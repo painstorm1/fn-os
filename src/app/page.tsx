@@ -174,9 +174,9 @@ function CalendarMemo() {
 
 function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPath: string }) {
   return (
-    <aside className="hidden h-screen w-[280px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-6 py-6 lg:block">
-      <Link href="/?menu=dashboard" className="mb-7 block">
-        <Image src="/fn-logo.jpg" alt="F&" width={126} height={126} className="object-contain" priority />
+    <aside className="hidden h-screen w-[280px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-6 py-5 lg:block">
+      <Link href="/?menu=dashboard" className="mb-4 block">
+        <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
 
       <nav className="space-y-1">
@@ -226,42 +226,220 @@ function ToolSection({ title, children, defaultOpen = false }: { title: string; 
 }
 
 function AddressBlock({ text }: { text: string }) {
-  return <pre className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-700">{text}</pre>;
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={copy}
+        className="absolute right-2 top-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-orange-600"
+      >
+        {copied ? "완료" : "복사"}
+      </button>
+      <pre className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 pr-14 text-xs leading-5 text-slate-700">{text}</pre>
+    </div>
+  );
 }
 
 function RightTools() {
+  const [bookmarkTab, setBookmarkTab] = useState<"china" | "japan" | "sites">("china");
+  const [productName, setProductName] = useState("");
+  const [gptResult, setGptResult] = useState("제품명을 입력하고 HS/관세 물어보기를 눌러주세요.");
+  const [gptLoading, setGptLoading] = useState(false);
+  const [lcl, setLcl] = useState({ method: "LCL(월수금)", w: "", d: "", h: "", box: "", origin: false });
+  const [lclResult, setLclResult] = useState("CBM을 입력하면 배송비가 계산됩니다.");
+
+  const bookmarks = {
+    china: [
+      ["알리바바", "https://korean.alibaba.com/"],
+      ["1688", "https://www.1688.com/"],
+      ["타오바오", "https://www.taobao.com/"],
+    ],
+    japan: [
+      ["슈퍼딜리버리", "https://www.superdelivery.com/"],
+      ["자카넷", "https://www.zakka.net/"],
+      ["아마존JP", "https://www.amazon.co.jp/"],
+    ],
+    sites: [
+      ["UNI-PASS", "https://unipass.customs.go.kr/csp/index.do"],
+      ["한국무역협회", "https://www.kita.net/"],
+      ["수입정보마루", "https://impfood.mfds.go.kr/"],
+      ["초록누리", "https://ecolife.mcee.go.kr/ecolife/main"],
+      ["KC인증정보 검색", "https://www.safetykorea.kr/release/itemSearch"],
+    ],
+  } as const;
+
+  function lclCbm() {
+    return (
+      (Number(lcl.w) || 0) *
+      (Number(lcl.d) || 0) *
+      (Number(lcl.h) || 0) *
+      (Number(lcl.box) || 0) /
+      1000000
+    );
+  }
+
+  async function calcLcl(next = lcl) {
+    const cbm =
+      (Number(next.w) || 0) *
+      (Number(next.d) || 0) *
+      (Number(next.h) || 0) *
+      (Number(next.box) || 0) /
+      1000000;
+    if (!cbm) {
+      setLclResult("CBM을 입력하면 배송비가 계산됩니다.");
+      return;
+    }
+    try {
+      const res = await fetch(`${IMPORT_ERP_URL}/api/lcl-fee?method=${encodeURIComponent(next.method)}&cbm=${encodeURIComponent(cbm.toFixed(3))}`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      const originFee = next.origin ? data.origin_certificate : 0;
+      const total = data.shipping_fee + originFee + data.bl_charge + data.forwarder_hc + data.cwc_krw;
+      const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
+      setLclResult([
+        `배송방식: ${next.method}`,
+        `총 CBM: ${cbm.toFixed(3)}`,
+        `해운비: ${won(data.shipping_fee)}`,
+        `원산지 증명: ${next.origin ? won(originFee) : "-"}`,
+        `BL 차지비: ${won(data.bl_charge)}`,
+        `포워더 HC: ${won(data.forwarder_hc)}`,
+        `CWC: $${data.cwc_usd} x USD환율 ${Math.round(data.usd_rate).toLocaleString("ko-KR")} = ${won(data.cwc_krw)}`,
+        `총 금액: ${won(total)}`,
+      ].join("\n"));
+    } catch {
+      setLclResult("수입ERP 서버 연결을 확인해 주세요. localhost:5500이 켜져 있어야 계산됩니다.");
+    }
+  }
+
+  function updateLcl(patch: Partial<typeof lcl>) {
+    const next = { ...lcl, ...patch };
+    setLcl(next);
+    void calcLcl(next);
+  }
+
+  async function askGptMini() {
+    const name = productName.trim();
+    if (!name) return;
+    const cacheKey = `gptcache_${name}`;
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null") as { ts: number; a: string } | null;
+    if (cached && Date.now() - cached.ts < 86400000) {
+      setGptResult(cached.a);
+      return;
+    }
+    setGptLoading(true);
+    setGptResult("GPTmini 조회 중...");
+    try {
+      const res = await fetch(`${IMPORT_ERP_URL}/api/gptmini/hs`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product_name: name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "GPTmini 호출 실패");
+      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), a: data.answer }));
+      setGptResult(data.answer);
+    } catch (error) {
+      setGptResult(error instanceof Error ? error.message : "수입ERP 서버 연결을 확인해 주세요.");
+    } finally {
+      setGptLoading(false);
+    }
+  }
+
   return (
     <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="BookMark" defaultOpen>
         <div className="grid grid-cols-3 gap-1">
-          {["중국", "일본", "사이트"].map((tab) => (
-            <button key={tab} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-bold">
-              {tab}
+          {[
+            ["china", "중국"],
+            ["japan", "일본"],
+            ["sites", "사이트"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setBookmarkTab(key as "china" | "japan" | "sites")}
+              className={`rounded-md border px-2 py-2 text-xs font-bold ${
+                bookmarkTab === key ? "border-orange-200 bg-orange-50 text-orange-600" : "border-slate-200 bg-slate-50"
+              }`}
+            >
+              {label}
             </button>
           ))}
         </div>
         <div className="mt-3 grid gap-2 text-xs font-bold">
-          <a className="rounded-md border border-slate-200 px-3 py-2" href="https://korean.alibaba.com/" target="_blank">알리바바</a>
-          <a className="rounded-md border border-slate-200 px-3 py-2" href="https://www.1688.com/" target="_blank">1688</a>
-          <a className="rounded-md border border-slate-200 px-3 py-2" href="https://unipass.customs.go.kr/csp/index.do" target="_blank">UNI-PASS</a>
+          {bookmarks[bookmarkTab].map(([label, href]) => (
+            <a key={href} className="rounded-md border border-slate-200 px-3 py-2 hover:border-orange-200 hover:text-orange-600" href={href} target="_blank">
+              {label}
+            </a>
+          ))}
         </div>
       </ToolSection>
 
       <ToolSection title="GPTmini (HS코드&관세율)" defaultOpen>
-        <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="제품명 입력" />
-        <button className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white">HS/관세 물어보기</button>
-        <div className="mt-2 min-h-20 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
-          수입ERP의 GPTmini 기능을 OS 오른쪽 영역으로 옮길 자리입니다.
+        <input
+          value={productName}
+          onChange={(event) => setProductName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void askGptMini();
+          }}
+          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+          placeholder="제품명 입력"
+        />
+        <button
+          type="button"
+          disabled={gptLoading}
+          onClick={askGptMini}
+          className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:opacity-60"
+        >
+          {gptLoading ? "조회 중..." : "HS/관세 물어보기"}
+        </button>
+        <div className="mt-2 min-h-24 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+          {gptResult}
         </div>
       </ToolSection>
 
-      <ToolSection title="LCL 배송요금">
+      <ToolSection title="LCL 배송요금" defaultOpen>
+        <select
+          value={lcl.method}
+          onChange={(event) => updateLcl({ method: event.target.value })}
+          className="mb-2 w-full rounded-md border border-slate-200 px-2 py-2 text-xs"
+        >
+          <option>LCL(월수금)</option>
+          <option>LCL(화목일)</option>
+        </select>
         <div className="grid grid-cols-2 gap-2">
-          {["가로 cm", "세로 cm", "높이 cm", "박스 수"].map((label) => (
-            <input key={label} className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder={label} />
+          {[
+            ["w", "가로 cm"],
+            ["d", "세로 cm"],
+            ["h", "높이 cm"],
+            ["box", "박스 수"],
+          ].map(([key, label]) => (
+            <input
+              key={key}
+              value={lcl[key as "w" | "d" | "h" | "box"]}
+              onChange={(event) => updateLcl({ [key]: event.target.value })}
+              className="rounded-md border border-slate-200 px-2 py-2 text-xs"
+              placeholder={label}
+              type="number"
+            />
           ))}
         </div>
-        <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">총 CBM 0.000</div>
+        <label className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-600">
+          <input type="checkbox" checked={lcl.origin} onChange={(event) => updateLcl({ origin: event.target.checked })} />
+          원산지 증명
+        </label>
+        <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">총 CBM {lclCbm().toFixed(3)}</div>
+        <pre className="mt-2 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">{lclResult}</pre>
       </ToolSection>
 
       <ToolSection title="타배 위해 주소"><AddressBlock text={`收件人: FN\n电话: 18563144074\n地址: 위해 배송대행지 주소`} /></ToolSection>
