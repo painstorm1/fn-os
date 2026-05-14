@@ -7,6 +7,7 @@ class FnOsStart
 {
     const string FnOsDir = @"D:\Codex_work\FN_WORK_APP\FN_OS";
     const string ImportErpDir = @"D:\Codex_work\FN_WORK_APP\수입ERP";
+    const string NodeExe = @"C:\Program Files\nodejs\node.exe";
     const string PythonExe = @"C:\Users\pains\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe";
     const string FnOsUrl = "http://localhost:3000";
 
@@ -16,19 +17,21 @@ class FnOsStart
         {
             if (!IsPortOpen("127.0.0.1", 5500))
             {
-                StartCmd(
-                    "FN Import ERP : localhost:5500",
+                StartHidden(
+                    PythonExe,
+                    "scripts\\run_local_sqlite.py",
                     ImportErpDir,
-                    Quote(PythonExe) + " scripts\\run_local_sqlite.py"
+                    "FN Import ERP"
                 );
             }
 
             if (!IsPortOpen("127.0.0.1", 3000))
             {
-                StartCmd(
-                    "FN OS : localhost:3000",
+                StartHidden(
+                    NodeExe,
+                    "\"node_modules\\next\\dist\\bin\\next\" dev -H 127.0.0.1 -p 3000",
                     FnOsDir,
-                    "run-dev.bat"
+                    "FN OS"
                 );
             }
 
@@ -48,14 +51,16 @@ class FnOsStart
         }
     }
 
-    static void StartCmd(string title, string workingDir, string command)
+    static void StartHidden(string fileName, string arguments, string workingDir, string title)
     {
-        var args = "/k \"title " + title + " && cd /d " + Quote(workingDir) + " && " + command + "\"";
-        var psi = new ProcessStartInfo("cmd.exe", args)
+        var psi = new ProcessStartInfo(fileName, arguments)
         {
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Minimized,
+            WorkingDirectory = workingDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
         };
+        psi.EnvironmentVariables["FN_OS_PROCESS_TITLE"] = title;
         Process.Start(psi);
     }
 
@@ -92,10 +97,5 @@ class FnOsStart
     static void OpenBrowser(string url)
     {
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-    }
-
-    static string Quote(string value)
-    {
-        return "\"" + value + "\"";
     }
 }
