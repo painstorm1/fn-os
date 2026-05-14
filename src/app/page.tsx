@@ -502,6 +502,298 @@ Phone (+82), 1033748934`}
   );
 }
 
+type ImportOrder = {
+  id: number;
+  order_code?: string;
+  order_date?: string;
+  paid_date?: string;
+  fn_arrived?: string;
+  factory_name?: string;
+  repr_product?: string;
+  repr_image?: string;
+  line_count?: number;
+  child_count?: number;
+  total_qty?: number;
+  total_won?: number;
+  status?: string;
+};
+
+type ImportProduct = {
+  id: number;
+  sku?: string;
+  name: string;
+  category_name?: string;
+  factory_name?: string;
+  image_path?: string;
+  options?: string;
+  std_price?: number;
+  currency?: string;
+  status?: string;
+};
+
+type ImportFactory = {
+  id: number;
+  name: string;
+  country?: string;
+  platform?: string;
+  contact?: string;
+  note?: string;
+  product_count?: number;
+  order_count?: number;
+};
+
+function apiUrl(path: string) {
+  return `${IMPORT_ERP_URL}${path}`;
+}
+
+function assetUrl(path?: string) {
+  if (!path) return "";
+  if (path.startsWith("http")) return path;
+  return `${IMPORT_ERP_URL}/static/${path.replace(/^\/?static\//, "")}`;
+}
+
+function krw(value?: number) {
+  return `₩${Math.round(value || 0).toLocaleString("ko-KR")}`;
+}
+
+function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
+  const [recent, setRecent] = useState<ImportOrder[]>([]);
+  const [monthly, setMonthly] = useState<Array<{ month: string; cnt: number; amount: number }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/fnos/dashboard"), { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!alive) return;
+        setRecent(data.recent || []);
+        setMonthly(data.monthly || []);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) return <Panel title="수입제품 현황"><p className="text-sm text-slate-500">수입ERP 데이터를 불러오는 중...</p></Panel>;
+
+  return (
+    <div className={`grid gap-4 ${compact ? "xl:grid-cols-[1fr_320px]" : "2xl:grid-cols-[1fr_360px]"}`}>
+      <Panel title="최근 발주" subtitle="수입ERP 데이터 원장 기준 최근 10건">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="border-b border-slate-200 text-xs text-slate-500">
+              <tr>
+                <th className="py-2">발주일</th>
+                <th className="py-2">제품</th>
+                <th className="py-2">공급사</th>
+                <th className="py-2 text-right">수량</th>
+                <th className="py-2 text-right">금액</th>
+                <th className="py-2">상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((order) => (
+                <tr key={order.id} className="border-b border-slate-100">
+                  <td className="py-3 font-bold">{order.order_date || order.paid_date || "-"}</td>
+                  <td className="py-3">
+                    <div className="flex items-center gap-3">
+                      {order.repr_image ? (
+                        <img src={assetUrl(order.repr_image)} alt="" className="h-10 w-10 rounded-md object-cover" />
+                      ) : (
+                        <div className="h-10 w-10 rounded-md bg-slate-100" />
+                      )}
+                      <div>
+                        <div className="font-black">{order.repr_product || "제품 라인 없음"}</div>
+                        {(order.line_count || 0) > 1 && <div className="text-xs text-slate-500">외 {(order.line_count || 1) - 1}건</div>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3">{order.factory_name || "-"}</td>
+                  <td className="py-3 text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</td>
+                  <td className="py-3 text-right font-black">{krw(order.total_won)}</td>
+                  <td className="py-3"><StatusPill status={order.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel title="월별 발주" subtitle="최근 6개월">
+        <div className="space-y-2">
+          {monthly.map((item) => (
+            <div key={item.month} className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50 px-3 py-3 text-sm">
+              <span className="font-bold">{item.month}</span>
+              <span className="text-slate-500">{item.cnt}건</span>
+              <strong>{krw(item.amount)}</strong>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function NativeImportWorkspace({ path }: { path: string }) {
+  if (path.startsWith("/products")) return <NativeProducts />;
+  if (path.startsWith("/settings")) return <NativeSettings />;
+  return <NativeOrders />;
+}
+
+function NativeOrders() {
+  const [orders, setOrders] = useState<ImportOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/fnos/orders"), { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setOrders(data.orders || []);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <Panel
+      title="발주"
+      subtitle="FN OS 안으로 흡수한 수입ERP 발주 목록"
+      action={<a className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={apiUrl("/orders/new")} target="_blank">+ 새 발주</a>}
+    >
+      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
+        <div className="grid gap-2">
+          {orders.map((order) => (
+            <a key={order.id} href={apiUrl(`/orders?embed=1#order-${order.id}`)} target="_blank" className="grid grid-cols-[56px_1.2fr_1fr_100px_130px_90px] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm hover:border-orange-200">
+              {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-slate-100" />}
+              <div>
+                <div className="font-black">{order.repr_product || `${order.line_count || 0}개 라인`}</div>
+                <div className="text-xs text-slate-500">{order.order_code || order.order_date || "-"}</div>
+              </div>
+              <div className="font-bold text-slate-600">{order.factory_name || "-"}</div>
+              <div className="text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</div>
+              <div className="text-right font-black">{krw(order.total_won)}</div>
+              <StatusPill status={order.status} />
+            </a>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function NativeProducts() {
+  const [products, setProducts] = useState<ImportProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/fnos/products"), { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setProducts(data.products || []);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <Panel
+      title="제품"
+      subtitle="수입 제품 카탈로그"
+      action={<a className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={apiUrl("/products/new")} target="_blank">+ 새 제품</a>}
+    >
+      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+          {products.map((product) => (
+            <a key={product.id} href={apiUrl(`/products/${product.id}?embed=1`)} target="_blank" className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
+              <div className="aspect-square overflow-hidden rounded-md bg-slate-100">
+                {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
+              </div>
+              <div className="mt-3 font-black">{product.name}</div>
+              <div className="mt-1 text-xs text-slate-500">{product.category_name || "-"} · {product.factory_name || "-"}</div>
+              <div className="mt-2 text-sm font-black text-orange-600">{product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || ""}` : "-"}</div>
+            </a>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function NativeSettings() {
+  const [data, setData] = useState<{ rates: Record<string, number>; categories: Array<{ id: number; name: string }>; factories: ImportFactory[] } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/fnos/settings"), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next) => {
+        if (alive) setData(next);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
+      <Panel title="환율" subtitle="수입ERP 설정값">
+        <div className="grid gap-2">
+          {Object.entries(data?.rates || {}).map(([currency, rate]) => (
+            <div key={currency} className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm">
+              <strong>{currency}</strong>
+              <span>{rate.toLocaleString("ko-KR")}</span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="공급사/공장" subtitle={`${data?.factories?.length || 0}개`}>
+        <div className="grid gap-2">
+          {(data?.factories || []).map((factory) => (
+            <div key={factory.id} className="rounded-md border border-slate-200 p-3">
+              <div className="font-black">{factory.name}</div>
+              <div className="mt-1 text-xs text-slate-500">{factory.country || "-"} · 제품 {factory.product_count || 0} · 발주 {factory.order_count || 0}</div>
+              {factory.note && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600">{factory.note}</p>}
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function Panel({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-black">{title}</h2>
+          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function StatusPill({ status }: { status?: string }) {
+  return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
+}
+
 function Dashboard() {
   return (
     <div className="space-y-6">
@@ -518,26 +810,10 @@ function Dashboard() {
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="text-lg font-black">수입제품 현황</h2>
-          <p className="mt-1 text-sm text-slate-500">기존 수입ERP 대시보드 내용을 FN OS 안에서 확인합니다.</p>
+          <p className="mt-1 text-sm text-slate-500">수입ERP 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
         </div>
-        <ImportFrame path="/" compact />
+        <NativeImportDashboard compact />
       </section>
-    </div>
-  );
-}
-
-function withEmbedParam(path: string) {
-  const [pathname, query = ""] = path.split("?");
-  const params = new URLSearchParams(query);
-  params.set("embed", "1");
-  return `${pathname}?${params.toString()}`;
-}
-
-function ImportFrame({ path, compact = false }: { path: string; compact?: boolean }) {
-  const src = `${IMPORT_ERP_URL}${withEmbedParam(path)}`;
-  return (
-    <div className={`overflow-hidden rounded-md border border-slate-200 bg-white ${compact ? "h-[560px]" : "h-[calc(100vh-48px)]"}`}>
-      <iframe title="수입ERP" src={src} className="h-full w-full border-0" />
     </div>
   );
 }
@@ -553,7 +829,7 @@ function HomeContent() {
         <LeftSidebar activeMenu={activeMenu} importPath={importPath} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeMenu === "수입관리" ? (
-            <ImportFrame path={importPath} />
+            <NativeImportWorkspace path={importPath} />
           ) : activeMenu === "대시보드" ? (
             <Dashboard />
           ) : (
