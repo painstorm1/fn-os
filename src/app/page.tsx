@@ -509,6 +509,7 @@ type ImportOrder = {
   order_date?: string;
   paid_date?: string;
   fn_arrived?: string;
+  factory_id?: number;
   factory_name?: string;
   repr_product?: string;
   repr_image?: string;
@@ -517,12 +518,19 @@ type ImportOrder = {
   total_qty?: number;
   total_won?: number;
   status?: string;
+  platform?: string;
+  currency?: string;
+  fx_rate?: number;
+  payment_method?: string;
+  shipping_method?: string;
+  note?: string;
 };
 
 type ImportProduct = {
   id: number;
   sku?: string;
   name: string;
+  category_id?: number;
   category_name?: string;
   factory_id?: number;
   factory_name?: string;
@@ -531,6 +539,11 @@ type ImportProduct = {
   std_price?: number;
   currency?: string;
   status?: string;
+  product_url?: string;
+  hs_code?: string;
+  fta_rate?: number;
+  moq?: number;
+  note?: string;
 };
 
 type ImportCategory = {
@@ -564,6 +577,32 @@ type OrderLine = {
   unit_price: string;
   item_currency: string;
   line_note: string;
+};
+
+type ImportOrderItem = {
+  id?: number;
+  product_id?: number | string;
+  product_name?: string;
+  option_value?: string;
+  quantity?: string | number;
+  unit_price?: string | number;
+  item_currency?: string;
+  line_note?: string;
+  image_path?: string;
+};
+
+type ImportOrderDetail = {
+  ok: boolean;
+  order: ImportOrder;
+  items: ImportOrderItem[];
+  total_won?: number;
+  total_qty?: number;
+};
+
+type ImportProductDetail = {
+  ok: boolean;
+  product: ImportProduct;
+  history: Array<{ id: number; order_code?: string; order_date?: string; paid_date?: string; factory?: string; quantity?: number; unit_price?: number; item_currency?: string; status?: string }>;
 };
 
 function apiUrl(path: string) {
@@ -667,8 +706,16 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 }
 
 function NativeImportWorkspace({ path }: { path: string }) {
+  const orderEditMatch = path.match(/^\/orders\/(\d+)\/edit/);
+  const orderMatch = path.match(/^\/orders\/(\d+)/);
+  const productEditMatch = path.match(/^\/products\/(\d+)\/edit/);
+  const productMatch = path.match(/^\/products\/(\d+)/);
   if (path.startsWith("/orders/new")) return <NativeOrderForm />;
   if (path.startsWith("/products/new")) return <NativeProductForm />;
+  if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
+  if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
+  if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
+  if (productMatch) return <NativeProductDetail id={Number(productMatch[1])} />;
   if (path.startsWith("/products")) return <NativeProducts />;
   if (path.startsWith("/settings")) return <NativeSettings />;
   return <NativeOrders />;
@@ -702,7 +749,7 @@ function NativeOrders() {
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="grid gap-2">
           {orders.map((order) => (
-            <a key={order.id} href={apiUrl(`/orders?embed=1#order-${order.id}`)} target="_blank" className="grid grid-cols-[56px_1.2fr_1fr_100px_130px_90px] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm hover:border-orange-200">
+            <Link key={order.id} href={importHref(`/orders/${order.id}`)} className="grid grid-cols-[56px_1.2fr_1fr_100px_130px_90px] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm hover:border-orange-200">
               {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-slate-100" />}
               <div>
                 <div className="font-black">{order.repr_product || `${order.line_count || 0}개 라인`}</div>
@@ -712,7 +759,7 @@ function NativeOrders() {
               <div className="text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</div>
               <div className="text-right font-black">{krw(order.total_won)}</div>
               <StatusPill status={order.status} />
-            </a>
+            </Link>
           ))}
         </div>
       )}
@@ -748,14 +795,14 @@ function NativeProducts() {
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
           {products.map((product) => (
-            <a key={product.id} href={apiUrl(`/products/${product.id}?embed=1`)} target="_blank" className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
+            <Link key={product.id} href={importHref(`/products/${product.id}`)} className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
               <div className="aspect-square overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
               <div className="mt-3 font-black">{product.name}</div>
               <div className="mt-1 text-xs text-slate-500">{product.category_name || "-"} · {product.factory_name || "-"}</div>
               <div className="mt-2 text-sm font-black text-orange-600">{product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || ""}` : "-"}</div>
-            </a>
+            </Link>
           ))}
         </div>
       )}
@@ -785,11 +832,96 @@ function useImportFormData() {
   return { data, loading };
 }
 
-function NativeProductForm() {
+function NativeProductDetail({ id }: { id: number }) {
+  const [detail, setDetail] = useState<ImportProductDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next) => {
+        if (alive) setDetail(next);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const product = detail?.product;
+  return (
+    <Panel
+      title={product?.name || "제품 상세"}
+      subtitle={product ? `${product.category_name || "-"} · ${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
+      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>}
+    >
+      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : product ? (
+        <div className="grid gap-5 xl:grid-cols-[280px_1fr]">
+          <div className="space-y-3">
+            <div className="aspect-square overflow-hidden rounded-md bg-slate-100">
+              {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
+            </div>
+            {product.product_url && <a className="block rounded-md border border-slate-200 px-3 py-2 text-sm font-bold text-orange-600" href={product.product_url} target="_blank">상품 URL 열기</a>}
+          </div>
+          <div className="grid gap-5">
+            <div className="grid gap-3 md:grid-cols-4">
+              <Info label="SKU" value={product.sku || "-"} />
+              <Info label="상태" value={product.status || "-"} />
+              <Info label="HS 코드" value={product.hs_code || "-"} />
+              <Info label="FTA 관세율" value={`${product.fta_rate || 0}%`} />
+              <Info label="MOQ" value={product.moq ? String(product.moq) : "-"} />
+              <Info label="표준 단가" value={product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || ""}` : "-"} />
+              <Info label="옵션" value={product.options || "-"} wide />
+              <Info label="메모" value={product.note || "-"} wide />
+            </div>
+            <section className="rounded-md border border-slate-200">
+              <h3 className="border-b border-slate-200 px-4 py-3 font-black">발주 이력</h3>
+              <div className="grid gap-2 p-4">
+                {(detail.history || []).map((item) => (
+                  <Link key={item.id} href={importHref(`/orders/${item.id}`)} className="grid grid-cols-[1fr_1fr_100px_120px_90px] rounded-md bg-slate-50 px-3 py-2 text-sm">
+                    <span className="font-bold">{item.order_code || item.order_date || "-"}</span>
+                    <span>{item.factory || "-"}</span>
+                    <span className="text-right">{item.quantity || 0}</span>
+                    <span className="text-right">{item.unit_price ? `${item.unit_price.toLocaleString("ko-KR")} ${item.item_currency || ""}` : "-"}</span>
+                    <StatusPill status={item.status} />
+                  </Link>
+                ))}
+                {!detail.history?.length && <p className="text-sm text-slate-500">아직 발주 이력이 없습니다.</p>}
+              </div>
+            </section>
+          </div>
+        </div>
+      ) : <p className="text-sm text-rose-600">제품을 찾을 수 없습니다.</p>}
+    </Panel>
+  );
+}
+
+function NativeProductForm({ id }: { id?: number }) {
   const { data, loading } = useImportFormData();
+  const [product, setProduct] = useState<ImportProduct | null>(null);
+  const [detailLoading, setDetailLoading] = useState(Boolean(id));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next) => {
+        if (alive) setProduct(next.product || null);
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -798,14 +930,14 @@ function NativeProductForm() {
     const form = new FormData(e.currentTarget);
     if (file) form.set("image", file);
     try {
-      const res = await fetch(apiUrl("/api/fnos/products"), {
-        method: "POST",
+      const res = await fetch(apiUrl(id ? `/api/fnos/products/${id}` : "/api/fnos/products"), {
+        method: id ? "PUT" : "POST",
         body: form,
         credentials: "include",
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
-      window.location.href = importHref("/products");
+      window.location.href = importHref(id ? `/products/${id}` : "/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
     } finally {
@@ -814,12 +946,13 @@ function NativeProductForm() {
   }
 
   return (
-    <Panel title="새 제품 등록" subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
-      {loading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
-        <form onSubmit={submit} className="grid gap-5 xl:grid-cols-[300px_1fr]">
+    <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
+      {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+        <form key={product?.id || "new"} onSubmit={submit} className="grid gap-5 xl:grid-cols-[300px_1fr]">
           <div className="space-y-4">
             <label className="block text-sm font-black">
               제품 사진
+              {product?.image_path && <img src={assetUrl(product.image_path)} alt="" className="mb-3 mt-2 h-48 w-48 rounded-md object-cover" />}
               <input className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" type="file" name="image" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </label>
             <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
@@ -831,45 +964,45 @@ function NativeProductForm() {
 
           <div className="grid gap-4">
             <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
-              <Field label="제품명 *"><input className="field-input" name="name" required /></Field>
-              <Field label="SKU"><input className="field-input" name="sku" /></Field>
+              <Field label="제품명 *"><input className="field-input" name="name" required defaultValue={product?.name || ""} /></Field>
+              <Field label="SKU"><input className="field-input" name="sku" defaultValue={product?.sku || ""} /></Field>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <Field label="카테고리">
-                <select className="field-input" name="category_id" defaultValue="">
+                <select className="field-input" name="category_id" defaultValue={product?.category_id || ""}>
                   <option value="">선택...</option>
                   {data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </Field>
               <Field label="주공장">
-                <select className="field-input" name="factory_id" defaultValue="">
+                <select className="field-input" name="factory_id" defaultValue={product?.factory_id || ""}>
                   <option value="">선택 안함</option>
                   {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </Field>
               <Field label="상태">
-                <select className="field-input" name="status" defaultValue="현역">
+                <select className="field-input" name="status" defaultValue={product?.status || "현역"}>
                   {["현역", "보류", "종료"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
             </div>
-            <Field label="상품 URL (1688/알리/쇼핑몰 링크)"><input className="field-input" name="product_url" placeholder="https://..." /></Field>
-            <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" /></Field>
+            <Field label="상품 URL (1688/알리/쇼핑몰 링크)"><input className="field-input" name="product_url" placeholder="https://..." defaultValue={product?.product_url || ""} /></Field>
+            <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
             <div className="grid gap-4 md:grid-cols-[1.4fr_.7fr_.7fr_.7fr_.7fr]">
-              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" /></Field>
-              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue="0" /></Field>
-              <Field label="MOQ"><input className="field-input" type="number" name="moq" /></Field>
-              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" /></Field>
+              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" defaultValue={product?.hs_code || ""} /></Field>
+              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue={product?.fta_rate || 0} /></Field>
+              <Field label="MOQ"><input className="field-input" type="number" name="moq" defaultValue={product?.moq || ""} /></Field>
+              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" defaultValue={product?.std_price || ""} /></Field>
               <Field label="통화">
-                <select className="field-input" name="currency" defaultValue="CNY">
+                <select className="field-input" name="currency" defaultValue={product?.currency || "CNY"}>
                   {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
             </div>
-            <Field label="메모"><textarea className="field-input min-h-24" name="note" /></Field>
+            <Field label="메모"><textarea className="field-input min-h-24" name="note" defaultValue={product?.note || ""} /></Field>
             {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
             <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-              <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/products")}>취소</Link>
+              <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref(id ? `/products/${id}` : "/products")}>취소</Link>
               <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
             </div>
           </div>
@@ -879,13 +1012,100 @@ function NativeProductForm() {
   );
 }
 
-function NativeOrderForm() {
+function NativeOrderDetail({ id }: { id: number }) {
+  const [detail, setDetail] = useState<ImportOrderDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next) => {
+        if (alive) setDetail(next);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const order = detail?.order;
+  return (
+    <Panel
+      title={order?.order_code || "발주 상세"}
+      subtitle={order ? `${order.factory_name || "-"} · ${order.status || "-"}` : "수입ERP 발주 데이터"}
+      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/orders/${id}/edit`)}>수정</Link>}
+    >
+      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : order ? (
+        <div className="grid gap-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Info label="발주일" value={order.order_date || "-"} />
+            <Info label="결제일" value={order.paid_date || "-"} />
+            <Info label="플랫폼" value={order.platform || "-"} />
+            <Info label="배송방식" value={order.shipping_method || "-"} />
+            <Info label="통화/환율" value={`${order.currency || "-"} / ${order.fx_rate || "-"}`} />
+            <Info label="총수량" value={String(detail.total_qty || 0)} />
+            <Info label="총금액" value={krw(detail.total_won)} />
+            <Info label="메모" value={order.note || "-"} wide />
+          </div>
+          <section className="rounded-md border border-slate-200">
+            <h3 className="border-b border-slate-200 px-4 py-3 font-black">제품 라인</h3>
+            <div className="grid gap-2 p-4">
+              {(detail.items || []).map((item, index) => (
+                <div key={item.id || index} className="grid grid-cols-[48px_1fr_120px_90px_120px_1fr] items-center gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+                  {item.image_path ? <img src={assetUrl(item.image_path)} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-slate-200" />}
+                  <strong>{item.product_name || "-"}</strong>
+                  <span>{item.option_value || "-"}</span>
+                  <span className="text-right">{item.quantity || 0}</span>
+                  <span className="text-right">{item.unit_price ? `${Number(item.unit_price).toLocaleString("ko-KR")} ${item.item_currency || ""}` : "-"}</span>
+                  <span className="text-slate-500">{item.line_note || ""}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : <p className="text-sm text-rose-600">발주를 찾을 수 없습니다.</p>}
+    </Panel>
+  );
+}
+
+function NativeOrderForm({ id }: { id?: number }) {
   const { data, loading } = useImportFormData();
+  const [order, setOrder] = useState<ImportOrder | null>(null);
+  const [detailLoading, setDetailLoading] = useState(Boolean(id));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [lines, setLines] = useState<OrderLine[]>([
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
   ]);
+
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next: ImportOrderDetail) => {
+        if (!alive) return;
+        setOrder(next.order || null);
+        setLines((next.items || []).map((item) => ({
+          product_id: item.product_id ? String(item.product_id) : "",
+          product_name: item.product_name || "",
+          option_value: item.option_value || "",
+          quantity: item.quantity ? String(item.quantity) : "",
+          unit_price: item.unit_price ? String(item.unit_price) : "",
+          item_currency: item.item_currency || "CNY",
+          line_note: item.line_note || "",
+        })));
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
 
   function updateLine(index: number, patch: Partial<OrderLine>) {
     setLines((prev) => prev.map((line, i) => i === index ? { ...line, ...patch } : line));
@@ -909,15 +1129,15 @@ function NativeOrderForm() {
     const form = new FormData(e.currentTarget);
     const payload = Object.fromEntries(form.entries());
     try {
-      const res = await fetch(apiUrl("/api/fnos/orders"), {
-        method: "POST",
+      const res = await fetch(apiUrl(id ? `/api/fnos/orders/${id}` : "/api/fnos/orders"), {
+        method: id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ ...payload, items: lines.filter((line) => line.product_name && line.quantity && line.unit_price) }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
-      window.location.href = importHref("/orders");
+      window.location.href = importHref(id ? `/orders/${id}` : "/orders");
     } catch (err) {
       setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
     } finally {
@@ -926,27 +1146,27 @@ function NativeOrderForm() {
   }
 
   return (
-    <Panel title="새 발주 등록" subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
-      {loading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
-        <form onSubmit={submit} className="grid gap-5">
+    <Panel title={id ? "발주 수정" : "새 발주 등록"} subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
+      {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+        <form key={order?.id || "new"} onSubmit={submit} className="grid gap-5">
           <div className="grid gap-4 md:grid-cols-4">
             <Field label="주공장">
-              <select className="field-input" name="factory_id" defaultValue="">
+              <select className="field-input" name="factory_id" defaultValue={order?.factory_id || ""}>
                 <option value="">선택 안함</option>
                 {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </Field>
-            <Field label="플랫폼"><input className="field-input" name="platform" placeholder="1688 / 알리바바" /></Field>
+            <Field label="플랫폼"><input className="field-input" name="platform" placeholder="1688 / 알리바바" defaultValue={order?.platform || ""} /></Field>
             <Field label="통화">
-              <select className="field-input" name="currency" defaultValue="CNY">
+              <select className="field-input" name="currency" defaultValue={order?.currency || "CNY"}>
                 {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
               </select>
             </Field>
-            <Field label="환율"><input className="field-input" type="number" step="0.01" name="fx_rate" defaultValue={data?.rates.CNY || 195} /></Field>
-            <Field label="발주일"><input className="field-input" type="date" name="order_date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-            <Field label="결제일"><input className="field-input" type="date" name="paid_date" /></Field>
-            <Field label="결제수단"><input className="field-input" name="payment_method" /></Field>
-            <Field label="배송방식"><input className="field-input" name="shipping_method" placeholder="LCL / 항공 / 택배" /></Field>
+            <Field label="환율"><input className="field-input" type="number" step="0.01" name="fx_rate" defaultValue={order?.fx_rate || data?.rates.CNY || 195} /></Field>
+            <Field label="발주일"><input className="field-input" type="date" name="order_date" defaultValue={order?.order_date || ""} /></Field>
+            <Field label="결제일"><input className="field-input" type="date" name="paid_date" defaultValue={order?.paid_date || ""} /></Field>
+            <Field label="결제수단"><input className="field-input" name="payment_method" defaultValue={order?.payment_method || ""} /></Field>
+            <Field label="배송방식"><input className="field-input" name="shipping_method" placeholder="LCL / 항공 / 택배" defaultValue={order?.shipping_method || ""} /></Field>
           </div>
 
           <section className="rounded-md border border-slate-200">
@@ -972,10 +1192,10 @@ function NativeOrderForm() {
             </div>
           </section>
 
-          <Field label="메모"><textarea className="field-input min-h-24" name="note" /></Field>
+          <Field label="메모"><textarea className="field-input min-h-24" name="note" defaultValue={order?.note || ""} /></Field>
           {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-            <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/orders")}>취소</Link>
+            <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref(id ? `/orders/${id}` : "/orders")}>취소</Link>
             <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
           </div>
         </form>
@@ -990,6 +1210,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {label}
       {children}
     </label>
+  );
+}
+
+function Info({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div className={`rounded-md bg-slate-50 px-3 py-3 ${wide ? "md:col-span-2" : ""}`}>
+      <p className="text-xs font-bold text-slate-500">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm font-black text-slate-900">{value}</p>
+    </div>
   );
 }
 
