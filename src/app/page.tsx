@@ -460,10 +460,7 @@ type ImportOrder = {
 
 type ImportProduct = {
   id: number;
-  sku?: string;
   name: string;
-  category_id?: number;
-  category_name?: string;
   factory_id?: number;
   factory_name?: string;
   image_path?: string;
@@ -473,14 +470,10 @@ type ImportProduct = {
   status?: string;
   product_url?: string;
   hs_code?: string;
+  basic_rate?: number;
   fta_rate?: number;
   moq?: number;
   note?: string;
-};
-
-type ImportCategory = {
-  id: number;
-  name: string;
 };
 
 type ImportFactory = {
@@ -496,7 +489,6 @@ type ImportFactory = {
 
 type ImportFormData = {
   rates: Record<string, number>;
-  categories: ImportCategory[];
   factories: ImportFactory[];
   products: ImportProduct[];
 };
@@ -732,7 +724,7 @@ function NativeProducts() {
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
               <div className="mt-3 font-black">{product.name}</div>
-              <div className="mt-1 text-xs text-slate-500">{product.category_name || "-"} · {product.factory_name || "-"}</div>
+              <div className="mt-1 text-xs text-slate-500">{product.factory_name || "-"}</div>
               <div className="mt-2 text-sm font-black text-orange-600">{product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || ""}` : "-"}</div>
             </Link>
           ))}
@@ -787,7 +779,7 @@ function NativeProductDetail({ id }: { id: number }) {
   return (
     <Panel
       title={product?.name || "제품 상세"}
-      subtitle={product ? `${product.category_name || "-"} · ${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
+      subtitle={product ? `${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
       action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : product ? (
@@ -800,9 +792,9 @@ function NativeProductDetail({ id }: { id: number }) {
           </div>
           <div className="grid gap-5">
             <div className="grid gap-3 md:grid-cols-4">
-              <Info label="SKU" value={product.sku || "-"} />
               <Info label="상태" value={product.status || "-"} />
               <Info label="HS 코드" value={product.hs_code || "-"} />
+              <Info label="기본 관세율" value={`${product.basic_rate || 0}%`} />
               <Info label="FTA 관세율" value={`${product.fta_rate || 0}%`} />
               <Info label="MOQ" value={product.moq ? String(product.moq) : "-"} />
               <Info label="표준 단가" value={product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || ""}` : "-"} />
@@ -912,6 +904,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
+  const [productUrl, setProductUrl] = useState("");
 
   useEffect(() => {
     return () => {
@@ -930,7 +923,10 @@ function NativeProductForm({ id }: { id?: number }) {
     fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" })
       .then((res) => res.json())
       .then((next) => {
-        if (alive) setProduct(next.product || null);
+        if (alive) {
+          setProduct(next.product || null);
+          setProductUrl(next.product?.product_url || "");
+        }
       })
       .finally(() => {
         if (alive) setDetailLoading(false);
@@ -969,6 +965,15 @@ function NativeProductForm({ id }: { id?: number }) {
           <div className="space-y-4">
             <div>
               <p className="text-sm font-black">제품 사진</p>
+              <div className="mt-2 aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                {(previewUrl || product?.image_path) && (
+                  <img
+                    src={previewUrl || assetUrl(product?.image_path)}
+                    alt="제품 이미지 미리보기"
+                    className="h-full w-full object-cover"
+                  />
+                )}
+              </div>
               <input
                 id="product-image-file"
                 className="sr-only"
@@ -983,36 +988,24 @@ function NativeProductForm({ id }: { id?: number }) {
               >
                 이미지 선택
               </label>
-              <p className="mt-2 truncate rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">
-                {file ? file.name : "선택된 파일 없음"}
-              </p>
-              {(previewUrl || product?.image_path) && (
-                <div className="mt-3 overflow-hidden rounded-md border border-slate-200 bg-white p-2">
-                  <img
-                    src={previewUrl || assetUrl(product?.image_path)}
-                    alt="제품 이미지 미리보기"
-                    className="h-56 w-full rounded object-cover"
-                  />
-                  <p className="mt-2 text-xs font-bold text-slate-500">{previewUrl ? "새 이미지 미리보기" : "등록된 이미지"}</p>
-                </div>
-              )}
             </div>
             <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
             <GptMiniProductBox />
           </div>
 
           <div className="grid gap-4">
-            <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
+            <div className="grid gap-4 md:grid-cols-[2fr_.7fr_.8fr_.7fr]">
               <Field label="제품명 *"><input className="field-input" name="name" required defaultValue={product?.name || ""} /></Field>
-              <Field label="SKU"><input className="field-input" name="sku" defaultValue={product?.sku || ""} /></Field>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="카테고리">
-                <select className="field-input" name="category_id" defaultValue={product?.category_id || ""}>
-                  <option value="">선택...</option>
-                  {data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              <Field label="MOQ"><input className="field-input" type="number" name="moq" defaultValue={product?.moq || ""} /></Field>
+              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" defaultValue={product?.std_price || ""} /></Field>
+              <Field label="통화">
+                <select className="field-input" name="currency" defaultValue={product?.currency || "CNY"}>
+                  {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-[2fr_1fr_.7fr]">
+              <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
               <Field label="주공장">
                 <select className="field-input" name="factory_id" defaultValue={product?.factory_id || ""}>
                   <option value="">선택 안함</option>
@@ -1025,18 +1018,29 @@ function NativeProductForm({ id }: { id?: number }) {
                 </select>
               </Field>
             </div>
-            <Field label="상품 URL (1688/알리/쇼핑몰 링크)"><input className="field-input" name="product_url" placeholder="https://..." defaultValue={product?.product_url || ""} /></Field>
-            <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
-            <div className="grid gap-4 md:grid-cols-[1.4fr_.7fr_.7fr_.7fr_.7fr]">
-              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" defaultValue={product?.hs_code || ""} /></Field>
-              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue={product?.fta_rate || 0} /></Field>
-              <Field label="MOQ"><input className="field-input" type="number" name="moq" defaultValue={product?.moq || ""} /></Field>
-              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" defaultValue={product?.std_price || ""} /></Field>
-              <Field label="통화">
-                <select className="field-input" name="currency" defaultValue={product?.currency || "CNY"}>
-                  {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
-                </select>
+            <div className="grid gap-4 md:grid-cols-[2fr_.8fr_.8fr_.8fr]">
+              <Field label="상품 URL">
+                <div className="flex gap-2">
+                  <input
+                    className="field-input"
+                    name="product_url"
+                    placeholder="https://..."
+                    value={productUrl}
+                    onChange={(event) => setProductUrl(event.target.value)}
+                  />
+                  <a
+                    className={`inline-flex min-h-10 shrink-0 items-center rounded-md border px-3 text-sm font-black ${productUrl ? "border-orange-200 bg-orange-50 text-orange-700" : "pointer-events-none border-slate-200 bg-slate-100 text-slate-400"}`}
+                    href={productUrl || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    바로가기
+                  </a>
+                </div>
               </Field>
+              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" defaultValue={product?.hs_code || ""} /></Field>
+              <Field label="기본 관세율 (%)"><input className="field-input" type="number" step="0.1" name="basic_rate" defaultValue={product?.basic_rate || 0} /></Field>
+              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue={product?.fta_rate || 0} /></Field>
             </div>
             <Field label="메모"><textarea className="field-input min-h-24" name="note" defaultValue={product?.note || ""} /></Field>
             {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
@@ -1245,10 +1249,10 @@ function NativeOrderForm({ id }: { id?: number }) {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1 text-sm font-black text-slate-700">
-      {label}
+    <div className="grid gap-1 text-sm font-black text-slate-700">
+      <span>{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -1262,7 +1266,7 @@ function Info({ label, value, wide = false }: { label: string; value: string; wi
 }
 
 function NativeSettings() {
-  const [data, setData] = useState<{ rates: Record<string, number>; categories: Array<{ id: number; name: string }>; factories: ImportFactory[] } | null>(null);
+  const [data, setData] = useState<{ rates: Record<string, number>; factories: ImportFactory[] } | null>(null);
 
   useEffect(() => {
     let alive = true;
