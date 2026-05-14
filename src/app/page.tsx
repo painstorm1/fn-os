@@ -300,27 +300,8 @@ function AddressBlock({ text }: { text: string }) {
 }
 
 function RightTools() {
-  const [productName, setProductName] = useState("");
-  const [gptResult, setGptResult] = useState("제품명을 입력하고 HS/관세 물어보기를 눌러주세요.");
-  const [gptLoading, setGptLoading] = useState(false);
   const [lcl, setLcl] = useState({ method: "LCL(월수금)", w: "", d: "", h: "", box: "", origin: false });
   const [lclResult, setLclResult] = useState("CBM을 입력하면 배송비가 계산됩니다.");
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const saved = localStorage.getItem("fn-os-gptmini-last-result");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as { productName?: string; answer?: string };
-          if (parsed.productName) setProductName(parsed.productName);
-          if (parsed.answer) setGptResult(parsed.answer);
-        } catch {
-          localStorage.removeItem("fn-os-gptmini-last-result");
-        }
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   function lclCbm() {
     return (
@@ -372,57 +353,8 @@ function RightTools() {
     void calcLcl(next);
   }
 
-  async function askGptMini() {
-    const name = productName.trim();
-    if (!name) return;
-    setGptLoading(true);
-    setGptResult("GPTmini 조회 중...");
-    try {
-      const res = await fetch(`${IMPORT_ERP_URL}/api/gptmini/hs`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product_name: name }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "GPTmini 호출 실패");
-      localStorage.setItem(
-        "fn-os-gptmini-last-result",
-        JSON.stringify({ productName: name, answer: data.answer, ts: Date.now() })
-      );
-      setGptResult(data.answer);
-    } catch (error) {
-      setGptResult(error instanceof Error ? error.message : "수입ERP 서버 연결을 확인해 주세요.");
-    } finally {
-      setGptLoading(false);
-    }
-  }
-
   return (
     <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <ToolSection title="GPTmini (HS코드&관세율)" defaultOpen>
-        <input
-          value={productName}
-          onChange={(event) => setProductName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void askGptMini();
-          }}
-          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-          placeholder="제품명 입력"
-        />
-        <button
-          type="button"
-          disabled={gptLoading}
-          onClick={askGptMini}
-          className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:opacity-60"
-        >
-          {gptLoading ? "조회 중..." : "HS/관세 물어보기"}
-        </button>
-        <div className="mt-2 min-h-24 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-          {gptResult}
-        </div>
-      </ToolSection>
-
       <ToolSection title="LCL 배송요금" defaultOpen>
         <select
           value={lcl.method}
@@ -899,6 +831,79 @@ function NativeProductDetail({ id }: { id: number }) {
   );
 }
 
+function GptMiniProductBox() {
+  const [productName, setProductName] = useState("");
+  const [result, setResult] = useState("제품명을 입력하고 HS/관세 물어보기를 눌러주세요.");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const saved = localStorage.getItem("fn-os-gptmini-last-result");
+      if (!saved) return;
+      try {
+        const parsed = JSON.parse(saved) as { productName?: string; answer?: string };
+        if (parsed.productName) setProductName(parsed.productName);
+        if (parsed.answer) setResult(parsed.answer);
+      } catch {
+        localStorage.removeItem("fn-os-gptmini-last-result");
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  async function ask() {
+    const name = productName.trim();
+    if (!name) return;
+    setLoading(true);
+    setResult("GPTmini 조회 중...");
+    try {
+      const res = await fetch(`${IMPORT_ERP_URL}/api/gptmini/hs`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product_name: name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "GPTmini 호출 실패");
+      localStorage.setItem(
+        "fn-os-gptmini-last-result",
+        JSON.stringify({ productName: name, answer: data.answer, ts: Date.now() })
+      );
+      setResult(data.answer);
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "수입ERP 서버 연결을 확인해 주세요.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <h3 className="text-sm font-black">GPTmini (HS코드&amp;관세율)</h3>
+      <input
+        value={productName}
+        onChange={(event) => setProductName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void ask();
+        }}
+        className="mt-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold outline-orange-500"
+        placeholder="제품명 입력"
+      />
+      <button
+        type="button"
+        disabled={loading}
+        onClick={ask}
+        className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:opacity-60"
+      >
+        {loading ? "조회 중..." : "HS/관세 물어보기"}
+      </button>
+      <div className="mt-2 min-h-24 whitespace-pre-wrap rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        {result}
+      </div>
+    </section>
+  );
+}
+
 function NativeProductForm({ id }: { id?: number }) {
   const { data, loading } = useImportFormData();
   const [product, setProduct] = useState<ImportProduct | null>(null);
@@ -906,6 +911,18 @@ function NativeProductForm({ id }: { id?: number }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function handleImageChange(nextFile?: File) {
+    setFile(nextFile || null);
+    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : "");
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -950,16 +967,38 @@ function NativeProductForm({ id }: { id?: number }) {
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
         <form key={product?.id || "new"} onSubmit={submit} className="grid gap-5 xl:grid-cols-[300px_1fr]">
           <div className="space-y-4">
-            <label className="block text-sm font-black">
-              제품 사진
-              {product?.image_path && <img src={assetUrl(product.image_path)} alt="" className="mb-3 mt-2 h-48 w-48 rounded-md object-cover" />}
-              <input className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" type="file" name="image" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </label>
-            <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-sm font-black">GPTmini (HS코드&amp;관세율)</p>
-              <p className="mt-2 text-xs leading-5 text-slate-500">제품 등록 폼에서는 HS코드와 관세율 값을 바로 입력해 저장합니다. 상세 조회는 오른쪽 GPTmini에서 그대로 사용할 수 있습니다.</p>
+            <div>
+              <p className="text-sm font-black">제품 사진</p>
+              <input
+                id="product-image-file"
+                className="sr-only"
+                type="file"
+                name="image"
+                accept="image/*"
+                onChange={(e) => handleImageChange(e.target.files?.[0])}
+              />
+              <label
+                htmlFor="product-image-file"
+                className="mt-2 flex h-12 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-700 hover:bg-orange-100"
+              >
+                이미지 선택
+              </label>
+              <p className="mt-2 truncate rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">
+                {file ? file.name : "선택된 파일 없음"}
+              </p>
+              {(previewUrl || product?.image_path) && (
+                <div className="mt-3 overflow-hidden rounded-md border border-slate-200 bg-white p-2">
+                  <img
+                    src={previewUrl || assetUrl(product?.image_path)}
+                    alt="제품 이미지 미리보기"
+                    className="h-56 w-full rounded object-cover"
+                  />
+                  <p className="mt-2 text-xs font-bold text-slate-500">{previewUrl ? "새 이미지 미리보기" : "등록된 이미지"}</p>
+                </div>
+              )}
             </div>
+            <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
+            <GptMiniProductBox />
           </div>
 
           <div className="grid gap-4">
