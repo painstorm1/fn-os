@@ -8,7 +8,6 @@ import { useSearchParams } from "next/navigation";
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
 const mainMenus = [
-  "대시보드",
   "매출/재고",
   "수입관리",
   "광고분석",
@@ -173,6 +172,14 @@ function CalendarMemo() {
 }
 
 function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPath: string }) {
+  const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
+
+  useEffect(() => {
+    if (activeMenu !== "수입관리") return;
+    const timer = window.setTimeout(() => setImportOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMenu]);
+
   return (
     <aside className="hidden h-screen w-[280px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-6 py-5 lg:block">
       <Link href="/?menu=dashboard" className="mb-4 block">
@@ -182,15 +189,32 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
       <nav className="space-y-1">
         {mainMenus.map((item) => (
           <div key={item}>
-            <Link
-              href={`/?menu=${menuSlugs[item]}`}
-              className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              {item}
-            </Link>
-            {item === "수입관리" && activeMenu === "수입관리" && (
+            {item === "수입관리" ? (
+              <Link
+                href="/?menu=import"
+                onClick={(event) => {
+                  if (activeMenu === "수입관리") {
+                    event.preventDefault();
+                    setImportOpen((open) => !open);
+                  }
+                }}
+                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item}
+              </Link>
+            ) : (
+              <Link
+                href={`/?menu=${menuSlugs[item]}`}
+                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item}
+              </Link>
+            )}
+            {item === "수입관리" && activeMenu === "수입관리" && importOpen && (
               <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
                 {importSubMenus.map((sub) => (
                   <Link
@@ -216,16 +240,42 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
   );
 }
 
-function ToolSection({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+function ToolSection({
+  title,
+  children,
+  defaultOpen = false,
+  href,
+  showChevron = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  href?: string;
+  showChevron?: boolean;
+}) {
   return (
     <details className="mb-3 rounded-md border border-slate-200 bg-white" open={defaultOpen}>
-      <summary className="cursor-pointer rounded-md bg-slate-50 px-3 py-3 text-sm font-black">{title}</summary>
+      <summary className="flex cursor-pointer list-none items-center justify-between rounded-md bg-slate-50 px-3 py-3 text-sm font-black [&::-webkit-details-marker]:hidden">
+        <span>{showChevron ? "▼ " : ""}{title}</span>
+        {href && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-orange-600"
+            title="사이트 열기"
+          >
+            ↗
+          </a>
+        )}
+      </summary>
       <div className="border-t border-slate-100 p-3">{children}</div>
     </details>
   );
 }
 
-function AddressBlock({ text, href }: { text: string; href?: string }) {
+function AddressBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -235,22 +285,11 @@ function AddressBlock({ text, href }: { text: string; href?: string }) {
   }
 
   return (
-    <div className="relative pt-10">
-      {href && (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute right-1 top-0 flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-orange-600"
-          title="사이트 열기"
-        >
-          ↗
-        </a>
-      )}
+    <div className="relative">
       <button
         type="button"
         onClick={copy}
-        className="absolute right-1 top-9 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-orange-600"
+        className="absolute right-2 top-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-orange-600"
       >
         {copied ? "완료" : "복사"}
       </button>
@@ -417,9 +456,8 @@ function RightTools() {
         <pre className="mt-2 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">{lclResult}</pre>
       </ToolSection>
 
-      <ToolSection title="타배 위해 주소">
+      <ToolSection title="타배 위해 주소" href="https://www.tabae.co.kr/" showChevron={false}>
         <AddressBlock
-          href="https://www.tabae.co.kr/"
           text={`우편번호(邮政编码) : 264205
 
 성(省) : 山东省
@@ -435,9 +473,8 @@ function RightTools() {
         />
       </ToolSection>
 
-      <ToolSection title="짐패스 도쿄 주소">
+      <ToolSection title="짐패스 도쿄 주소" href="https://www.jimpass.com/" showChevron={false}>
         <AddressBlock
-          href="https://www.jimpass.com/"
           text={`우편번호 (郵便番号) : 103-0015
 
 도도부현 (都道府県) : 東京都
