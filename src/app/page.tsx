@@ -225,7 +225,7 @@ function ToolSection({ title, children, defaultOpen = false }: { title: string; 
   );
 }
 
-function AddressBlock({ text }: { text: string }) {
+function AddressBlock({ text, href }: { text: string; href?: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -235,46 +235,52 @@ function AddressBlock({ text }: { text: string }) {
   }
 
   return (
-    <div className="relative">
+    <div className="relative pt-10">
+      {href && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute right-1 top-0 flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-orange-600"
+          title="사이트 열기"
+        >
+          ↗
+        </a>
+      )}
       <button
         type="button"
         onClick={copy}
-        className="absolute right-2 top-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-orange-600"
+        className="absolute right-1 top-9 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-orange-600"
       >
         {copied ? "완료" : "복사"}
       </button>
-      <pre className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 pr-14 text-xs leading-5 text-slate-700">{text}</pre>
+      <pre className="whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 pr-14 text-xs leading-7 text-slate-700">{text}</pre>
     </div>
   );
 }
 
 function RightTools() {
-  const [bookmarkTab, setBookmarkTab] = useState<"china" | "japan" | "sites">("china");
   const [productName, setProductName] = useState("");
   const [gptResult, setGptResult] = useState("제품명을 입력하고 HS/관세 물어보기를 눌러주세요.");
   const [gptLoading, setGptLoading] = useState(false);
   const [lcl, setLcl] = useState({ method: "LCL(월수금)", w: "", d: "", h: "", box: "", origin: false });
   const [lclResult, setLclResult] = useState("CBM을 입력하면 배송비가 계산됩니다.");
 
-  const bookmarks = {
-    china: [
-      ["알리바바", "https://korean.alibaba.com/"],
-      ["1688", "https://www.1688.com/"],
-      ["타오바오", "https://www.taobao.com/"],
-    ],
-    japan: [
-      ["슈퍼딜리버리", "https://www.superdelivery.com/"],
-      ["자카넷", "https://www.zakka.net/"],
-      ["아마존JP", "https://www.amazon.co.jp/"],
-    ],
-    sites: [
-      ["UNI-PASS", "https://unipass.customs.go.kr/csp/index.do"],
-      ["한국무역협회", "https://www.kita.net/"],
-      ["수입정보마루", "https://impfood.mfds.go.kr/"],
-      ["초록누리", "https://ecolife.mcee.go.kr/ecolife/main"],
-      ["KC인증정보 검색", "https://www.safetykorea.kr/release/itemSearch"],
-    ],
-  } as const;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const saved = localStorage.getItem("fn-os-gptmini-last-result");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as { productName?: string; answer?: string };
+          if (parsed.productName) setProductName(parsed.productName);
+          if (parsed.answer) setGptResult(parsed.answer);
+        } catch {
+          localStorage.removeItem("fn-os-gptmini-last-result");
+        }
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function lclCbm() {
     return (
@@ -329,12 +335,6 @@ function RightTools() {
   async function askGptMini() {
     const name = productName.trim();
     if (!name) return;
-    const cacheKey = `gptcache_${name}`;
-    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null") as { ts: number; a: string } | null;
-    if (cached && Date.now() - cached.ts < 86400000) {
-      setGptResult(cached.a);
-      return;
-    }
     setGptLoading(true);
     setGptResult("GPTmini 조회 중...");
     try {
@@ -346,7 +346,10 @@ function RightTools() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "GPTmini 호출 실패");
-      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), a: data.answer }));
+      localStorage.setItem(
+        "fn-os-gptmini-last-result",
+        JSON.stringify({ productName: name, answer: data.answer, ts: Date.now() })
+      );
       setGptResult(data.answer);
     } catch (error) {
       setGptResult(error instanceof Error ? error.message : "수입ERP 서버 연결을 확인해 주세요.");
@@ -357,34 +360,6 @@ function RightTools() {
 
   return (
     <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <ToolSection title="BookMark" defaultOpen>
-        <div className="grid grid-cols-3 gap-1">
-          {[
-            ["china", "중국"],
-            ["japan", "일본"],
-            ["sites", "사이트"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setBookmarkTab(key as "china" | "japan" | "sites")}
-              className={`rounded-md border px-2 py-2 text-xs font-bold ${
-                bookmarkTab === key ? "border-orange-200 bg-orange-50 text-orange-600" : "border-slate-200 bg-slate-50"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 grid gap-2 text-xs font-bold">
-          {bookmarks[bookmarkTab].map(([label, href]) => (
-            <a key={href} className="rounded-md border border-slate-200 px-3 py-2 hover:border-orange-200 hover:text-orange-600" href={href} target="_blank">
-              {label}
-            </a>
-          ))}
-        </div>
-      </ToolSection>
-
       <ToolSection title="GPTmini (HS코드&관세율)" defaultOpen>
         <input
           value={productName}
@@ -442,9 +417,50 @@ function RightTools() {
         <pre className="mt-2 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">{lclResult}</pre>
       </ToolSection>
 
-      <ToolSection title="타배 위해 주소"><AddressBlock text={`收件人: FN\n电话: 18563144074\n地址: 위해 배송대행지 주소`} /></ToolSection>
-      <ToolSection title="짐패스 도쿄 주소"><AddressBlock text={`〒103-0015\n東京都中央区日本橋箱崎町\nJIMPASS`} /></ToolSection>
-      <ToolSection title="FN 영문주소"><AddressBlock text={`FN(KIM JAEWOOK)\n42-19, Baegok-daero 2101beon-gil\nYongin-si, Republic of Korea\n17037`} /></ToolSection>
+      <ToolSection title="타배 위해 주소">
+        <AddressBlock
+          href="https://www.tabae.co.kr/"
+          text={`우편번호(邮政编码) : 264205
+
+성(省) : 山东省
+
+시(市) : 威海市
+
+상세주소(详细地址) : 环翠区凤林街道
+
+나의사서함번호 : 梧桐路南500米景和光
+电院内2号仓库/TB77624
+
+연락처(联系方式) : 18563144074`}
+        />
+      </ToolSection>
+
+      <ToolSection title="짐패스 도쿄 주소">
+        <AddressBlock
+          href="https://www.jimpass.com/"
+          text={`우편번호 (郵便番号) : 103-0015
+
+도도부현 (都道府県) : 東京都
+
+시구, 번지 (住所1) : 中央区日本橋箱崎町44-7
+
+그밖의 주소(住所2) : 4階 JK65203
+
+전화번호 (電話番号) : 03-3527-3876`}
+        />
+      </ToolSection>
+
+      <ToolSection title="FN 영문주소">
+        <AddressBlock
+          text={`FN(KIM JAEWOOK)
+
+FNcompany 42-19, Baegok-daero 2101beon-gil, Mohyeon-eup
+Cheoin-gu Yongin-si, Gyeonggi-do, Republic of Korea
+
+postcode 17037
+Phone (+82), 1033748934`}
+        />
+      </ToolSection>
     </aside>
   );
 }
