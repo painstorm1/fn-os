@@ -454,7 +454,19 @@ type ImportOrder = {
   currency?: string;
   fx_rate?: number;
   payment_method?: string;
+  first_payment_date?: string;
+  factory_ship_date?: string;
+  badaeji_arrived?: string;
+  customs_cleared?: string;
   shipping_method?: string;
+  fn_arrival_method?: string;
+  shipping_cost?: number;
+  customs_duty?: number;
+  vat?: number;
+  customs_fee?: number;
+  inspection_fee?: number;
+  domestic_shipping_cost?: number;
+  other_cost?: number;
   note?: string;
 };
 
@@ -501,6 +513,7 @@ type OrderLine = {
   unit_price: string;
   item_currency: string;
   line_note: string;
+  image_path?: string;
 };
 
 type ImportOrderItem = {
@@ -1115,6 +1128,304 @@ function NativeOrderDetail({ id }: { id: number }) {
 }
 
 function NativeOrderForm({ id }: { id?: number }) {
+  const { data, loading } = useImportFormData();
+  const [order, setOrder] = useState<ImportOrder | null>(null);
+  const [detailLoading, setDetailLoading] = useState(Boolean(id));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogOptions, setCatalogOptions] = useState<Record<number, string>>({});
+  const [paymentMethod, setPaymentMethod] = useState("플랫폼 카드결제");
+  const [lines, setLines] = useState<OrderLine[]>([
+    { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
+  ]);
+
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next: ImportOrderDetail) => {
+        if (!alive) return;
+        setOrder(next.order || null);
+        setPaymentMethod(next.order?.payment_method || "플랫폼 카드결제");
+        setLines((next.items || []).map((item) => ({
+          product_id: item.product_id ? String(item.product_id) : "",
+          product_name: item.product_name || "",
+          option_value: item.option_value || "",
+          quantity: item.quantity ? String(item.quantity) : "1",
+          unit_price: item.unit_price ? String(item.unit_price) : "",
+          item_currency: item.item_currency || "CNY",
+          line_note: item.line_note || "",
+          image_path: item.image_path || "",
+        })));
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const blankLine: OrderLine = { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" };
+
+  const catalogProducts = useMemo(() => {
+    const query = catalogQuery.trim().toLowerCase();
+    if (!query) return data?.products || [];
+    return (data?.products || []).filter((product) => (
+      [product.name, String(product.id), product.factory_name, product.options]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    ));
+  }, [catalogQuery, data?.products]);
+
+  const productTotal = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0)), 0);
+  const fxRate = order?.fx_rate || data?.rates?.CNY || 195;
+  const productTotalWon = Math.round(productTotal * Number(fxRate || 0));
+
+  function optionsFor(product?: ImportProduct) {
+    return (product?.options || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function updateLine(index: number, patch: Partial<OrderLine>) {
+    setLines((prev) => prev.map((line, i) => i === index ? { ...line, ...patch } : line));
+  }
+
+  function addProduct(product: ImportProduct) {
+    const selectedOption = catalogOptions[product.id] || optionsFor(product)[0] || "";
+    const nextLine: OrderLine = {
+      product_id: String(product.id),
+      product_name: product.name || "",
+      option_value: selectedOption,
+      quantity: "1",
+      unit_price: product.std_price ? String(product.std_price) : "",
+      item_currency: product.currency || "CNY",
+      line_note: "",
+      image_path: product.image_path || "",
+    };
+    setLines((prev) => {
+      const emptyIndex = prev.findIndex((line) => !line.product_name && !line.product_id);
+      if (emptyIndex === -1) return [...prev, nextLine];
+      return prev.map((line, index) => index === emptyIndex ? nextLine : line);
+    });
+    setCatalogOpen(false);
+  }
+
+  function addEmptyLine() {
+    setLines((prev) => [...prev, { ...blankLine }]);
+  }
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    const form = new FormData(e.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    try {
+      const res = await fetch(apiUrl(id ? `/api/fnos/orders/${id}` : "/api/fnos/orders"), {
+        method: id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ...payload, items: lines.filter((line) => line.product_name && line.quantity && line.unit_price) }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
+      window.location.href = importHref(id ? `/orders/${id}` : "/orders");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const stageFields = paymentMethod === "T/T송금"
+    ? [
+      { label: "주문", name: "order_date", value: order?.order_date },
+      { label: "1차결제", name: "first_payment_date", value: order?.first_payment_date },
+      { label: "2차결제", name: "paid_date", value: order?.paid_date },
+      { label: "공장출고", name: "factory_ship_date", value: order?.factory_ship_date },
+      { label: "배대지도착", name: "badaeji_arrived", value: order?.badaeji_arrived },
+      { label: "통관완료", name: "customs_cleared", value: order?.customs_cleared },
+      { label: "FN입고", name: "fn_arrived", value: order?.fn_arrived },
+    ]
+    : [
+      { label: "주문", name: "order_date", value: order?.order_date },
+      { label: "결제완료", name: "paid_date", value: order?.paid_date },
+      { label: "공장출고", name: "factory_ship_date", value: order?.factory_ship_date },
+      { label: "배대지도착", name: "badaeji_arrived", value: order?.badaeji_arrived },
+      { label: "통관완료", name: "customs_cleared", value: order?.customs_cleared },
+      { label: "FN입고", name: "fn_arrived", value: order?.fn_arrived },
+    ];
+
+  return (
+    <Panel
+      title={id ? "발주서 수정" : "새 발주서 작성"}
+      subtitle="발주 정보와 제품 라인을 입력합니다."
+      action={<span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>}
+    >
+      {loading || detailLoading ? <p className="text-sm text-slate-500">데이터를 불러오는 중...</p> : (
+        <form key={order?.id || "new"} onSubmit={submit} className="grid gap-5">
+          <input type="hidden" name="platform" value={order?.platform || "FN_OS"} />
+          <input type="hidden" name="currency" value={order?.currency || "CNY"} />
+          <input type="hidden" name="fx_rate" value={String(fxRate)} />
+
+          <section className="grid gap-3 border-t border-slate-200 pt-4">
+            <h3 className="border-b border-slate-200 pb-2 text-base font-black">기본 정보</h3>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Field label="발주처(공장)">
+                <select className="field-input" name="factory_id" defaultValue={order?.factory_id || ""}>
+                  <option value="">선택...</option>
+                  {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </Field>
+              <Field label="결제방법">
+                <select className="field-input" name="payment_method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                  {["플랫폼 카드결제", "T/T송금", "계좌이체", "기타"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
+              <Field label="운송방식">
+                <select className="field-input" name="shipping_method" defaultValue={order?.shipping_method || "LCL"}>
+                  {["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
+              <Field label="한국배송">
+                <select className="field-input" name="fn_arrival_method" defaultValue={order?.fn_arrival_method || "택배배송"}>
+                  {["택배배송", "화물배송", "직접입고", "기타"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
+            </div>
+          </section>
+
+          <section className="grid gap-3">
+            <div className="flex items-end justify-between border-b border-slate-200 pb-2">
+              <h3 className="text-base font-black">진행 상태</h3>
+              <p className="text-xs font-bold text-slate-500">날짜는 필요한 단계만 입력하면 됩니다.</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3 2xl:grid-cols-6">
+              {stageFields.map((stage, index) => (
+                <div key={stage.name} className="relative grid gap-2 rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-black ${index === 0 ? "bg-emerald-500 text-white" : "border-2 border-slate-300 text-slate-500"}`}>
+                      {index === 0 ? "✓" : "+"}
+                    </span>
+                    <strong className="text-sm">{stage.label}</strong>
+                  </div>
+                  <input className="field-input" type="date" name={stage.name} defaultValue={stage.value || ""} />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="grid gap-3">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="text-base font-black">제품 라인</h3>
+              <div className="flex gap-2">
+                <button type="button" className="inline-flex h-9 items-center rounded-md border border-slate-300 px-3 text-sm font-black" onClick={() => setCatalogOpen(true)}>카탈로그에서 추가</button>
+                <button type="button" className="inline-flex h-9 items-center rounded-md border border-slate-900 px-3 text-sm font-black" onClick={addEmptyLine}>+ 직접 입력</button>
+              </div>
+            </div>
+            <div className="hidden grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px] gap-3 border-b border-slate-200 px-2 py-2 text-sm font-black text-slate-600 xl:grid">
+              <span>사진</span><span>제품</span><span>옵션</span><span>수량</span><span>단가 / 통화</span><span>소계</span><span>비고</span><span />
+            </div>
+            <div className="grid gap-2">
+              {lines.map((line, index) => {
+                const subtotal = Number(line.quantity || 0) * Number(line.unit_price || 0);
+                return (
+                  <div key={index} className="grid gap-3 border-b border-slate-200 py-3 xl:grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px]">
+                    <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
+                      {line.image_path ? <img src={assetUrl(line.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">사진</div>}
+                    </div>
+                    <input className="field-input" value={line.product_name} onChange={(e) => updateLine(index, { product_name: e.target.value, product_id: "" })} placeholder="제품명" />
+                    <input className="field-input" value={line.option_value} onChange={(e) => updateLine(index, { option_value: e.target.value })} placeholder="옵션" />
+                    <input className="field-input text-right" type="number" step="0.01" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} placeholder="수량" />
+                    <div className="grid grid-cols-[1fr_76px] gap-2">
+                      <input className="field-input text-right" type="number" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} placeholder="단가" />
+                      <select className="field-input" value={line.item_currency} onChange={(e) => updateLine(index, { item_currency: e.target.value })}>
+                        {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex h-[38px] items-center justify-end text-sm font-black">{subtotal.toLocaleString("ko-KR")} {line.item_currency}</div>
+                    <input className="field-input" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
+                    <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid justify-end gap-1 text-right text-sm">
+              <p className="font-black">제품 합계: <span className="text-lg text-orange-600">{productTotal.toLocaleString("ko-KR")} CNY</span> / 원화 제품합계 <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
+              <p className="text-xs text-slate-500">CNY=₩{Number(fxRate || 0).toLocaleString("ko-KR")}</p>
+            </div>
+          </section>
+
+          <section className="grid gap-3 border-t border-slate-200 pt-4">
+            <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Field label="배대지 배송비"><input className="field-input text-right" type="number" name="shipping_cost" defaultValue={order?.shipping_cost || 0} /></Field>
+              <Field label="관세"><input className="field-input text-right" type="number" name="customs_duty" defaultValue={order?.customs_duty || 0} /></Field>
+              <Field label="부가세"><input className="field-input text-right" type="number" name="vat" defaultValue={order?.vat || 0} /></Field>
+              <Field label="통관수수료"><input className="field-input text-right" type="number" name="customs_fee" defaultValue={order?.customs_fee || 0} /></Field>
+              <Field label="식검비"><input className="field-input text-right" type="number" name="inspection_fee" defaultValue={order?.inspection_fee || 0} /></Field>
+              <Field label="국내배송비"><input className="field-input text-right" type="number" name="domestic_shipping_cost" defaultValue={order?.domestic_shipping_cost || 0} /></Field>
+              <Field label="기타비용"><input className="field-input text-right" type="number" name="other_cost" defaultValue={order?.other_cost || 0} /></Field>
+            </div>
+          </section>
+
+          <Field label="메모"><textarea className="field-input" name="note" defaultValue={order?.note || ""} /></Field>
+          {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref(id ? `/orders/${id}` : "/orders")}>취소</Link>
+            <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+          </div>
+
+          {catalogOpen && (
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
+              <div className="w-full max-w-5xl rounded-md bg-white shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-200 p-4">
+                  <h3 className="text-lg font-black">제품 선택</h3>
+                  <button type="button" className="text-2xl text-slate-500" onClick={() => setCatalogOpen(false)}>×</button>
+                </div>
+                <div className="grid gap-3 p-4">
+                  <input className="field-input" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="제품명 또는 SKU 검색" />
+                  <div className="grid max-h-[58vh] gap-2 overflow-auto">
+                    {catalogProducts.map((product) => {
+                      const options = optionsFor(product);
+                      return (
+                        <div key={product.id} className="grid items-center gap-3 rounded-md border border-slate-200 p-2 md:grid-cols-[76px_1fr_180px_90px]">
+                          <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
+                            {product.image_path ? <img src={assetUrl(product.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">사진</div>}
+                          </div>
+                          <div>
+                            <p className="font-black">{product.name}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">{product.factory_name || "-"} · {product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || "CNY"}` : "단가 없음"}</p>
+                          </div>
+                          {options.length ? (
+                            <select className="field-input" value={catalogOptions[product.id] || options[0]} onChange={(event) => setCatalogOptions((prev) => ({ ...prev, [product.id]: event.target.value }))}>
+                              {options.map((option) => <option key={option}>{option}</option>)}
+                            </select>
+                          ) : <span className="text-sm font-bold text-slate-500">옵션 없음</span>}
+                          <button type="button" className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-black text-white" onClick={() => addProduct(product)}>추가</button>
+                        </div>
+                      );
+                    })}
+                    {!catalogProducts.length && <p className="rounded-md bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">등록된 제품이 없습니다.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </form>
+      )}
+    </Panel>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyNativeOrderForm({ id }: { id?: number }) {
   const { data, loading } = useImportFormData();
   const [order, setOrder] = useState<ImportOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(id));
