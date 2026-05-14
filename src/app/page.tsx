@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
@@ -523,12 +524,18 @@ type ImportProduct = {
   sku?: string;
   name: string;
   category_name?: string;
+  factory_id?: number;
   factory_name?: string;
   image_path?: string;
   options?: string;
   std_price?: number;
   currency?: string;
   status?: string;
+};
+
+type ImportCategory = {
+  id: number;
+  name: string;
 };
 
 type ImportFactory = {
@@ -542,8 +549,29 @@ type ImportFactory = {
   order_count?: number;
 };
 
+type ImportFormData = {
+  rates: Record<string, number>;
+  categories: ImportCategory[];
+  factories: ImportFactory[];
+  products: ImportProduct[];
+};
+
+type OrderLine = {
+  product_id: string;
+  product_name: string;
+  option_value: string;
+  quantity: string;
+  unit_price: string;
+  item_currency: string;
+  line_note: string;
+};
+
 function apiUrl(path: string) {
   return `${IMPORT_ERP_URL}${path}`;
+}
+
+function importHref(path: string) {
+  return `/?menu=import&section=${encodeURIComponent(path)}`;
 }
 
 function assetUrl(path?: string) {
@@ -639,6 +667,8 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 }
 
 function NativeImportWorkspace({ path }: { path: string }) {
+  if (path.startsWith("/orders/new")) return <NativeOrderForm />;
+  if (path.startsWith("/products/new")) return <NativeProductForm />;
   if (path.startsWith("/products")) return <NativeProducts />;
   if (path.startsWith("/settings")) return <NativeSettings />;
   return <NativeOrders />;
@@ -667,7 +697,7 @@ function NativeOrders() {
     <Panel
       title="발주"
       subtitle="FN OS 안으로 흡수한 수입ERP 발주 목록"
-      action={<a className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={apiUrl("/orders/new")} target="_blank">+ 새 발주</a>}
+      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="grid gap-2">
@@ -713,7 +743,7 @@ function NativeProducts() {
     <Panel
       title="제품"
       subtitle="수입 제품 카탈로그"
-      action={<a className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={apiUrl("/products/new")} target="_blank">+ 새 제품</a>}
+      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/products/new")}>+ 새 제품</Link>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
@@ -730,6 +760,236 @@ function NativeProducts() {
         </div>
       )}
     </Panel>
+  );
+}
+
+function useImportFormData() {
+  const [data, setData] = useState<ImportFormData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/fnos/form-data"), { credentials: "include" })
+      .then((res) => res.json())
+      .then((next) => {
+        if (alive) setData(next);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return { data, loading };
+}
+
+function NativeProductForm() {
+  const { data, loading } = useImportFormData();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    const form = new FormData(e.currentTarget);
+    if (file) form.set("image", file);
+    try {
+      const res = await fetch(apiUrl("/api/fnos/products"), {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
+      window.location.href = importHref("/products");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Panel title="새 제품 등록" subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
+      {loading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+        <form onSubmit={submit} className="grid gap-5 xl:grid-cols-[300px_1fr]">
+          <div className="space-y-4">
+            <label className="block text-sm font-black">
+              제품 사진
+              <input className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" type="file" name="image" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </label>
+            <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-black">GPTmini (HS코드&amp;관세율)</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">제품 등록 폼에서는 HS코드와 관세율 값을 바로 입력해 저장합니다. 상세 조회는 오른쪽 GPTmini에서 그대로 사용할 수 있습니다.</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
+              <Field label="제품명 *"><input className="field-input" name="name" required /></Field>
+              <Field label="SKU"><input className="field-input" name="sku" /></Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field label="카테고리">
+                <select className="field-input" name="category_id" defaultValue="">
+                  <option value="">선택...</option>
+                  {data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </Field>
+              <Field label="주공장">
+                <select className="field-input" name="factory_id" defaultValue="">
+                  <option value="">선택 안함</option>
+                  {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </Field>
+              <Field label="상태">
+                <select className="field-input" name="status" defaultValue="현역">
+                  {["현역", "보류", "종료"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="상품 URL (1688/알리/쇼핑몰 링크)"><input className="field-input" name="product_url" placeholder="https://..." /></Field>
+            <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" /></Field>
+            <div className="grid gap-4 md:grid-cols-[1.4fr_.7fr_.7fr_.7fr_.7fr]">
+              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" /></Field>
+              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue="0" /></Field>
+              <Field label="MOQ"><input className="field-input" type="number" name="moq" /></Field>
+              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" /></Field>
+              <Field label="통화">
+                <select className="field-input" name="currency" defaultValue="CNY">
+                  {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="메모"><textarea className="field-input min-h-24" name="note" /></Field>
+            {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/products")}>취소</Link>
+              <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+            </div>
+          </div>
+        </form>
+      )}
+    </Panel>
+  );
+}
+
+function NativeOrderForm() {
+  const { data, loading } = useImportFormData();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [lines, setLines] = useState<OrderLine[]>([
+    { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
+  ]);
+
+  function updateLine(index: number, patch: Partial<OrderLine>) {
+    setLines((prev) => prev.map((line, i) => i === index ? { ...line, ...patch } : line));
+  }
+
+  function pickProduct(index: number, productId: string) {
+    const product = data?.products.find((item) => String(item.id) === productId);
+    updateLine(index, {
+      product_id: productId,
+      product_name: product?.name || "",
+      option_value: product?.options?.split(",")[0]?.trim() || "",
+      unit_price: product?.std_price ? String(product.std_price) : "",
+      item_currency: product?.currency || "CNY",
+    });
+  }
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    const form = new FormData(e.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    try {
+      const res = await fetch(apiUrl("/api/fnos/orders"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ...payload, items: lines.filter((line) => line.product_name && line.quantity && line.unit_price) }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
+      window.location.href = importHref("/orders");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Panel title="새 발주 등록" subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
+      {loading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+        <form onSubmit={submit} className="grid gap-5">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Field label="주공장">
+              <select className="field-input" name="factory_id" defaultValue="">
+                <option value="">선택 안함</option>
+                {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </Field>
+            <Field label="플랫폼"><input className="field-input" name="platform" placeholder="1688 / 알리바바" /></Field>
+            <Field label="통화">
+              <select className="field-input" name="currency" defaultValue="CNY">
+                {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </Field>
+            <Field label="환율"><input className="field-input" type="number" step="0.01" name="fx_rate" defaultValue={data?.rates.CNY || 195} /></Field>
+            <Field label="발주일"><input className="field-input" type="date" name="order_date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+            <Field label="결제일"><input className="field-input" type="date" name="paid_date" /></Field>
+            <Field label="결제수단"><input className="field-input" name="payment_method" /></Field>
+            <Field label="배송방식"><input className="field-input" name="shipping_method" placeholder="LCL / 항공 / 택배" /></Field>
+          </div>
+
+          <section className="rounded-md border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="font-black">제품 라인</h3>
+              <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-bold" onClick={() => setLines((prev) => [...prev, { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" }])}>+ 라인 추가</button>
+            </div>
+            <div className="grid gap-3 p-4">
+              {lines.map((line, index) => (
+                <div key={index} className="grid gap-3 rounded-md bg-slate-50 p-3 xl:grid-cols-[1fr_1fr_100px_130px_110px_1fr_40px]">
+                  <select className="field-input" value={line.product_id} onChange={(e) => pickProduct(index, e.target.value)}>
+                    <option value="">카탈로그 선택</option>
+                    {data?.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                  <input className="field-input" value={line.product_name} onChange={(e) => updateLine(index, { product_name: e.target.value })} placeholder="제품명" />
+                  <input className="field-input" value={line.option_value} onChange={(e) => updateLine(index, { option_value: e.target.value })} placeholder="옵션" />
+                  <input className="field-input" type="number" step="0.01" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} placeholder="수량" />
+                  <input className="field-input" type="number" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} placeholder="단가" />
+                  <input className="field-input" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
+                  <button type="button" className="rounded-md border border-rose-200 text-rose-600 disabled:opacity-40" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <Field label="메모"><textarea className="field-input min-h-24" name="note" /></Field>
+          {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/orders")}>취소</Link>
+            <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+          </div>
+        </form>
+      )}
+    </Panel>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="grid gap-1 text-sm font-black text-slate-700">
+      {label}
+      {children}
+    </label>
   );
 }
 

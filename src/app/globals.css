@@ -21,3 +21,16 @@ body {
 a {
   outline-color: #f97316;
 }
+
+.field-input {
+  min-height: 40px;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  outline-color: #f97316;
+}
