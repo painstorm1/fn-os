@@ -601,7 +601,8 @@ function orderExtraCost(order?: ImportOrder | null) {
     .reduce((sum, key) => sum + Number(order?.[key as keyof ImportOrder] || 0), 0);
 }
 
-function StageDateLane({ paymentMethod, values, onChange }: { paymentMethod?: string; values: StageValues; onChange: (name: string, value: string) => void }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyStageDateLane({ paymentMethod, values, onChange }: { paymentMethod?: string; values: StageValues; onChange: (name: string, value: string) => void }) {
   const [openStage, setOpenStage] = useState("");
   return (
     <div className="grid gap-3 md:grid-cols-3 2xl:grid-cols-6">
@@ -619,6 +620,49 @@ function StageDateLane({ paymentMethod, values, onChange }: { paymentMethod?: st
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?: string; values: StageValues; onChange: (name: string, value: string) => void }) {
+  const [openStage, setOpenStage] = useState("");
+  const stages = getStageFields(paymentMethod);
+
+  return (
+    <div className="relative px-3 pb-1 pt-4">
+      <div className="absolute left-8 right-8 top-[35px] h-px bg-slate-200" />
+      <div className="relative grid gap-3" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>
+        {stages.map((stage, index) => {
+          const value = values[stage.name] || "";
+          const done = Boolean(value);
+          return (
+            <div key={stage.name} className="grid justify-items-center gap-2 text-center">
+              <button
+                type="button"
+                className={`relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full text-xl font-black transition ${done || index === 0 ? "bg-emerald-500 text-white" : "border-2 border-slate-300 bg-white text-slate-500 hover:border-orange-300"}`}
+                onClick={() => setOpenStage((prev) => prev === stage.name ? "" : stage.name)}
+              >
+                {done || index === 0 ? "✓" : "+"}
+              </button>
+              <strong className="text-sm">{stage.label}</strong>
+              <button type="button" className="text-xs font-bold text-slate-500" onClick={() => setOpenStage(stage.name)}>
+                {value || "날짜 선택"}
+              </button>
+              {openStage === stage.name && (
+                <input
+                  className="field-input max-w-[140px]"
+                  type="date"
+                  value={value}
+                  onChange={(event) => {
+                    onChange(stage.name, event.target.value);
+                    setOpenStage("");
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -855,7 +899,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <h3 className="text-base font-black">진행 상태</h3>
             <p className="text-xs font-bold text-slate-500">동그라미를 클릭하면 날짜를 입력할 수 있습니다.</p>
           </div>
-          <StageDateLane paymentMethod={order.payment_method} values={stageValues} onChange={(name, value) => setStageValues((prev) => ({ ...prev, [name]: value }))} />
+          <StageProgressLane paymentMethod={order.payment_method} values={stageValues} onChange={(name, value) => setStageValues((prev) => ({ ...prev, [name]: value }))} />
         </section>
         <section className="grid gap-3">
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
@@ -1516,7 +1560,7 @@ function NativeOrderForm({ id }: { id?: number }) {
               </Field>
               <Field label="결제방법">
                 <select className="field-input" name="payment_method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                  {["플랫폼 카드결제", "T/T송금", "계좌이체", "기타"].map((item) => <option key={item}>{item}</option>)}
+                  {["플랫폼 카드결제", "T/T송금", "기타"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
               <Field label="운송방식">
@@ -1537,7 +1581,7 @@ function NativeOrderForm({ id }: { id?: number }) {
               <h3 className="text-base font-black">진행 상태</h3>
               <p className="text-xs font-bold text-slate-500">날짜는 필요한 단계만 입력하면 됩니다.</p>
             </div>
-            <StageDateLane paymentMethod={paymentMethod} values={visibleStageValues} onChange={(name, value) => setStageValues((prev) => ({ ...prev, [name]: value }))} />
+            <StageProgressLane paymentMethod={paymentMethod} values={visibleStageValues} onChange={(name, value) => setStageValues((prev) => ({ ...prev, [name]: value }))} />
           </section>
 
           <section className="grid gap-3">
