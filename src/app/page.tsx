@@ -984,7 +984,7 @@ function NativeOrders() {
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
-            <span>주문날짜</span><span>대표 제품</span><span>공장</span><span>수량</span><span>금액(원)</span><span>출고예정</span><span>상태</span>
+            <span className="text-center">주문날짜</span><span className="text-center">대표 제품</span><span className="text-center">공장</span><span className="text-center">수량</span><span className="text-center">금액(원)</span><span className="text-center">출고예정</span><span className="text-center">상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
