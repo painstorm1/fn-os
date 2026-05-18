@@ -48,13 +48,18 @@ function formatDateKey(date: Date) {
   ].join("-");
 }
 
+type CalendarServerMemo = {
+  memo: string;
+  order_id?: number;
+};
+
 function CalendarMemo() {
   const today = useMemo(() => new Date(), []);
   const [viewDate, setViewDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState(formatDateKey(today));
   const [memoText, setMemoText] = useState("");
   const [memos, setMemos] = useState<Record<string, string[]>>({});
-  const [serverMemos, setServerMemos] = useState<Record<string, string[]>>({});
+  const [serverMemos, setServerMemos] = useState<Record<string, CalendarServerMemo[]>>({});
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -69,16 +74,30 @@ function CalendarMemo() {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/fnos/calendar-production-memos"), { credentials: "include" })
-      .then((res) => res.ok ? res.json() : {})
-      .then((data) => {
-        if (alive) setServerMemos(data || {});
-      })
-      .catch(() => {
-        if (alive) setServerMemos({});
-      });
+    function loadServerMemos() {
+      fetch(apiUrl("/api/fnos/calendar-production-memos"), { credentials: "include" })
+        .then((res) => res.ok ? res.json() : {})
+        .then((data) => {
+          if (!alive) return;
+          const normalized = Object.fromEntries(
+            Object.entries(data || {}).map(([date, items]) => [
+              date,
+              (Array.isArray(items) ? items : []).map((item) => (
+                typeof item === "string" ? { memo: item } : item as CalendarServerMemo
+              )),
+            ]),
+          );
+          setServerMemos(normalized);
+        })
+        .catch(() => {
+          if (alive) setServerMemos({});
+        });
+    }
+    loadServerMemos();
+    window.addEventListener("fnos-calendar-refresh", loadServerMemos);
     return () => {
       alive = false;
+      window.removeEventListener("fnos-calendar-refresh", loadServerMemos);
     };
   }, []);
 
@@ -161,8 +180,14 @@ function CalendarMemo() {
         <strong className="text-xs font-bold text-slate-500">{selected}</strong>
         <div className="mt-2 space-y-1">
           {(serverMemos[selected] || []).map((memo, index) => (
-            <div key={`server-${memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
-              <span className="break-all">• {memo}</span>
+            <div key={`server-${memo.memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
+              {memo.order_id ? (
+                <Link href={importHref(`/orders/${memo.order_id}`)} className="break-all hover:underline">
+                  - {memo.memo}
+                </Link>
+              ) : (
+                <span className="break-all">- {memo.memo}</span>
+              )}
             </div>
           ))}
           {(memos[selected] || []).map((memo, index) => (
@@ -958,12 +983,12 @@ function NativeOrders() {
     <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
-          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_112px_110px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
+          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
             <span>주문날짜</span><span>대표 제품</span><span>공장</span><span>수량</span><span>금액(원)</span><span>출고예정</span><span>상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
-              <button type="button" onClick={() => toggleOrder(order.id)} className="grid w-full items-center gap-4 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_112px_110px_90px]">
+              <button type="button" onClick={() => toggleOrder(order.id)} className="grid w-full items-center gap-4 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
                   {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-14 w-14 rounded-md object-cover" /> : <span className="h-14 w-14 rounded-md bg-slate-100" />}
@@ -972,7 +997,7 @@ function NativeOrders() {
                 <span className="font-bold text-slate-600">{order.factory_name || "-"}</span>
                 <span className="text-left">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</span>
                 <span className="text-right font-black">{krw(order.total_won)}</span>
-                <span className="font-black text-orange-600">{productionDueText(order)}</span>
+                <span className="pr-3 text-right font-black text-orange-600">{productionDueText(order)}</span>
                 <StatusPill status={order.status} />
               </button>
               {expandedId === order.id && (
@@ -1070,7 +1095,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     });
     const next = await res.json();
     setSaving(false);
-    if (res.ok && next.ok) onSaved(next);
+    if (res.ok && next.ok) {
+      window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      onSaved(next);
+    }
   }
 
   async function deleteOrder() {
@@ -1079,7 +1107,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       method: "DELETE",
       credentials: "include",
     });
-    if (res.ok) onSaved(null);
+    if (res.ok) {
+      window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      onSaved(null);
+    }
   }
 
   return (
@@ -1302,8 +1333,8 @@ function NativeProducts() {
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
-            <Link key={product.id} href={importHref(`/products/${product.id}`)} className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
-              <div className="h-[150px] w-[150px] overflow-hidden rounded-md bg-slate-100">
+            <Link key={product.id} href={importHref(`/products/${product.id}`)} className="min-w-0 rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
+              <div className="aspect-square w-full overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
               <div className="mt-3 font-black">{product.name}</div>
@@ -1533,6 +1564,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [linkedMaterials, setLinkedMaterials] = useState<ProductMaterialLink[]>([]);
   const [linkedProducts, setLinkedProducts] = useState<MaterialProductLink[]>([]);
   const [productLinkOpen, setProductLinkOpen] = useState(false);
+  const [productLinkQuery, setProductLinkQuery] = useState("");
 
   useEffect(() => {
     return () => {
@@ -1621,6 +1653,7 @@ function NativeProductForm({ id }: { id?: number }) {
   return (
     <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+        <>
         <form key={product?.id || "new"} onSubmit={submit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
           <div className="space-y-3">
             <div>
@@ -1655,37 +1688,10 @@ function NativeProductForm({ id }: { id?: number }) {
                 <button
                   type="button"
                   className="flex h-10 w-[200px] items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-700 hover:bg-orange-100"
-                  onClick={() => setProductLinkOpen((prev) => !prev)}
+                  onClick={() => setProductLinkOpen(true)}
                 >
                   상품 연결
                 </button>
-                {productLinkOpen && (
-                  <section className="w-[200px] rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="max-h-72 overflow-auto">
-                      {(data?.products || []).filter((item) => !isMaterial(item) && item.id !== id).map((item) => {
-                        const checked = linkedProducts.some((link) => link.product_id === item.id);
-                        const linked = linkedProducts.find((link) => link.product_id === item.id);
-                        return (
-                          <label key={item.id} className="mb-2 grid gap-1 rounded-md border border-slate-200 bg-white p-2 text-xs font-bold">
-                            <span className="flex items-center gap-2">
-                              <input type="checkbox" checked={checked} onChange={() => toggleLinkedProduct(item)} />
-                              <span>{item.name}</span>
-                            </span>
-                            <input
-                              className="field-input h-8 text-right"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              disabled={!checked}
-                              value={linked?.qty_per_product || linked?.quantity_per_unit || 1}
-                              onChange={(event) => setLinkedProductQty(item.id, event.target.value)}
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </section>
-                )}
               </div>
             ) : <GptMiniProductBox />}
           </div>
@@ -1801,6 +1807,47 @@ function NativeProductForm({ id }: { id?: number }) {
             </div>
           </div>
         </form>
+        {productLinkOpen && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
+            <div className="w-full max-w-4xl rounded-md bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                <h3 className="text-lg font-black">상품 선택</h3>
+                <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={() => setProductLinkOpen(false)}>×</button>
+              </div>
+              <div className="grid gap-3 p-5">
+                <input className="field-input" value={productLinkQuery} onChange={(event) => setProductLinkQuery(event.target.value)} placeholder="제품명 검색" />
+                <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
+                  {(data?.products || [])
+                    .filter((item) => !isMaterial(item) && item.id !== id)
+                    .filter((item) => !productLinkQuery.trim() || item.name.toLowerCase().includes(productLinkQuery.trim().toLowerCase()))
+                    .map((item) => {
+                      const checked = linkedProducts.some((link) => link.product_id === item.id);
+                      const linked = linkedProducts.find((link) => link.product_id === item.id);
+                      return (
+                        <div key={item.id} className="grid grid-cols-[72px_1fr_120px_96px] items-center gap-3 border-b border-slate-200 p-3 last:border-b-0">
+                          <div className="h-14 w-14 overflow-hidden rounded-md bg-slate-100">
+                            {item.image_path && <img src={assetUrl(item.image_path)} alt={item.name} className="h-full w-full object-cover" />}
+                          </div>
+                          <div>
+                            <p className="font-black">{item.name}</p>
+                            <p className="text-xs font-bold text-slate-500">{item.factory_name || "-"}</p>
+                          </div>
+                          <input className="field-input h-9 text-right" type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
+                          <button type="button" className={`h-9 rounded-md px-4 text-sm font-black ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-orange-500 text-white"}`} onClick={() => toggleLinkedProduct(item)}>
+                            {checked ? "선택됨" : "추가"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+                <div className="flex justify-end">
+                  <button type="button" className="h-10 rounded-md bg-slate-950 px-5 text-sm font-black text-white" onClick={() => setProductLinkOpen(false)}>완료</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
     </Panel>
   );
@@ -1809,6 +1856,7 @@ function NativeProductForm({ id }: { id?: number }) {
 function NativeOrderDetail({ id }: { id: number }) {
   const [detail, setDetail] = useState<ImportOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1826,6 +1874,20 @@ function NativeOrderDetail({ id }: { id: number }) {
   }, [id]);
 
   const order = detail?.order;
+  async function deleteOrder() {
+    if (!confirm("이 발주를 삭제할까요?")) return;
+    setDeleting(true);
+    const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
+      method: "DELETE",
+      credentials: "include",
+    });
+    setDeleting(false);
+    if (res.ok) {
+      window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      window.location.href = importHref("/orders");
+    }
+  }
+
   return (
     <Panel
       title={order?.order_code || "발주 상세"}
@@ -1834,6 +1896,9 @@ function NativeOrderDetail({ id }: { id: number }) {
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : order ? (
         <div className="grid gap-5">
+          <div className="flex justify-end">
+            <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600 disabled:opacity-50" onClick={deleteOrder} disabled={deleting}>삭제</button>
+          </div>
           <div className="grid gap-3 md:grid-cols-4">
             <Info label="발주일" value={order.order_date || "-"} />
             <Info label="결제일" value={order.paid_date || "-"} />
@@ -2374,6 +2439,7 @@ function Info({ label, value, wide = false }: { label: string; value: string; wi
 function NativeSettings() {
   const [data, setData] = useState<{ rates: Record<string, number>; factories: ImportFactory[] } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [factoryFormOpen, setFactoryFormOpen] = useState(false);
   const [factoryDraft, setFactoryDraft] = useState({ name: "", country: "중국", platform: "1688", contact: "", note: "" });
 
   async function loadSettings() {
@@ -2410,13 +2476,14 @@ function NativeSettings() {
       body: JSON.stringify({ ...factoryDraft, note_lines: factoryDraft.note.split(/\r?\n/) }),
     });
     setFactoryDraft({ name: "", country: "중국", platform: "1688", contact: "", note: "" });
+    setFactoryFormOpen(false);
     await loadSettings();
     setSaving(false);
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-      <Panel title="환율" subtitle="KRW 기준 기본 환율">
+    <div className="grid items-start gap-4 xl:grid-cols-[360px_1fr]">
+      <Panel title="환율" subtitle="KRW 기준 기본 환율" className="h-fit self-start">
         <form onSubmit={saveRates} className="grid gap-3 sm:grid-cols-2">
           {(["CNY", "USD", "JPY", "EUR"] as const).map((currency) => (
             <Field key={currency} label={`${currency} → KRW`}>
@@ -2431,7 +2498,8 @@ function NativeSettings() {
 
       <Panel title="공급사/공장" subtitle={`${data?.factories?.length || 0}개`}>
         <div className="grid gap-4">
-          <section className="rounded-md border border-slate-200 p-4">
+          {!factoryFormOpen && <button type="button" className="inline-flex h-10 w-fit items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" onClick={() => setFactoryFormOpen(true)}>공급사 추가</button>}
+          <section className={`rounded-md border border-slate-200 p-4 ${factoryFormOpen ? "" : "hidden"}`}>
             <h3 className="mb-3 text-base font-black">새 공급사 추가</h3>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="공급사명 *"><input className="field-input" value={factoryDraft.name} onChange={(e) => setFactoryDraft((prev) => ({ ...prev, name: e.target.value }))} /></Field>
@@ -2548,9 +2616,9 @@ function LegacyNativeSettings() {
   );
 }
 
-function Panel({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Panel({ title, subtitle, action, children, className = "" }: { title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+    <section className={`rounded-md border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-black">{title}</h2>
