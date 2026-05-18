@@ -247,17 +247,23 @@ function ToolSection({
   defaultOpen = false,
   href,
   showChevron = true,
+  iconSrc,
 }: {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
   href?: string;
   showChevron?: boolean;
+  iconSrc?: string;
 }) {
   return (
     <details className="mb-3 rounded-md border border-slate-200 bg-white" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between rounded-md bg-slate-50 px-3 py-3 text-sm font-black [&::-webkit-details-marker]:hidden">
-        <span>{showChevron ? "▼ " : ""}{title}</span>
+        <span className="flex items-center gap-2">
+          {showChevron ? "▼" : ""}
+          {iconSrc && <img src={iconSrc} alt="" className="h-4 w-4 rounded-sm object-contain" />}
+          <span>{title}</span>
+        </span>
         {href && (
           <a
             href={href}
@@ -278,9 +284,10 @@ function ToolSection({
 
 function AddressBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const displayText = text.replace(/\s*:\s*/g, "\n");
 
   async function copy() {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(displayText);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   }
@@ -294,7 +301,7 @@ function AddressBlock({ text }: { text: string }) {
       >
         {copied ? "완료" : "복사"}
       </button>
-      <pre className="whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 pr-14 text-xs leading-7 text-slate-700">{text}</pre>
+      <pre className="whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 pr-14 text-xs leading-7 text-slate-700">{displayText}</pre>
     </div>
   );
 }
@@ -389,7 +396,7 @@ function RightTools() {
         <pre className="mt-2 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">{lclResult}</pre>
       </ToolSection>
 
-      <ToolSection title="타배 위해 주소" href="https://www.tabae.co.kr/" showChevron={false}>
+      <ToolSection title="타배 위해 주소" href="https://www.tabae.co.kr/" showChevron={false} iconSrc="https://www.google.com/s2/favicons?domain=tabae.co.kr&sz=32">
         <AddressBlock
           text={`우편번호(邮政编码) : 264205
 
@@ -406,7 +413,7 @@ function RightTools() {
         />
       </ToolSection>
 
-      <ToolSection title="짐패스 도쿄 주소" href="https://www.jimpass.com/" showChevron={false}>
+      <ToolSection title="짐패스 도쿄(항공) 주소" href="https://www.jimpass.com/" showChevron={false} iconSrc="https://www.google.com/s2/favicons?domain=jimpass.com&sz=32">
         <AddressBlock
           text={`우편번호 (郵便番号) : 103-0015
 
@@ -420,7 +427,7 @@ function RightTools() {
         />
       </ToolSection>
 
-      <ToolSection title="FN 영문주소">
+      <ToolSection title="FN 영문주소" showChevron={false} iconSrc="/F&.jpg">
         <AddressBlock
           text={`FN(KIM JAEWOOK)
 
@@ -534,6 +541,13 @@ type ImportOrderDetail = {
   ok: boolean;
   order: ImportOrder;
   items: ImportOrderItem[];
+  children?: ImportOrder[];
+  margin?: { coupang_price?: number; naver_price?: number; naver_free_shipping?: boolean | number } | null;
+  fx_rates?: Record<string, number>;
+  native_totals?: Record<string, number>;
+  product_won?: number;
+  children_total_won?: number;
+  unit_cost?: number;
   total_won?: number;
   total_qty?: number;
 };
@@ -850,7 +864,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     other_cost: String(order.other_cost || 0),
     note: order.note || "",
   });
-  const productWon = Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order));
+  const productWon = Number(detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
+  const nativeTotals = Object.entries(detail.native_totals || {}).map(([currency, amount]) => `${Number(amount).toLocaleString("ko-KR", { maximumFractionDigits: currency === "KRW" ? 0 : 2 })} ${currency}`).join(" + ") || "-";
+  const usedCurrencies = Object.keys(detail.native_totals || (order.currency ? { [order.currency]: 0 } : { CNY: 0 }));
+  const rateNote = usedCurrencies.map((currency) => `${currency}=₩${Number(detail.fx_rates?.[currency] || order.fx_rate || 1).toLocaleString("ko-KR")}`).join(" · ");
 
   async function saveQuick() {
     setSaving(true);
@@ -891,6 +908,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <div><b>{order.order_date || order.paid_date || "-"}</b> <StatusPill status={order.status} /></div>
           <div className="flex gap-2">
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
+            <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
+            <Link className="inline-flex h-9 items-center rounded-md border border-sky-400 px-3 text-sm font-black text-sky-600" href={importHref(`/orders/new?parent=${order.id}`)}>+ 부자재 발주</Link>
             <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{saving ? "저장 중..." : "저장"}</button>
           </div>
         </div>
@@ -914,16 +933,88 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <Field label="메모"><textarea className="field-input" value={costs.note} onChange={(e) => setCosts((prev) => ({ ...prev, note: e.target.value }))} /></Field>
         </section>
       </div>
-      <aside className="h-fit rounded-md border border-orange-100 bg-orange-50 p-4">
-        <p className="text-sm font-bold text-slate-500">총 비용</p>
-        <p className="mt-2 text-2xl font-black">{krw(detail.total_won)}</p>
-        <div className="mt-4 grid gap-2 text-sm">
-          <p className="flex justify-between"><span>제품 합계</span><b>{krw(productWon)}</b></p>
-          <p className="flex justify-between"><span>부대비용</span><b>{krw(orderExtraCost(order))}</b></p>
-          <p className="flex justify-between"><span>수량</span><b>{Number(detail.total_qty || 0).toLocaleString("ko-KR")}</b></p>
-        </div>
+      <aside className="grid h-fit gap-3">
+        <section className="rounded-md border border-orange-100 bg-orange-50 p-4">
+          <p className="text-sm font-bold text-slate-500">총 비용</p>
+          <p className="mt-2 text-2xl font-black">{krw(detail.total_won)}</p>
+          <div className="mt-4 grid gap-2 text-sm">
+            <p className="flex justify-between"><span>제품 합계</span><b>{krw(productWon)}</b></p>
+            <p className="flex justify-between"><span>선택통화 합계</span><b>{nativeTotals}</b></p>
+            <p className="flex justify-between"><span>부대비용</span><b>{krw(orderExtraCost(order))}</b></p>
+            <p className="flex justify-between"><span>예상원가</span><b>{krw(detail.unit_cost)}</b></p>
+            <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
+            {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
+          </div>
+        </section>
+        <MarginCalculator orderId={order.id} unitCost={Number(detail.unit_cost || 0)} margin={detail.margin || null} />
       </aside>
     </div>
+  );
+}
+
+function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unitCost: number; margin?: ImportOrderDetail["margin"] }) {
+  const [coupang, setCoupang] = useState(margin?.coupang_price ? String(margin.coupang_price) : "");
+  const [naver, setNaver] = useState(margin?.naver_price ? String(margin.naver_price) : "");
+  const [naverFree, setNaverFree] = useState(margin?.naver_free_shipping !== 0);
+  const [saving, setSaving] = useState(false);
+
+  function calc(priceText: string) {
+    const price = Number(priceText || 0);
+    if (!price) return { amount: "-", pct: "-" };
+    const mg = price - unitCost;
+    return { amount: krw(mg), pct: `${((mg / price) * 100).toFixed(1)}%` };
+  }
+
+  async function save() {
+    setSaving(true);
+    await fetch(apiUrl(`/api/orders/${orderId}/margin`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        coupang_price: coupang ? Number(coupang) : null,
+        naver_price: naver ? Number(naver) : null,
+        naver_free_shipping: naverFree,
+      }),
+    });
+    setSaving(false);
+  }
+
+  const coupangResult = calc(coupang);
+  const naverResult = calc(naver);
+
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-4">
+      <h3 className="font-black">마진 계산기</h3>
+      <p className="mt-2 text-xs text-slate-500">개당 원가: <b>{krw(unitCost)}</b></p>
+      <div className="mt-3 grid gap-3 text-sm">
+        <div>
+          <label className="font-black">쿠팡 (무료배송)</label>
+          <div className="mt-1 grid grid-cols-[56px_1fr_34px] overflow-hidden rounded-md border border-slate-200">
+            <span className="bg-slate-50 px-2 py-2">판매가</span>
+            <input className="px-2 outline-none" type="number" value={coupang} onChange={(e) => setCoupang(e.target.value)} placeholder="입력..." />
+            <span className="bg-slate-50 px-2 py-2">원</span>
+          </div>
+          <p className="mt-1 flex justify-between"><span>MG금액:</span><b>{coupangResult.amount}</b></p>
+          <p className="flex justify-between"><span>MG%:</span><b>{coupangResult.pct}</b></p>
+        </div>
+        <div>
+          <div className="flex items-center gap-3">
+            <label className="font-black">네이버</label>
+            <label className="text-xs"><input type="radio" checked={naverFree} onChange={() => setNaverFree(true)} /> 무료배송</label>
+            <label className="text-xs"><input type="radio" checked={!naverFree} onChange={() => setNaverFree(false)} /> 착불</label>
+          </div>
+          <div className="mt-1 grid grid-cols-[56px_1fr_34px] overflow-hidden rounded-md border border-slate-200">
+            <span className="bg-slate-50 px-2 py-2">판매가</span>
+            <input className="px-2 outline-none" type="number" value={naver} onChange={(e) => setNaver(e.target.value)} placeholder="입력..." />
+            <span className="bg-slate-50 px-2 py-2">원</span>
+          </div>
+          <p className="mt-1 flex justify-between"><span>MG금액:</span><b>{naverResult.amount}</b></p>
+          <p className="flex justify-between"><span>MG%:</span><b>{naverResult.pct}</b></p>
+        </div>
+        <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>
+      </div>
+    </section>
   );
 }
 
