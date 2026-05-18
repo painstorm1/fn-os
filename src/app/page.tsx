@@ -54,6 +54,7 @@ function CalendarMemo() {
   const [selected, setSelected] = useState(formatDateKey(today));
   const [memoText, setMemoText] = useState("");
   const [memos, setMemos] = useState<Record<string, string[]>>({});
+  const [serverMemos, setServerMemos] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -64,6 +65,21 @@ function CalendarMemo() {
       }
     }, 0);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl("/api/calendar-production-memos"), { credentials: "include" })
+      .then((res) => res.ok ? res.json() : {})
+      .then((data) => {
+        if (alive) setServerMemos(data || {});
+      })
+      .catch(() => {
+        if (alive) setServerMemos({});
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const year = viewDate.getFullYear();
@@ -125,7 +141,7 @@ function CalendarMemo() {
         {days.map((day) => {
           const key = formatDateKey(new Date(year, month, day));
           const isSelected = key === selected;
-          const hasMemo = Boolean(memos[key]?.length);
+          const hasMemo = Boolean(memos[key]?.length || serverMemos[key]?.length);
           return (
             <button
               key={key}
@@ -144,8 +160,13 @@ function CalendarMemo() {
       <div className="mt-4 pt-2">
         <strong className="text-xs font-bold text-slate-500">{selected}</strong>
         <div className="mt-2 space-y-1">
+          {(serverMemos[selected] || []).map((memo, index) => (
+            <div key={`server-${memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
+              <span className="break-all">• {memo}</span>
+            </div>
+          ))}
           {(memos[selected] || []).map((memo, index) => (
-            <div key={`${memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
+            <div key={`local-${memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
               <span className="break-all">• {memo}</span>
               <button type="button" className="text-slate-400 hover:text-rose-500" onClick={() => deleteMemo(index)}>
                 ×
@@ -467,6 +488,12 @@ type ImportOrder = {
   customs_cleared?: string;
   shipping_method?: string;
   fn_arrival_method?: string;
+  production_days?: number | string | null;
+  production_due_date?: string | null;
+  production_memo?: string | null;
+  actual_payment_usd?: number | string | null;
+  actual_payment_usd_1?: number | string | null;
+  actual_payment_usd_2?: number | string | null;
   shipping_cost?: number;
   customs_duty?: number;
   vat?: number;
@@ -613,6 +640,30 @@ function stageValuesFromOrder(order?: ImportOrder | null): StageValues {
 function orderExtraCost(order?: ImportOrder | null) {
   return ["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"]
     .reduce((sum, key) => sum + Number(order?.[key as keyof ImportOrder] || 0), 0);
+}
+
+function isTTPayment(paymentMethod?: string) {
+  return Boolean(paymentMethod?.includes("T/T") || paymentMethod?.includes("TT"));
+}
+
+function actualUsdTotal(order?: ImportOrder | null) {
+  const first = Number(order?.actual_payment_usd_1 || 0);
+  const second = Number(order?.actual_payment_usd_2 || 0);
+  if (first || second) return first + second;
+  return Number(order?.actual_payment_usd || 0);
+}
+
+function nativeTotalText(totals?: Record<string, number>, fallbackCurrency = "CNY") {
+  const entries = Object.entries(totals || {});
+  if (!entries.length) return `0 ${fallbackCurrency}`;
+  return entries
+    .map(([currency, amount]) => `${Number(amount || 0).toLocaleString("ko-KR", { maximumFractionDigits: currency === "KRW" ? 0 : 2 })} ${currency}`)
+    .join(" + ");
+}
+
+function rateNoteText(rates?: Record<string, number>, currencies: string[] = []) {
+  const ordered = Array.from(new Set([...currencies, "CNY", "USD"].filter(Boolean)));
+  return ordered.map((currency) => `${currency}=₩${Number(rates?.[currency] || (currency === "KRW" ? 1 : 0)).toLocaleString("ko-KR")}`).join(" · ");
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -864,10 +915,16 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     other_cost: String(order.other_cost || 0),
     note: order.note || "",
   });
+  const [productionDays, setProductionDays] = useState(order.production_days != null ? String(order.production_days) : "");
+  const [actualUsd, setActualUsd] = useState(order.actual_payment_usd != null ? String(order.actual_payment_usd) : "");
+  const [actualUsd1, setActualUsd1] = useState(order.actual_payment_usd_1 != null ? String(order.actual_payment_usd_1) : "");
+  const [actualUsd2, setActualUsd2] = useState(order.actual_payment_usd_2 != null ? String(order.actual_payment_usd_2) : "");
   const productWon = Number(detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
-  const nativeTotals = Object.entries(detail.native_totals || {}).map(([currency, amount]) => `${Number(amount).toLocaleString("ko-KR", { maximumFractionDigits: currency === "KRW" ? 0 : 2 })} ${currency}`).join(" + ") || "-";
+  const nativeTotals = nativeTotalText(detail.native_totals, order.currency || "CNY");
   const usedCurrencies = Object.keys(detail.native_totals || (order.currency ? { [order.currency]: 0 } : { CNY: 0 }));
-  const rateNote = usedCurrencies.map((currency) => `${currency}=₩${Number(detail.fx_rates?.[currency] || order.fx_rate || 1).toLocaleString("ko-KR")}`).join(" · ");
+  const rateNote = rateNoteText(detail.fx_rates, usedCurrencies);
+  const isTT = isTTPayment(order.payment_method);
+  const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
 
   async function saveQuick() {
     setSaving(true);
@@ -877,7 +934,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       currency: order.currency || "CNY",
       fx_rate: order.fx_rate || 1,
       payment_method: order.payment_method || "플랫폼 카드결제",
-      fn_arrival_method: order.fn_arrival_method || "택배배송",
+      production_days: productionDays,
+      actual_payment_usd: actualUsdValue || "",
+      actual_payment_usd_1: isTT ? actualUsd1 : "",
+      actual_payment_usd_2: isTT ? actualUsd2 : "",
       ...stageValues,
       ...costs,
       items: (detail.items || []).map((item) => ({
@@ -923,6 +983,23 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         <section className="grid gap-3">
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
           <div className="grid gap-3 md:grid-cols-4">
+            <Field label="예상 제작기간">
+              <div className="grid grid-cols-[1fr_38px] overflow-hidden rounded-md border border-slate-200">
+                <input className="px-3 py-2 text-right outline-none" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
+                <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
+              </div>
+            </Field>
+            {isTT ? (
+              <>
+                <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(e) => setActualUsd1(e.target.value)} /></Field>
+                <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(e) => setActualUsd2(e.target.value)} /></Field>
+                <Field label="최종 실 결제금액(USD)"><div className="field-input bg-slate-50 text-right font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</div></Field>
+              </>
+            ) : (
+              <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(e) => setActualUsd(e.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+            )}
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
             <Field label="운송방식"><select className="field-input" value={costs.shipping_method} onChange={(e) => setCosts((prev) => ({ ...prev, shipping_method: e.target.value }))}>{["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}</select></Field>
             {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
               <Field key={key} label={{ shipping_cost: "배대지 배송비", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
@@ -940,6 +1017,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <div className="mt-4 grid gap-2 text-sm">
             <p className="flex justify-between"><span>제품 합계</span><b>{krw(productWon)}</b></p>
             <p className="flex justify-between"><span>선택통화 합계</span><b>{nativeTotals}</b></p>
+            {actualUsdTotal(order) > 0 && <p className="flex justify-between"><span>실 결제금액</span><b>{actualUsdTotal(order).toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</b></p>}
             <p className="flex justify-between"><span>부대비용</span><b>{krw(orderExtraCost(order))}</b></p>
             <p className="flex justify-between"><span>예상원가</span><b>{krw(detail.unit_cost)}</b></p>
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
@@ -958,11 +1036,12 @@ function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unit
   const [naverFree, setNaverFree] = useState(margin?.naver_free_shipping !== 0);
   const [saving, setSaving] = useState(false);
 
-  function calc(priceText: string) {
+  function calc(priceText: string, feeRate: number, sellerShippingFee: number) {
     const price = Number(priceText || 0);
     if (!price) return { amount: "-", pct: "-" };
-    const mg = price - unitCost;
-    return { amount: krw(mg), pct: `${((mg / price) * 100).toFixed(1)}%` };
+    const settlement = price * (1 - feeRate);
+    const mg = settlement - sellerShippingFee - unitCost;
+    return { amount: krw(mg), pct: settlement > 0 ? `${((mg / settlement) * 100).toFixed(1)}%` : "-" };
   }
 
   async function save() {
@@ -980,8 +1059,8 @@ function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unit
     setSaving(false);
   }
 
-  const coupangResult = calc(coupang);
-  const naverResult = calc(naver);
+  const coupangResult = calc(coupang, 0.12, 3000);
+  const naverResult = calc(naver, 0.06, naverFree ? 3000 : 0);
 
   return (
     <section className="rounded-md border border-slate-200 bg-white p-4">
@@ -1498,6 +1577,10 @@ function NativeOrderForm({ id }: { id?: number }) {
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogOptions, setCatalogOptions] = useState<Record<number, string>>({});
   const [paymentMethod, setPaymentMethod] = useState("플랫폼 카드결제");
+  const [productionDays, setProductionDays] = useState("");
+  const [actualUsd, setActualUsd] = useState("");
+  const [actualUsd1, setActualUsd1] = useState("");
+  const [actualUsd2, setActualUsd2] = useState("");
   const [stageValues, setStageValues] = useState<StageValues>(stageValuesFromOrder(null));
   const [lines, setLines] = useState<OrderLine[]>([
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
@@ -1512,6 +1595,10 @@ function NativeOrderForm({ id }: { id?: number }) {
         if (!alive) return;
         setOrder(next.order || null);
         setPaymentMethod(next.order?.payment_method || "플랫폼 카드결제");
+        setProductionDays(next.order?.production_days != null ? String(next.order.production_days) : "");
+        setActualUsd(next.order?.actual_payment_usd != null ? String(next.order.actual_payment_usd) : "");
+        setActualUsd1(next.order?.actual_payment_usd_1 != null ? String(next.order.actual_payment_usd_1) : "");
+        setActualUsd2(next.order?.actual_payment_usd_2 != null ? String(next.order.actual_payment_usd_2) : "");
         setStageValues(stageValuesFromOrder(next.order));
         setLines((next.items || []).map((item) => ({
           product_id: item.product_id ? String(item.product_id) : "",
@@ -1544,9 +1631,18 @@ function NativeOrderForm({ id }: { id?: number }) {
     ));
   }, [catalogQuery, data?.products]);
 
-  const productTotal = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0)), 0);
+  const nativeTotals = lines.reduce<Record<string, number>>((totals, line) => {
+    const currency = line.item_currency || "CNY";
+    totals[currency] = (totals[currency] || 0) + (Number(line.quantity || 0) * Number(line.unit_price || 0));
+    return totals;
+  }, {});
+  const productTotal = nativeTotals.CNY || 0;
   const fxRate = order?.fx_rate || data?.rates?.CNY || 195;
-  const productTotalWon = Math.round(productTotal * Number(fxRate || 0));
+  const isTT = isTTPayment(paymentMethod);
+  const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
+  const productLineWon = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0)), 0);
+  const productTotalWon = Math.round(actualUsdValue > 0 ? actualUsdValue * Number(data?.rates?.USD || 0) : productLineWon);
+  const formRateNote = rateNoteText(data?.rates, Object.keys(nativeTotals));
   const visibleStageValues = paymentMethod === "T/T송금" || paymentMethod === "TT송금" ? stageValues : { ...stageValues, first_payment_date: "" };
 
   function optionsFor(product?: ImportProduct) {
@@ -1590,12 +1686,20 @@ function NativeOrderForm({ id }: { id?: number }) {
     setError("");
     const form = new FormData(e.currentTarget);
     const payload = Object.fromEntries(form.entries());
+    const paymentPayload = isTT
+      ? { actual_payment_usd: actualUsdValue || "", actual_payment_usd_1: actualUsd1, actual_payment_usd_2: actualUsd2 }
+      : { actual_payment_usd: actualUsd, actual_payment_usd_1: "", actual_payment_usd_2: "" };
     try {
       const res = await fetch(apiUrl(id ? `/api/fnos/orders/${id}` : "/api/fnos/orders"), {
         method: id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ ...payload, items: lines.filter((line) => line.product_name && line.quantity && line.unit_price) }),
+        body: JSON.stringify({
+          ...payload,
+          production_days: productionDays,
+          ...paymentPayload,
+          items: lines.filter((line) => line.product_name && line.quantity && line.unit_price),
+        }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
@@ -1659,10 +1763,11 @@ function NativeOrderForm({ id }: { id?: number }) {
                   {["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
-              <Field label="한국배송">
-                <select className="field-input" name="fn_arrival_method" defaultValue={order?.fn_arrival_method || "택배배송"}>
-                  {["택배배송", "화물배송", "직접입고", "기타"].map((item) => <option key={item}>{item}</option>)}
-                </select>
+              <Field label="예상 제작기간">
+                <div className="grid grid-cols-[1fr_38px] overflow-hidden rounded-md border border-slate-200">
+                  <input className="px-3 py-2 text-right outline-none" type="number" min="0" step="1" value={productionDays} onChange={(event) => setProductionDays(event.target.value)} placeholder="7" />
+                  <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
+                </div>
               </Field>
             </div>
           </section>
@@ -1711,8 +1816,19 @@ function NativeOrderForm({ id }: { id?: number }) {
               })}
             </div>
             <div className="grid justify-end gap-1 text-right text-sm">
-              <p className="font-black">제품 합계: <span className="text-lg text-orange-600">{productTotal.toLocaleString("ko-KR")} CNY</span> / 원화 제품합계 <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
-              <p className="text-xs text-slate-500">CNY=₩{Number(fxRate || 0).toLocaleString("ko-KR")}</p>
+              <p className="font-black">제품 합계: <span className="text-lg text-orange-600">{nativeTotalText(nativeTotals, "CNY")}</span> / 원화 제품합계 <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
+              <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
+            </div>
+            <div className="ml-auto grid w-full max-w-3xl gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-3">
+              {isTT ? (
+                <>
+                  <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(event) => setActualUsd1(event.target.value)} /></Field>
+                  <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(event) => setActualUsd2(event.target.value)} /></Field>
+                  <Field label="최종 실 결제금액(USD)"><div className="field-input bg-slate-50 text-right font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</div></Field>
+                </>
+              ) : (
+                <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(event) => setActualUsd(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+              )}
             </div>
           </section>
 
