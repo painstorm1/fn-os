@@ -69,7 +69,7 @@ function CalendarMemo() {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/calendar-production-memos"), { credentials: "include" })
+    fetch(apiUrl("/api/fnos/calendar-production-memos"), { credentials: "include" })
       .then((res) => res.ok ? res.json() : {})
       .then((data) => {
         if (alive) setServerMemos(data || {});
@@ -627,7 +627,7 @@ function getStageFields(paymentMethod?: string) {
 
 function stageValuesFromOrder(order?: ImportOrder | null): StageValues {
   return {
-    order_date: order?.order_date || "",
+    order_date: order ? (order.order_date || "") : formatDateKey(new Date()),
     first_payment_date: order?.first_payment_date || "",
     paid_date: order?.paid_date || "",
     factory_ship_date: order?.factory_ship_date || "",
@@ -704,10 +704,17 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
             <div key={stage.name} className="grid justify-items-center gap-2 text-center">
               <button
                 type="button"
-                className={`relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full text-xl font-black transition ${done || index === 0 ? "bg-emerald-500 text-white" : "border-2 border-slate-300 bg-white text-slate-500 hover:border-orange-300"}`}
-                onClick={() => setOpenStage((prev) => prev === stage.name ? "" : stage.name)}
+                className={`relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full text-xl font-black transition ${done ? "bg-emerald-500 text-white" : "border-2 border-slate-300 bg-white text-slate-500 hover:border-orange-300"}`}
+                onClick={() => {
+                  if (done) {
+                    onChange(stage.name, "");
+                    setOpenStage("");
+                    return;
+                  }
+                  setOpenStage((prev) => prev === stage.name ? "" : stage.name);
+                }}
               >
-                {done || index === 0 ? "✓" : "+"}
+                {done ? "✓" : "+"}
               </button>
               <strong className="text-sm">{stage.label}</strong>
               <button type="button" className="text-xs font-bold text-slate-500" onClick={() => setOpenStage(stage.name)}>
@@ -925,6 +932,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const rateNote = rateNoteText(detail.fx_rates, usedCurrencies);
   const isTT = isTTPayment(order.payment_method);
   const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
+  const panelProductWon = actualUsdValue > 0 ? actualUsdValue * Number(detail.fx_rates?.USD || 0) : productWon;
+  const panelTotalWon = Number(detail.total_won || 0) - productWon + panelProductWon;
 
   async function saveQuick() {
     setSaving(true);
@@ -993,7 +1002,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
               <>
                 <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(e) => setActualUsd1(e.target.value)} /></Field>
                 <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(e) => setActualUsd2(e.target.value)} /></Field>
-                <Field label="최종 실 결제금액(USD)"><div className="field-input bg-slate-50 text-right font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</div></Field>
+                <Field label="최종 실 결제금액(USD)"><p className="px-1 py-2 text-right text-sm font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</p></Field>
               </>
             ) : (
               <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(e) => setActualUsd(e.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
@@ -1013,11 +1022,11 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       <aside className="grid h-fit gap-3">
         <section className="rounded-md border border-orange-100 bg-orange-50 p-4">
           <p className="text-sm font-bold text-slate-500">총 비용</p>
-          <p className="mt-2 text-2xl font-black">{krw(detail.total_won)}</p>
+          <p className="mt-2 text-2xl font-black">{krw(panelTotalWon)}</p>
           <div className="mt-4 grid gap-2 text-sm">
-            <p className="flex justify-between"><span>제품 합계</span><b>{krw(productWon)}</b></p>
+            <p className="flex justify-between"><span>제품 합계</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>선택통화 합계</span><b>{nativeTotals}</b></p>
-            {actualUsdTotal(order) > 0 && <p className="flex justify-between"><span>실 결제금액</span><b>{actualUsdTotal(order).toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</b></p>}
+            {actualUsdValue > 0 && <p className="flex justify-between"><span>실 결제금액</span><b>{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</b></p>}
             <p className="flex justify-between"><span>부대비용</span><b>{krw(orderExtraCost(order))}</b></p>
             <p className="flex justify-between"><span>예상원가</span><b>{krw(detail.unit_cost)}</b></p>
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
@@ -1046,7 +1055,7 @@ function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unit
 
   async function save() {
     setSaving(true);
-    await fetch(apiUrl(`/api/orders/${orderId}/margin`), {
+    await fetch(apiUrl(`/api/fnos/orders/${orderId}/margin`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -1815,20 +1824,26 @@ function NativeOrderForm({ id }: { id?: number }) {
                 );
               })}
             </div>
-            <div className="grid justify-end gap-1 text-right text-sm">
-              <p className="font-black">제품 합계: <span className="text-lg text-orange-600">{nativeTotalText(nativeTotals, "CNY")}</span> / 원화 제품합계 <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
-              <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
-            </div>
-            <div className="ml-auto grid w-full max-w-3xl gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-3">
-              {isTT ? (
-                <>
-                  <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(event) => setActualUsd1(event.target.value)} /></Field>
-                  <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(event) => setActualUsd2(event.target.value)} /></Field>
-                  <Field label="최종 실 결제금액(USD)"><div className="field-input bg-slate-50 text-right font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</div></Field>
-                </>
-              ) : (
-                <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(event) => setActualUsd(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
-              )}
+            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,760px)_1fr]">
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-3">
+                {isTT ? (
+                  <>
+                    <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(event) => setActualUsd1(event.target.value)} /></Field>
+                    <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(event) => setActualUsd2(event.target.value)} /></Field>
+                    <Field label="최종 실 결제금액(USD)"><p className="px-1 py-2 text-right text-sm font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</p></Field>
+                  </>
+                ) : (
+                  <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(event) => setActualUsd(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+                )}
+              </div>
+              <div className="grid gap-1 text-right text-sm">
+                <p className="font-black">
+                  제품 합계: <span className="text-lg text-orange-600">{nativeTotalText(nativeTotals, "CNY")}</span>
+                  {actualUsdValue > 0 && <span className="text-lg text-orange-600"> / {actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</span>}
+                  <span> / 원화 제품합계 </span><span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span>
+                </p>
+                <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
+              </div>
             </div>
           </section>
 
@@ -2259,6 +2274,21 @@ function HomeContent() {
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
+      <style jsx global>{`
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type="number"] {
+          -moz-appearance: textfield;
+        }
+        .field-input:focus {
+          border-color: #fb923c;
+          box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.25);
+          outline: none;
+        }
+      `}</style>
       <div className="flex min-h-screen">
         <LeftSidebar activeMenu={activeMenu} importPath={importPath} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
