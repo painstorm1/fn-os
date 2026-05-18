@@ -1103,13 +1103,16 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
 
   async function deleteOrder() {
     if (!confirm("이 발주를 삭제할까요?")) return;
-    const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}`), {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (res.ok) {
+    try {
+      const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제에 실패했습니다.");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       onSaved(null);
+    } catch {
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
     }
   }
 
@@ -1403,11 +1406,16 @@ function NativeProductDetail({ id }: { id: number }) {
   const product = detail?.product;
   async function deleteProduct() {
     if (!confirm("이 상품을 삭제할까요?")) return;
-    const res = await fetch(apiUrl(`/api/fnos/products/${id}`), {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (res.ok) window.location.href = importHref("/products");
+    try {
+      const res = await fetch(apiUrl(`/api/fnos/products/${id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      window.location.href = importHref("/products");
+    } catch {
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+    }
   }
 
   async function adjustMaterialStock() {
@@ -1877,14 +1885,18 @@ function NativeOrderDetail({ id }: { id: number }) {
   async function deleteOrder() {
     if (!confirm("이 발주를 삭제할까요?")) return;
     setDeleting(true);
-    const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
-      method: "DELETE",
-      credentials: "include",
-    });
-    setDeleting(false);
-    if (res.ok) {
+    try {
+      const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제에 실패했습니다.");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       window.location.href = importHref("/orders");
+    } catch {
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -2084,11 +2096,17 @@ function NativeOrderForm({ id }: { id?: number }) {
 
   async function deleteOrder() {
     if (!id || !confirm("이 발주를 삭제할까요?")) return;
-    const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (res.ok) window.location.href = importHref("/orders");
+    try {
+      const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      window.location.href = importHref("/orders");
+    } catch {
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
