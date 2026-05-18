@@ -2516,7 +2516,11 @@ function NativeSettings() {
 
       <Panel title="공급사/공장" subtitle={`${data?.factories?.length || 0}개`}>
         <div className="grid gap-4">
-          {!factoryFormOpen && <button type="button" className="inline-flex h-10 w-fit items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" onClick={() => setFactoryFormOpen(true)}>공급사 추가</button>}
+          {!factoryFormOpen && (
+            <div className="flex justify-end">
+              <button type="button" className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" onClick={() => setFactoryFormOpen(true)}>공급사 추가</button>
+            </div>
+          )}
           <section className={`rounded-md border border-slate-200 p-4 ${factoryFormOpen ? "" : "hidden"}`}>
             <h3 className="mb-3 text-base font-black">새 공급사 추가</h3>
             <div className="grid gap-3 md:grid-cols-4">
