@@ -1300,7 +1300,7 @@ function NativeProducts() {
           <span className="text-slate-300">|</span>
           <button type="button" onClick={() => setTab("materials")} className={tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
             <Link key={product.id} href={importHref(`/products/${product.id}`)} className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
               <div className="h-[150px] w-[150px] overflow-hidden rounded-md bg-slate-100">
@@ -1532,6 +1532,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [itemType, setItemType] = useState<"PRODUCT" | "MATERIAL">("PRODUCT");
   const [linkedMaterials, setLinkedMaterials] = useState<ProductMaterialLink[]>([]);
   const [linkedProducts, setLinkedProducts] = useState<MaterialProductLink[]>([]);
+  const [productLinkOpen, setProductLinkOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -1649,7 +1650,44 @@ function NativeProductForm({ id }: { id?: number }) {
               </label>
             </div>
             <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
-            <GptMiniProductBox />
+            {itemType === "MATERIAL" ? (
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  className="flex h-10 w-[200px] items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-700 hover:bg-orange-100"
+                  onClick={() => setProductLinkOpen((prev) => !prev)}
+                >
+                  상품 연결
+                </button>
+                {productLinkOpen && (
+                  <section className="w-[200px] rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="max-h-72 overflow-auto">
+                      {(data?.products || []).filter((item) => !isMaterial(item) && item.id !== id).map((item) => {
+                        const checked = linkedProducts.some((link) => link.product_id === item.id);
+                        const linked = linkedProducts.find((link) => link.product_id === item.id);
+                        return (
+                          <label key={item.id} className="mb-2 grid gap-1 rounded-md border border-slate-200 bg-white p-2 text-xs font-bold">
+                            <span className="flex items-center gap-2">
+                              <input type="checkbox" checked={checked} onChange={() => toggleLinkedProduct(item)} />
+                              <span>{item.name}</span>
+                            </span>
+                            <input
+                              className="field-input h-8 text-right"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              disabled={!checked}
+                              value={linked?.qty_per_product || linked?.quantity_per_unit || 1}
+                              onChange={(event) => setLinkedProductQty(item.id, event.target.value)}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+              </div>
+            ) : <GptMiniProductBox />}
           </div>
 
           <div className="grid gap-3">
@@ -1663,12 +1701,11 @@ function NativeProductForm({ id }: { id?: number }) {
               {itemType === "MATERIAL" ? (
                 <>
                   <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
-                  <Field label="안전재고"><input className="field-input" type="number" step="1" name="material_safe_qty" defaultValue={product?.material_safe_qty || 0} /></Field>
                 </>
               ) : null}
             </div>
             <div className="grid items-start gap-3 md:grid-cols-[2fr_.7fr_.8fr_.7fr]">
-              <Field label="제품명 *"><input className="field-input" name="name" required defaultValue={product?.name || ""} /></Field>
+              <Field label={itemType === "MATERIAL" ? "부자재명 *" : "제품명 *"}><input className="field-input" name="name" required defaultValue={product?.name || ""} /></Field>
               <Field label="MOQ"><input className="field-input" type="number" name="moq" defaultValue={product?.moq || ""} /></Field>
               <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" defaultValue={product?.std_price || ""} /></Field>
               <Field label="통화">
@@ -1677,28 +1714,33 @@ function NativeProductForm({ id }: { id?: number }) {
                 </select>
               </Field>
             </div>
-            <div className="grid items-start gap-3 md:grid-cols-[2fr_1fr_.7fr]">
-              <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
-              <Field label="주공장">
-                <select className="field-input" name="factory_id" defaultValue={product?.factory_id || ""}>
-                  <option value="">선택 안함</option>
-                  {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </Field>
-              <Field label="상태">
-                <select className="field-input" name="status" defaultValue={product?.status || "현역"}>
-                  {["현역", "보류", "종료"].map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </Field>
-            </div>
-            {itemType === "MATERIAL" && (
-              <div className="grid items-start gap-3 md:grid-cols-3">
+            {itemType === "MATERIAL" ? (
+              <div className="grid items-start gap-3 md:grid-cols-[2fr_1fr]">
+                <Field label="옵션"><input className="field-input" name="options" placeholder="쉼표로 구분" defaultValue={product?.options || ""} /></Field>
                 <Field label="원가 설정(원)"><input className="field-input" type="number" min="0" step="1" name="material_unit_cost" defaultValue={product?.material_unit_cost ?? product?.material_cost ?? 0} /></Field>
-                <Field label="배송주소"><input className="field-input" name="shipping_address" defaultValue={product?.shipping_address || ""} /></Field>
-                <Field label="부자재 메모"><input className="field-input" name="material_note" defaultValue={product?.material_note || ""} /></Field>
+              </div>
+            ) : (
+              <div className="grid items-start gap-3 md:grid-cols-[2fr_1fr_.7fr]">
+                <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
+                <Field label="주공장">
+                  <select className="field-input" name="factory_id" defaultValue={product?.factory_id || ""}>
+                    <option value="">선택 안함</option>
+                    {data?.factories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="상태">
+                  <select className="field-input" name="status" defaultValue={product?.status || "현역"}>
+                    {["현역", "보류", "종료"].map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </Field>
               </div>
             )}
-            <div className="grid items-start gap-3 md:grid-cols-[2fr_.8fr_.8fr_.8fr]">
+            {itemType === "MATERIAL" && (
+              <div className="grid items-start gap-3 md:grid-cols-1">
+                <Field label="배송주소"><input className="field-input" name="shipping_address" defaultValue={product?.shipping_address || ""} /></Field>
+              </div>
+            )}
+            <div className={`grid items-start gap-3 ${itemType === "MATERIAL" ? "md:grid-cols-1" : "md:grid-cols-[2fr_.8fr_.8fr_.8fr]"}`}>
               <Field label="상품 URL">
                 <div className="flex gap-2">
                   <input
@@ -1718,9 +1760,13 @@ function NativeProductForm({ id }: { id?: number }) {
                   </a>
                 </div>
               </Field>
-              <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" defaultValue={product?.hs_code || ""} /></Field>
-              <Field label="기본 관세율 (%)"><input className="field-input" type="number" step="0.1" name="basic_rate" defaultValue={product?.basic_rate || 0} /></Field>
-              <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue={product?.fta_rate || 0} /></Field>
+              {itemType !== "MATERIAL" && (
+                <>
+                  <Field label="HS 코드"><input className="field-input" name="hs_code" placeholder="0000.00.0000" defaultValue={product?.hs_code || ""} /></Field>
+                  <Field label="기본 관세율 (%)"><input className="field-input" type="number" step="0.1" name="basic_rate" defaultValue={product?.basic_rate || 0} /></Field>
+                  <Field label="FTA 관세율 (%)"><input className="field-input" type="number" step="0.1" name="fta_rate" defaultValue={product?.fta_rate || 0} /></Field>
+                </>
+              )}
             </div>
             <Field label="메모"><textarea className="field-input" name="note" defaultValue={product?.note || ""} /></Field>
             {itemType === "PRODUCT" && (
@@ -1745,27 +1791,6 @@ function NativeProductForm({ id }: { id?: number }) {
                     );
                   })}
                   {!data?.materials?.length && <p className="text-sm font-bold text-slate-500">등록된 부자재가 없습니다.</p>}
-                </div>
-              </section>
-            )}
-            {itemType === "MATERIAL" && (
-              <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-black">상품 연결</h3>
-                  <span className="text-xs font-bold text-slate-500">이 부자재를 사용하는 상품</span>
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {(data?.products || []).filter((item) => !isMaterial(item) && item.id !== id).map((item) => {
-                    const checked = linkedProducts.some((link) => link.product_id === item.id);
-                    const linked = linkedProducts.find((link) => link.product_id === item.id);
-                    return (
-                      <label key={item.id} className={`grid grid-cols-[20px_1fr_86px] items-center gap-2 rounded-md border bg-white p-2 text-sm ${checked ? "border-orange-300" : "border-slate-200"}`}>
-                        <input type="checkbox" checked={checked} onChange={() => toggleLinkedProduct(item)} />
-                        <b>{item.name}</b>
-                        <input className="field-input h-8 text-right" type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
-                      </label>
-                    );
-                  })}
                 </div>
               </section>
             )}
