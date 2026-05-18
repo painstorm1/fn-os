@@ -517,6 +517,7 @@ type ImportProduct = {
   currency?: string;
   status?: string;
   product_url?: string;
+  shipping_address?: string;
   hs_code?: string;
   basic_rate?: number;
   fta_rate?: number;
@@ -524,19 +525,33 @@ type ImportProduct = {
   note?: string;
   item_type?: string;
   material_cost?: number;
+  material_unit_cost?: number;
+  material_safe_qty?: number;
+  material_initial_qty?: number;
+  material_note?: string;
   material_stock_adjust?: number;
   material_stock?: number;
   material_incoming?: number;
   material_consumed?: number;
   materials?: ProductMaterialLink[];
+  linked_products?: MaterialProductLink[];
 };
 
 type ProductMaterialLink = {
   material_id: number;
   material_name?: string;
   quantity_per_unit: number;
+  qty_per_product?: number;
   material_stock?: number;
   material_cost?: number;
+  material_unit_cost?: number;
+};
+
+type MaterialProductLink = {
+  product_id: number;
+  product_name?: string;
+  quantity_per_unit: number;
+  qty_per_product?: number;
 };
 
 type ImportFactory = {
@@ -593,6 +608,7 @@ type ImportOrderDetail = {
   fx_rates?: Record<string, number>;
   native_totals?: Record<string, number>;
   product_won?: number;
+  material_unit_cost_total?: number;
   children_total_won?: number;
   unit_cost?: number;
   total_won?: number;
@@ -626,6 +642,26 @@ function isMaterial(product?: ImportProduct | null) {
 function materialSummary(materials?: ProductMaterialLink[]) {
   if (!materials?.length) return "";
   return materials.map((item) => `${item.material_name || "부자재"} ${Number(item.quantity_per_unit || 1).toLocaleString("ko-KR")}`).join(", ");
+}
+
+function materialNeedSummary(materials: ProductMaterialLink[] | undefined, quantity: string | number) {
+  const qty = Number(quantity || 0);
+  if (!materials?.length || !qty) return "";
+  return materials
+    .map((item) => {
+      const need = qty * Number(item.qty_per_product || item.quantity_per_unit || 1);
+      const stock = Number(item.material_stock || 0);
+      const shortage = need - stock;
+      return shortage > 0
+        ? `${item.material_name || "부자재"} ${need.toLocaleString("ko-KR")}개 사용 예정, ${shortage.toLocaleString("ko-KR")}개 부족`
+        : `${item.material_name || "부자재"} ${need.toLocaleString("ko-KR")}개 사용 예정`;
+    })
+    .join(", ");
+}
+
+function hasMaterialShortage(materials: ProductMaterialLink[] | undefined, quantity: string | number) {
+  const qty = Number(quantity || 0);
+  return Boolean(materials?.some((item) => qty * Number(item.qty_per_product || item.quantity_per_unit || 1) > Number(item.material_stock || 0)));
 }
 
 function krw(value?: number) {
@@ -1054,7 +1090,6 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <div className="flex gap-2">
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
-            <Link className="inline-flex h-9 items-center rounded-md border border-sky-400 px-3 text-sm font-black text-sky-600" href={importHref(`/orders/new?parent=${order.id}`)}>+ 부자재 발주</Link>
             <button type="button" onClick={deleteOrder} className="inline-flex h-9 items-center rounded-md border border-rose-300 px-3 text-sm font-black text-rose-600">삭제</button>
             <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{saving ? "저장 중..." : "저장"}</button>
           </div>
@@ -1268,7 +1303,7 @@ function NativeProducts() {
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
           {visibleProducts.map((product) => (
             <Link key={product.id} href={importHref(`/products/${product.id}`)} className="rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
-              <div className="aspect-square overflow-hidden rounded-md bg-slate-100">
+              <div className="h-[150px] w-[150px] overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
               <div className="mt-3 font-black">{product.name}</div>
@@ -1344,12 +1379,30 @@ function NativeProductDetail({ id }: { id: number }) {
     if (res.ok) window.location.href = importHref("/products");
   }
 
+  async function adjustMaterialStock() {
+    if (!product || !isMaterial(product)) return;
+    const target = window.prompt("새 현재고를 입력하세요.", String(product.material_stock ?? 0));
+    if (target === null) return;
+    const memo = window.prompt("조정 메모", "수동 재고 조정") || "수동 재고 조정";
+    const res = await fetch(apiUrl(`/api/fnos/materials/${id}/adjust`), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_stock: target, memo }),
+    });
+    if (res.ok) {
+      const next = await fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" }).then((r) => r.json());
+      setDetail(next);
+    }
+  }
+
   return (
     <Panel
       title={product?.name || "제품 상세"}
       subtitle={product ? `${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
       action={<div className="flex gap-2">
         <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600" onClick={deleteProduct}>삭제</button>
+        {product && isMaterial(product) ? <button type="button" className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-black text-emerald-600" onClick={adjustMaterialStock}>재고 조정</button> : null}
         <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>
       </div>}
     >
@@ -1478,6 +1531,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [productUrl, setProductUrl] = useState("");
   const [itemType, setItemType] = useState<"PRODUCT" | "MATERIAL">("PRODUCT");
   const [linkedMaterials, setLinkedMaterials] = useState<ProductMaterialLink[]>([]);
+  const [linkedProducts, setLinkedProducts] = useState<MaterialProductLink[]>([]);
 
   useEffect(() => {
     return () => {
@@ -1503,6 +1557,19 @@ function NativeProductForm({ id }: { id?: number }) {
     setLinkedMaterials((prev) => prev.map((item) => item.material_id === materialId ? { ...item, quantity_per_unit: Number(value || 0) || 1 } : item));
   }
 
+  function toggleLinkedProduct(productItem: ImportProduct) {
+    setLinkedProducts((prev) => {
+      if (prev.some((item) => item.product_id === productItem.id)) {
+        return prev.filter((item) => item.product_id !== productItem.id);
+      }
+      return [...prev, { product_id: productItem.id, product_name: productItem.name, quantity_per_unit: 1, qty_per_product: 1 }];
+    });
+  }
+
+  function setLinkedProductQty(productId: number, value: string) {
+    setLinkedProducts((prev) => prev.map((item) => item.product_id === productId ? { ...item, quantity_per_unit: Number(value || 0) || 1, qty_per_product: Number(value || 0) || 1 } : item));
+  }
+
   useEffect(() => {
     if (!id) return;
     let alive = true;
@@ -1514,6 +1581,7 @@ function NativeProductForm({ id }: { id?: number }) {
           setProductUrl(next.product?.product_url || "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
+          setLinkedProducts(next.product?.linked_products || []);
         }
       })
       .finally(() => {
@@ -1532,6 +1600,7 @@ function NativeProductForm({ id }: { id?: number }) {
     if (file) form.set("image", file);
     form.set("item_type", itemType);
     form.set("materials", JSON.stringify(itemType === "PRODUCT" ? linkedMaterials : []));
+    form.set("linked_products", JSON.stringify(itemType === "MATERIAL" ? linkedProducts : []));
     try {
       const res = await fetch(apiUrl(id ? `/api/fnos/products/${id}` : "/api/fnos/products"), {
         method: id ? "PUT" : "POST",
@@ -1593,8 +1662,8 @@ function NativeProductForm({ id }: { id?: number }) {
               </Field>
               {itemType === "MATERIAL" ? (
                 <>
-                  <Field label="원가 설정"><input className="field-input" type="number" min="0" step="1" name="material_cost" defaultValue={product?.material_cost || 0} /></Field>
-                  <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_stock_adjust" defaultValue={product?.material_stock_adjust || 0} /></Field>
+                  <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
+                  <Field label="안전재고"><input className="field-input" type="number" step="1" name="material_safe_qty" defaultValue={product?.material_safe_qty || 0} /></Field>
                 </>
               ) : null}
             </div>
@@ -1622,6 +1691,13 @@ function NativeProductForm({ id }: { id?: number }) {
                 </select>
               </Field>
             </div>
+            {itemType === "MATERIAL" && (
+              <div className="grid items-start gap-3 md:grid-cols-3">
+                <Field label="원가 설정(원)"><input className="field-input" type="number" min="0" step="1" name="material_unit_cost" defaultValue={product?.material_unit_cost ?? product?.material_cost ?? 0} /></Field>
+                <Field label="배송주소"><input className="field-input" name="shipping_address" defaultValue={product?.shipping_address || ""} /></Field>
+                <Field label="부자재 메모"><input className="field-input" name="material_note" defaultValue={product?.material_note || ""} /></Field>
+              </div>
+            )}
             <div className="grid items-start gap-3 md:grid-cols-[2fr_.8fr_.8fr_.8fr]">
               <Field label="상품 URL">
                 <div className="flex gap-2">
@@ -1669,6 +1745,27 @@ function NativeProductForm({ id }: { id?: number }) {
                     );
                   })}
                   {!data?.materials?.length && <p className="text-sm font-bold text-slate-500">등록된 부자재가 없습니다.</p>}
+                </div>
+              </section>
+            )}
+            {itemType === "MATERIAL" && (
+              <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-black">상품 연결</h3>
+                  <span className="text-xs font-bold text-slate-500">이 부자재를 사용하는 상품</span>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(data?.products || []).filter((item) => !isMaterial(item) && item.id !== id).map((item) => {
+                    const checked = linkedProducts.some((link) => link.product_id === item.id);
+                    const linked = linkedProducts.find((link) => link.product_id === item.id);
+                    return (
+                      <label key={item.id} className={`grid grid-cols-[20px_1fr_86px] items-center gap-2 rounded-md border bg-white p-2 text-sm ${checked ? "border-orange-300" : "border-slate-200"}`}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleLinkedProduct(item)} />
+                        <b>{item.name}</b>
+                        <input className="field-input h-8 text-right" type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
+                      </label>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -2005,7 +2102,7 @@ function NativeOrderForm({ id }: { id?: number }) {
                     {String(line.item_type || "").toUpperCase() === "MATERIAL" ? (
                       <p className="text-xs font-bold text-emerald-600 xl:col-start-2">부자재 입고 재고에 반영</p>
                     ) : line.materials?.length ? (
-                      <p className="text-xs font-bold text-slate-500 xl:col-start-2">부자재: {materialSummary(line.materials)}</p>
+                      <p className={`text-xs font-bold xl:col-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
                     ) : null}
                     <input className="field-input" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
                     <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
