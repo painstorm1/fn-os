@@ -666,6 +666,22 @@ function rateNoteText(rates?: Record<string, number>, currencies: string[] = [])
   return ordered.map((currency) => `${currency}=₩${Number(rates?.[currency] || (currency === "KRW" ? 1 : 0)).toLocaleString("ko-KR")}`).join(" · ");
 }
 
+function productionDueText(order: ImportOrder) {
+  const days = Number(order.production_days || 0);
+  const paidOrOrder = order.paid_date || order.order_date;
+  if (!days || !paidOrOrder) return "-";
+  const base = new Date(`${paidOrOrder}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return "-";
+  const due = new Date(base);
+  due.setDate(base.getDate() + days);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+  if (diff > 0) return `D-${diff}`;
+  if (diff === 0) return "D-Day";
+  return `D+${Math.abs(diff)}`;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function LegacyStageDateLane({ paymentMethod, values, onChange }: { paymentMethod?: string; values: StageValues; onChange: (name: string, value: string) => void }) {
   const [openStage, setOpenStage] = useState("");
@@ -706,7 +722,7 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
                 type="button"
                 className={`relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full text-xl font-black transition ${done ? "bg-emerald-500 text-white" : "border-2 border-slate-300 bg-white text-slate-500 hover:border-orange-300"}`}
                 onClick={() => {
-                  if (done) {
+                  if (done && stage.name !== "order_date") {
                     onChange(stage.name, "");
                     setOpenStage("");
                     return;
@@ -877,25 +893,39 @@ function NativeOrders() {
     <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
-          <div className="hidden grid-cols-[120px_1.4fr_1fr_90px_130px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
-            <span>주문날짜</span><span>대표 제품</span><span>공장</span><span>수량</span><span>금액(원)</span><span>상태</span>
+          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_130px_90px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
+            <span>주문날짜</span><span>대표 제품</span><span>공장</span><span>수량</span><span>금액(원)</span><span>출고예정</span><span>상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
-              <button type="button" onClick={() => toggleOrder(order.id)} className="grid w-full items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_90px_130px_90px]">
+              <button type="button" onClick={() => toggleOrder(order.id)} className="grid w-full items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_130px_90px_90px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
                   {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-14 w-14 rounded-md object-cover" /> : <span className="h-14 w-14 rounded-md bg-slate-100" />}
                   <span><b>{order.repr_product || `${order.line_count || 0}개 라인`}</b>{order.child_count ? <small className="ml-2 text-slate-500">+{order.child_count}</small> : null}</span>
                 </span>
                 <span className="font-bold text-slate-600">{order.factory_name || "-"}</span>
-                <span className="text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</span>
+                <span className="text-left">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</span>
                 <span className="text-right font-black">{krw(order.total_won)}</span>
+                <span className="font-black text-orange-600">{productionDueText(order)}</span>
                 <StatusPill status={order.status} />
               </button>
               {expandedId === order.id && (
                 details[order.id]
-                  ? <NativeOrderQuickEditor detail={details[order.id]} onSaved={(next) => { setDetails((prev) => ({ ...prev, [order.id]: next })); void loadOrders(); }} />
+                  ? <NativeOrderQuickEditor detail={details[order.id]} onSaved={(next) => {
+                    if (!next) {
+                      setExpandedId(null);
+                      setDetails((prev) => {
+                        const copy = { ...prev };
+                        delete copy[order.id];
+                        return copy;
+                      });
+                      void loadOrders();
+                      return;
+                    }
+                    setDetails((prev) => ({ ...prev, [order.id]: next }));
+                    void loadOrders();
+                  }} />
                   : <div className="border-b border-slate-200 p-5 text-sm font-bold text-slate-500">상세 불러오는 중...</div>
               )}
             </div>
@@ -907,7 +937,7 @@ function NativeOrders() {
   );
 }
 
-function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail; onSaved: (detail: ImportOrderDetail) => void }) {
+function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail; onSaved: (detail: ImportOrderDetail | null) => void }) {
   const order = detail.order;
   const [saving, setSaving] = useState(false);
   const [stageValues, setStageValues] = useState<StageValues>(stageValuesFromOrder(order));
@@ -934,6 +964,14 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
   const panelProductWon = actualUsdValue > 0 ? actualUsdValue * Number(detail.fx_rates?.USD || 0) : productWon;
   const panelTotalWon = Number(detail.total_won || 0) - productWon + panelProductWon;
+
+  useEffect(() => {
+    setProductionDays(order.production_days != null ? String(order.production_days) : "");
+    setActualUsd(order.actual_payment_usd != null ? String(order.actual_payment_usd) : "");
+    setActualUsd1(order.actual_payment_usd_1 != null ? String(order.actual_payment_usd_1) : "");
+    setActualUsd2(order.actual_payment_usd_2 != null ? String(order.actual_payment_usd_2) : "");
+    setStageValues(stageValuesFromOrder(order));
+  }, [order.id, order.production_days, order.actual_payment_usd, order.actual_payment_usd_1, order.actual_payment_usd_2]);
 
   async function saveQuick() {
     setSaving(true);
@@ -970,6 +1008,15 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     if (res.ok && next.ok) onSaved(next);
   }
 
+  async function deleteOrder() {
+    if (!confirm("이 발주를 삭제할까요?")) return;
+    const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}`), {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (res.ok) onSaved(null);
+  }
+
   return (
     <div className="grid gap-5 border-b border-slate-200 bg-white p-5 xl:grid-cols-[1fr_320px]">
       <div className="grid gap-5">
@@ -979,6 +1026,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-sky-400 px-3 text-sm font-black text-sky-600" href={importHref(`/orders/new?parent=${order.id}`)}>+ 부자재 발주</Link>
+            <button type="button" onClick={deleteOrder} className="inline-flex h-9 items-center rounded-md border border-rose-300 px-3 text-sm font-black text-rose-600">삭제</button>
             <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{saving ? "저장 중..." : "저장"}</button>
           </div>
         </div>
@@ -993,8 +1041,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="예상 제작기간">
-              <div className="grid grid-cols-[1fr_38px] overflow-hidden rounded-md border border-slate-200">
-                <input className="px-3 py-2 text-right outline-none" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
+              <div className="grid grid-cols-[1fr_38px]">
+                <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
                 <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
               </div>
             </Field>
@@ -1238,11 +1286,23 @@ function NativeProductDetail({ id }: { id: number }) {
   }, [id]);
 
   const product = detail?.product;
+  async function deleteProduct() {
+    if (!confirm("이 상품을 삭제할까요?")) return;
+    const res = await fetch(apiUrl(`/api/fnos/products/${id}`), {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (res.ok) window.location.href = importHref("/products");
+  }
+
   return (
     <Panel
       title={product?.name || "제품 상세"}
       subtitle={product ? `${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
-      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>}
+      action={<div className="flex gap-2">
+        <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600" onClick={deleteProduct}>삭제</button>
+        <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>
+      </div>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : product ? (
         <div className="grid gap-5 xl:grid-cols-[280px_1fr]">
@@ -1652,6 +1712,10 @@ function NativeOrderForm({ id }: { id?: number }) {
   const productLineWon = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0)), 0);
   const productTotalWon = Math.round(actualUsdValue > 0 ? actualUsdValue * Number(data?.rates?.USD || 0) : productLineWon);
   const formRateNote = rateNoteText(data?.rates, Object.keys(nativeTotals));
+  const productSummaryParts = [
+    nativeTotalText(nativeTotals, "CNY"),
+    ...(actualUsdValue > 0 ? [`${actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD`] : []),
+  ];
   const visibleStageValues = paymentMethod === "T/T송금" || paymentMethod === "TT송금" ? stageValues : { ...stageValues, first_payment_date: "" };
 
   function optionsFor(product?: ImportProduct) {
@@ -1712,12 +1776,21 @@ function NativeOrderForm({ id }: { id?: number }) {
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
-      window.location.href = importHref(id ? `/orders/${id}` : "/orders");
+      window.location.href = importHref("/orders");
     } catch (err) {
       setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function deleteOrder() {
+    if (!id || !confirm("이 발주를 삭제할까요?")) return;
+    const res = await fetch(apiUrl(`/api/fnos/orders/${id}`), {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (res.ok) window.location.href = importHref("/orders");
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1773,8 +1846,8 @@ function NativeOrderForm({ id }: { id?: number }) {
                 </select>
               </Field>
               <Field label="예상 제작기간">
-                <div className="grid grid-cols-[1fr_38px] overflow-hidden rounded-md border border-slate-200">
-                  <input className="px-3 py-2 text-right outline-none" type="number" min="0" step="1" value={productionDays} onChange={(event) => setProductionDays(event.target.value)} placeholder="7" />
+                <div className="grid grid-cols-[1fr_38px]">
+                  <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(event) => setProductionDays(event.target.value)} placeholder="7" />
                   <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
                 </div>
               </Field>
@@ -1824,13 +1897,12 @@ function NativeOrderForm({ id }: { id?: number }) {
                 );
               })}
             </div>
-            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,760px)_1fr]">
-              <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-3">
+            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,520px)_1fr]">
+              <div className={`grid gap-3 rounded-md border border-slate-200 bg-white p-3 ${isTT ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
                 {isTT ? (
                   <>
                     <Field label="1차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd1} onChange={(event) => setActualUsd1(event.target.value)} /></Field>
                     <Field label="2차 결제(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd2} onChange={(event) => setActualUsd2(event.target.value)} /></Field>
-                    <Field label="최종 실 결제금액(USD)"><p className="px-1 py-2 text-right text-sm font-black">{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</p></Field>
                   </>
                 ) : (
                   <Field label="실 결제금액(USD)"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualUsd} onChange={(event) => setActualUsd(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
@@ -1838,10 +1910,9 @@ function NativeOrderForm({ id }: { id?: number }) {
               </div>
               <div className="grid gap-1 text-right text-sm">
                 <p className="font-black">
-                  제품 합계: <span className="text-lg text-orange-600">{nativeTotalText(nativeTotals, "CNY")}</span>
-                  {actualUsdValue > 0 && <span className="text-lg text-orange-600"> / {actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</span>}
-                  <span> / 원화 제품합계 </span><span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span>
+                  제품 합계: <span className="text-lg text-orange-600">{productSummaryParts.join(" / ")}</span>
                 </p>
+                <p className="font-black">원화 제품 합계: <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
                 <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
               </div>
             </div>
@@ -1864,6 +1935,7 @@ function NativeOrderForm({ id }: { id?: number }) {
           {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref(id ? `/orders/${id}` : "/orders")}>취소</Link>
+            {id && <button type="button" className="inline-flex h-10 items-center justify-center rounded-md border border-rose-300 px-4 text-sm font-black text-rose-600" onClick={deleteOrder}>삭제</button>}
             <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
           </div>
 
@@ -2161,6 +2233,17 @@ function FactorySettingsCard({ factory, onSaved }: { factory: ImportFactory; onS
     setSaving(false);
   }
 
+  async function deleteFactory() {
+    if (!confirm("이 공급사를 삭제할까요?")) return;
+    setSaving(true);
+    await fetch(apiUrl(`/api/fnos/factories/${factory.id}`), {
+      method: "DELETE",
+      credentials: "include",
+    });
+    await onSaved();
+    setSaving(false);
+  }
+
   return (
     <div className="rounded-md border border-slate-200">
       <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left" onClick={() => setOpen((prev) => !prev)}>
@@ -2174,7 +2257,10 @@ function FactorySettingsCard({ factory, onSaved }: { factory: ImportFactory; onS
           <Field label="플랫폼"><input className="field-input" value={draft.platform || ""} onChange={(e) => setDraft((prev) => ({ ...prev, platform: e.target.value }))} /></Field>
           <Field label="담당자"><input className="field-input" value={draft.contact || ""} onChange={(e) => setDraft((prev) => ({ ...prev, contact: e.target.value }))} /></Field>
           <div className="md:col-span-4"><p className="mb-1.5 text-sm font-black text-slate-700">메모</p><textarea className="field-input" value={draft.note || ""} onChange={(e) => setDraft((prev) => ({ ...prev, note: e.target.value }))} /></div>
-          <div className="md:col-span-4 flex justify-end"><button type="button" className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" disabled={saving} onClick={save}>{saving ? "저장 중..." : "저장"}</button></div>
+          <div className="md:col-span-4 flex justify-end gap-2">
+            <button type="button" className="inline-flex h-10 items-center rounded-md border border-rose-300 px-5 text-sm font-black text-rose-600" disabled={saving} onClick={deleteFactory}>삭제</button>
+            <button type="button" className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" disabled={saving} onClick={save}>{saving ? "저장 중..." : "저장"}</button>
+          </div>
         </div>
       )}
     </div>
