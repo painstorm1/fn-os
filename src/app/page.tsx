@@ -1615,11 +1615,51 @@ function NativeProductForm({ id }: { id?: number }) {
     };
   }, [previewUrl]);
 
-  function handleImageChange(nextFile?: File) {
-    setFile(nextFile || null);
+  async function normalizeImageFile(nextFile: File, force = false) {
+    if (nextFile.type === "image/gif") return nextFile;
+    const maxBytes = 3.2 * 1024 * 1024;
+    const maxSide = 1600;
+    if (!force && nextFile.size <= maxBytes) return nextFile;
+    const sourceUrl = URL.createObjectURL(nextFile);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = sourceUrl;
+      });
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+      canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+      canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+      if (!blob) return nextFile;
+      if (!force && blob.size >= nextFile.size && blob.size <= maxBytes) return nextFile;
+      return new File([blob], nextFile.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+    } finally {
+      URL.revokeObjectURL(sourceUrl);
+    }
+  }
+
+  async function prepareImageChange(nextFile?: File, forceCompress = false) {
+    if (!nextFile) {
+      setFile(null);
+      setImageUrl("");
+      setImageHint("");
+      setPreviewUrl("");
+      return;
+    }
+    setImageHint("이미지 처리 중...");
+    const preparedFile = await normalizeImageFile(nextFile, forceCompress);
+    setFile(preparedFile);
     setImageUrl("");
-    setImageHint(nextFile ? "선택한 이미지가 저장됩니다." : "");
-    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : "");
+    setImageHint(preparedFile.size < nextFile.size ? "이미지를 압축해서 저장합니다." : "선택한 이미지가 저장됩니다.");
+    setPreviewUrl(URL.createObjectURL(preparedFile));
+  }
+
+  function handleImageChange(nextFile?: File) {
+    void prepareImageChange(nextFile);
   }
 
   function handleImageUrlChange(value: string) {
@@ -1637,7 +1677,7 @@ function NativeProductForm({ id }: { id?: number }) {
       const pastedFile = imageItem.getAsFile();
       if (pastedFile) {
         const ext = pastedFile.type.split("/")[1] || "png";
-        handleImageChange(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type }));
+        void prepareImageChange(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type }), true);
         setImageHint("붙여넣은 이미지가 저장됩니다.");
         event.preventDefault();
       }
@@ -1716,7 +1756,11 @@ function NativeProductForm({ id }: { id?: number }) {
         body: form,
         credentials: "include",
       });
-      const json = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      const json = contentType.includes("application/json") ? await res.json() : null;
+      if (!json) {
+        throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 이미지 URL을 사용하거나 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
+      }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
       window.location.href = importHref(id ? `/products/${id}` : "/products");
     } catch (err) {
