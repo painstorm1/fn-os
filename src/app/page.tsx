@@ -917,7 +917,7 @@ function LegacyStageDateLane({ paymentMethod, values, onChange }: { paymentMetho
             </button>
             <strong className="text-sm">{stage.label}</strong>
             <button type="button" className="text-xs font-bold text-slate-500" onClick={() => setOpenStage(stage.name)}>{value || "날짜 선택"}</button>
-            {openStage === stage.name && <input className="field-input" type="date" value={value} onChange={(event) => { onChange(stage.name, event.target.value); setOpenStage(""); }} />}
+            {openStage === stage.name && <input className="field-input" type="date" value={value} onChange={(event) => onChange(stage.name, event.target.value)} />}
           </div>
         );
       })}
@@ -961,10 +961,7 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
                   className="field-input max-w-[140px]"
                   type="date"
                   value={value}
-                  onChange={(event) => {
-                    onChange(stage.name, event.target.value);
-                    setOpenStage("");
-                  }}
+                  onChange={(event) => onChange(stage.name, event.target.value)}
                 />
               )}
             </div>
