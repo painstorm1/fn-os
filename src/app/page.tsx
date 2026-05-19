@@ -948,7 +948,7 @@ function NativeImportWorkspace({ path }: { path: string }) {
   if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
   if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
   if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
-  if (productMatch) return <NativeProductDetail id={Number(productMatch[1])} />;
+  if (productMatch) return <NativeProductForm id={Number(productMatch[1])} />;
   if (basePath.startsWith("/products")) return <NativeProducts />;
   if (basePath.startsWith("/settings")) return <NativeSettings />;
   return <NativeOrders initialOpenOrderId={openOrderId} />;
@@ -1369,7 +1369,7 @@ function NativeProducts() {
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
-            <Link key={product.id} href={importHref(`/products/${product.id}`)} className="min-w-0 rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
+            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
               <div className="aspect-square w-full overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
@@ -1586,6 +1586,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [product, setProduct] = useState<ImportProduct | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(id));
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -1757,11 +1758,33 @@ function NativeProductForm({ id }: { id?: number }) {
         throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
-      window.location.href = importHref(id ? `/products/${id}` : "/products");
+      window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteProduct() {
+    if (!id || !confirm("이 제품을 삭제할까요?")) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await fetch(apiUrl(`/api/fnos/products/${id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const contentType = res.headers.get("content-type") || "";
+      const json = contentType.includes("application/json") ? await res.json() : null;
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || "제품 삭제에 실패했습니다.");
+      }
+      window.location.href = importHref("/products");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "제품 삭제에 실패했습니다.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1921,9 +1944,23 @@ function NativeProductForm({ id }: { id?: number }) {
               </section>
             )}
             {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
-            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-              <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref(id ? `/products/${id}` : "/products")}>취소</Link>
-              <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+            <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-4">
+              <div>
+                {id && (
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center rounded-md border border-rose-300 px-4 text-sm font-black text-rose-600 disabled:opacity-50"
+                    disabled={deleting || saving}
+                    onClick={deleteProduct}
+                  >
+                    {deleting ? "삭제 중..." : "삭제"}
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref("/products")}>취소</Link>
+                <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{saving ? "저장 중..." : "저장"}</button>
+              </div>
             </div>
           </div>
         </form>
