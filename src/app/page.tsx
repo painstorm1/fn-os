@@ -1008,7 +1008,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
                 <th className="py-2 text-right">수량</th>
                 <th className="py-2 text-right">금액(원)</th>
                 <th className="py-2 text-right">출고예정</th>
-                <th className="py-2 text-right">상태</th>
+                <th className="py-2 text-center">상태</th>
               </tr>
             </thead>
             <tbody>
