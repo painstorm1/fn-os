@@ -1032,7 +1032,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
                   <td className="py-3 text-right"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</Link></td>
                   <td className="py-3 text-right font-black"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{krw(order.total_won)}</Link></td>
                   <td className="py-3 text-right font-black text-orange-600"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{productionDueText(order)}</Link></td>
-                  <td className="py-3"><Link className="flex justify-end" href={importHref(`/orders?open=${order.id}`)}><StatusPill status={order.status} /></Link></td>
+                  <td className="py-3"><Link className="flex justify-center" href={importHref(`/orders?open=${order.id}`)}><StatusPill status={order.status} /></Link></td>
                 </tr>
               ))}
             </tbody>
