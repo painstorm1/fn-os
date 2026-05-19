@@ -1315,29 +1315,15 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         </section>
         <section className="grid gap-3">
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
-          <div className="grid items-start gap-4 2xl:grid-cols-[1.05fr_1fr]">
-            <div className="grid gap-3">
-              <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1.25fr_92px_120px]">
-                <Field label="중국내 배송비"><input className="field-input text-right" type="number" value={costs.china_domestic_shipping} onChange={(e) => setCosts((prev) => ({ ...prev, china_domestic_shipping: e.target.value }))} /></Field>
-                <Field label="수수료"><input className="field-input text-right" type="number" value={costs.china_fee} onChange={(e) => setCosts((prev) => ({ ...prev, china_fee: e.target.value }))} /></Field>
-                <Field label="중국내 기타금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
-                <Field label="기타 적요"><input className="field-input" value={costs.china_other_note} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_note: e.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
-                <Field label="통화">
-                  <select className="field-input" value={costs.china_cost_currency} onChange={(e) => setCosts((prev) => ({ ...prev, china_cost_currency: e.target.value }))}>
-                    {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                </Field>
-                <Field label="운송방식"><select className="field-input" value={costs.shipping_method} onChange={(e) => setCosts((prev) => ({ ...prev, shipping_method: e.target.value }))}>{["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}</select></Field>
-              </div>
-              <Field label="메모"><textarea className="field-input min-h-[84px]" value={costs.note} onChange={(e) => setCosts((prev) => ({ ...prev, note: e.target.value }))} /></Field>
-            </div>
-            <div className="grid gap-3 md:grid-cols-4 2xl:grid-cols-3">
+          <div className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-4">
               {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
                 <Field key={key} label={{ shipping_cost: "배대지 배송비", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
                   <input className="field-input text-right" type="number" value={costs[key]} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))} />
                 </Field>
               ))}
             </div>
+            <Field label="메모"><textarea className="field-input min-h-[84px]" value={costs.note} onChange={(e) => setCosts((prev) => ({ ...prev, note: e.target.value }))} /></Field>
           </div>
         </section>
       </div>
