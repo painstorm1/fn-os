@@ -529,7 +529,9 @@ type ImportOrder = {
   actual_payment_total?: number | string | null;
   actual_payment_total_krw?: number | string | null;
   china_domestic_shipping?: number;
+  china_fee?: number;
   china_other_cost?: number;
+  china_other_note?: string;
   china_cost_currency?: string;
   shipping_cost?: number;
   customs_duty?: number;
@@ -1120,7 +1122,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     domestic_shipping_cost: String(order.domestic_shipping_cost || 0),
     other_cost: String(order.other_cost || 0),
     china_domestic_shipping: String(order.china_domestic_shipping || 0),
+    china_fee: String(order.china_fee || 0),
     china_other_cost: String(order.china_other_cost || 0),
+    china_other_note: order.china_other_note || "",
     china_cost_currency: order.china_cost_currency || order.currency || "CNY",
     note: order.note || "",
   });
@@ -1155,12 +1159,14 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       domestic_shipping_cost: String(order.domestic_shipping_cost || 0),
       other_cost: String(order.other_cost || 0),
       china_domestic_shipping: String(order.china_domestic_shipping || 0),
+      china_fee: String(order.china_fee || 0),
       china_other_cost: String(order.china_other_cost || 0),
+      china_other_note: order.china_other_note || "",
       china_cost_currency: order.china_cost_currency || order.currency || "CNY",
       note: order.note || "",
     });
     setStageValues(stageValuesFromOrder(order));
-  }, [order.id, order.production_days, order.actual_payment_currency, order.actual_payment_total, order.actual_payment_1, order.actual_payment_2, order.actual_payment_total_krw, order.actual_payment_usd, order.actual_payment_usd_1, order.actual_payment_usd_2]);
+  }, [order.id, order.production_days, order.actual_payment_currency, order.actual_payment_total, order.actual_payment_1, order.actual_payment_2, order.actual_payment_total_krw, order.actual_payment_usd, order.actual_payment_usd_1, order.actual_payment_usd_2, order.china_domestic_shipping, order.china_fee, order.china_other_cost, order.china_other_note, order.china_cost_currency]);
 
   async function saveQuick() {
     setSaving(true);
@@ -1272,10 +1278,12 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
               </>
             )}
           </div>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-6">
             <Field label="중국내 배송비"><input className="field-input text-right" type="number" value={costs.china_domestic_shipping} onChange={(e) => setCosts((prev) => ({ ...prev, china_domestic_shipping: e.target.value }))} /></Field>
-            <Field label="중국내 기타 금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
-            <Field label="중국내 비용 통화">
+            <Field label="수수료"><input className="field-input text-right" type="number" value={costs.china_fee} onChange={(e) => setCosts((prev) => ({ ...prev, china_fee: e.target.value }))} /></Field>
+            <Field label="중국내 기타금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
+            <Field label="기타 적요"><input className="field-input" value={costs.china_other_note} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_note: e.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
+            <Field label="통화">
               <select className="field-input" value={costs.china_cost_currency} onChange={(e) => setCosts((prev) => ({ ...prev, china_cost_currency: e.target.value }))}>
                 {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
               </select>
@@ -2334,6 +2342,13 @@ function NativeOrderForm({ id }: { id?: number }) {
   const [actualPayment, setActualPayment] = useState("");
   const [actualPayment1, setActualPayment1] = useState("");
   const [actualPayment2, setActualPayment2] = useState("");
+  const [chinaCosts, setChinaCosts] = useState({
+    shipping: "",
+    fee: "",
+    other: "",
+    otherNote: "",
+    currency: "CNY",
+  });
   const [stageValues, setStageValues] = useState<StageValues>(stageValuesFromOrder(null));
   const [lines, setLines] = useState<OrderLine[]>([
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
@@ -2353,6 +2368,13 @@ function NativeOrderForm({ id }: { id?: number }) {
         setActualPayment(actualPaymentSingle(next.order));
         setActualPayment1(actualPaymentFirst(next.order));
         setActualPayment2(actualPaymentSecond(next.order));
+        setChinaCosts({
+          shipping: next.order?.china_domestic_shipping != null ? String(next.order.china_domestic_shipping) : "",
+          fee: next.order?.china_fee != null ? String(next.order.china_fee) : "",
+          other: next.order?.china_other_cost != null ? String(next.order.china_other_cost) : "",
+          otherNote: next.order?.china_other_note || "",
+          currency: next.order?.china_cost_currency || next.order?.currency || "CNY",
+        });
         setStageValues(stageValuesFromOrder(next.order));
         setLines((next.items || []).map((item) => ({
           product_id: item.product_id ? String(item.product_id) : "",
@@ -2387,25 +2409,27 @@ function NativeOrderForm({ id }: { id?: number }) {
     ));
   }, [catalogQuery, data?.products]);
 
-  const nativeTotals = lines.reduce<Record<string, number>>((totals, line) => {
-    if (String(line.item_type || "").toUpperCase() === "MATERIAL") return totals;
+  const orderNativeTotals = lines.reduce<Record<string, number>>((totals, line) => {
     const currency = line.item_currency || "CNY";
     totals[currency] = (totals[currency] || 0) + (Number(line.quantity || 0) * Number(line.unit_price || 0));
     return totals;
   }, {});
-  const productTotal = nativeTotals.CNY || 0;
+  const chinaCostAmount = Number(chinaCosts.shipping || 0) + Number(chinaCosts.fee || 0) + Number(chinaCosts.other || 0);
+  if (chinaCostAmount) {
+    const currency = chinaCosts.currency || "CNY";
+    orderNativeTotals[currency] = (orderNativeTotals[currency] || 0) + chinaCostAmount;
+  }
   const fxRate = order?.fx_rate || data?.rates?.CNY || 195;
   const isTT = isTTPayment(paymentMethod);
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
   const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(data?.rates?.USD || 0)) : 0;
-  const productLineWon = lines.reduce((sum, line) => {
-    if (String(line.item_type || "").toUpperCase() === "MATERIAL") return sum;
+  const orderLineWon = lines.reduce((sum, line) => {
     return sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0));
-  }, 0);
-  const productTotalWon = Math.round(actualPaymentKrw > 0 ? actualPaymentKrw : productLineWon);
-  const formRateNote = rateNoteText(data?.rates, Object.keys(nativeTotals));
-  const productSummaryParts = [
-    nativeTotalText(nativeTotals, "CNY"),
+  }, 0) + (chinaCostAmount * Number(data?.rates?.[chinaCosts.currency || "CNY"] || 0));
+  const orderTotalWon = Math.round(actualPaymentKrw > 0 ? actualPaymentKrw : orderLineWon);
+  const formRateNote = rateNoteText(data?.rates, Object.keys(orderNativeTotals));
+  const orderSummaryParts = [
+    nativeTotalText(orderNativeTotals, "CNY"),
     ...(actualPaymentValue > 0 ? [actualCurrency === "KRW" ? krw(actualPaymentValue) : `${actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD`] : []),
   ];
   const visibleStageValues = paymentMethod === "T/T송금" || paymentMethod === "TT송금" ? stageValues : { ...stageValues, first_payment_date: "" };
@@ -2482,6 +2506,11 @@ function NativeOrderForm({ id }: { id?: number }) {
         body: JSON.stringify({
           ...payload,
           production_days: productionDays,
+          china_domestic_shipping: chinaCosts.shipping,
+          china_fee: chinaCosts.fee,
+          china_other_cost: chinaCosts.other,
+          china_other_note: chinaCosts.otherNote,
+          china_cost_currency: chinaCosts.currency,
           ...paymentPayload,
           items: lines.filter((line) => line.product_name && line.quantity && line.unit_price),
         }),
@@ -2648,17 +2677,19 @@ function NativeOrderForm({ id }: { id?: number }) {
               </div>
               <div className="grid gap-1 text-right text-sm">
                 <p className="font-black">
-                  제품 합계: <span className="text-lg text-orange-600">{productSummaryParts.join(" / ")}</span>
+                  주문 합계: <span className="text-lg text-orange-600">{orderSummaryParts.join(" / ")}</span>
                 </p>
-                <p className="font-black">원화 제품 합계: <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
+                <p className="font-black">원화 주문 합계: <span className="text-lg text-orange-600">₩{orderTotalWon.toLocaleString("ko-KR")}</span></p>
                 <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_120px]">
-              <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" defaultValue={order?.china_domestic_shipping || 0} /></Field>
-              <Field label="중국내 기타 금액"><input className="field-input text-right" type="number" name="china_other_cost" defaultValue={order?.china_other_cost || 0} /></Field>
+            <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
+              <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" value={chinaCosts.shipping} onChange={(event) => setChinaCosts((prev) => ({ ...prev, shipping: event.target.value }))} /></Field>
+              <Field label="수수료"><input className="field-input text-right" type="number" name="china_fee" value={chinaCosts.fee} onChange={(event) => setChinaCosts((prev) => ({ ...prev, fee: event.target.value }))} /></Field>
+              <Field label="중국내 기타금액"><input className="field-input text-right" type="number" name="china_other_cost" value={chinaCosts.other} onChange={(event) => setChinaCosts((prev) => ({ ...prev, other: event.target.value }))} /></Field>
+              <Field label="기타 적요"><input className="field-input" name="china_other_note" value={chinaCosts.otherNote} onChange={(event) => setChinaCosts((prev) => ({ ...prev, otherNote: event.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
               <Field label="통화">
-                <select className="field-input" name="china_cost_currency" defaultValue={order?.china_cost_currency || order?.currency || "CNY"}>
+                <select className="field-input" name="china_cost_currency" value={chinaCosts.currency} onChange={(event) => setChinaCosts((prev) => ({ ...prev, currency: event.target.value }))}>
                   {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
                 </select>
               </Field>
@@ -2681,7 +2712,7 @@ function NativeOrderForm({ id }: { id?: number }) {
           <Field label="메모"><textarea className="field-input" name="note" defaultValue={order?.note || ""} /></Field>
           {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref(id ? `/orders/${id}` : "/orders")}>취소</Link>
+            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref("/orders")}>취소</Link>
             {id && <button type="button" className="inline-flex h-10 items-center justify-center rounded-md border border-rose-300 px-4 text-sm font-black text-rose-600" onClick={deleteOrder}>삭제</button>}
             <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
           </div>
@@ -2853,7 +2884,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
           <Field label="메모"><textarea className="field-input min-h-24" name="note" defaultValue={order?.note || ""} /></Field>
           {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-            <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref(id ? `/orders/${id}` : "/orders")}>취소</Link>
+            <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/orders")}>취소</Link>
             <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
           </div>
         </form>
