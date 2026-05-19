@@ -523,6 +523,9 @@ type ImportOrder = {
   actual_payment_usd?: number | string | null;
   actual_payment_usd_1?: number | string | null;
   actual_payment_usd_2?: number | string | null;
+  china_domestic_shipping?: number;
+  china_other_cost?: number;
+  china_cost_currency?: string;
   shipping_cost?: number;
   customs_duty?: number;
   vat?: number;
@@ -638,10 +641,39 @@ type ImportOrderDetail = {
   native_totals?: Record<string, number>;
   product_won?: number;
   material_unit_cost_total?: number;
+  cost_grid?: CostGrid;
   children_total_won?: number;
   unit_cost?: number;
   total_won?: number;
   total_qty?: number;
+};
+
+type CostGridRow = {
+  order_item_id?: number;
+  option_name?: string;
+  product_name?: string;
+  quantity?: number;
+  item_currency?: string;
+  unit_price?: number;
+  cost_ratio?: number;
+  unit_extra_cost?: number;
+  material_unit_cost?: number;
+  estimated_unit_cost?: number;
+  coupang_free_price?: number | null;
+  naver_free_price?: number | null;
+  naver_cod_price?: number | null;
+  coupang_margin?: { amount?: number | null; pct?: number | null };
+  naver_free_margin?: { amount?: number | null; pct?: number | null };
+  naver_cod_margin?: { amount?: number | null; pct?: number | null };
+};
+
+type CostGrid = {
+  rows?: CostGridRow[];
+  china_extra_cost?: number;
+  korea_extra_cost?: number;
+  total_extra_cost?: number;
+  product_base_total?: number;
+  goods_total_won?: number;
 };
 
 type ImportProductDetail = {
@@ -699,6 +731,11 @@ function hasMaterialShortage(materials: ProductMaterialLink[] | undefined, quant
 
 function krw(value?: number) {
   return `₩${Math.round(value || 0).toLocaleString("ko-KR")}`;
+}
+
+function fmtPct(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return `${Number(value).toFixed(1)}%`;
 }
 
 function getStageFields(paymentMethod?: string) {
@@ -1061,26 +1098,43 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     inspection_fee: String(order.inspection_fee || 0),
     domestic_shipping_cost: String(order.domestic_shipping_cost || 0),
     other_cost: String(order.other_cost || 0),
+    china_domestic_shipping: String(order.china_domestic_shipping || 0),
+    china_other_cost: String(order.china_other_cost || 0),
+    china_cost_currency: order.china_cost_currency || order.currency || "CNY",
     note: order.note || "",
   });
   const [productionDays, setProductionDays] = useState(order.production_days != null ? String(order.production_days) : "");
   const [actualUsd, setActualUsd] = useState(order.actual_payment_usd != null ? String(order.actual_payment_usd) : "");
   const [actualUsd1, setActualUsd1] = useState(order.actual_payment_usd_1 != null ? String(order.actual_payment_usd_1) : "");
   const [actualUsd2, setActualUsd2] = useState(order.actual_payment_usd_2 != null ? String(order.actual_payment_usd_2) : "");
-  const productWon = Number(detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
+  const productWon = Number(detail.cost_grid?.product_base_total ?? detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
   const nativeTotals = nativeTotalText(detail.native_totals, order.currency || "CNY");
   const usedCurrencies = Object.keys(detail.native_totals || (order.currency ? { [order.currency]: 0 } : { CNY: 0 }));
   const rateNote = rateNoteText(detail.fx_rates, usedCurrencies);
   const isTT = isTTPayment(order.payment_method);
   const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
-  const panelProductWon = actualUsdValue > 0 ? actualUsdValue * Number(detail.fx_rates?.USD || 0) : productWon;
-  const panelTotalWon = Number(detail.total_won || 0) - productWon + panelProductWon;
+  const panelProductWon = productWon;
+  const panelTotalWon = panelProductWon + Number(detail.cost_grid?.total_extra_cost || orderExtraCost(order));
 
   useEffect(() => {
     setProductionDays(order.production_days != null ? String(order.production_days) : "");
     setActualUsd(order.actual_payment_usd != null ? String(order.actual_payment_usd) : "");
     setActualUsd1(order.actual_payment_usd_1 != null ? String(order.actual_payment_usd_1) : "");
     setActualUsd2(order.actual_payment_usd_2 != null ? String(order.actual_payment_usd_2) : "");
+    setCosts({
+      shipping_method: order.shipping_method || "LCL",
+      shipping_cost: String(order.shipping_cost || 0),
+      customs_duty: String(order.customs_duty || 0),
+      vat: String(order.vat || 0),
+      customs_fee: String(order.customs_fee || 0),
+      inspection_fee: String(order.inspection_fee || 0),
+      domestic_shipping_cost: String(order.domestic_shipping_cost || 0),
+      other_cost: String(order.other_cost || 0),
+      china_domestic_shipping: String(order.china_domestic_shipping || 0),
+      china_other_cost: String(order.china_other_cost || 0),
+      china_cost_currency: order.china_cost_currency || order.currency || "CNY",
+      note: order.note || "",
+    });
     setStageValues(stageValuesFromOrder(order));
   }, [order.id, order.production_days, order.actual_payment_usd, order.actual_payment_usd_1, order.actual_payment_usd_2]);
 
@@ -1176,7 +1230,16 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             )}
           </div>
           <div className="grid gap-3 md:grid-cols-4">
+            <Field label="중국내 배송비"><input className="field-input text-right" type="number" value={costs.china_domestic_shipping} onChange={(e) => setCosts((prev) => ({ ...prev, china_domestic_shipping: e.target.value }))} /></Field>
+            <Field label="중국내 기타 금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
+            <Field label="중국내 비용 통화">
+              <select className="field-input" value={costs.china_cost_currency} onChange={(e) => setCosts((prev) => ({ ...prev, china_cost_currency: e.target.value }))}>
+                {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </Field>
             <Field label="운송방식"><select className="field-input" value={costs.shipping_method} onChange={(e) => setCosts((prev) => ({ ...prev, shipping_method: e.target.value }))}>{["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}</select></Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
             {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
               <Field key={key} label={{ shipping_cost: "배대지 배송비", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
                 <input className="field-input text-right" type="number" value={costs[key]} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))} />
@@ -1194,15 +1257,135 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <p className="flex justify-between"><span>제품 합계</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>선택통화 합계</span><b>{nativeTotals}</b></p>
             {actualUsdValue > 0 && <p className="flex justify-between"><span>실 결제금액</span><b>{actualUsdValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</b></p>}
-            <p className="flex justify-between"><span>부대비용</span><b>{krw(orderExtraCost(order))}</b></p>
-            <p className="flex justify-between"><span>예상원가</span><b>{krw(detail.unit_cost)}</b></p>
+            <p className="flex justify-between"><span>중국내 부대비용</span><b>{krw(detail.cost_grid?.china_extra_cost || 0)}</b></p>
+            <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(detail.cost_grid?.korea_extra_cost || orderExtraCost(order))}</b></p>
+            <p className="flex justify-between"><span>총 부대비용</span><b>{krw(detail.cost_grid?.total_extra_cost || orderExtraCost(order))}</b></p>
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
             {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
           </div>
         </section>
-        <MarginCalculator orderId={order.id} unitCost={Number(detail.unit_cost || 0)} margin={detail.margin || null} />
       </aside>
+      <div className="xl:col-span-2">
+        <CostMarginGrid orderId={order.id} grid={detail.cost_grid} />
+      </div>
     </div>
+  );
+}
+
+function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid }) {
+  const rows = grid?.rows || [];
+  const [prices, setPrices] = useState<Record<number, { coupang: string; naverFree: string; naverCod: string }>>(() => {
+    const next: Record<number, { coupang: string; naverFree: string; naverCod: string }> = {};
+    rows.forEach((row) => {
+      if (!row.order_item_id) return;
+      next[row.order_item_id] = {
+        coupang: row.coupang_free_price ? String(row.coupang_free_price) : "",
+        naverFree: row.naver_free_price ? String(row.naver_free_price) : "",
+        naverCod: row.naver_cod_price ? String(row.naver_cod_price) : "",
+      };
+    });
+    return next;
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const next: Record<number, { coupang: string; naverFree: string; naverCod: string }> = {};
+    rows.forEach((row) => {
+      if (!row.order_item_id) return;
+      next[row.order_item_id] = {
+        coupang: row.coupang_free_price ? String(row.coupang_free_price) : "",
+        naverFree: row.naver_free_price ? String(row.naver_free_price) : "",
+        naverCod: row.naver_cod_price ? String(row.naver_cod_price) : "",
+      };
+    });
+    setPrices(next);
+  }, [orderId, rows.map((row) => `${row.order_item_id}:${row.coupang_free_price}:${row.naver_free_price}:${row.naver_cod_price}`).join("|")]);
+
+  function calc(priceText: string, unitCost: number, feeRate: number, sellerShippingFee: number) {
+    const price = Number(priceText || 0);
+    if (!price) return { amount: null, pct: null };
+    const settlement = price * (1 - feeRate);
+    const amount = settlement - sellerShippingFee - unitCost;
+    return { amount, pct: settlement > 0 ? (amount / settlement) * 100 : null };
+  }
+
+  async function save() {
+    setSaving(true);
+    await fetch(apiUrl(`/api/fnos/orders/${orderId}/margin`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        items: rows.map((row) => ({
+          order_item_id: row.order_item_id,
+          coupang_free_price: prices[Number(row.order_item_id)]?.coupang || null,
+          naver_free_price: prices[Number(row.order_item_id)]?.naverFree || null,
+          naver_cod_price: prices[Number(row.order_item_id)]?.naverCod || null,
+        })),
+      }),
+    });
+    setSaving(false);
+  }
+
+  function update(rowId: number | undefined, key: "coupang" | "naverFree" | "naverCod", value: string) {
+    if (!rowId) return;
+    setPrices((prev) => ({
+      ...prev,
+      [rowId]: { ...(prev[rowId] || { coupang: "", naverFree: "", naverCod: "" }), [key]: value },
+    }));
+  }
+
+  return (
+    <section className="rounded-md border border-slate-200 bg-white">
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-3">
+        <h3 className="font-black">옵션별 원가/마진표</h3>
+        <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1560px] text-xs">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>
+              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재원가", "예상원가", "쿠팡(무료배송)", "쿠팡 MG금액", "쿠팡 MG%", "네이버(무료배송)", "네이버 MG금액", "네이버 MG%", "네이버(착불)", "네이버 MG금액", "네이버 MG%"].map((head) => (
+                <th key={head} className="border-b border-r border-slate-200 px-2 py-2 text-left font-black last:border-r-0">{head}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const rowId = Number(row.order_item_id || 0);
+              const price = prices[rowId] || { coupang: "", naverFree: "", naverCod: "" };
+              const unitCost = Number(row.estimated_unit_cost || 0);
+              const cp = calc(price.coupang, unitCost, 0.12, 3000);
+              const nf = calc(price.naverFree, unitCost, 0.06, 3000);
+              const nc = calc(price.naverCod, unitCost, 0.06, 0);
+              return (
+                <tr key={row.order_item_id || `${row.option_name}-${row.product_name}`} className="odd:bg-white even:bg-slate-50/50">
+                  <td className="border-r border-slate-200 px-2 py-2 font-bold">{row.option_name || row.product_name || "-"}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.quantity || 0).toLocaleString("ko-KR")}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.unit_price || 0).toLocaleString("ko-KR")} {row.item_currency}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(Number(row.cost_ratio || 0) * 100)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.unit_extra_cost || 0)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
+                  <td className="border-r border-slate-200 px-2 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{cp.amount === null ? "-" : krw(cp.amount)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(cp.pct)}</td>
+                  <td className="border-r border-slate-200 px-2 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{nf.amount === null ? "-" : krw(nf.amount)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(nf.pct)}</td>
+                  <td className="border-r border-slate-200 px-2 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{nc.amount === null ? "-" : krw(nc.amount)}</td>
+                  <td className="px-2 py-2 text-right">{fmtPct(nc.pct)}</td>
+                </tr>
+              );
+            })}
+            {!rows.length && (
+              <tr><td colSpan={16} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -2158,6 +2341,7 @@ function NativeOrderForm({ id }: { id?: number }) {
   }, [catalogQuery, data?.products]);
 
   const nativeTotals = lines.reduce<Record<string, number>>((totals, line) => {
+    if (String(line.item_type || "").toUpperCase() === "MATERIAL") return totals;
     const currency = line.item_currency || "CNY";
     totals[currency] = (totals[currency] || 0) + (Number(line.quantity || 0) * Number(line.unit_price || 0));
     return totals;
@@ -2166,8 +2350,12 @@ function NativeOrderForm({ id }: { id?: number }) {
   const fxRate = order?.fx_rate || data?.rates?.CNY || 195;
   const isTT = isTTPayment(paymentMethod);
   const actualUsdValue = isTT ? Number(actualUsd1 || 0) + Number(actualUsd2 || 0) : Number(actualUsd || 0);
-  const productLineWon = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0)), 0);
-  const productTotalWon = Math.round(actualUsdValue > 0 ? actualUsdValue * Number(data?.rates?.USD || 0) : productLineWon);
+  const goodsLineWon = lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0)), 0);
+  const productLineWon = lines.reduce((sum, line) => {
+    if (String(line.item_type || "").toUpperCase() === "MATERIAL") return sum;
+    return sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0));
+  }, 0);
+  const productTotalWon = Math.round(actualUsdValue > 0 && goodsLineWon > 0 ? actualUsdValue * Number(data?.rates?.USD || 0) * (productLineWon / goodsLineWon) : productLineWon);
   const formRateNote = rateNoteText(data?.rates, Object.keys(nativeTotals));
   const productSummaryParts = [
     nativeTotalText(nativeTotals, "CNY"),
@@ -2385,6 +2573,15 @@ function NativeOrderForm({ id }: { id?: number }) {
                 <p className="font-black">원화 제품 합계: <span className="text-lg text-orange-600">₩{productTotalWon.toLocaleString("ko-KR")}</span></p>
                 <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
               </div>
+            </div>
+            <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_120px]">
+              <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" defaultValue={order?.china_domestic_shipping || 0} /></Field>
+              <Field label="중국내 기타 금액"><input className="field-input text-right" type="number" name="china_other_cost" defaultValue={order?.china_other_cost || 0} /></Field>
+              <Field label="통화">
+                <select className="field-input" name="china_cost_currency" defaultValue={order?.china_cost_currency || order?.currency || "CNY"}>
+                  {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
             </div>
           </section>
 
