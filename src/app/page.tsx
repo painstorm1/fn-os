@@ -1016,10 +1016,10 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
             </thead>
             <tbody>
               {recent.slice(0, 5).map((order) => (
-                <tr key={order.id} className="border-b border-slate-100">
-                  <td className="py-3 font-bold">{order.order_date || order.paid_date || "-"}</td>
+                <tr key={order.id} className="border-b border-slate-100 hover:bg-orange-50">
+                  <td className="py-3 font-bold"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{order.order_date || order.paid_date || "-"}</Link></td>
                   <td className="py-3">
-                    <div className="flex items-center gap-3">
+                    <Link className="flex items-center gap-3" href={importHref(`/orders?open=${order.id}`)}>
                       {order.repr_image ? (
                         <img src={assetUrl(order.repr_image)} alt="" className="h-10 w-10 rounded-md object-cover" />
                       ) : (
@@ -1029,13 +1029,13 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
                         <div className="font-black">{order.repr_product || "제품 라인 없음"}</div>
                         {(order.line_count || 0) > 1 && <div className="text-xs text-slate-500">외 {(order.line_count || 1) - 1}건</div>}
                       </div>
-                    </div>
+                    </Link>
                   </td>
-                  <td className="py-3">{order.factory_name || "-"}</td>
-                  <td className="py-3 text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</td>
-                  <td className="py-3 text-right font-black">{krw(order.total_won)}</td>
-                  <td className="py-3 text-right font-black text-orange-600">{productionDueText(order)}</td>
-                  <td className="py-3"><span className="flex justify-end"><StatusPill status={order.status} /></span></td>
+                  <td className="py-3"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{order.factory_name || "-"}</Link></td>
+                  <td className="py-3 text-right"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</Link></td>
+                  <td className="py-3 text-right font-black"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{krw(order.total_won)}</Link></td>
+                  <td className="py-3 text-right font-black text-orange-600"><Link className="block" href={importHref(`/orders?open=${order.id}`)}>{productionDueText(order)}</Link></td>
+                  <td className="py-3"><Link className="flex justify-end" href={importHref(`/orders?open=${order.id}`)}><StatusPill status={order.status} /></Link></td>
                 </tr>
               ))}
             </tbody>
