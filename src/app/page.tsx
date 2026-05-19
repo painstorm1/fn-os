@@ -1196,12 +1196,13 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const productWon = Number(detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
   const nativeTotals = nativeTotalText(detail.native_totals, order.currency || "CNY");
   const usedCurrencies = Object.keys(detail.native_totals || (order.currency ? { [order.currency]: 0 } : { CNY: 0 }));
-  const rateNote = rateNoteText(detail.fx_rates, usedCurrencies);
+  const rateNote = rateNoteText(detail.fx_rates, Array.from(new Set([...usedCurrencies, "CNY", "USD"])));
   const isTT = isTTPayment(order.payment_method);
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
   const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(detail.fx_rates?.USD || 0)) : 0;
   const chinaExtraWon = Number(detail.cost_grid?.china_extra_cost || 0);
   const panelProductWon = Math.max(0, productWon - chinaExtraWon);
+  const koreaExtraWon = Number(detail.cost_grid?.korea_extra_cost || orderExtraCost(order));
   const panelTotalWon = panelProductWon + Number(detail.cost_grid?.total_extra_cost || orderExtraCost(order));
 
   useEffect(() => {
@@ -1372,14 +1373,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <p className="text-sm font-bold text-slate-500">총 비용</p>
           <p className="mt-2 text-2xl font-black">{krw(panelTotalWon)}</p>
           <div className="mt-4 grid gap-2 text-sm">
-            <p className="flex justify-between"><span>제품 합계</span><b>{krw(panelProductWon)}</b></p>
-            <p className="flex justify-between"><span>선택통화 합계</span><b>{nativeTotals}</b></p>
-            {actualPaymentValue > 0 && actualCurrency === "KRW" && <p className="flex justify-between"><span>실 결제금액</span><b>{krw(actualPaymentValue)}</b></p>}
-            {actualPaymentValue > 0 && actualCurrency === "USD" && <p className="flex justify-between"><span>실 결제금액</span><b>{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD</b></p>}
-            {actualPaymentValue > 0 && actualCurrency === "USD" && <p className="flex justify-between"><span>원화 반영액</span><b>{krw(actualPaymentKrw)}</b></p>}
+            <p className="flex justify-between"><span>제품합계(선택통화)</span><b>{nativeTotals}</b></p>
+            <p className="flex justify-between"><span>제품합계(원화)</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>중국내 부대비용</span><b>{krw(chinaExtraWon)}</b></p>
-            <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(detail.cost_grid?.korea_extra_cost || orderExtraCost(order))}</b></p>
-            <p className="flex justify-between"><span>총 부대비용</span><b>{krw(detail.cost_grid?.total_extra_cost || orderExtraCost(order))}</b></p>
+            <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(koreaExtraWon)}</b></p>
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
             {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
           </div>
