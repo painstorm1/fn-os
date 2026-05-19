@@ -94,7 +94,7 @@ function CalendarMemo() {
         });
     }
     loadServerMemos();
-    const refreshTimer = window.setInterval(loadServerMemos, 15000);
+    const refreshTimer = window.setInterval(loadServerMemos, 60000);
     window.addEventListener("fnos-calendar-refresh", loadServerMemos);
     window.addEventListener("focus", loadServerMemos);
     return () => {
@@ -243,7 +243,10 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
             {item === "수입관리" ? (
               <Link
                 href="/?menu=import"
+                onMouseEnter={() => warmImportCache(importPath)}
+                onFocus={() => warmImportCache(importPath)}
                 onClick={(event) => {
+                  warmImportCache(importPath);
                   if (activeMenu === "수입관리") {
                     event.preventDefault();
                     setImportOpen((open) => !open);
@@ -271,6 +274,8 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
                   <Link
                     key={sub.path}
                     href={`/?menu=import&section=${encodeURIComponent(sub.path)}`}
+                    onMouseEnter={() => warmImportCache(sub.path)}
+                    onFocus={() => warmImportCache(sub.path)}
                     className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs font-black ${
                       importPath === sub.path ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
                     }`}
@@ -686,11 +691,68 @@ type CostGrid = {
 type ImportProductDetail = {
   ok: boolean;
   product: ImportProduct;
+  materials?: ProductMaterialLink[];
   history: Array<{ id: number; order_code?: string; order_date?: string; paid_date?: string; factory?: string; quantity?: number; unit_price?: number; item_currency?: string; status?: string }>;
 };
 
 function apiUrl(path: string) {
   return `${IMPORT_ERP_URL}${path}`;
+}
+
+type CacheEntry<T> = {
+  at: number;
+  data?: T;
+  promise?: Promise<T>;
+};
+
+const apiCache = new Map<string, CacheEntry<unknown>>();
+const DEFAULT_CACHE_TTL = 45_000;
+
+function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
+  const key = apiUrl(path);
+  const now = Date.now();
+  const cached = apiCache.get(key) as CacheEntry<T> | undefined;
+  if (cached?.data !== undefined && now - cached.at < ttl) return Promise.resolve(cached.data);
+  if (cached?.promise) return cached.promise;
+  const promise = fetch(key, { credentials: "include" })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json() as Promise<T>;
+    })
+    .then((data) => {
+      apiCache.set(key, { at: Date.now(), data });
+      return data;
+    })
+    .catch((error) => {
+      apiCache.delete(key);
+      throw error;
+    });
+  apiCache.set(key, { at: now, promise });
+  return promise;
+}
+
+function invalidateApiCache(match?: string) {
+  if (!match) {
+    apiCache.clear();
+    return;
+  }
+  const needle = apiUrl(match);
+  for (const key of Array.from(apiCache.keys())) {
+    if (key.includes(needle) || key.includes(match)) apiCache.delete(key);
+  }
+}
+
+function warmImportCache(section?: string) {
+  void cachedJson("/api/fnos/form-data", 60_000).catch(() => undefined);
+  if (!section || section === "/orders") {
+    void cachedJson("/api/fnos/orders", 30_000).catch(() => undefined);
+  }
+  if (!section || section === "/products") {
+    void cachedJson("/api/fnos/products", 60_000).catch(() => undefined);
+  }
+  if (!section || section === "/settings") {
+    void cachedJson("/api/fnos/settings", 60_000).catch(() => undefined);
+  }
 }
 
 function importHref(path: string) {
@@ -920,8 +982,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/fnos/dashboard"), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<{ recent?: ImportOrder[]; monthly?: Array<{ month: string; cnt: number; amount: number }> }>("/api/fnos/dashboard")
       .then((data) => {
         if (!alive) return;
         setRecent(data.recent || []);
@@ -1022,8 +1083,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
   const [loading, setLoading] = useState(true);
 
   async function loadOrders() {
-    const res = await fetch(apiUrl("/api/fnos/orders"), { credentials: "include" });
-    const data = await res.json();
+    const data = await cachedJson<{ orders?: ImportOrder[] }>("/api/fnos/orders", 30_000);
     setOrders(data.orders || []);
   }
 
@@ -1041,8 +1101,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
   async function openOrder(orderId: number) {
     setExpandedId(orderId);
     if (!details[orderId]) {
-      const res = await fetch(apiUrl(`/api/fnos/orders/${orderId}`), { credentials: "include" });
-      const detail = await res.json();
+      const detail = await cachedJson<ImportOrderDetail>(`/api/fnos/orders/${orderId}`, 30_000);
       setDetails((prev) => ({ ...prev, [orderId]: detail }));
     }
   }
@@ -1207,6 +1266,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     const next = await res.json();
     setSaving(false);
     if (res.ok && next.ok) {
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
+      invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       onSaved(next);
     }
@@ -1220,6 +1282,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         credentials: "include",
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
+      invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       onSaved(null);
     } catch {
@@ -1573,8 +1638,7 @@ function NativeProducts() {
     } catch {
       // Cache is only a speed hint; ignore invalid data.
     }
-    fetch(apiUrl("/api/fnos/products"), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", 60_000)
       .then((data) => {
         if (!alive) return;
         const nextProducts = data.products || [];
@@ -1638,8 +1702,7 @@ function useImportFormData() {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/fnos/form-data"), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportFormData>("/api/fnos/form-data", 60_000)
       .then((next) => {
         if (alive) setData({ ...next, factories: sortFactories(next.factories) });
       })
@@ -1660,8 +1723,7 @@ function NativeProductDetail({ id }: { id: number }) {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000)
       .then((next) => {
         if (alive) setDetail(next);
       })
@@ -1682,6 +1744,9 @@ function NativeProductDetail({ id }: { id: number }) {
         credentials: "include",
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/form-data");
+      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch {
       alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
@@ -1949,13 +2014,12 @@ function NativeProductForm({ id }: { id?: number }) {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000)
       .then((next) => {
         if (alive) {
           setProduct(next.product || null);
           setProductUrl(next.product?.product_url || "");
-          setPastedImageDataUrl(/^data:image\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
+          setPastedImageDataUrl(/^data:image\//i.test(next.product?.image_path || "") ? (next.product?.image_path || "") : "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
           setLinkedProducts(next.product?.linked_products || []);
@@ -1995,6 +2059,9 @@ function NativeProductForm({ id }: { id?: number }) {
         throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/form-data");
+      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
@@ -2017,6 +2084,9 @@ function NativeProductForm({ id }: { id?: number }) {
       if (!res.ok || json?.ok === false) {
         throw new Error(json?.error || "제품 삭제에 실패했습니다.");
       }
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/form-data");
+      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 삭제에 실패했습니다.");
@@ -2254,8 +2324,7 @@ function NativeOrderDetail({ id }: { id: number }) {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportOrderDetail>(`/api/fnos/orders/${id}`, 30_000)
       .then((next) => {
         if (alive) setDetail(next);
       })
@@ -2277,6 +2346,9 @@ function NativeOrderDetail({ id }: { id: number }) {
         credentials: "include",
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
+      invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       window.location.href = importHref("/orders");
     } catch {
@@ -2537,6 +2609,9 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
+      invalidateApiCache("/api/fnos/calendar-production-memos");
       window.location.href = importHref("/orders");
     } catch (err) {
       setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
@@ -2553,6 +2628,9 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
         credentials: "include",
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
+      invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       window.location.href = importHref("/orders");
     } catch {
@@ -2793,8 +2871,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportOrderDetail>(`/api/fnos/orders/${id}`, 30_000)
       .then((next: ImportOrderDetail) => {
         if (!alive) return;
         setOrder(next.order || null);
@@ -2938,8 +3015,7 @@ function NativeSettings() {
   const [factoryDraft, setFactoryDraft] = useState({ name: "", country: "중국", platform: "1688", contact: "", note: "" });
 
   async function loadSettings() {
-    const res = await fetch(apiUrl("/api/fnos/settings"), { credentials: "include" });
-    const next = await res.json();
+    const next = await cachedJson<{ rates: Record<string, number>; factories: ImportFactory[] }>("/api/fnos/settings", 60_000);
     setData({ ...next, factories: sortFactories(next.factories) });
   }
 
@@ -2958,6 +3034,8 @@ function NativeSettings() {
       credentials: "include",
       body: JSON.stringify(Object.fromEntries(form.entries())),
     });
+    invalidateApiCache("/api/fnos/settings");
+    invalidateApiCache("/api/fnos/form-data");
     await loadSettings();
     setSaving(false);
   }
@@ -2971,6 +3049,8 @@ function NativeSettings() {
       credentials: "include",
       body: JSON.stringify({ ...factoryDraft, note_lines: factoryDraft.note.split(/\r?\n/) }),
     });
+    invalidateApiCache("/api/fnos/settings");
+    invalidateApiCache("/api/fnos/form-data");
     setFactoryDraft({ name: "", country: "중국", platform: "1688", contact: "", note: "" });
     setFactoryFormOpen(false);
     await loadSettings();
@@ -3035,6 +3115,8 @@ function FactorySettingsCard({ factory, onSaved }: { factory: ImportFactory; onS
       credentials: "include",
       body: JSON.stringify({ ...draft, note_lines: draft.note.split(/\r?\n/) }),
     });
+    invalidateApiCache("/api/fnos/settings");
+    invalidateApiCache("/api/fnos/form-data");
     await onSaved();
     setSaving(false);
   }
@@ -3046,6 +3128,8 @@ function FactorySettingsCard({ factory, onSaved }: { factory: ImportFactory; onS
       method: "DELETE",
       credentials: "include",
     });
+    invalidateApiCache("/api/fnos/settings");
+    invalidateApiCache("/api/fnos/form-data");
     await onSaved();
     setSaving(false);
   }
