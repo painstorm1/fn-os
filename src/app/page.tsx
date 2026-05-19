@@ -1464,7 +1464,7 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
         <table className="min-w-[1260px] text-xs">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재원가", "예상원가", "쿠팡(무료배송)", "쿠팡 MG금액", "쿠팡 MG%", "네이버(무료배송)", "네이버 MG금액", "네이버 MG%", "네이버(착불)", "네이버 MG금액", "네이버 MG%"].map((head) => (
+              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재원가", "예상원가", "쿠팡(무료)", "쿠팡 MG금액", "쿠팡 MG%", "네이버(무료)", "네이버 MG금액", "네이버 MG%", "네이버(착불)", "네이버 MG금액", "네이버 MG%"].map((head) => (
                 <th key={head} className="border-b border-r border-slate-200 px-2 py-2 text-left font-black last:border-r-0">{head}</th>
               ))}
             </tr>
