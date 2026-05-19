@@ -186,7 +186,7 @@ function CalendarMemo() {
           {(serverMemos[selected] || []).map((memo, index) => (
             <div key={`server-${memo.memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
               {memo.order_id ? (
-                <Link href={importHref(`/orders/${memo.order_id}`)} className="break-all hover:underline">
+                <Link href={importHref(`/orders?open=${memo.order_id}`)} className="break-all hover:underline">
                   - {memo.memo}
                 </Link>
               ) : (
@@ -932,22 +932,25 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 }
 
 function NativeImportWorkspace({ path }: { path: string }) {
-  const orderEditMatch = path.match(/^\/orders\/(\d+)\/edit/);
-  const orderMatch = path.match(/^\/orders\/(\d+)/);
-  const productEditMatch = path.match(/^\/products\/(\d+)\/edit/);
-  const productMatch = path.match(/^\/products\/(\d+)/);
-  if (path.startsWith("/orders/new")) return <NativeOrderForm />;
-  if (path.startsWith("/products/new")) return <NativeProductForm />;
+  const [basePath, queryString = ""] = path.split("?");
+  const query = new URLSearchParams(queryString);
+  const openOrderId = Number(query.get("open") || 0) || null;
+  const orderEditMatch = basePath.match(/^\/orders\/(\d+)\/edit/);
+  const orderMatch = basePath.match(/^\/orders\/(\d+)/);
+  const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
+  const productMatch = basePath.match(/^\/products\/(\d+)/);
+  if (basePath.startsWith("/orders/new")) return <NativeOrderForm />;
+  if (basePath.startsWith("/products/new")) return <NativeProductForm />;
   if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
   if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
   if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
   if (productMatch) return <NativeProductDetail id={Number(productMatch[1])} />;
-  if (path.startsWith("/products")) return <NativeProducts />;
-  if (path.startsWith("/settings")) return <NativeSettings />;
-  return <NativeOrders />;
+  if (basePath.startsWith("/products")) return <NativeProducts />;
+  if (basePath.startsWith("/settings")) return <NativeSettings />;
+  return <NativeOrders initialOpenOrderId={openOrderId} />;
 }
 
-function NativeOrders() {
+function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: number | null }) {
   const [orders, setOrders] = useState<ImportOrder[]>([]);
   const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -970,11 +973,7 @@ function NativeOrders() {
     };
   }, []);
 
-  async function toggleOrder(orderId: number) {
-    if (expandedId === orderId) {
-      setExpandedId(null);
-      return;
-    }
+  async function openOrder(orderId: number) {
     setExpandedId(orderId);
     if (!details[orderId]) {
       const res = await fetch(apiUrl(`/api/fnos/orders/${orderId}`), { credentials: "include" });
@@ -982,6 +981,20 @@ function NativeOrders() {
       setDetails((prev) => ({ ...prev, [orderId]: detail }));
     }
   }
+
+  async function toggleOrder(orderId: number) {
+    if (expandedId === orderId) {
+      setExpandedId(null);
+      return;
+    }
+    await openOrder(orderId);
+  }
+
+  useEffect(() => {
+    if (loading || !initialOpenOrderId) return;
+    void openOrder(initialOpenOrderId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, initialOpenOrderId]);
 
   return (
     <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}>
