@@ -1644,7 +1644,9 @@ function NativeProducts() {
     };
   }, []);
 
-  const visibleProducts = products.filter((product) => tab === "materials" ? isMaterial(product) : !isMaterial(product));
+  const visibleProducts = products
+    .filter((product) => tab === "materials" ? isMaterial(product) : !isMaterial(product))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko-KR", { numeric: true, sensitivity: "base" }));
 
   return (
     <Panel
