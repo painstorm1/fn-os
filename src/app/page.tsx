@@ -2488,12 +2488,14 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
 
   const catalogProducts = useMemo(() => {
     const query = catalogQuery.trim().toLowerCase();
-    if (!query) return data?.products || [];
-    return (data?.products || []).filter((product) => (
-      [product.name, String(product.id), product.factory_name, product.options]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    ));
+    const products = query
+      ? (data?.products || []).filter((product) => (
+        [product.name, String(product.id), product.factory_name, product.options]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query))
+      ))
+      : (data?.products || []);
+    return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko-KR", { numeric: true, sensitivity: "base" }));
   }, [catalogQuery, data?.products]);
 
   const orderNativeTotals = lines.reduce<Record<string, number>>((totals, line) => {
