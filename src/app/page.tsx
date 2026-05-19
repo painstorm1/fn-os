@@ -664,6 +664,10 @@ function assetUrl(path?: string) {
   return `${IMPORT_ERP_URL}/static/${path.replace(/^\/?static\//, "")}`;
 }
 
+function sortFactories(factories?: ImportFactory[]) {
+  return [...(factories || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko-KR"));
+}
+
 function isMaterial(product?: ImportProduct | null) {
   return String(product?.item_type || "").toUpperCase() === "MATERIAL";
 }
@@ -1400,7 +1404,7 @@ function useImportFormData() {
     fetch(apiUrl("/api/fnos/form-data"), { credentials: "include" })
       .then((res) => res.json())
       .then((next) => {
-        if (alive) setData(next);
+        if (alive) setData({ ...next, factories: sortFactories(next.factories) });
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2537,7 +2541,8 @@ function NativeSettings() {
 
   async function loadSettings() {
     const res = await fetch(apiUrl("/api/fnos/settings"), { credentials: "include" });
-    setData(await res.json());
+    const next = await res.json();
+    setData({ ...next, factories: sortFactories(next.factories) });
   }
 
   useEffect(() => {
