@@ -1000,21 +1000,22 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={`grid gap-4 ${compact ? "xl:grid-cols-[1fr_320px]" : "2xl:grid-cols-[1fr_360px]"}`}>
-      <Panel title="최근 발주" subtitle="수입ERP 데이터 원장 기준 최근 10건">
+      <Panel title="최근 발주" subtitle="수입ERP 데이터 원장 기준 최근 5건">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-slate-200 text-xs text-slate-500">
               <tr>
-                <th className="py-2">발주일</th>
-                <th className="py-2">제품</th>
-                <th className="py-2">공급사</th>
+                <th className="py-2">주문날짜</th>
+                <th className="py-2">대표 제품</th>
+                <th className="py-2">공장</th>
                 <th className="py-2 text-right">수량</th>
-                <th className="py-2 text-right">금액</th>
-                <th className="py-2">상태</th>
+                <th className="py-2 text-right">금액(원)</th>
+                <th className="py-2 text-right">출고예정</th>
+                <th className="py-2 text-right">상태</th>
               </tr>
             </thead>
             <tbody>
-              {recent.map((order) => (
+              {recent.slice(0, 5).map((order) => (
                 <tr key={order.id} className="border-b border-slate-100">
                   <td className="py-3 font-bold">{order.order_date || order.paid_date || "-"}</td>
                   <td className="py-3">
@@ -1033,7 +1034,8 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
                   <td className="py-3">{order.factory_name || "-"}</td>
                   <td className="py-3 text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</td>
                   <td className="py-3 text-right font-black">{krw(order.total_won)}</td>
-                  <td className="py-3"><StatusPill status={order.status} /></td>
+                  <td className="py-3 text-right font-black text-orange-600">{productionDueText(order)}</td>
+                  <td className="py-3"><span className="flex justify-end"><StatusPill status={order.status} /></span></td>
                 </tr>
               ))}
             </tbody>
