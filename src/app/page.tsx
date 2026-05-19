@@ -2158,7 +2158,7 @@ function NativeProductForm({ id }: { id?: number }) {
             <div className="grid items-start gap-3 md:grid-cols-[2fr_.7fr_.8fr_.7fr]">
               <Field label={itemType === "MATERIAL" ? "부자재명 *" : "제품명 *"}><input className="field-input" name="name" required defaultValue={product?.name || ""} /></Field>
               <Field label="MOQ"><input className="field-input" type="number" name="moq" defaultValue={product?.moq || ""} /></Field>
-              <Field label="표준 단가"><input className="field-input" type="number" step="0.01" name="std_price" defaultValue={product?.std_price || ""} /></Field>
+              <Field label="표준 단가"><input className="field-input" type="number" step="0.001" name="std_price" defaultValue={product?.std_price || ""} /></Field>
               <Field label="통화">
                 <select className="field-input" name="currency" defaultValue={product?.currency || "CNY"}>
                   {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
