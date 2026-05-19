@@ -1323,10 +1323,22 @@ function NativeProducts() {
 
   useEffect(() => {
     let alive = true;
+    try {
+      const cached = sessionStorage.getItem("fnos-products-cache");
+      if (cached) {
+        setProducts(JSON.parse(cached));
+        setLoading(false);
+      }
+    } catch {
+      // Cache is only a speed hint; ignore invalid data.
+    }
     fetch(apiUrl("/api/fnos/products"), { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
-        if (alive) setProducts(data.products || []);
+        if (!alive) return;
+        const nextProducts = data.products || [];
+        setProducts(nextProducts);
+        sessionStorage.setItem("fnos-products-cache", JSON.stringify(nextProducts));
       })
       .finally(() => {
         if (alive) setLoading(false);
