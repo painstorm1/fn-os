@@ -1315,41 +1315,28 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         </section>
         <section className="grid gap-3">
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
-          <div className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[120px_110px_minmax(130px,1fr)_minmax(130px,1fr)_150px]">
-              <Field label="제작기간">
-                <div className="grid grid-cols-[1fr_30px]">
-                  <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
-                  <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
-                </div>
-              </Field>
-              <Field label="통화">
-                <select className="field-input" value={actualCurrency} onChange={(e) => setActualCurrency(e.target.value as "KRW" | "USD")}>
-                  <option>KRW</option>
-                  <option>USD</option>
-                </select>
-              </Field>
-              {isTT ? (
-                <>
-                  <Field label="1차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(e) => setActualPayment1(e.target.value)} /></Field>
-                  <Field label="2차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(e) => setActualPayment2(e.target.value)} /></Field>
-                  <Field label="최종 결제"><p className="whitespace-nowrap px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
-                </>
-              ) : (
-                <Field label="실 결제금액"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment} onChange={(e) => setActualPayment(e.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
-              )}
+          <div className="grid items-start gap-4 2xl:grid-cols-[1.05fr_1fr]">
+            <div className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1.25fr_92px_120px]">
+                <Field label="중국내 배송비"><input className="field-input text-right" type="number" value={costs.china_domestic_shipping} onChange={(e) => setCosts((prev) => ({ ...prev, china_domestic_shipping: e.target.value }))} /></Field>
+                <Field label="수수료"><input className="field-input text-right" type="number" value={costs.china_fee} onChange={(e) => setCosts((prev) => ({ ...prev, china_fee: e.target.value }))} /></Field>
+                <Field label="중국내 기타금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
+                <Field label="기타 적요"><input className="field-input" value={costs.china_other_note} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_note: e.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
+                <Field label="통화">
+                  <select className="field-input" value={costs.china_cost_currency} onChange={(e) => setCosts((prev) => ({ ...prev, china_cost_currency: e.target.value }))}>
+                    {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </Field>
+                <Field label="운송방식"><select className="field-input" value={costs.shipping_method} onChange={(e) => setCosts((prev) => ({ ...prev, shipping_method: e.target.value }))}>{["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}</select></Field>
+              </div>
+              <Field label="메모"><textarea className="field-input min-h-[84px]" value={costs.note} onChange={(e) => setCosts((prev) => ({ ...prev, note: e.target.value }))} /></Field>
             </div>
-            <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1.35fr_92px_110px]">
-              <Field label="배송비"><input className="field-input text-right" type="number" value={costs.china_domestic_shipping} onChange={(e) => setCosts((prev) => ({ ...prev, china_domestic_shipping: e.target.value }))} /></Field>
-              <Field label="수수료"><input className="field-input text-right" type="number" value={costs.china_fee} onChange={(e) => setCosts((prev) => ({ ...prev, china_fee: e.target.value }))} /></Field>
-              <Field label="기타금액"><input className="field-input text-right" type="number" value={costs.china_other_cost} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_cost: e.target.value }))} /></Field>
-              <Field label="기타 적요"><input className="field-input" value={costs.china_other_note} onChange={(e) => setCosts((prev) => ({ ...prev, china_other_note: e.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
-              <Field label="통화">
-                <select className="field-input" value={costs.china_cost_currency} onChange={(e) => setCosts((prev) => ({ ...prev, china_cost_currency: e.target.value }))}>
-                  {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </Field>
-              <Field label="운송"><select className="field-input" value={costs.shipping_method} onChange={(e) => setCosts((prev) => ({ ...prev, shipping_method: e.target.value }))}>{["LCL", "항공", "해운", "택배", "기타"].map((item) => <option key={item}>{item}</option>)}</select></Field>
+            <div className="grid gap-3 md:grid-cols-4 2xl:grid-cols-3">
+              {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
+                <Field key={key} label={{ shipping_cost: "배대지 배송비", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
+                  <input className="field-input text-right" type="number" value={costs[key]} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))} />
+                </Field>
+              ))}
             </div>
           </div>
         </section>
@@ -1368,16 +1355,34 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           </div>
         </section>
         <section className="rounded-md border border-slate-200 bg-white p-3">
-          <h3 className="mb-3 text-sm font-black">한국 물류·통관</h3>
+          <h3 className="mb-3 text-sm font-black">제작·실결제</h3>
           <div className="grid grid-cols-2 gap-2">
-            {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
-              <Field key={key} label={{ shipping_cost: "배대지", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
-                <input className="field-input text-right" type="number" value={costs[key]} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))} />
-              </Field>
-            ))}
-          </div>
-          <div className="mt-3">
-            <Field label="메모"><textarea className="field-input min-h-[96px]" value={costs.note} onChange={(e) => setCosts((prev) => ({ ...prev, note: e.target.value }))} /></Field>
+            <Field label="제작기간">
+              <div className="grid grid-cols-[1fr_30px]">
+                <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
+                <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
+              </div>
+            </Field>
+            <Field label="통화">
+              <select className="field-input" value={actualCurrency} onChange={(e) => setActualCurrency(e.target.value as "KRW" | "USD")}>
+                <option>KRW</option>
+                <option>USD</option>
+              </select>
+            </Field>
+            {isTT ? (
+              <>
+                <Field label="1차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(e) => setActualPayment1(e.target.value)} /></Field>
+                <Field label="2차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(e) => setActualPayment2(e.target.value)} /></Field>
+                <div className="col-span-2 rounded-md bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-black text-slate-500">최종 결제</p>
+                  <p className="mt-1 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p>
+                </div>
+              </>
+            ) : (
+              <div className="col-span-2">
+                <Field label="실 결제금액"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment} onChange={(e) => setActualPayment(e.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+              </div>
+            )}
           </div>
         </section>
       </aside>
