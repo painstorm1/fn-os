@@ -660,7 +660,7 @@ function importHref(path: string) {
 
 function assetUrl(path?: string) {
   if (!path) return "";
-  if (path.startsWith("http")) return path;
+  if (path.startsWith("http") || path.startsWith("data:image/")) return path;
   return `${IMPORT_ERP_URL}/static/${path.replace(/^\/?static\//, "")}`;
 }
 
@@ -1601,6 +1601,7 @@ function NativeProductForm({ id }: { id?: number }) {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [pastedImageDataUrl, setPastedImageDataUrl] = useState("");
   const [imageHint, setImageHint] = useState("");
   const [productUrl, setProductUrl] = useState("");
   const [itemType, setItemType] = useState<"PRODUCT" | "MATERIAL">("PRODUCT");
@@ -1642,10 +1643,21 @@ function NativeProductForm({ id }: { id?: number }) {
     }
   }
 
+  async function imageFileToDataUrl(nextFile: File) {
+    const preparedFile = await normalizeImageFile(nextFile, true);
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = reject;
+      reader.readAsDataURL(preparedFile);
+    });
+  }
+
   async function prepareImageChange(nextFile?: File, forceCompress = false) {
     if (!nextFile) {
       setFile(null);
       setImageUrl("");
+      setPastedImageDataUrl("");
       setImageHint("");
       setPreviewUrl("");
       return;
@@ -1654,6 +1666,7 @@ function NativeProductForm({ id }: { id?: number }) {
     const preparedFile = await normalizeImageFile(nextFile, forceCompress);
     setFile(preparedFile);
     setImageUrl("");
+    setPastedImageDataUrl("");
     setImageHint(preparedFile.size < nextFile.size ? "이미지를 압축해서 저장합니다." : "선택한 이미지가 저장됩니다.");
     setPreviewUrl(URL.createObjectURL(preparedFile));
   }
@@ -1665,6 +1678,7 @@ function NativeProductForm({ id }: { id?: number }) {
   function handleImageUrlChange(value: string) {
     const nextUrl = value.trim();
     setImageUrl(value);
+    setPastedImageDataUrl("");
     setFile(null);
     setPreviewUrl(nextUrl);
     setImageHint(nextUrl ? "이미지 URL이 저장됩니다." : "");
@@ -1677,7 +1691,14 @@ function NativeProductForm({ id }: { id?: number }) {
       const pastedFile = imageItem.getAsFile();
       if (pastedFile) {
         const ext = pastedFile.type.split("/")[1] || "png";
-        void prepareImageChange(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type }), true);
+        setImageHint("붙여넣은 이미지 처리 중...");
+        void imageFileToDataUrl(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type })).then((dataUrl) => {
+          setFile(null);
+          setImageUrl("");
+          setPastedImageDataUrl(dataUrl);
+          setPreviewUrl(dataUrl);
+          setImageHint("붙여넣은 이미지가 저장됩니다.");
+        }).catch(() => setImageHint("이미지를 처리하지 못했습니다. 이미지 URL을 사용해 주세요."));
         setImageHint("붙여넣은 이미지가 저장됩니다.");
         event.preventDefault();
       }
@@ -1727,6 +1748,7 @@ function NativeProductForm({ id }: { id?: number }) {
           setProduct(next.product || null);
           setProductUrl(next.product?.product_url || "");
           setImageUrl(/^https?:\/\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
+          setPastedImageDataUrl(/^data:image\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
           setLinkedProducts(next.product?.linked_products || []);
@@ -1747,6 +1769,7 @@ function NativeProductForm({ id }: { id?: number }) {
     const form = new FormData(e.currentTarget);
     if (file) form.set("image", file);
     else if (imageUrl.trim()) form.set("image_url", imageUrl.trim());
+    else if (pastedImageDataUrl) form.set("image_url", pastedImageDataUrl);
     form.set("item_type", itemType);
     form.set("materials", JSON.stringify(itemType === "PRODUCT" ? linkedMaterials : []));
     form.set("linked_products", JSON.stringify(itemType === "MATERIAL" ? linkedProducts : []));
