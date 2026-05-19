@@ -1125,7 +1125,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
-            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span className="pr-3 text-right">출고예정</span><span>상태</span>
+            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span className="pr-3 text-right">출고예정</span><span className="text-right">상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
@@ -1139,7 +1139,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                 <span className="text-right">{Math.round(order.total_qty || 0).toLocaleString("ko-KR")}</span>
                 <span className="text-right font-black">{krw(order.total_won)}</span>
                 <span className="pr-3 text-right font-black text-orange-600">{productionDueText(order)}</span>
-                <StatusPill status={order.status} />
+                <span className="flex justify-end"><StatusPill status={order.status} /></span>
               </button>
               {expandedId === order.id && (
                 details[order.id]
