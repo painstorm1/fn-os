@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { ClipboardEvent, FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
@@ -1596,6 +1596,8 @@ function NativeProductForm({ id }: { id?: number }) {
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageHint, setImageHint] = useState("");
   const [productUrl, setProductUrl] = useState("");
   const [itemType, setItemType] = useState<"PRODUCT" | "MATERIAL">("PRODUCT");
   const [linkedMaterials, setLinkedMaterials] = useState<ProductMaterialLink[]>([]);
@@ -1611,7 +1613,38 @@ function NativeProductForm({ id }: { id?: number }) {
 
   function handleImageChange(nextFile?: File) {
     setFile(nextFile || null);
+    setImageUrl("");
+    setImageHint(nextFile ? "선택한 이미지가 저장됩니다." : "");
     setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : "");
+  }
+
+  function handleImageUrlChange(value: string) {
+    const nextUrl = value.trim();
+    setImageUrl(value);
+    setFile(null);
+    setPreviewUrl(nextUrl);
+    setImageHint(nextUrl ? "이미지 URL이 저장됩니다." : "");
+  }
+
+  function handleImagePaste(event: ClipboardEvent<HTMLDivElement>) {
+    const items = Array.from(event.clipboardData.items || []);
+    const imageItem = items.find((item) => item.type.startsWith("image/"));
+    if (imageItem) {
+      const pastedFile = imageItem.getAsFile();
+      if (pastedFile) {
+        const ext = pastedFile.type.split("/")[1] || "png";
+        handleImageChange(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type }));
+        setImageHint("붙여넣은 이미지가 저장됩니다.");
+        event.preventDefault();
+      }
+      return;
+    }
+
+    const text = event.clipboardData.getData("text/plain").trim();
+    if (/^https?:\/\//i.test(text)) {
+      handleImageUrlChange(text);
+      event.preventDefault();
+    }
   }
 
   function toggleMaterial(material: ImportProduct) {
@@ -1649,6 +1682,7 @@ function NativeProductForm({ id }: { id?: number }) {
         if (alive) {
           setProduct(next.product || null);
           setProductUrl(next.product?.product_url || "");
+          setImageUrl(/^https?:\/\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
           setLinkedProducts(next.product?.linked_products || []);
@@ -1668,6 +1702,7 @@ function NativeProductForm({ id }: { id?: number }) {
     setError("");
     const form = new FormData(e.currentTarget);
     if (file) form.set("image", file);
+    else if (imageUrl.trim()) form.set("image_url", imageUrl.trim());
     form.set("item_type", itemType);
     form.set("materials", JSON.stringify(itemType === "PRODUCT" ? linkedMaterials : []));
     form.set("linked_products", JSON.stringify(itemType === "MATERIAL" ? linkedProducts : []));
@@ -1692,10 +1727,14 @@ function NativeProductForm({ id }: { id?: number }) {
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
         <>
         <form key={product?.id || "new"} onSubmit={submit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
-          <div className="space-y-3">
+          <div className="space-y-3" onPaste={handleImagePaste}>
             <div>
               <p className="text-sm font-black">제품 사진</p>
-              <div className="mt-2 h-[200px] w-[200px] overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+              <div
+                className="mt-2 h-[200px] w-[200px] overflow-hidden rounded-md border border-slate-200 bg-slate-100 outline-orange-500 focus:outline focus:outline-2"
+                tabIndex={0}
+                title="이미지를 복사한 뒤 Ctrl+V로 붙여넣을 수 있습니다."
+              >
                 {(previewUrl || product?.image_path) && (
                   <img
                     src={previewUrl || assetUrl(product?.image_path)}
@@ -1718,8 +1757,15 @@ function NativeProductForm({ id }: { id?: number }) {
               >
                 이미지 선택
               </label>
+              <input
+                className="mt-2 h-10 w-[200px] rounded-md border border-slate-300 bg-white px-3 text-xs font-bold outline-orange-500"
+                placeholder="이미지 URL 붙여넣기"
+                value={imageUrl}
+                onChange={(event) => handleImageUrlChange(event.target.value)}
+              />
             </div>
             <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
+            {imageHint && <p className="text-xs font-bold text-orange-600">{imageHint}</p>}
             {itemType === "MATERIAL" ? (
               <div className="grid gap-2">
                 <button
