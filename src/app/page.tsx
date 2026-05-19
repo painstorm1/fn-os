@@ -1313,7 +1313,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         </section>
         <section className="grid gap-3">
           <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1.55fr]">
             <Field label="예상 제작기간">
               <div className="grid grid-cols-[1fr_38px]">
                 <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
@@ -1330,7 +1330,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
                 </Field>
                 <Field label={`1차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(e) => setActualPayment1(e.target.value)} /></Field>
                 <Field label={`2차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(e) => setActualPayment2(e.target.value)} /></Field>
-                <Field label={`최종 실 결제금액(${actualCurrency})`}><p className="px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
+                <Field label={`최종 실 결제금액(${actualCurrency})`}><p className="whitespace-nowrap px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
               </>
             ) : (
               <>
@@ -2747,8 +2747,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 );
               })}
             </div>
-            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,520px)_1fr]">
-              <div className={`grid gap-3 rounded-md border border-slate-200 bg-white p-3 ${isTT ? "md:grid-cols-4" : "md:grid-cols-2"}`}>
+            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,660px)_1fr]">
+              <div className={`grid gap-3 rounded-md border border-slate-200 bg-white p-3 ${isTT ? "md:grid-cols-[1fr_1fr_1fr_1.55fr]" : "md:grid-cols-2"}`}>
                 {isTT ? (
                   <>
                     <Field label="실결제 통화">
@@ -2759,7 +2759,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     </Field>
                     <Field label={`1차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(event) => setActualPayment1(event.target.value)} /></Field>
                     <Field label={`2차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(event) => setActualPayment2(event.target.value)} /></Field>
-                    <Field label={`최종 실 결제금액(${actualCurrency})`}><p className="px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
+                    <Field label={`최종 실 결제금액(${actualCurrency})`}><p className="whitespace-nowrap px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
                   </>
                 ) : (
                   <>
