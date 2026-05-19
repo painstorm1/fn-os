@@ -1747,8 +1747,12 @@ function NativeProductForm({ id }: { id?: number }) {
     setSaving(true);
     setError("");
     const form = new FormData(e.currentTarget);
-    if (file) form.set("image", file);
-    else if (pastedImageDataUrl) form.set("image_url", pastedImageDataUrl);
+    if (pastedImageDataUrl) {
+      form.delete("image");
+      form.set("image_url", pastedImageDataUrl);
+    } else if (file) {
+      form.set("image", file);
+    }
     form.set("item_type", itemType);
     form.set("materials", JSON.stringify(itemType === "PRODUCT" ? linkedMaterials : []));
     form.set("linked_products", JSON.stringify(itemType === "MATERIAL" ? linkedProducts : []));
