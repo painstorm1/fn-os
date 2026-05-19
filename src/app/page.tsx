@@ -1413,7 +1413,13 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
     if (!price) return { amount: null, pct: null };
     const settlement = price * (1 - feeRate);
     const amount = settlement - sellerShippingFee - unitCost;
-    return { amount, pct: settlement > 0 ? (amount / settlement) * 100 : null };
+    const marginBase = settlement - sellerShippingFee;
+    return { amount, pct: marginBase > 0 ? (amount / marginBase) * 100 : null };
+  }
+
+  function formatMargin(value: { amount: number | null; pct: number | null }) {
+    if (value.amount === null) return "-";
+    return `${krw(value.amount)} (${fmtPct(value.pct)})`;
   }
 
   async function save() {
@@ -1449,10 +1455,10 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
         <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1260px] text-xs">
+        <table className="min-w-[1120px] text-xs">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재원가", "예상원가", "쿠팡(무료)", "쿠팡 MG금액", "쿠팡 MG%", "네이버(무료)", "네이버 MG금액", "네이버 MG%", "네이버(착불)", "네이버 MG금액", "네이버 MG%"].map((head) => (
+              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"].map((head) => (
                 <th key={head} className="border-b border-r border-slate-200 px-2 py-2 text-left font-black last:border-r-0">{head}</th>
               ))}
             </tr>
@@ -1475,19 +1481,16 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
                   <td className="w-[96px] border-r border-slate-200 px-1.5 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{cp.amount === null ? "-" : krw(cp.amount)}</td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(cp.pct)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{formatMargin(cp)}</td>
                   <td className="w-[96px] border-r border-slate-200 px-1.5 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{nf.amount === null ? "-" : krw(nf.amount)}</td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(nf.pct)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{formatMargin(nf)}</td>
                   <td className="w-[96px] border-r border-slate-200 px-1.5 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{nc.amount === null ? "-" : krw(nc.amount)}</td>
-                  <td className="px-2 py-2 text-right">{fmtPct(nc.pct)}</td>
+                  <td className="px-2 py-2 text-right">{formatMargin(nc)}</td>
                 </tr>
               );
             })}
             {!rows.length && (
-              <tr><td colSpan={16} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
+              <tr><td colSpan={13} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
             )}
           </tbody>
         </table>
