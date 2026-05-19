@@ -1600,7 +1600,6 @@ function NativeProductForm({ id }: { id?: number }) {
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
   const [pastedImageDataUrl, setPastedImageDataUrl] = useState("");
   const [imageHint, setImageHint] = useState("");
   const [productUrl, setProductUrl] = useState("");
@@ -1656,7 +1655,6 @@ function NativeProductForm({ id }: { id?: number }) {
   async function prepareImageChange(nextFile?: File, forceCompress = false) {
     if (!nextFile) {
       setFile(null);
-      setImageUrl("");
       setPastedImageDataUrl("");
       setImageHint("");
       setPreviewUrl("");
@@ -1665,7 +1663,6 @@ function NativeProductForm({ id }: { id?: number }) {
     setImageHint("이미지 처리 중...");
     const preparedFile = await normalizeImageFile(nextFile, forceCompress);
     setFile(preparedFile);
-    setImageUrl("");
     setPastedImageDataUrl("");
     setImageHint(preparedFile.size < nextFile.size ? "이미지를 압축해서 저장합니다." : "선택한 이미지가 저장됩니다.");
     setPreviewUrl(URL.createObjectURL(preparedFile));
@@ -1673,15 +1670,6 @@ function NativeProductForm({ id }: { id?: number }) {
 
   function handleImageChange(nextFile?: File) {
     void prepareImageChange(nextFile);
-  }
-
-  function handleImageUrlChange(value: string) {
-    const nextUrl = value.trim();
-    setImageUrl(value);
-    setPastedImageDataUrl("");
-    setFile(null);
-    setPreviewUrl(nextUrl);
-    setImageHint(nextUrl ? "이미지 URL이 저장됩니다." : "");
   }
 
   function handleImagePaste(event: ClipboardEvent<HTMLDivElement>) {
@@ -1694,21 +1682,14 @@ function NativeProductForm({ id }: { id?: number }) {
         setImageHint("붙여넣은 이미지 처리 중...");
         void imageFileToDataUrl(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type })).then((dataUrl) => {
           setFile(null);
-          setImageUrl("");
           setPastedImageDataUrl(dataUrl);
           setPreviewUrl(dataUrl);
           setImageHint("붙여넣은 이미지가 저장됩니다.");
-        }).catch(() => setImageHint("이미지를 처리하지 못했습니다. 이미지 URL을 사용해 주세요."));
+        }).catch(() => setImageHint("이미지를 처리하지 못했습니다. 파일로 저장해 주세요."));
         setImageHint("붙여넣은 이미지가 저장됩니다.");
         event.preventDefault();
       }
       return;
-    }
-
-    const text = event.clipboardData.getData("text/plain").trim();
-    if (/^https?:\/\//i.test(text)) {
-      handleImageUrlChange(text);
-      event.preventDefault();
     }
   }
 
@@ -1747,7 +1728,6 @@ function NativeProductForm({ id }: { id?: number }) {
         if (alive) {
           setProduct(next.product || null);
           setProductUrl(next.product?.product_url || "");
-          setImageUrl(/^https?:\/\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
           setPastedImageDataUrl(/^data:image\//i.test(next.product?.image_path || "") ? next.product.image_path : "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
@@ -1768,7 +1748,6 @@ function NativeProductForm({ id }: { id?: number }) {
     setError("");
     const form = new FormData(e.currentTarget);
     if (file) form.set("image", file);
-    else if (imageUrl.trim()) form.set("image_url", imageUrl.trim());
     else if (pastedImageDataUrl) form.set("image_url", pastedImageDataUrl);
     form.set("item_type", itemType);
     form.set("materials", JSON.stringify(itemType === "PRODUCT" ? linkedMaterials : []));
@@ -1782,7 +1761,7 @@ function NativeProductForm({ id }: { id?: number }) {
       const contentType = res.headers.get("content-type") || "";
       const json = contentType.includes("application/json") ? await res.json() : null;
       if (!json) {
-        throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 이미지 URL을 사용하거나 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
+        throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
       window.location.href = importHref(id ? `/products/${id}` : "/products");
@@ -1828,12 +1807,6 @@ function NativeProductForm({ id }: { id?: number }) {
               >
                 이미지 선택
               </label>
-              <input
-                className="mt-2 h-10 w-[200px] rounded-md border border-slate-300 bg-white px-3 text-xs font-bold outline-orange-500"
-                placeholder="이미지 URL 붙여넣기"
-                value={imageUrl}
-                onChange={(event) => handleImageUrlChange(event.target.value)}
-              />
             </div>
             <p className="text-xs font-bold text-slate-500">JPG/PNG/WebP, 최대 32MB</p>
             {imageHint && <p className="text-xs font-bold text-orange-600">{imageHint}</p>}
