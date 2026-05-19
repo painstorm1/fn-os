@@ -999,11 +999,12 @@ function NativeImportWorkspace({ path }: { path: string }) {
   const [basePath, queryString = ""] = path.split("?");
   const query = new URLSearchParams(queryString);
   const openOrderId = Number(query.get("open") || 0) || null;
+  const copyOrderId = Number(query.get("copy") || 0) || undefined;
   const orderEditMatch = basePath.match(/^\/orders\/(\d+)\/edit/);
   const orderMatch = basePath.match(/^\/orders\/(\d+)/);
   const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
   const productMatch = basePath.match(/^\/products\/(\d+)/);
-  if (basePath.startsWith("/orders/new")) return <NativeOrderForm />;
+  if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
   if (basePath.startsWith("/products/new")) return <NativeProductForm />;
   if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
   if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
@@ -2327,10 +2328,10 @@ function NativeOrderDetail({ id }: { id: number }) {
   );
 }
 
-function NativeOrderForm({ id }: { id?: number }) {
+function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
   const { data, loading } = useImportFormData();
   const [order, setOrder] = useState<ImportOrder | null>(null);
-  const [detailLoading, setDetailLoading] = useState(Boolean(id));
+  const [detailLoading, setDetailLoading] = useState(Boolean(id || copyId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -2355,27 +2356,46 @@ function NativeOrderForm({ id }: { id?: number }) {
   ]);
 
   useEffect(() => {
-    if (!id) return;
+    const sourceId = id || copyId;
+    if (!sourceId) return;
     let alive = true;
-    fetch(apiUrl(`/api/fnos/orders/${id}`), { credentials: "include" })
+    const isCopy = !id && Boolean(copyId);
+    fetch(apiUrl(`/api/fnos/orders/${sourceId}`), { credentials: "include" })
       .then((res) => res.json())
       .then((next: ImportOrderDetail) => {
         if (!alive) return;
-        setOrder(next.order || null);
-        setPaymentMethod(next.order?.payment_method || "플랫폼 카드결제");
-        setProductionDays(next.order?.production_days != null ? String(next.order.production_days) : "");
-        setActualCurrency(actualPaymentCurrency(next.order));
-        setActualPayment(actualPaymentSingle(next.order));
-        setActualPayment1(actualPaymentFirst(next.order));
-        setActualPayment2(actualPaymentSecond(next.order));
+        const sourceOrder = next.order || null;
+        const formOrder = sourceOrder && isCopy ? {
+          ...sourceOrder,
+          id: 0,
+          order_code: "",
+          parent_order_id: undefined,
+          order_date: "",
+          first_payment_date: "",
+          paid_date: "",
+          factory_ship_date: "",
+          badaeji_arrived: "",
+          customs_cleared: "",
+          fn_arrived: "",
+          production_due_date: null,
+          production_memo: null,
+          status: "",
+        } as ImportOrder : sourceOrder;
+        setOrder(formOrder);
+        setPaymentMethod(formOrder?.payment_method || "플랫폼 카드결제");
+        setProductionDays(formOrder?.production_days != null ? String(formOrder.production_days) : "");
+        setActualCurrency(actualPaymentCurrency(formOrder));
+        setActualPayment(actualPaymentSingle(formOrder));
+        setActualPayment1(actualPaymentFirst(formOrder));
+        setActualPayment2(actualPaymentSecond(formOrder));
         setChinaCosts({
-          shipping: next.order?.china_domestic_shipping != null ? String(next.order.china_domestic_shipping) : "",
-          fee: next.order?.china_fee != null ? String(next.order.china_fee) : "",
-          other: next.order?.china_other_cost != null ? String(next.order.china_other_cost) : "",
-          otherNote: next.order?.china_other_note || "",
-          currency: next.order?.china_cost_currency || next.order?.currency || "CNY",
+          shipping: formOrder?.china_domestic_shipping != null ? String(formOrder.china_domestic_shipping) : "",
+          fee: formOrder?.china_fee != null ? String(formOrder.china_fee) : "",
+          other: formOrder?.china_other_cost != null ? String(formOrder.china_other_cost) : "",
+          otherNote: formOrder?.china_other_note || "",
+          currency: formOrder?.china_cost_currency || formOrder?.currency || "CNY",
         });
-        setStageValues(stageValuesFromOrder(next.order));
+        setStageValues(stageValuesFromOrder(formOrder));
         setLines((next.items || []).map((item) => ({
           product_id: item.product_id ? String(item.product_id) : "",
           product_name: item.product_name || "",
@@ -2395,7 +2415,7 @@ function NativeOrderForm({ id }: { id?: number }) {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, copyId]);
 
   const blankLine: OrderLine = { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" };
 
