@@ -1080,9 +1080,16 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
   const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ q: "", dateFrom: "", dateTo: "" });
+  const [appliedFilters, setAppliedFilters] = useState({ q: "", dateFrom: "", dateTo: "" });
 
-  async function loadOrders() {
-    const data = await cachedJson<{ orders?: ImportOrder[] }>("/api/fnos/orders", 30_000);
+  async function loadOrders(nextFilters = appliedFilters) {
+    const params = new URLSearchParams();
+    if (nextFilters.q.trim()) params.set("q", nextFilters.q.trim());
+    if (nextFilters.dateFrom) params.set("date_from", nextFilters.dateFrom);
+    if (nextFilters.dateTo) params.set("date_to", nextFilters.dateTo);
+    const path = `/api/fnos/orders${params.toString() ? `?${params.toString()}` : ""}`;
+    const data = await cachedJson<{ orders?: ImportOrder[] }>(path, 30_000);
     setOrders(data.orders || []);
   }
 
@@ -1123,6 +1130,21 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
     <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+          <form
+            className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_150px_78px]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setAppliedFilters(filters);
+              setExpandedId(null);
+              setLoading(true);
+              loadOrders(filters).finally(() => setLoading(false));
+            }}
+          >
+            <input className="field-input" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} placeholder="제품명 or 거래처명" />
+            <input className="field-input" type="date" value={filters.dateFrom} onChange={(event) => setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))} />
+            <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
+            <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
+          </form>
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
             <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span>
           </div>
@@ -1616,6 +1638,7 @@ function NativeProducts() {
   const [products, setProducts] = useState<ImportProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"products" | "materials">("products");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -1644,7 +1667,13 @@ function NativeProducts() {
   }, []);
 
   const visibleProducts = products
-    .filter((product) => tab === "materials" ? isMaterial(product) : !isMaterial(product))
+    .filter((product) => {
+      const keyword = query.trim().toLowerCase();
+      if (!keyword) return tab === "materials" ? isMaterial(product) : !isMaterial(product);
+      return [product.name, product.factory_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword));
+    })
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko-KR", { numeric: true, sensitivity: "base" }));
 
   return (
@@ -1655,10 +1684,14 @@ function NativeProducts() {
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <>
-        <div className="mb-4 flex items-center gap-3 text-sm font-black">
-          <button type="button" onClick={() => setTab("products")} className={tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
-          <span className="text-slate-300">|</span>
-          <button type="button" onClick={() => setTab("materials")} className={tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
+        <div className="mb-4 grid gap-3">
+          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명 or 거래처명" />
+          <div className="flex items-center gap-3 text-sm font-black">
+            <button type="button" onClick={() => setTab("products")} className={!query.trim() && tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
+            <span className="text-slate-300">|</span>
+            <button type="button" onClick={() => setTab("materials")} className={!query.trim() && tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
+            {query.trim() && <span className="text-xs text-slate-500">검색 중에는 상품/부자재 전체에서 찾습니다.</span>}
+          </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
