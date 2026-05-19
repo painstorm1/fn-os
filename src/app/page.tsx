@@ -1451,22 +1451,6 @@ function NativeProductDetail({ id }: { id: number }) {
     }
   }
 
-  async function adjustMaterialStock() {
-    if (!product || !isMaterial(product)) return;
-    const target = window.prompt("새 현재고를 입력하세요.", String(product.material_stock ?? 0));
-    if (target === null) return;
-    const memo = window.prompt("조정 메모", "수동 재고 조정") || "수동 재고 조정";
-    const res = await fetch(apiUrl(`/api/fnos/materials/${id}/adjust`), {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_stock: target, memo }),
-    });
-    if (res.ok) {
-      const next = await fetch(apiUrl(`/api/fnos/products/${id}`), { credentials: "include" }).then((r) => r.json());
-      setDetail(next);
-    }
-  }
 
   return (
     <Panel
@@ -1474,7 +1458,6 @@ function NativeProductDetail({ id }: { id: number }) {
       subtitle={product ? `${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
       action={<div className="flex gap-2">
         <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600" onClick={deleteProduct}>삭제</button>
-        {product && isMaterial(product) ? <button type="button" className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-black text-emerald-600" onClick={adjustMaterialStock}>재고 조정</button> : null}
         <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>
       </div>}
     >
@@ -1488,6 +1471,12 @@ function NativeProductDetail({ id }: { id: number }) {
           </div>
           <div className="grid gap-5">
             <div className="grid gap-3 md:grid-cols-4">
+              {isMaterial(product) ? (
+                <>
+                  <Info label="현재고" value={`${Number(product.material_stock || 0).toLocaleString("ko-KR")}개`} />
+                  <Info label="원가" value={krw(product.material_unit_cost || product.material_cost || 0)} />
+                </>
+              ) : null}
               <Info label="상태" value={product.status || "-"} />
               <Info label="HS 코드" value={product.hs_code || "-"} />
               <Info label="기본 관세율" value={`${product.basic_rate || 0}%`} />
@@ -1837,7 +1826,7 @@ function NativeProductForm({ id }: { id?: number }) {
               </Field>
               {itemType === "MATERIAL" ? (
                 <>
-                  <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
+                  <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_stock ?? product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
                 </>
               ) : null}
             </div>
