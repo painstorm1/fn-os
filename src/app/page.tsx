@@ -2342,7 +2342,7 @@ function NativeOrderForm({ id }: { id?: number }) {
               {lines.map((line, index) => {
                 const subtotal = Number(line.quantity || 0) * Number(line.unit_price || 0);
                 return (
-                  <div key={index} className="grid gap-3 border-b border-slate-200 py-3 xl:grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px]">
+                  <div key={index} className="grid items-start gap-3 border-b border-slate-200 py-3 xl:grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px]">
                     <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
                       {line.image_path ? <img src={assetUrl(line.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">사진</div>}
                     </div>
@@ -2357,12 +2357,12 @@ function NativeOrderForm({ id }: { id?: number }) {
                     </div>
                     <div className="flex h-[38px] items-center justify-end text-sm font-black">{subtotal.toLocaleString("ko-KR")} {line.item_currency}</div>
                     {String(line.item_type || "").toUpperCase() === "MATERIAL" ? (
-                      <p className="text-xs font-bold text-emerald-600 xl:col-start-2">부자재 입고 재고에 반영</p>
+                      <p className="text-xs font-bold text-emerald-600 xl:col-span-5 xl:col-start-2 xl:row-start-2">부자재 입고 재고에 반영</p>
                     ) : line.materials?.length ? (
-                      <p className={`text-xs font-bold xl:col-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
+                      <p className={`text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
                     ) : null}
-                    <input className="field-input" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
-                    <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
+                    <input className="field-input xl:col-start-7 xl:row-start-1" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
+                    <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40 xl:col-start-8 xl:row-start-1" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
                   </div>
                 );
               })}
