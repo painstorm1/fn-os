@@ -1419,7 +1419,7 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
 
   function formatMargin(value: { amount: number | null; pct: number | null }) {
     if (value.amount === null) return "-";
-    return `${krw(value.amount)} (${fmtPct(value.pct)})`;
+    return `${krw(value.amount)} ｜ ${fmtPct(value.pct)}`;
   }
 
   async function save() {
