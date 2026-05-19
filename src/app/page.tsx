@@ -2547,7 +2547,6 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       if (emptyIndex === -1) return [...prev, nextLine];
       return prev.map((line, index) => index === emptyIndex ? nextLine : line);
     });
-    setCatalogOpen(false);
   }
 
   function addEmptyLine() {
