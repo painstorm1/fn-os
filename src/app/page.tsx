@@ -94,10 +94,14 @@ function CalendarMemo() {
         });
     }
     loadServerMemos();
+    const refreshTimer = window.setInterval(loadServerMemos, 15000);
     window.addEventListener("fnos-calendar-refresh", loadServerMemos);
+    window.addEventListener("focus", loadServerMemos);
     return () => {
       alive = false;
+      window.clearInterval(refreshTimer);
       window.removeEventListener("fnos-calendar-refresh", loadServerMemos);
+      window.removeEventListener("focus", loadServerMemos);
     };
   }, []);
 
