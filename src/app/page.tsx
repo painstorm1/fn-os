@@ -1617,8 +1617,8 @@ function NativeProductForm({ id }: { id?: number }) {
 
   async function normalizeImageFile(nextFile: File, force = false) {
     if (nextFile.type === "image/gif") return nextFile;
-    const maxBytes = 1.2 * 1024 * 1024;
-    const maxSide = 1200;
+    const maxBytes = 420 * 1024;
+    const maxSide = 720;
     if (!force && nextFile.size <= maxBytes) return nextFile;
     const sourceUrl = URL.createObjectURL(nextFile);
     try {
@@ -1633,7 +1633,7 @@ function NativeProductForm({ id }: { id?: number }) {
       canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
       canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
       canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.68));
       if (!blob) return nextFile;
       if (!force && blob.size >= nextFile.size && blob.size <= maxBytes) return nextFile;
       return new File([blob], nextFile.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
