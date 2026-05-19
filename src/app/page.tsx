@@ -1617,8 +1617,8 @@ function NativeProductForm({ id }: { id?: number }) {
 
   async function normalizeImageFile(nextFile: File, force = false) {
     if (nextFile.type === "image/gif") return nextFile;
-    const maxBytes = 3.2 * 1024 * 1024;
-    const maxSide = 1600;
+    const maxBytes = 1.2 * 1024 * 1024;
+    const maxSide = 1200;
     if (!force && nextFile.size <= maxBytes) return nextFile;
     const sourceUrl = URL.createObjectURL(nextFile);
     try {
@@ -1633,7 +1633,7 @@ function NativeProductForm({ id }: { id?: number }) {
       canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
       canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
       canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
       if (!blob) return nextFile;
       if (!force && blob.size >= nextFile.size && blob.size <= maxBytes) return nextFile;
       return new File([blob], nextFile.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
@@ -1661,11 +1661,11 @@ function NativeProductForm({ id }: { id?: number }) {
       return;
     }
     setImageHint("이미지 처리 중...");
-    const preparedFile = await normalizeImageFile(nextFile, forceCompress);
-    setFile(preparedFile);
-    setPastedImageDataUrl("");
-    setImageHint(preparedFile.size < nextFile.size ? "이미지를 압축해서 저장합니다." : "선택한 이미지가 저장됩니다.");
-    setPreviewUrl(URL.createObjectURL(preparedFile));
+    const dataUrl = await imageFileToDataUrl(nextFile);
+    setFile(null);
+    setPastedImageDataUrl(dataUrl);
+    setImageHint("선택한 이미지가 저장됩니다.");
+    setPreviewUrl(dataUrl);
   }
 
   function handleImageChange(nextFile?: File) {
