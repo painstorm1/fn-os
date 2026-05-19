@@ -3227,9 +3227,15 @@ function Dashboard() {
       </section>
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4">
-          <h2 className="text-lg font-black">수입제품 현황</h2>
-          <p className="mt-1 text-sm text-slate-500">수입ERP 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-black">수입제품 현황</h2>
+            <p className="mt-1 text-sm text-slate-500">수입ERP 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
+          </div>
+          <div className="flex gap-2">
+            <Link className="inline-flex h-9 items-center rounded-md bg-orange-500 px-3 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>
+            <Link className="inline-flex h-9 items-center rounded-md border border-orange-200 bg-orange-50 px-3 text-sm font-black text-orange-600" href={importHref("/products/new")}>+ 새 상품</Link>
+          </div>
         </div>
         <NativeImportDashboard compact />
       </section>
