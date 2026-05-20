@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
@@ -3642,13 +3642,150 @@ function timeLabel() {
   return `${mm}${dd}_발주건출력_${nowDate.getHours() < 12 ? "오전" : "오후"}`;
 }
 
+type SalesGridCell = { row: number; col: number };
+type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
+
+function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
+  return {
+    startRow: Math.min(a.row, b.row),
+    endRow: Math.max(a.row, b.row),
+    startCol: Math.min(a.col, b.col),
+    endCol: Math.max(a.col, b.col),
+  };
+}
+
+function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[][], colIndex: number) {
+  if (sheet === "송장출력용" && header !== "주문옵션") return 90;
+  const longest = [header, ...rows.map((row) => row[colIndex] || "")].reduce((max, value) => Math.max(max, String(value).length), 0);
+  return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
+}
+
 function SalesExcelGrid({ sheet, rows, onChange }: { sheet: SalesSheetName; rows: string[][]; onChange: (rows: string[][]) => void }) {
   const headers = salesSheetHeaders[sheet];
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
+  const [range, setRange] = useState<SalesGridRange>({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
+  const [selecting, setSelecting] = useState(false);
+  const [editing, setEditing] = useState<SalesGridCell | null>(null);
+  const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
+  const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => 30));
+  const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
+
+  useEffect(() => {
+    setAnchor({ row: 0, col: 0 });
+    setRange({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
+    setEditing(null);
+    setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
+    setRowHeights(rows.map(() => 30));
+  }, [sheet]);
+
+  useEffect(() => {
+    setRowHeights((prev) => rows.map((_, index) => prev[index] || 30));
+  }, [rows.length]);
+
+  useEffect(() => {
+    if (!resize) return;
+    const activeResize = resize;
+    function onMove(event: globalThis.MouseEvent) {
+      const delta = (activeResize.type === "col" ? event.clientX : event.clientY) - activeResize.start;
+      if (activeResize.type === "col") {
+        setColWidths((prev) => prev.map((width, index) => index === activeResize.index ? Math.max(54, activeResize.initial + delta) : width));
+      } else {
+        setRowHeights((prev) => prev.map((height, index) => index === activeResize.index ? Math.max(22, activeResize.initial + delta) : height));
+      }
+    }
+    function onUp() {
+      setResize(null);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resize]);
+
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     onChange(rows.map((row, r) => r === rowIndex ? row.map((cell, c) => c === colIndex ? value : cell) : row));
   }
   function addRow() {
     onChange([...rows, headers.map(() => "")]);
+  }
+  function selectCell(row: number, col: number, extend = false) {
+    const next = { row, col };
+    const base = extend ? anchor : next;
+    if (!extend) setAnchor(next);
+    setRange(normalizeRange(base, next));
+    setEditing(null);
+    gridRef.current?.focus();
+  }
+  function isSelected(row: number, col: number) {
+    return row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol;
+  }
+  function copyRange(event: ClipboardEvent<HTMLDivElement>) {
+    const text = rows
+      .slice(range.startRow, range.endRow + 1)
+      .map((row) => row.slice(range.startCol, range.endCol + 1).join("\t"))
+      .join("\n");
+    event.clipboardData.setData("text/plain", text);
+    event.preventDefault();
+  }
+  function pasteRange(event: ClipboardEvent<HTMLDivElement>) {
+    const text = event.clipboardData.getData("text/plain");
+    if (!text) return;
+    const pasted = text.replace(/\r/g, "").split("\n").filter((line, index, arr) => line !== "" || index < arr.length - 1).map((line) => line.split("\t"));
+    if (!pasted.length) return;
+    const next = rows.map((row) => [...row]);
+    const neededRows = range.startRow + pasted.length;
+    while (next.length < neededRows) next.push(headers.map(() => ""));
+    pasted.forEach((line, rowOffset) => {
+      line.forEach((value, colOffset) => {
+        const rowIndex = range.startRow + rowOffset;
+        const colIndex = range.startCol + colOffset;
+        if (colIndex < headers.length) next[rowIndex][colIndex] = value;
+      });
+    });
+    onChange(next);
+    setRange(normalizeRange(
+      { row: range.startRow, col: range.startCol },
+      { row: range.startRow + pasted.length - 1, col: Math.min(headers.length - 1, range.startCol + pasted[0].length - 1) },
+    ));
+    event.preventDefault();
+  }
+  function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (editing) return;
+    if (event.key === "Delete" || event.key === "Backspace") {
+      const next = rows.map((row, rowIndex) => row.map((cell, colIndex) => isSelected(rowIndex, colIndex) ? "" : cell));
+      onChange(next);
+      event.preventDefault();
+      return;
+    }
+    const current = { row: range.startRow, col: range.startCol };
+    if (event.key === "Enter") {
+      setEditing(current);
+      event.preventDefault();
+      return;
+    }
+    const move: Record<string, SalesGridCell> = {
+      ArrowUp: { row: Math.max(0, current.row - 1), col: current.col },
+      ArrowDown: { row: Math.min(rows.length - 1, current.row + 1), col: current.col },
+      ArrowLeft: { row: current.row, col: Math.max(0, current.col - 1) },
+      ArrowRight: { row: current.row, col: Math.min(headers.length - 1, current.col + 1) },
+    };
+    if (move[event.key]) {
+      selectCell(move[event.key].row, move[event.key].col, event.shiftKey);
+      event.preventDefault();
+    }
+  }
+  function startColResize(event: MouseEvent, index: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    setResize({ type: "col", index, start: event.clientX, initial: colWidths[index] || 90 });
+  }
+  function startRowResize(event: MouseEvent, index: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    setResize({ type: "row", index, start: event.clientY, initial: rowHeights[index] || 30 });
   }
   return (
     <div className="rounded-md border border-slate-200 bg-white">
@@ -3656,25 +3793,73 @@ function SalesExcelGrid({ sheet, rows, onChange }: { sheet: SalesSheetName; rows
         <strong>{sheet}</strong>
         <button type="button" onClick={addRow} className="rounded-md border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">행 추가</button>
       </div>
-      <div className="max-h-[560px] overflow-auto">
+      <div
+        ref={gridRef}
+        tabIndex={0}
+        onCopy={copyRange}
+        onPaste={pasteRange}
+        onKeyDown={onGridKeyDown}
+        onMouseUp={() => setSelecting(false)}
+        className="max-h-[560px] overflow-auto outline-none"
+      >
         <table className="min-w-max border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-slate-100">
             <tr>
               <th className="w-10 border border-slate-200 px-2 py-2 text-slate-400">#</th>
-              {headers.map((header) => <th key={header} className="min-w-[130px] border border-slate-200 px-2 py-2 text-left font-black text-slate-600">{header}</th>)}
+              {headers.map((header, colIndex) => (
+                <th key={header} style={{ width: colWidths[colIndex] || 90 }} className="relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
+                  <div className="truncate">{header}</div>
+                  <button
+                    type="button"
+                    aria-label={`${header} 열 너비 조절`}
+                    onMouseDown={(event) => startColResize(event, colIndex)}
+                    className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-orange-300"
+                  />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                <td className="border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-400">{rowIndex + 1}</td>
+              <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
+                <td className="relative border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-400">
+                  {rowIndex + 1}
+                  <button
+                    type="button"
+                    aria-label={`${rowIndex + 1}행 높이 조절`}
+                    onMouseDown={(event) => startRowResize(event, rowIndex)}
+                    className="absolute bottom-0 left-0 h-1 w-full cursor-row-resize hover:bg-orange-300"
+                  />
+                </td>
                 {headers.map((header, colIndex) => (
-                  <td key={`${header}-${colIndex}`} className="border border-slate-200 p-0">
-                    <input
-                      value={row[colIndex] || ""}
-                      onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
-                      className="h-8 min-w-[130px] bg-white px-2 text-xs outline-orange-400"
-                    />
+                  <td
+                    key={`${header}-${colIndex}`}
+                    style={{ width: colWidths[colIndex] || 90, height: rowHeights[rowIndex] || 30 }}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return;
+                      selectCell(rowIndex, colIndex, event.shiftKey);
+                      setSelecting(true);
+                    }}
+                    onMouseEnter={() => {
+                      if (selecting) setRange(normalizeRange(anchor, { row: rowIndex, col: colIndex }));
+                    }}
+                    onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
+                    className={`border p-0 align-middle ${isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : "border-slate-200 bg-white"}`}
+                  >
+                    {editing?.row === rowIndex && editing?.col === colIndex ? (
+                      <input
+                        autoFocus
+                        value={row[colIndex] || ""}
+                        onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
+                        onBlur={() => setEditing(null)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === "Escape") setEditing(null);
+                        }}
+                        className="h-full w-full bg-white px-2 text-xs outline-orange-400"
+                      />
+                    ) : (
+                      <div className="h-full w-full select-none overflow-hidden whitespace-nowrap px-2 py-1 leading-5">{row[colIndex] || ""}</div>
+                    )}
                   </td>
                 ))}
               </tr>
