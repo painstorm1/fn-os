@@ -3568,18 +3568,18 @@ function StatusPill({ status }: { status?: string }) {
   return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
 }
 
-type SalesSheetName = "송장출력용" | "이카운트_송장입력" | "이카운트 판매입력";
+type SalesSheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  "이카운트 판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+  "이카운트_판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
 };
 
 const salesInitialRows: Record<SalesSheetName, string[][]> = {
   송장출력용: [],
   이카운트_송장입력: [],
-  "이카운트 판매입력": [],
+  "이카운트_판매입력": [],
 };
 
 function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
@@ -3635,6 +3635,13 @@ function timeLabel() {
   const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
   const dd = String(nowDate.getDate()).padStart(2, "0");
   return `${mm}${dd}_발주건출력_${nowDate.getHours() < 12 ? "오전" : "오후"}`;
+}
+
+function integratedOrderFileName() {
+  const nowDate = new Date();
+  const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
+  const dd = String(nowDate.getDate()).padStart(2, "0");
+  return `${mm}${dd}_FNOS통합발주`;
 }
 
 function fnParcelSheetName(date = new Date()) {
@@ -3982,7 +3989,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
-    "이카운트 판매입력": makeSheetRows("이카운트 판매입력"),
+    "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
   });
   const [jsonText, setJsonText] = useState(`[
   {
@@ -4064,7 +4071,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
     const next = Array.from(files || []);
     if (!next.length) return;
-    if (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트 판매입력"])) {
+    if (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트_판매입력"])) {
       const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 실행하면 해당 시트 값이 덮어써질 수 있습니다. 파일을 대기 목록에 추가할까요?");
       if (!ok) return;
     }
@@ -4133,7 +4140,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("전체 엑셀을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    downloadXlsxFile(`${timeLabel()}.xlsx`, sheets);
+    downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, sheets);
     setCompletedSalesTasks((prev) => ({ ...prev, exportAll: true }));
     setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
   }
@@ -4174,7 +4181,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const directSheets = {
       송장출력용: directRows,
       이카운트_송장입력: [],
-      "이카운트 판매입력": [],
+      "이카운트_판매입력": [],
     };
     downloadXlsxFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xlsx`, directSheets);
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
@@ -4182,8 +4189,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendSalesInput() {
-    const headers = salesSheetHeaders["이카운트 판매입력"];
-    const rows = sheets["이카운트 판매입력"]
+    const headers = salesSheetHeaders["이카운트_판매입력"];
+    const rows = sheets["이카운트_판매입력"]
       .filter((row) => row.some(Boolean))
       .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
     if (!rows.length) {
@@ -4194,7 +4201,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${rows.length}건을 이카운트 판매입력으로 전송합니다. 계속할까요?`);
+      const ok = window.confirm(`${rows.length}건을 이카운트_판매입력으로 전송합니다. 계속할까요?`);
       if (!ok) return;
     }
     const res = await fetch("/api/sales/import-ecount", {
@@ -4282,7 +4289,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSheets({
       송장출력용: makeSheetRows("송장출력용"),
       이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
-      "이카운트 판매입력": makeSheetRows("이카운트 판매입력"),
+      "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
     });
     setMessage("이번 작업을 초기화했습니다.");
   }
@@ -4306,7 +4313,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>1. 발주파일 작업 실행</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>2. 송장출력용 내보내기</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={makeDirectShippingFile}>3. 직송파일 만들기</button>
-            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트 판매입력 전송</button>
+            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트_판매입력 전송</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>5. 송장번호 매칭</button>
             <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>6. FN_택배시트 반영</button>
           </div>
