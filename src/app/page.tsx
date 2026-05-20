@@ -4002,7 +4002,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <input type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { void pickOrderFiles(event.target.files, "invoices"); event.target.value = ""; }} />
               </label>
               <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-500">
-                이카운트 주문수집, 오늘의집, 토스, 현대이지웰, 송장번호 파일을 여러 개 끌어다 놓을 수 있습니다. 드래그앤드랍은 발주파일로 읽습니다.
+                파일을 여러 개 끌어다 놓을 수 있습니다. 드래그앤드랍은 발주파일만 가능
               </div>
             </div>
             {uploadedFiles.length > 0 && (
