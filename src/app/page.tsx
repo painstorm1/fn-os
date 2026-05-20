@@ -3598,9 +3598,65 @@ function classifyOrderUploadFileName(fileName: string) {
   return "";
 }
 
+type SalesSortToken = { raw: string; rank: number; numberValue: number | null };
+
+function salesSortTokenize(value: string): SalesSortToken[] {
+  const cleaned = String(value || "")
+    .replace(/\[[^\]]+\]/g, "")
+    .trim()
+    .toLowerCase();
+  const matches = cleaned.match(/[A-Za-z]+|\d+(?:\.\d+)?|[\uAC00-\uD7A3]+|[^A-Za-z0-9\uAC00-\uD7A3]+/g) || [];
+  return matches
+    .map((raw) => {
+      const numberValue = /^\d/.test(raw) ? Number(raw) : null;
+      const rank = /^[A-Za-z]+$/.test(raw)
+        ? 0
+        : /^[\uAC00-\uD7A3]+$/.test(raw)
+          ? 1
+          : numberValue !== null && Number.isFinite(numberValue)
+            ? 2
+            : 3;
+      return { raw, rank, numberValue };
+    })
+    .filter((token) => token.raw.trim() || token.rank !== 3);
+}
+
+function compareMixedKoreanText(a: string, b: string) {
+  const left = String(a || "").trim();
+  const right = String(b || "").trim();
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+
+  const leftTokens = salesSortTokenize(left);
+  const rightTokens = salesSortTokenize(right);
+  const length = Math.max(leftTokens.length, rightTokens.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftToken = leftTokens[index];
+    const rightToken = rightTokens[index];
+    if (!leftToken) return -1;
+    if (!rightToken) return 1;
+
+    if (leftToken.rank !== rightToken.rank) return leftToken.rank - rightToken.rank;
+
+    if (leftToken.numberValue !== null && rightToken.numberValue !== null) {
+      const diff = leftToken.numberValue - rightToken.numberValue;
+      if (diff !== 0) return diff;
+      continue;
+    }
+
+    const locale = leftToken.rank === 0 ? "en" : "ko";
+    const diff = leftToken.raw.localeCompare(rightToken.raw, locale, { numeric: true, sensitivity: "base" });
+    if (diff !== 0) return diff;
+  }
+
+  return left.localeCompare(right, "ko", { numeric: true, sensitivity: "base" });
+}
+
 function sortShippingRowsByOption(rows: string[][]) {
   const optionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
-  return [...rows].sort((a, b) => String(a[optionIndex] || "").localeCompare(String(b[optionIndex] || ""), "ko"));
+  return [...rows].sort((a, b) => compareMixedKoreanText(String(a[optionIndex] || ""), String(b[optionIndex] || "")));
 }
 
 type DirectShippingPartner = "JB" | "케이모아";
@@ -3742,7 +3798,7 @@ function compareSalesCellValue(a: string, b: string) {
   if (left && right && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
     return leftNumber - rightNumber;
   }
-  return left.localeCompare(right, "ko", { numeric: true, sensitivity: "base" });
+  return compareMixedKoreanText(left, right);
 }
 
 function SalesExcelGrid({

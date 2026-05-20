@@ -20,6 +20,62 @@ function clean(value: unknown) {
   return String(value).trim();
 }
 
+type OrderSortToken = { raw: string; rank: number; numberValue: number | null };
+
+function orderSortTokenize(value: string): OrderSortToken[] {
+  const cleaned = String(value || "")
+    .replace(/\[[^\]]+\]/g, "")
+    .trim()
+    .toLowerCase();
+  const matches = cleaned.match(/[A-Za-z]+|\d+(?:\.\d+)?|[\uAC00-\uD7A3]+|[^A-Za-z0-9\uAC00-\uD7A3]+/g) || [];
+  return matches
+    .map((raw) => {
+      const numberValue = /^\d/.test(raw) ? Number(raw) : null;
+      const rank = /^[A-Za-z]+$/.test(raw)
+        ? 0
+        : /^[\uAC00-\uD7A3]+$/.test(raw)
+          ? 1
+          : numberValue !== null && Number.isFinite(numberValue)
+            ? 2
+            : 3;
+      return { raw, rank, numberValue };
+    })
+    .filter((token) => token.raw.trim() || token.rank !== 3);
+}
+
+function compareOrderText(a: string, b: string) {
+  const left = clean(a);
+  const right = clean(b);
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+
+  const leftTokens = orderSortTokenize(left);
+  const rightTokens = orderSortTokenize(right);
+  const length = Math.max(leftTokens.length, rightTokens.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftToken = leftTokens[index];
+    const rightToken = rightTokens[index];
+    if (!leftToken) return -1;
+    if (!rightToken) return 1;
+
+    if (leftToken.rank !== rightToken.rank) return leftToken.rank - rightToken.rank;
+
+    if (leftToken.numberValue !== null && rightToken.numberValue !== null) {
+      const diff = leftToken.numberValue - rightToken.numberValue;
+      if (diff !== 0) return diff;
+      continue;
+    }
+
+    const locale = leftToken.rank === 0 ? "en" : "ko";
+    const diff = leftToken.raw.localeCompare(rightToken.raw, locale, { numeric: true, sensitivity: "base" });
+    if (diff !== 0) return diff;
+  }
+
+  return left.localeCompare(right, "ko", { numeric: true, sensitivity: "base" });
+}
+
 function parseNumber(value: unknown) {
   const next = Number(clean(value).replace(/,/g, ""));
   return Number.isFinite(next) ? next : 0;
@@ -174,7 +230,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
 
   return {
     shipping: shipping
-      .sort((a, b) => a.sortKey.localeCompare(b.sortKey, "ko"))
+      .sort((a, b) => compareOrderText(a.sortKey, b.sortKey))
       .map((item) => item.row),
     invoice,
     sale,
