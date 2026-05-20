@@ -3770,8 +3770,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const defaultTab = section === "history" ? "판매내역" : section === "inventory" ? "재고현황" : section === "master" ? "품목관리" : "온라인 발주";
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
-  const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
-  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
   const [activeSheet, setActiveSheet] = useState<SalesSheetName>("송장출력용");
@@ -3797,28 +3795,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 ]`);
 
-  const tabs = ["온라인 발주", "판매입력", "판매내역", "구매입력", "구매내역", "품목관리", "재고현황", "품절예측", "송장/출고"];
-
   useEffect(() => {
     setActiveTab(defaultTab);
   }, [defaultTab]);
 
   function loadSummary() {
-    setLoading(true);
-    Promise.all([
-      fetch("/api/dashboard/summary", { credentials: "include" }).then((res) => res.json()),
-      fetch("/api/system/sales-inventory-health", { credentials: "include" }).then((res) => res.json()),
-    ])
-      .then(([summaryData, healthData]) => {
+    fetch("/api/dashboard/summary", { credentials: "include" })
+      .then((res) => res.json())
+      .then((summaryData) => {
         setSummary(summaryData);
-        setHealth(healthData);
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "요약 조회 실패";
         setSummary({ ok: false, error: message });
-        setHealth(null);
-      })
-      .finally(() => setLoading(false));
+      });
   }
 
   useEffect(() => {
@@ -3973,90 +3963,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
-  const dbNeedsSetup = Boolean(summary?.error || (health && !health.db_ready));
-  const kpi = [
-    { label: "오늘 매출", value: krw(summary?.today_sales || 0), note: "FN OS 판매 DB 기준" },
-    { label: "이번 달 매출", value: krw(summary?.month_sales || 0), note: "판매조회 API 대체 원장" },
-    { label: "오늘 판매수량", value: `${Number(summary?.today_qty || 0).toLocaleString("ko-KR")}개`, note: "판매입력 수량 합계" },
-    { label: "이번 달 구매액", value: krw(summary?.month_purchase_amount || 0), note: "FN OS 구매 DB 기준" },
-    { label: "재고 위험", value: `${Number(summary?.inventory_risk_count || 0).toLocaleString("ko-KR")} SKU`, note: "현재 기준 5개 이하" },
-    { label: "전송 실패", value: `${Number(summary?.sync_fail_count || 0).toLocaleString("ko-KR")}건`, note: "이카운트 로그 기준" },
-  ];
-  const setupSteps = health?.next_steps?.length ? health.next_steps : [
-    "Supabase SQL Editor에서 schema_sales_inventory.sql 실행",
-    "Vercel 환경변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY 입력",
-    "ECOUNT_* 환경변수 입력 후 품목/재고 동기화 테스트",
-    "엑셀 VBA에서 FN_OS_API_KEY로 판매입력 API 호출 연결",
-  ];
 
   return (
     <div className="space-y-4">
-      <Panel title="매출/재고" subtitle="FN OS가 판매 원장을 먼저 보관하고, 이카운트에는 API로 동기화합니다.">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {kpi.map((item) => (
-            <article key={item.label} className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-black text-slate-500">{item.label}</p>
-              <p className="mt-2 text-xl font-black">{loading ? "불러오는 중..." : item.value}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">{item.note}</p>
-            </article>
-          ))}
-        </div>
-        {summary?.error && (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">
-            DB 연결 전입니다. 아래 준비 작업을 완료하면 실데이터가 표시됩니다.
-          </div>
-        )}
-      </Panel>
-
-      {dbNeedsSetup && (
-        <Panel title="매출/재고 연결 준비" subtitle="지금 화면은 정상입니다. 아직 Supabase 원장 DB가 연결되지 않아서 0원으로 보이는 상태예요.">
-          <div className="mb-3 grid gap-3 md:grid-cols-3">
-            <div className={`rounded-md border p-3 text-sm font-black ${health?.db_configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-              Supabase 환경변수: {health?.db_configured ? "설정됨" : "미설정"}
-            </div>
-            <div className={`rounded-md border p-3 text-sm font-black ${health?.db_ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-              DB 테이블: {health?.db_ready ? "준비됨" : "확인 필요"}
-            </div>
-            <div className={`rounded-md border p-3 text-sm font-black ${health?.ecount_configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-              이카운트 API: {health?.ecount_configured ? "설정됨" : "미설정"}
-            </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {setupSteps.map((step, index) => (
-              <div key={step} className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">{index + 1}</span>
-                <p className="font-bold text-slate-700">{step}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
-            현재 응답: {summary?.error}
-          </p>
-          {Boolean(health?.tables?.length) && (
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {health?.tables?.map((table) => (
-                <div key={table.table} className={`rounded-md border px-3 py-2 text-xs font-bold ${table.ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
-                  {table.table}: {table.ok ? "OK" : "확인 필요"}
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-      )}
-
-      <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-2 shadow-sm">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-md px-3 py-2 text-sm font-black ${activeTab === tab ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
       {activeTab === "온라인 발주" && (
         <Panel
           title="온라인 발주"
@@ -4135,11 +4044,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           action={
             <button
               type="button"
-              className={`rounded-md px-4 py-2 text-sm font-black text-white ${dbNeedsSetup ? "bg-slate-300" : "bg-orange-500"}`}
+              className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white"
               onClick={() => postRows(activeTab === "판매입력" ? "sales" : "purchases")}
-              disabled={dbNeedsSetup}
             >
-              {dbNeedsSetup ? "DB 설정 후 저장" : "FN OS 저장"}
+              FN OS 저장
             </button>
           }
         >
