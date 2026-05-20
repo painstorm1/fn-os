@@ -3661,7 +3661,17 @@ function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[
   return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
 }
 
-function SalesExcelGrid({ sheet, rows, onChange }: { sheet: SalesSheetName; rows: string[][]; onChange: (rows: string[][]) => void }) {
+function SalesExcelGrid({
+  sheet,
+  rows,
+  onChange,
+  onSelectionChange,
+}: {
+  sheet: SalesSheetName;
+  rows: string[][];
+  onChange: (rows: string[][]) => void;
+  onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange) => void;
+}) {
   const headers = salesSheetHeaders[sheet];
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
@@ -3683,6 +3693,10 @@ function SalesExcelGrid({ sheet, rows, onChange }: { sheet: SalesSheetName; rows
   useEffect(() => {
     setRowHeights((prev) => rows.map((_, index) => prev[index] || 30));
   }, [rows.length]);
+
+  useEffect(() => {
+    onSelectionChange?.(sheet, range);
+  }, [sheet, range, onSelectionChange]);
 
   useEffect(() => {
     if (!resize) return;
@@ -3962,6 +3976,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [completedSalesTasks, setCompletedSalesTasks] = useState<Record<string, boolean>>({});
+  const [pendingOrderFiles, setPendingOrderFiles] = useState<File[]>([]);
+  const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState<File[]>([]);
+  const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
@@ -4044,18 +4061,33 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     loadSummary();
   }
 
-  async function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
+  function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
     const next = Array.from(files || []);
     if (!next.length) return;
     if (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트 판매입력"])) {
-      const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 읽으면 해당 시트 값이 덮어써질 수 있습니다. 계속할까요?");
+      const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 실행하면 해당 시트 값이 덮어써질 수 있습니다. 파일을 대기 목록에 추가할까요?");
       if (!ok) return;
     }
     setUploadedFiles((prev) => [...prev, ...next]);
-    setMessage(`${next.length}개 파일을 읽는 중입니다...`);
+    if (kind === "orders") {
+      setPendingOrderFiles((prev) => [...prev, ...next]);
+    } else {
+      setPendingInvoiceFiles((prev) => [...prev, ...next]);
+    }
+    setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: false }));
+    setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${next.length}개를 대기 목록에 올렸습니다. 1번 버튼을 누르면 시트가 채워집니다.`);
+  }
+
+  async function parseWaitingFiles(kind: "orders" | "invoices") {
+    const waitingFiles = kind === "orders" ? pendingOrderFiles : pendingInvoiceFiles;
+    if (!waitingFiles.length) {
+      window.alert(kind === "orders" ? "먼저 발주파일을 업로드해 주세요." : "먼저 송장파일을 업로드해 주세요.");
+      return;
+    }
+    setMessage(`${waitingFiles.length}개 파일을 읽는 중입니다...`);
     const formData = new FormData();
     formData.append("kind", kind);
-    next.forEach((file) => formData.append("files", file));
+    waitingFiles.forEach((file) => formData.append("files", file));
     const res = await fetch("/api/sales/order-files/parse", {
       method: "POST",
       credentials: "include",
@@ -4076,8 +4108,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return nextSheets;
     });
     const count = (Object.values(parsedSheets || {}) as string[][][]).reduce((sum, rows) => sum + rows.length, 0);
-    setCompletedSalesTasks({});
-    setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${next.length}개를 읽어서 ${count}개 행을 시트에 반영했습니다.`);
+    setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: kind === "orders" ? true : prev.orderFlow, invoiceFlow: kind === "invoices" ? true : prev.invoiceFlow }));
+    setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${waitingFiles.length}개를 읽어서 ${count}개 행을 시트에 반영했습니다.`);
   }
 
   function runOrderMacroFlow() {
@@ -4088,12 +4120,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return;
       }
     }
-    if (uploadedFiles.length) {
-      setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-      setMessage("발주파일 작업 실행 완료. 업로드 파일 기준으로 생성된 시트를 확인해 주세요.");
-      return;
-    }
-    window.alert("먼저 발주파일을 업로드해 주세요. 빈 시트에는 임의 값을 만들지 않습니다.");
+    void parseWaitingFiles("orders");
   }
 
   function exportAllSheets() {
@@ -4130,14 +4157,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("직송파일을 만들 송장출력용 데이터가 없습니다.");
       return;
     }
+    const selectedRows = selectedSalesRange?.sheet === "송장출력용"
+      ? sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean))
+      : [];
+    if (!selectedRows.length) {
+      window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요. 예: 2행과 5행을 드래그 또는 Shift 선택");
+      return;
+    }
     if (completedSalesTasks.directShipping) {
       const ok = window.confirm("직송파일을 이미 만든 것으로 보입니다. 다시 만들까요?");
       if (!ok) return;
     }
     const choice = window.prompt("직송파일 거래처를 입력하세요.", "거래처 JB 케이모아");
     if (!choice) return;
-    const rows = sheets.송장출력용.filter((row) => row.some(Boolean));
-    const directRows = rows.map((row) => [choice, row[0] || "", row[1] || "", row[2] || "", row[5] || "", row[6] || "", row[7] || ""]);
+    const directRows = selectedRows.map((row) => [choice, row[0] || "", row[1] || "", row[2] || "", row[5] || "", row[6] || "", row[7] || ""]);
     const directSheets = {
       송장출력용: directRows,
       이카운트_송장입력: [],
@@ -4145,7 +4178,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     };
     downloadTextFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xls`, buildExcelXml(directSheets));
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
-    setMessage(`${choice} 직송파일을 생성했습니다.`);
+    setMessage(`${choice} 직송파일을 선택한 ${selectedRows.length}개 행으로 생성했습니다.`);
   }
 
   async function sendSalesInput() {
@@ -4241,6 +4274,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
     setUploadedFiles([]);
+    setPendingOrderFiles([]);
+    setPendingInvoiceFiles([]);
+    setSelectedSalesRange(null);
     setCompletedSalesTasks({});
     setActiveSheet("송장출력용");
     setSheets({
@@ -4307,6 +4343,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 ))}
               </div>
             )}
+            {(pendingOrderFiles.length > 0 || pendingInvoiceFiles.length > 0) && (
+              <p className="mt-2 text-xs font-bold text-slate-500">
+                대기 중: 발주파일 {pendingOrderFiles.length}개 / 송장파일 {pendingInvoiceFiles.length}개
+              </p>
+            )}
           </div>
           <div className="mb-3 flex flex-wrap gap-2">
             {(Object.keys(salesSheetHeaders) as SalesSheetName[]).map((sheet) => (
@@ -4324,6 +4365,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             sheet={activeSheet}
             rows={sheets[activeSheet]}
             onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
+            onSelectionChange={(sheet, range) => setSelectedSalesRange({ sheet, range })}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 웹브라우저 보안상 파일을 바탕화면에 직접 저장하지는 못해서 다운로드 파일로 생성합니다. 브라우저 다운로드 위치를 바탕화면으로 지정하면 같은 흐름으로 사용할 수 있습니다.
