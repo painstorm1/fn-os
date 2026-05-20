@@ -3663,7 +3663,7 @@ function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
 }
 
 function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[][], colIndex: number) {
-  if (sheet === "송장출력용" && header !== "주문옵션") return 90;
+  if (sheet === "송장출력용" && header !== "주문옵션") return 95;
   const longest = [header, ...rows.map((row) => row[colIndex] || "")].reduce((max, value) => Math.max(max, String(value).length), 0);
   return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
 }
@@ -3673,11 +3673,13 @@ function SalesExcelGrid({
   rows,
   onChange,
   onSelectionChange,
+  resetKey = 0,
 }: {
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange) => void;
+  resetKey?: number;
 }) {
   const headers = salesSheetHeaders[sheet];
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -3695,7 +3697,7 @@ function SalesExcelGrid({
     setEditing(null);
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
     setRowHeights(rows.map(() => 30));
-  }, [sheet]);
+  }, [sheet, resetKey]);
 
   useEffect(() => {
     setRowHeights((prev) => rows.map((_, index) => prev[index] || 30));
@@ -3986,6 +3988,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [pendingOrderFiles, setPendingOrderFiles] = useState<File[]>([]);
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState<File[]>([]);
   const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
+  const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
@@ -4114,6 +4117,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       });
       return nextSheets;
     });
+    setSalesGridResetKey((value) => value + 1);
     const count = (Object.values(parsedSheets || {}) as string[][][]).reduce((sum, rows) => sum + rows.length, 0);
     setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: kind === "orders" ? true : prev.orderFlow, invoiceFlow: kind === "invoices" ? true : prev.invoiceFlow }));
     setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${waitingFiles.length}개를 읽어서 ${count}개 행을 시트에 반영했습니다.`);
@@ -4291,6 +4295,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
       "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
     });
+    setSalesGridResetKey((value) => value + 1);
     setMessage("이번 작업을 초기화했습니다.");
   }
 
@@ -4373,6 +4378,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             rows={sheets[activeSheet]}
             onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
             onSelectionChange={(sheet, range) => setSelectedSalesRange({ sheet, range })}
+            resetKey={salesGridResetKey}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 웹브라우저 보안상 파일을 바탕화면에 직접 저장하지는 못해서 다운로드 파일로 생성합니다. 브라우저 다운로드 위치를 바탕화면으로 지정하면 같은 흐름으로 사용할 수 있습니다.

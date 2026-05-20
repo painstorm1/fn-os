@@ -75,6 +75,13 @@ function makeOrderOption(row: Record<string, unknown>) {
   return qty > 1 ? `${name}-★${qty}개` : name;
 }
 
+function isValidDownRow(row: Record<string, unknown>) {
+  const product = clean(pick(row, ["품목코드(ERP)", "품목코드", "품목명(ERP)", "품목명"]));
+  const recipient = clean(pick(row, ["수취인"]));
+  const orderNo = clean(pick(row, ["주문번호", "묶음주문번호"]));
+  return Boolean(product && recipient && orderNo);
+}
+
 function buildFromDownRows(rows: Record<string, unknown>[]) {
   const counters = new Map<string, number>();
   const shipping: Array<{ sortKey: string; row: string[] }> = [];
@@ -82,6 +89,8 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
   const sale: string[][] = [];
 
   for (const source of rows) {
+    if (!isValidDownRow(source)) continue;
+
     const mallName = clean(pick(source, ["쇼핑몰명", "거래처명"]));
     const mallCode = clean(pick(source, ["쇼핑몰코드"]));
     const date = pick(source, ["수집일자", "일자"]);
