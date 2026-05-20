@@ -4096,6 +4096,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
+  const [invoiceMemoText, setInvoiceMemoText] = useState("");
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
@@ -4359,6 +4360,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function matchInvoiceNumbers() {
+    if (!pendingInvoiceFiles.length && !completedSalesTasks.invoiceFlow) {
+      window.alert("먼저 송장파일을 업로드해 주세요.");
+      return;
+    }
     if (!hasSalesRows(sheets.송장출력용)) {
       window.alert("송장번호 매칭을 실행할 송장출력용 데이터가 없습니다.");
       return;
@@ -4371,10 +4376,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .filter((row) => row.some(Boolean))
       .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
       .map((row) => `${row[0]} ${row[1]} ${row[2] || ""}`);
-    const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
-    downloadTextFile(`${timeLabel()}_직접송장입력.txt`, memo, "text/plain;charset=utf-8");
     setCompletedSalesTasks((prev) => ({ ...prev, invoiceMatched: true }));
-    setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상 메모장을 생성했습니다.");
+    if (manualRows.length) {
+      const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
+      setInvoiceMemoText(memo);
+      setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상 메모장을 화면에 표시했습니다.");
+    } else {
+      setInvoiceMemoText("");
+      setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상은 없습니다.");
+    }
   }
 
   async function applyFnParcelSheet() {
@@ -4423,6 +4433,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setPendingInvoiceFiles([]);
     setSelectedSalesRange(null);
     setCompletedSalesTasks({});
+    setInvoiceMemoText("");
     setDirectShippingRows({ JB: [], 케이모아: [] });
     setActiveSheet("송장출력용");
     setSheets({
@@ -4530,6 +4541,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <button type="button" onClick={() => makeDirectShippingFile("JB")} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">JB</button>
                   <button type="button" onClick={() => makeDirectShippingFile("케이모아")} className="rounded-md border border-slate-200 bg-white px-4 py-5 text-lg font-black text-slate-700 hover:bg-slate-50">케이모아</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {invoiceMemoText && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+              <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-black">직접 송장 입력 메모장</h3>
+                  <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
+                </div>
+                <textarea
+                  className="mt-4 h-80 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-mono text-sm font-bold text-slate-800 outline-orange-400"
+                  value={invoiceMemoText}
+                  onChange={(event) => setInvoiceMemoText(event.target.value)}
+                  autoFocus
+                />
+                <div className="mt-4 flex justify-end">
+                  <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
                 </div>
               </div>
             </div>
