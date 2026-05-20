@@ -3265,6 +3265,7 @@ function SalesInventoryWorkspace() {
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [showJsonTool, setShowJsonTool] = useState(false);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -3338,6 +3339,7 @@ function SalesInventoryWorkspace() {
   }
 
   const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
+  const dbNeedsSetup = Boolean(summary?.error);
   const kpi = [
     { label: "오늘 매출", value: krw(summary?.today_sales || 0), note: "FN OS 판매 DB 기준" },
     { label: "이번 달 매출", value: krw(summary?.month_sales || 0), note: "판매조회 API 대체 원장" },
@@ -3345,6 +3347,12 @@ function SalesInventoryWorkspace() {
     { label: "이번 달 구매액", value: krw(summary?.month_purchase_amount || 0), note: "FN OS 구매 DB 기준" },
     { label: "재고 위험", value: `${Number(summary?.inventory_risk_count || 0).toLocaleString("ko-KR")} SKU`, note: "현재 기준 5개 이하" },
     { label: "전송 실패", value: `${Number(summary?.sync_fail_count || 0).toLocaleString("ko-KR")}건`, note: "이카운트 로그 기준" },
+  ];
+  const setupSteps = [
+    "Supabase SQL Editor에서 schema_sales_inventory.sql 실행",
+    "Vercel 환경변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY 입력",
+    "ECOUNT_* 환경변수 입력 후 품목/재고 동기화 테스트",
+    "엑셀 VBA에서 FN_OS_API_KEY로 판매입력 API 호출 연결",
   ];
 
   return (
@@ -3361,10 +3369,26 @@ function SalesInventoryWorkspace() {
         </div>
         {summary?.error && (
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">
-            DB 연결 전입니다. Supabase 스키마와 환경변수를 설정하면 실데이터가 표시됩니다. ({summary.error})
+            DB 연결 전입니다. 아래 준비 작업을 완료하면 실데이터가 표시됩니다.
           </div>
         )}
       </Panel>
+
+      {dbNeedsSetup && (
+        <Panel title="매출/재고 연결 준비" subtitle="지금 화면은 정상입니다. 아직 Supabase 원장 DB가 연결되지 않아서 0원으로 보이는 상태예요.">
+          <div className="grid gap-3 md:grid-cols-2">
+            {setupSteps.map((step, index) => (
+              <div key={step} className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">{index + 1}</span>
+                <p className="font-bold text-slate-700">{step}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
+            현재 응답: {summary?.error}
+          </p>
+        </Panel>
+      )}
 
       <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-2 shadow-sm">
         {tabs.map((tab) => (
@@ -3383,18 +3407,50 @@ function SalesInventoryWorkspace() {
         <Panel
           title={activeTab}
           subtitle={activeTab === "판매입력" ? "엑셀 1_판매입력 시트 rows를 FN OS DB에 저장합니다." : "구매입력 rows를 FN OS DB에 저장합니다."}
-          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => postRows(activeTab === "판매입력" ? "sales" : "purchases")}>FN OS 저장</button>}
+          action={
+            <button
+              type="button"
+              className={`rounded-md px-4 py-2 text-sm font-black text-white ${dbNeedsSetup ? "bg-slate-300" : "bg-orange-500"}`}
+              onClick={() => postRows(activeTab === "판매입력" ? "sales" : "purchases")}
+              disabled={dbNeedsSetup}
+            >
+              {dbNeedsSetup ? "DB 설정 후 저장" : "FN OS 저장"}
+            </button>
+          }
         >
-          <textarea
-            className="h-72 w-full rounded-md border border-slate-200 p-3 font-mono text-xs outline-orange-400"
-            value={jsonText}
-            onChange={(event) => setJsonText(event.target.value)}
-          />
-          <div className="mt-3 rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-            VBA 호출용 엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import-ecount" : "POST /api/purchases/import-ecount"}</code>
-            <br />
-            요청 예: <code>{`{ "rows": [...], "sync_ecount": true }`}</code>
+          <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-black">엑셀/VBA 전송 대기</h3>
+              <p className="mt-2 text-sm font-bold text-slate-600">
+                엑셀 매크로에서 아래 엔드포인트로 rows 배열을 보내면 FN OS DB에 먼저 저장되고, 옵션에 따라 이카운트로 전송됩니다.
+              </p>
+              <div className="mt-4 rounded-md bg-white p-3 text-xs font-bold text-slate-600">
+                <p>엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import-ecount" : "POST /api/purchases/import-ecount"}</code></p>
+                <p className="mt-1">인증: <code>x-fnos-api-key: FN_OS_API_KEY</code></p>
+                <p className="mt-1">요청 예: <code>{`{ "rows": [...], "sync_ecount": true }`}</code></p>
+              </div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <h3 className="font-black">현재 우선순위</h3>
+              <p className="mt-2 text-sm font-bold text-slate-600">
+                웹에서 직접 입력하는 화면보다, 기존 엑셀 흐름을 API로 연결하는 것이 먼저입니다.
+              </p>
+              <button
+                type="button"
+                className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
+                onClick={() => setShowJsonTool((value) => !value)}
+              >
+                {showJsonTool ? "테스트 JSON 닫기" : "테스트 JSON 열기"}
+              </button>
+            </div>
           </div>
+          {showJsonTool && (
+            <textarea
+              className="mt-3 h-56 w-full rounded-md border border-slate-200 p-3 font-mono text-xs outline-orange-400"
+              value={jsonText}
+              onChange={(event) => setJsonText(event.target.value)}
+            />
+          )}
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
