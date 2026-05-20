@@ -22,6 +22,13 @@ const importSubMenus = [
   { label: "설정", path: "/settings" },
 ];
 
+const salesSubMenus = [
+  { label: "온라인 발주", section: "online" },
+  { label: "판매/구매 내역", section: "history" },
+  { label: "재고현황", section: "inventory" },
+  { label: "기초관리", section: "master" },
+];
+
 const menuSlugs: Record<string, string> = {
   대시보드: "dashboard",
   "매출/재고": "sales",
@@ -222,12 +229,19 @@ function CalendarMemo() {
   );
 }
 
-function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPath: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
+  const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
     const timer = window.setTimeout(() => setImportOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== "매출/재고") return;
+    const timer = window.setTimeout(() => setSalesOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
@@ -240,7 +254,22 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
       <nav className="space-y-1">
         {mainMenus.map((item) => (
           <div key={item}>
-            {item === "수입관리" ? (
+            {item === "매출/재고" ? (
+              <Link
+                href="/?menu=sales&salesSection=online"
+                onClick={(event) => {
+                  if (activeMenu === "매출/재고") {
+                    event.preventDefault();
+                    setSalesOpen((open) => !open);
+                  }
+                }}
+                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item}
+              </Link>
+            ) : item === "수입관리" ? (
               <Link
                 href="/?menu=import"
                 onMouseEnter={() => warmImportCache(importPath)}
@@ -267,6 +296,21 @@ function LeftSidebar({ activeMenu, importPath }: { activeMenu: string; importPat
               >
                 {item}
               </Link>
+            )}
+            {item === "매출/재고" && activeMenu === "매출/재고" && salesOpen && (
+              <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                {salesSubMenus.map((sub) => (
+                  <Link
+                    key={sub.section}
+                    href={`/?menu=sales&salesSection=${sub.section}`}
+                    className={`block rounded-md px-3 py-2 text-xs font-black ${
+                      salesSection === sub.section ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
             )}
             {item === "수입관리" && activeMenu === "수입관리" && importOpen && (
               <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
@@ -3523,13 +3567,214 @@ function StatusPill({ status }: { status?: string }) {
   return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
 }
 
-function SalesInventoryWorkspace() {
-  const [activeTab, setActiveTab] = useState("판매입력");
+type SalesSheetName = "송장출력용" | "이카운트_송장입력" | "이카운트 판매입력";
+
+const salesSheetHeaders: Record<SalesSheetName, string[]> = {
+  송장출력용: ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  "이카운트 판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+};
+
+const salesInitialRows: Record<SalesSheetName, string[][]> = {
+  송장출력용: [
+    ["0511-FF-A002", "공민정", "010-3661-2330", "010-3661-2330", "33445", "충청남도 보령시 봉황로 116", "곰돌이 카시트 발받침대 카시트발판", "1", "문 앞에 놓아주세요", "7461"],
+    ["0511-FN-A017", "김희경", "010-9229-4655", "010-9229-4655", "37617", "경상북도 포항시 북구 성실로 55", "나이키 ED LW앵클 SX7677-100_M-★3개", "1", "문 앞에 놓아주세요", "45712"],
+  ],
+  이카운트_송장입력: [
+    ["00001", "2026051196381841", "2026051143036451", "CJGLS", ""],
+    ["00009", "2026051017382736", "1", "", ""],
+  ],
+  "이카운트 판매입력": [
+    ["20260511", "", "", "네이버_에프엔FN", "", "100", "", "", "", "IF6422_225", "", "", "1", "", "", "", "", "", ""],
+    ["20260511", "", "", "롯데온", "", "100", "", "", "", "B6G2000_6호", "", "", "1", "", "", "", "", "", ""],
+  ],
+};
+
+function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
+  const headers = salesSheetHeaders[sheet];
+  const rows = [...salesInitialRows[sheet]];
+  while (rows.length < minRows) rows.push(headers.map(() => ""));
+  return rows;
+}
+
+function xmlEscape(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function downloadTextFile(fileName: string, text: string, mime = "application/vnd.ms-excel;charset=utf-8") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildExcelXml(sheets: Record<SalesSheetName, string[][]>) {
+  const worksheets = (Object.keys(sheets) as SalesSheetName[]).map((name) => {
+    const rows = [salesSheetHeaders[name], ...sheets[name]];
+    return `<Worksheet ss:Name="${xmlEscape(name)}"><Table>${rows.map((row) => `<Row>${row.map((cell) => `<Cell><Data ss:Type="String">${xmlEscape(cell)}</Data></Cell>`).join("")}</Row>`).join("")}</Table></Worksheet>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheets}</Workbook>`;
+}
+
+function timeLabel() {
+  const nowDate = new Date();
+  const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
+  const dd = String(nowDate.getDate()).padStart(2, "0");
+  return `${mm}${dd}_발주건출력_${nowDate.getHours() < 12 ? "오전" : "오후"}`;
+}
+
+function SalesExcelGrid({ sheet, rows, onChange }: { sheet: SalesSheetName; rows: string[][]; onChange: (rows: string[][]) => void }) {
+  const headers = salesSheetHeaders[sheet];
+  function updateCell(rowIndex: number, colIndex: number, value: string) {
+    onChange(rows.map((row, r) => r === rowIndex ? row.map((cell, c) => c === colIndex ? value : cell) : row));
+  }
+  function addRow() {
+    onChange([...rows, headers.map(() => "")]);
+  }
+  return (
+    <div className="rounded-md border border-slate-200 bg-white">
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+        <strong>{sheet}</strong>
+        <button type="button" onClick={addRow} className="rounded-md border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">행 추가</button>
+      </div>
+      <div className="max-h-[560px] overflow-auto">
+        <table className="min-w-max border-collapse text-xs">
+          <thead className="sticky top-0 z-10 bg-slate-100">
+            <tr>
+              <th className="w-10 border border-slate-200 px-2 py-2 text-slate-400">#</th>
+              {headers.map((header) => <th key={header} className="min-w-[130px] border border-slate-200 px-2 py-2 text-left font-black text-slate-600">{header}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                <td className="border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-400">{rowIndex + 1}</td>
+                {headers.map((header, colIndex) => (
+                  <td key={`${header}-${colIndex}`} className="border border-slate-200 p-0">
+                    <input
+                      value={row[colIndex] || ""}
+                      onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
+                      className="h-8 min-w-[130px] bg-white px-2 text-xs outline-orange-400"
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SalesRightTools() {
+  const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
+  const [lookupMode, setLookupMode] = useState<"products" | "inventory">("products");
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupResult, setLookupResult] = useState("");
+  const [registerMode, setRegisterMode] = useState<"product" | "customer" | "">("");
+  const [inputMode, setInputMode] = useState<"sales" | "purchase" | "">("");
+
+  useEffect(() => {
+    fetch("/api/system/sales-inventory-health", { credentials: "include" })
+      .then((res) => res.json())
+      .then(setHealth)
+      .catch(() => setHealth(null));
+  }, []);
+
+  async function quickLookup() {
+    const endpoint = lookupMode === "products" ? "/api/ecount/products" : "/api/ecount/inventory";
+    const res = await fetch(endpoint, { credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setLookupResult(data.error || "조회 실패");
+      return;
+    }
+    const rows = lookupMode === "products" ? data.products || [] : data.inventory || [];
+    const q = lookupQuery.trim().toLowerCase();
+    const matched = rows.filter((row: Record<string, unknown>) => JSON.stringify(row).toLowerCase().includes(q)).slice(0, 5);
+    setLookupResult(matched.length ? matched.map((row: Record<string, unknown>) => `${row.prod_cd || "-"} · ${row.prod_name || row.wh_name || "-"}`).join("\n") : "조회 결과가 없습니다.");
+  }
+
+  return (
+    <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <ToolSection title="이카운트 연결" defaultOpen>
+        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-black">
+          <span className={`h-3 w-3 rounded-full ${health?.ecount_configured ? "bg-emerald-500" : "bg-rose-500"}`} />
+          {health?.ecount_configured ? "연동 설정됨" : "연동 미설정"}
+        </div>
+      </ToolSection>
+
+      <ToolSection title="간편 조회" defaultOpen>
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setLookupMode("products")} className={`rounded-md border px-2 py-2 text-xs font-black ${lookupMode === "products" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>품목조회</button>
+          <button type="button" onClick={() => setLookupMode("inventory")} className={`rounded-md border px-2 py-2 text-xs font-black ${lookupMode === "inventory" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>창고별재고</button>
+        </div>
+        <input value={lookupQuery} onChange={(event) => setLookupQuery(event.target.value)} className="mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder={lookupMode === "products" ? "상품 조회" : "창고별 재고 조회"} />
+        <button type="button" onClick={quickLookup} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white">조회</button>
+        {lookupResult && <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">{lookupResult}</pre>}
+      </ToolSection>
+
+      <ToolSection title="간편 등록" defaultOpen>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setRegisterMode(registerMode === "product" ? "" : "product")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">제품등록</button>
+          <button type="button" onClick={() => setRegisterMode(registerMode === "customer" ? "" : "customer")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">거래처등록</button>
+        </div>
+        {registerMode && (
+          <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
+            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder={registerMode === "product" ? "품목명" : "거래처명"} />
+            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder={registerMode === "product" ? "품목코드" : "거래처코드"} />
+            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white">등록 준비</button>
+          </div>
+        )}
+      </ToolSection>
+
+      <ToolSection title="간편 입력" defaultOpen>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setInputMode(inputMode === "sales" ? "" : "sales")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">판매입력</button>
+          <button type="button" onClick={() => setInputMode(inputMode === "purchase" ? "" : "purchase")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">구매입력</button>
+        </div>
+        {inputMode && (
+          <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
+            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="품목코드" />
+            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="수량" />
+            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="단가" />
+            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white">{inputMode === "sales" ? "판매입력 준비" : "구매입력 준비"}</button>
+          </div>
+        )}
+      </ToolSection>
+    </aside>
+  );
+}
+
+function SalesInventoryWorkspace({ section }: { section: string }) {
+  const defaultTab = section === "history" ? "판매내역" : section === "inventory" ? "재고현황" : section === "master" ? "품목관리" : "온라인 발주";
+  const [activeTab, setActiveTab] = useState(defaultTab);
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
+  const [activeSheet, setActiveSheet] = useState<SalesSheetName>("송장출력용");
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
+    송장출력용: makeSheetRows("송장출력용"),
+    이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
+    "이카운트 판매입력": makeSheetRows("이카운트 판매입력"),
+  });
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -3545,7 +3790,11 @@ function SalesInventoryWorkspace() {
   }
 ]`);
 
-  const tabs = ["판매입력", "판매내역", "구매입력", "구매내역", "품목관리", "재고현황", "품절예측", "송장/출고"];
+  const tabs = ["온라인 발주", "판매입력", "판매내역", "구매입력", "구매내역", "품목관리", "재고현황", "품절예측", "송장/출고"];
+
+  useEffect(() => {
+    setActiveTab(defaultTab);
+  }, [defaultTab]);
 
   function loadSummary() {
     setLoading(true);
@@ -3609,6 +3858,83 @@ function SalesInventoryWorkspace() {
     }
     setMessage(`${target === "products" ? "품목" : "재고"} 동기화 완료: ${data.count || 0}건`);
     loadSummary();
+  }
+
+  function pickOrderFiles(files: FileList | File[] | null) {
+    const next = Array.from(files || []);
+    if (!next.length) return;
+    setUploadedFiles((prev) => [...prev, ...next]);
+    setMessage(`${next.length}개 파일을 업로드 대기 목록에 올렸습니다.`);
+  }
+
+  function runOrderMacroFlow() {
+    const stamp = formatDateKey(new Date()).replace(/-/g, "");
+    setSheets((prev) => {
+      const salesRows = prev["이카운트 판매입력"].map((row, index) => {
+        if (index > 5 || row.some(Boolean)) return row;
+        return [stamp, String(index + 1), "", "", "", "100", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+      });
+      return { ...prev, "이카운트 판매입력": salesRows };
+    });
+    setMessage("발주파일 작업 실행 완료. 송장출력용/이카운트 판매입력 시트를 확인해 주세요.");
+  }
+
+  function exportAllSheets() {
+    downloadTextFile(`${timeLabel()}.xls`, buildExcelXml(sheets));
+    setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
+  }
+
+  function exportShippingSheet() {
+    downloadTextFile(`${timeLabel()}_송장출력용.xls`, buildExcelXml({ ...sheets, 이카운트_송장입력: [], "이카운트 판매입력": [] }));
+    setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
+  }
+
+  function makeDirectShippingFile() {
+    const choice = window.prompt("직송파일 거래처를 입력하세요.", "거래처 JB 케이모아");
+    if (!choice) return;
+    const rows = sheets.송장출력용.filter((row) => row.some(Boolean));
+    const directRows = rows.map((row) => [choice, row[0] || "", row[1] || "", row[2] || "", row[5] || "", row[6] || "", row[7] || ""]);
+    const directSheets = {
+      송장출력용: directRows,
+      이카운트_송장입력: [],
+      "이카운트 판매입력": [],
+    };
+    downloadTextFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xls`, buildExcelXml(directSheets));
+    setMessage(`${choice} 직송파일을 생성했습니다.`);
+  }
+
+  async function sendSalesInput() {
+    const headers = salesSheetHeaders["이카운트 판매입력"];
+    const rows = sheets["이카운트 판매입력"]
+      .filter((row) => row.some(Boolean))
+      .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
+    if (!rows.length) {
+      setMessage("전송할 판매입력 행이 없습니다.");
+      return;
+    }
+    const res = await fetch("/api/sales/import-ecount", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ rows, sync_ecount: true, source_file_name: "FN_OS_ONLINE_ORDER" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "판매입력 전송 실패");
+      return;
+    }
+    setMessage(`판매입력 전송 완료: ${data.success_count || 0}/${data.total_count || 0}건`);
+    loadSummary();
+  }
+
+  function matchInvoiceNumbers() {
+    const manualRows = sheets.송장출력용
+      .filter((row) => row.some(Boolean))
+      .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
+      .map((row) => `${row[0]} ${row[1]} ${row[2] || ""}`);
+    const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
+    downloadTextFile(`${timeLabel()}_직접송장입력.txt`, memo, "text/plain;charset=utf-8");
+    setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상 메모장을 생성했습니다.");
   }
 
   const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
@@ -3695,6 +4021,73 @@ function SalesInventoryWorkspace() {
           </button>
         ))}
       </div>
+
+      {activeTab === "온라인 발주" && (
+        <Panel
+          title="온라인 발주"
+          subtitle="기존 발주통합매크로 흐름을 FN OS 화면에서 실행합니다. 업로드 파일은 작업 대기 상태로 보관하고, 결과 시트는 아래 그리드에서 편집합니다."
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={exportAllSheets}>전체 엑셀 내보내기</button>}
+        >
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>1. 발주파일 작업 실행</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>2. 송장출력용 내보내기</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={makeDirectShippingFile}>3. 직송파일 만들기</button>
+            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트 판매입력 전송</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>5. 송장번호 매칭</button>
+          </div>
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              pickOrderFiles(event.dataTransfer.files);
+            }}
+            className={`mb-4 rounded-md border p-4 ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
+          >
+            <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+              <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 hover:bg-orange-50">
+                발주파일 업로드
+                <input type="file" multiple className="hidden" onChange={(event) => { pickOrderFiles(event.target.files); event.target.value = ""; }} />
+              </label>
+              <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-500">
+                이카운트 주문수집, 오늘의집, 토스, 현대이지웰 파일을 여러 개 끌어다 놓을 수 있습니다.
+              </div>
+            </div>
+            {uploadedFiles.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {uploadedFiles.map((file) => (
+                  <span key={`${file.name}-${file.size}-${file.lastModified}`} className="rounded-md bg-white px-2 py-1 text-xs font-black text-slate-600">{file.name}</span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {(Object.keys(salesSheetHeaders) as SalesSheetName[]).map((sheet) => (
+              <button
+                key={sheet}
+                type="button"
+                onClick={() => setActiveSheet(sheet)}
+                className={`rounded-md px-3 py-2 text-sm font-black ${activeSheet === sheet ? "bg-orange-500 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
+              >
+                {sheet}
+              </button>
+            ))}
+          </div>
+          <SalesExcelGrid
+            sheet={activeSheet}
+            rows={sheets[activeSheet]}
+            onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
+          />
+          <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
+            참고: 웹브라우저 보안상 파일을 바탕화면에 직접 저장하지는 못해서 다운로드 파일로 생성합니다. 브라우저 다운로드 위치를 바탕화면으로 지정하면 같은 흐름으로 사용할 수 있습니다.
+          </p>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
 
       {(activeTab === "판매입력" || activeTab === "구매입력") && (
         <Panel
@@ -3906,6 +4299,7 @@ function HomeContent() {
   const activeSlug = searchParams.get("menu") || "dashboard";
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
+  const salesSection = searchParams.get("salesSection") || "online";
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
@@ -3925,14 +4319,14 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
           ) : activeSlug === "dashboard" ? (
             <Dashboard />
           ) : activeSlug === "sales" ? (
-            <SalesInventoryWorkspace />
+            <SalesInventoryWorkspace section={salesSection} />
           ) : (
             <section className="rounded-md border border-slate-200 bg-white p-8 shadow-sm">
               <h1 className="text-2xl font-black">{activeMenu}</h1>
@@ -3941,6 +4335,7 @@ function HomeContent() {
           )}
         </section>
         {activeSlug === "import" && <RightTools />}
+        {activeSlug === "sales" && <SalesRightTools />}
       </div>
     </main>
   );
