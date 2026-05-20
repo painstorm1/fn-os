@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import * as XLSX from "xlsx";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
@@ -3599,14 +3600,6 @@ function hasSalesRows(rows: string[][]) {
   return rows.some((row) => row.some((cell) => String(cell || "").trim()));
 }
 
-function xmlEscape(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function downloadTextFile(fileName: string, text: string, mime = "application/vnd.ms-excel;charset=utf-8") {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -3617,17 +3610,24 @@ function downloadTextFile(fileName: string, text: string, mime = "application/vn
   URL.revokeObjectURL(url);
 }
 
-function buildExcelXml(sheets: Record<SalesSheetName, string[][]>) {
-  const worksheets = (Object.keys(sheets) as SalesSheetName[]).map((name) => {
-    const rows = [salesSheetHeaders[name], ...sheets[name]];
-    return `<Worksheet ss:Name="${xmlEscape(name)}"><Table>${rows.map((row) => `<Row>${row.map((cell) => `<Cell><Data ss:Type="String">${xmlEscape(cell)}</Data></Cell>`).join("")}</Row>`).join("")}</Table></Worksheet>`;
-  }).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheets}</Workbook>`;
+function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetName, string[][]>>) {
+  const workbook = XLSX.utils.book_new();
+  (Object.keys(sheets) as SalesSheetName[]).forEach((name) => {
+    const rows = sheets[name] || [];
+    const worksheet = XLSX.utils.aoa_to_sheet([salesSheetHeaders[name], ...rows]);
+    worksheet["!cols"] = salesSheetHeaders[name].map((header, index) => ({
+      wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
+    }));
+    XLSX.utils.book_append_sheet(workbook, worksheet, name);
+  });
+  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function timeLabel() {
@@ -4133,7 +4133,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("전체 엑셀을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    downloadTextFile(`${timeLabel()}.xls`, buildExcelXml(sheets));
+    downloadXlsxFile(`${timeLabel()}.xlsx`, sheets);
     setCompletedSalesTasks((prev) => ({ ...prev, exportAll: true }));
     setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
   }
@@ -4147,7 +4147,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("송장출력용을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    downloadTextFile(`${timeLabel()}_송장출력용.xls`, buildExcelXml({ ...sheets, 이카운트_송장입력: [], "이카운트 판매입력": [] }));
+    downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: sheets.송장출력용 });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
@@ -4176,7 +4176,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       이카운트_송장입력: [],
       "이카운트 판매입력": [],
     };
-    downloadTextFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xls`, buildExcelXml(directSheets));
+    downloadXlsxFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xlsx`, directSheets);
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
     setMessage(`${choice} 직송파일을 선택한 ${selectedRows.length}개 행으로 생성했습니다.`);
   }
