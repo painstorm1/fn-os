@@ -710,6 +710,15 @@ type SalesInventorySummary = {
   logs?: Array<Record<string, unknown>>;
 };
 
+type SalesInventoryHealth = {
+  ok?: boolean;
+  db_configured?: boolean;
+  db_ready?: boolean;
+  ecount_configured?: boolean;
+  tables?: Array<{ table: string; ok: boolean; message?: string }>;
+  next_steps?: string[];
+};
+
 function apiUrl(path: string) {
   return `${IMPORT_ERP_URL}${path}`;
 }
@@ -3263,6 +3272,7 @@ function StatusPill({ status }: { status?: string }) {
 function SalesInventoryWorkspace() {
   const [activeTab, setActiveTab] = useState("판매입력");
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
+  const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
@@ -3285,10 +3295,19 @@ function SalesInventoryWorkspace() {
 
   function loadSummary() {
     setLoading(true);
-    fetch("/api/dashboard/summary", { credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => setSummary(data))
-      .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "요약 조회 실패" }))
+    Promise.all([
+      fetch("/api/dashboard/summary", { credentials: "include" }).then((res) => res.json()),
+      fetch("/api/system/sales-inventory-health", { credentials: "include" }).then((res) => res.json()),
+    ])
+      .then(([summaryData, healthData]) => {
+        setSummary(summaryData);
+        setHealth(healthData);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "요약 조회 실패";
+        setSummary({ ok: false, error: message });
+        setHealth(null);
+      })
       .finally(() => setLoading(false));
   }
 
@@ -3339,7 +3358,7 @@ function SalesInventoryWorkspace() {
   }
 
   const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
-  const dbNeedsSetup = Boolean(summary?.error);
+  const dbNeedsSetup = Boolean(summary?.error || (health && !health.db_ready));
   const kpi = [
     { label: "오늘 매출", value: krw(summary?.today_sales || 0), note: "FN OS 판매 DB 기준" },
     { label: "이번 달 매출", value: krw(summary?.month_sales || 0), note: "판매조회 API 대체 원장" },
@@ -3348,7 +3367,7 @@ function SalesInventoryWorkspace() {
     { label: "재고 위험", value: `${Number(summary?.inventory_risk_count || 0).toLocaleString("ko-KR")} SKU`, note: "현재 기준 5개 이하" },
     { label: "전송 실패", value: `${Number(summary?.sync_fail_count || 0).toLocaleString("ko-KR")}건`, note: "이카운트 로그 기준" },
   ];
-  const setupSteps = [
+  const setupSteps = health?.next_steps?.length ? health.next_steps : [
     "Supabase SQL Editor에서 schema_sales_inventory.sql 실행",
     "Vercel 환경변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY 입력",
     "ECOUNT_* 환경변수 입력 후 품목/재고 동기화 테스트",
@@ -3376,6 +3395,17 @@ function SalesInventoryWorkspace() {
 
       {dbNeedsSetup && (
         <Panel title="매출/재고 연결 준비" subtitle="지금 화면은 정상입니다. 아직 Supabase 원장 DB가 연결되지 않아서 0원으로 보이는 상태예요.">
+          <div className="mb-3 grid gap-3 md:grid-cols-3">
+            <div className={`rounded-md border p-3 text-sm font-black ${health?.db_configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+              Supabase 환경변수: {health?.db_configured ? "설정됨" : "미설정"}
+            </div>
+            <div className={`rounded-md border p-3 text-sm font-black ${health?.db_ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+              DB 테이블: {health?.db_ready ? "준비됨" : "확인 필요"}
+            </div>
+            <div className={`rounded-md border p-3 text-sm font-black ${health?.ecount_configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+              이카운트 API: {health?.ecount_configured ? "설정됨" : "미설정"}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {setupSteps.map((step, index) => (
               <div key={step} className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
@@ -3387,6 +3417,15 @@ function SalesInventoryWorkspace() {
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             현재 응답: {summary?.error}
           </p>
+          {Boolean(health?.tables?.length) && (
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {health?.tables?.map((table) => (
+                <div key={table.table} className={`rounded-md border px-3 py-2 text-xs font-bold ${table.ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                  {table.table}: {table.ok ? "OK" : "확인 필요"}
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
       )}
 
