@@ -3597,6 +3597,13 @@ function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
   return rows;
 }
 
+function padSalesRows(sheet: SalesSheetName, rows: string[][], minRows = 18) {
+  const headers = salesSheetHeaders[sheet];
+  const next = rows.map((row) => headers.map((_, index) => row[index] || ""));
+  while (next.length < minRows) next.push(headers.map(() => ""));
+  return next;
+}
+
 function xmlEscape(value: unknown) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -3860,14 +3867,42 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     loadSummary();
   }
 
-  function pickOrderFiles(files: FileList | File[] | null) {
+  async function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
     const next = Array.from(files || []);
     if (!next.length) return;
     setUploadedFiles((prev) => [...prev, ...next]);
-    setMessage(`${next.length}개 파일을 업로드 대기 목록에 올렸습니다.`);
+    setMessage(`${next.length}개 파일을 읽는 중입니다...`);
+    const formData = new FormData();
+    formData.append("kind", kind);
+    next.forEach((file) => formData.append("files", file));
+    const res = await fetch("/api/sales/order-files/parse", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "엑셀 파일을 읽지 못했습니다.");
+      return;
+    }
+    const parsedSheets = data.sheets as Partial<Record<SalesSheetName, string[][]>>;
+    setSheets((prev) => {
+      const nextSheets = { ...prev };
+      (Object.keys(salesSheetHeaders) as SalesSheetName[]).forEach((sheet) => {
+        const rows = parsedSheets?.[sheet] || [];
+        if (rows.length) nextSheets[sheet] = padSalesRows(sheet, rows);
+      });
+      return nextSheets;
+    });
+    const count = (Object.values(parsedSheets || {}) as string[][][]).reduce((sum, rows) => sum + rows.length, 0);
+    setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${next.length}개를 읽어서 ${count}개 행을 시트에 반영했습니다.`);
   }
 
   function runOrderMacroFlow() {
+    if (uploadedFiles.length) {
+      setMessage("업로드 파일 기준으로 시트가 이미 생성되어 있습니다. 필요한 셀을 수정한 뒤 내보내기나 전송을 진행해 주세요.");
+      return;
+    }
     const stamp = formatDateKey(new Date()).replace(/-/g, "");
     setSheets((prev) => {
       const salesRows = prev["이카운트 판매입력"].map((row, index) => {
@@ -4044,17 +4079,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             onDrop={(event) => {
               event.preventDefault();
               setDragging(false);
-              pickOrderFiles(event.dataTransfer.files);
+              void pickOrderFiles(event.dataTransfer.files, "orders");
             }}
             className={`mb-4 rounded-md border p-4 ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
           >
-            <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+            <div className="grid gap-3 lg:grid-cols-[180px_180px_1fr]">
               <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 hover:bg-orange-50">
                 발주파일 업로드
-                <input type="file" multiple className="hidden" onChange={(event) => { pickOrderFiles(event.target.files); event.target.value = ""; }} />
+                <input type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { void pickOrderFiles(event.target.files, "orders"); event.target.value = ""; }} />
+              </label>
+              <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-blue-200 bg-white px-4 text-sm font-black text-blue-600 hover:bg-blue-50">
+                송장파일 업로드
+                <input type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { void pickOrderFiles(event.target.files, "invoices"); event.target.value = ""; }} />
               </label>
               <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-500">
-                이카운트 주문수집, 오늘의집, 토스, 현대이지웰 파일을 여러 개 끌어다 놓을 수 있습니다.
+                이카운트 주문수집, 오늘의집, 토스, 현대이지웰, 송장번호 파일을 여러 개 끌어다 놓을 수 있습니다. 드래그앤드랍은 발주파일로 읽습니다.
               </div>
             </div>
             {uploadedFiles.length > 0 && (
