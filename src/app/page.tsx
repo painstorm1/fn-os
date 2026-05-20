@@ -4081,7 +4081,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function runOrderMacroFlow() {
-    if (completedSalesTasks.orderFlow || uploadedFiles.length) {
+    if (completedSalesTasks.orderFlow) {
       const ok = window.confirm("이미 발주파일 작업을 실행한 것으로 보입니다. 중복 작업일 수 있는데 계속할까요?");
       if (!ok) {
         setMessage("발주파일 작업 실행을 취소했습니다.");
@@ -4090,7 +4090,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     if (uploadedFiles.length) {
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-      setMessage("업로드 파일 기준으로 시트가 이미 생성되어 있습니다. 필요한 셀을 수정한 뒤 내보내기나 전송을 진행해 주세요.");
+      setMessage("발주파일 작업 실행 완료. 업로드 파일 기준으로 생성된 시트를 확인해 주세요.");
       return;
     }
     window.alert("먼저 발주파일을 업로드해 주세요. 빈 시트에는 임의 값을 만들지 않습니다.");
