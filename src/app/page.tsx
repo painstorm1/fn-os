@@ -695,6 +695,21 @@ type ImportProductDetail = {
   history: Array<{ id: number; order_code?: string; order_date?: string; paid_date?: string; factory?: string; quantity?: number; unit_price?: number; item_currency?: string; status?: string }>;
 };
 
+type SalesInventorySummary = {
+  ok?: boolean;
+  error?: string;
+  today_sales?: number;
+  month_sales?: number;
+  today_qty?: number;
+  month_purchase_amount?: number;
+  inventory_risk_count?: number;
+  sync_fail_count?: number;
+  recent_sales?: Array<Record<string, unknown>>;
+  recent_purchases?: Array<Record<string, unknown>>;
+  inventory?: Array<Record<string, unknown>>;
+  logs?: Array<Record<string, unknown>>;
+};
+
 function apiUrl(path: string) {
   return `${IMPORT_ERP_URL}${path}`;
 }
@@ -3245,6 +3260,268 @@ function StatusPill({ status }: { status?: string }) {
   return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
 }
 
+function SalesInventoryWorkspace() {
+  const [activeTab, setActiveTab] = useState("판매입력");
+  const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [jsonText, setJsonText] = useState(`[
+  {
+    "일자": "20260520",
+    "순번": "1",
+    "거래처코드": "",
+    "거래처명": "",
+    "출하창고": "100",
+    "품목코드": "",
+    "품목명": "",
+    "수량": 1,
+    "단가(vat포함)": 1000,
+    "적요": ""
+  }
+]`);
+
+  const tabs = ["판매입력", "판매내역", "구매입력", "구매내역", "품목관리", "재고현황", "품절예측", "송장/출고"];
+
+  function loadSummary() {
+    setLoading(true);
+    fetch("/api/dashboard/summary", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => setSummary(data))
+      .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "요약 조회 실패" }))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadSummary();
+  }, []);
+
+  async function postRows(kind: "sales" | "purchases") {
+    setMessage("");
+    let rows: unknown;
+    try {
+      rows = JSON.parse(jsonText);
+    } catch {
+      setMessage("JSON 형식이 올바르지 않습니다. VBA에서는 rows 배열로 보내면 됩니다.");
+      return;
+    }
+    const endpoint = kind === "sales" ? "/api/sales/import-ecount" : "/api/purchases/import-ecount";
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ rows, sync_ecount: false, source_file_name: "FN_OS_WEB" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "저장 실패");
+      return;
+    }
+    setMessage(`FN OS 저장 완료: ${data.total_count || 0}건`);
+    loadSummary();
+  }
+
+  async function sync(target: "products" | "inventory") {
+    setMessage("");
+    const res = await fetch(`/api/ecount/${target}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "동기화 실패");
+      return;
+    }
+    setMessage(`${target === "products" ? "품목" : "재고"} 동기화 완료: ${data.count || 0}건`);
+    loadSummary();
+  }
+
+  const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
+  const kpi = [
+    { label: "오늘 매출", value: krw(summary?.today_sales || 0), note: "FN OS 판매 DB 기준" },
+    { label: "이번 달 매출", value: krw(summary?.month_sales || 0), note: "판매조회 API 대체 원장" },
+    { label: "오늘 판매수량", value: `${Number(summary?.today_qty || 0).toLocaleString("ko-KR")}개`, note: "판매입력 수량 합계" },
+    { label: "이번 달 구매액", value: krw(summary?.month_purchase_amount || 0), note: "FN OS 구매 DB 기준" },
+    { label: "재고 위험", value: `${Number(summary?.inventory_risk_count || 0).toLocaleString("ko-KR")} SKU`, note: "현재 기준 5개 이하" },
+    { label: "전송 실패", value: `${Number(summary?.sync_fail_count || 0).toLocaleString("ko-KR")}건`, note: "이카운트 로그 기준" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Panel title="매출/재고" subtitle="FN OS가 판매 원장을 먼저 보관하고, 이카운트에는 API로 동기화합니다.">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {kpi.map((item) => (
+            <article key={item.label} className="rounded-md border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-black text-slate-500">{item.label}</p>
+              <p className="mt-2 text-xl font-black">{loading ? "불러오는 중..." : item.value}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">{item.note}</p>
+            </article>
+          ))}
+        </div>
+        {summary?.error && (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">
+            DB 연결 전입니다. Supabase 스키마와 환경변수를 설정하면 실데이터가 표시됩니다. ({summary.error})
+          </div>
+        )}
+      </Panel>
+
+      <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-2 shadow-sm">
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`rounded-md px-3 py-2 text-sm font-black ${activeTab === tab ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {(activeTab === "판매입력" || activeTab === "구매입력") && (
+        <Panel
+          title={activeTab}
+          subtitle={activeTab === "판매입력" ? "엑셀 1_판매입력 시트 rows를 FN OS DB에 저장합니다." : "구매입력 rows를 FN OS DB에 저장합니다."}
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => postRows(activeTab === "판매입력" ? "sales" : "purchases")}>FN OS 저장</button>}
+        >
+          <textarea
+            className="h-72 w-full rounded-md border border-slate-200 p-3 font-mono text-xs outline-orange-400"
+            value={jsonText}
+            onChange={(event) => setJsonText(event.target.value)}
+          />
+          <div className="mt-3 rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
+            VBA 호출용 엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import-ecount" : "POST /api/purchases/import-ecount"}</code>
+            <br />
+            요청 예: <code>{`{ "rows": [...], "sync_ecount": true }`}</code>
+          </div>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {(activeTab === "판매내역" || activeTab === "구매내역") && (
+        <Panel title={activeTab} subtitle="이카운트 판매조회 API가 없으므로 FN OS DB 기준으로 조회합니다.">
+          <div className="mb-3 grid gap-2 md:grid-cols-4">
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 거래처명 검색" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
+            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
+              <option>전체 상태</option>
+              <option>PENDING</option>
+              <option>SUCCESS</option>
+              <option>FAIL</option>
+            </select>
+          </div>
+          <SalesInventoryTable rows={recentRows} />
+        </Panel>
+      )}
+
+      {activeTab === "품목관리" && (
+        <Panel
+          title="품목관리"
+          subtitle="이카운트 품목조회 API로 품목 마스터를 동기화하고, 쇼핑몰 SKU와 ERP 품목코드를 매핑합니다."
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("products")}>품목 동기화</button>}
+        >
+          <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-600">매핑 구조: 쇼핑몰 SKU → FN SKU → 이카운트 PROD_CD. 다음 단계에서 미매칭 리스트와 수정 UI를 붙이면 됩니다.</p>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {(activeTab === "재고현황" || activeTab === "품절예측") && (
+        <Panel
+          title={activeTab}
+          subtitle="이카운트 재고현황/창고별 재고를 FN OS에 저장하고 판매 DB와 결합해 품절 위험을 계산합니다."
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="border-b border-slate-200 text-xs text-slate-500">
+                <tr>
+                  <th className="py-2 text-left">품목코드</th>
+                  <th className="py-2 text-left">품목명</th>
+                  <th className="py-2 text-left">창고</th>
+                  <th className="py-2 text-right">현재재고</th>
+                  <th className="py-2 text-right">예상 소진일</th>
+                  <th className="py-2 text-center">위험도</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(summary?.inventory || []).slice(0, 20).map((row, index) => {
+                  const qty = Number(row.bal_qty || 0);
+                  return (
+                    <tr key={`${row.prod_cd || index}-${index}`} className="border-b border-slate-100">
+                      <td className="py-2 font-bold">{String(row.prod_cd || "-")}</td>
+                      <td className="py-2">{String(row.prod_name || "-")}</td>
+                      <td className="py-2">{String(row.wh_name || row.wh_cd || "-")}</td>
+                      <td className="py-2 text-right font-black">{qty.toLocaleString("ko-KR")}</td>
+                      <td className="py-2 text-right">{qty > 0 ? "판매 DB 연결 후 계산" : "즉시 확인"}</td>
+                      <td className="py-2 text-center"><StatusPill status={qty <= 5 ? "위험" : "정상"} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {activeTab === "송장/출고" && (
+        <Panel title="송장/출고" subtitle="송장출력용, 이카운트_송장입력 시트 구조를 웹 DB로 옮기는 영역입니다.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-black">송장출력용</h3>
+              <p className="mt-2 text-sm text-slate-600">쇼핑몰코드, 수취인, 연락처, 우편번호, 주소, 주문옵션, 수량, 배송요청사항, 정산예정금액을 저장할 예정입니다.</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-black">이카운트_송장입력</h3>
+              <p className="mt-2 text-sm text-slate-600">주문번호, 묶음주문번호, 배송방법코드, 송장번호 매칭 및 입력 상태를 관리합니다.</p>
+            </div>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> }) {
+  if (!rows.length) {
+    return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[900px] text-sm">
+        <thead className="border-b border-slate-200 text-xs text-slate-500">
+          <tr>
+            <th className="py-2 text-left">일자</th>
+            <th className="py-2 text-left">거래처</th>
+            <th className="py-2 text-left">품목코드</th>
+            <th className="py-2 text-left">품목명</th>
+            <th className="py-2 text-right">수량</th>
+            <th className="py-2 text-right">단가</th>
+            <th className="py-2 text-right">공급가액</th>
+            <th className="py-2 text-center">상태</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={String(row.id || index)} className="border-b border-slate-100">
+              <td className="py-2 font-bold">{String(row.io_date || "-")}</td>
+              <td className="py-2">{String(row.cust_name || row.cust_code || "-")}</td>
+              <td className="py-2">{String(row.prod_cd || "-")}</td>
+              <td className="py-2 font-bold">{String(row.prod_name || "-")}</td>
+              <td className="py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
+              <td className="py-2 text-right">{Number(row.price || 0).toLocaleString("ko-KR")}</td>
+              <td className="py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
+              <td className="py-2 text-center"><StatusPill status={String(row.ecount_sync_status || "PENDING")} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Dashboard() {
   return (
     <div className="space-y-6">
@@ -3277,7 +3554,8 @@ function Dashboard() {
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  const activeMenu = slugMenus[searchParams.get("menu") || "dashboard"] || "대시보드";
+  const activeSlug = searchParams.get("menu") || "dashboard";
+  const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
 
   return (
@@ -3300,10 +3578,12 @@ function HomeContent() {
       <div className="flex min-h-screen">
         <LeftSidebar activeMenu={activeMenu} importPath={importPath} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
-          {activeMenu === "수입관리" ? (
+          {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
-          ) : activeMenu === "대시보드" ? (
+          ) : activeSlug === "dashboard" ? (
             <Dashboard />
+          ) : activeSlug === "sales" ? (
+            <SalesInventoryWorkspace />
           ) : (
             <section className="rounded-md border border-slate-200 bg-white p-8 shadow-sm">
               <h1 className="text-2xl font-black">{activeMenu}</h1>
@@ -3311,7 +3591,7 @@ function HomeContent() {
             </section>
           )}
         </section>
-        {activeMenu === "수입관리" && <RightTools />}
+        {activeSlug === "import" && <RightTools />}
       </div>
     </main>
   );

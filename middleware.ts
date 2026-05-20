@@ -6,10 +6,15 @@ function authToken() {
   return process.env.FN_OS_AUTH_TOKEN || process.env.FN_OS_PASSWORD || "fnos-local-dev";
 }
 
+function apiToken() {
+  return process.env.FN_OS_API_KEY || authToken();
+}
+
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const isLoginPage = pathname === "/login";
   const isLoginApi = pathname === "/api/login";
+  const isApi = pathname.startsWith("/api/");
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
   if (isLoginPage || isLoginApi || isPublicAsset) {
@@ -19,6 +24,15 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get(COOKIE_NAME)?.value;
   if (session === authToken()) {
     return NextResponse.next();
+  }
+
+  if (isApi) {
+    const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const headerToken = request.headers.get("x-fnos-api-key") || bearer;
+    if (headerToken && headerToken === apiToken()) {
+      return NextResponse.next();
+    }
+    return NextResponse.json({ ok: false, error: "인증이 필요합니다." }, { status: 401 });
   }
 
   const loginUrl = request.nextUrl.clone();
