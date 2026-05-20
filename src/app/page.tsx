@@ -4180,6 +4180,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const count = (Object.values(parsedSheets || {}) as string[][][]).reduce((sum, rows) => sum + rows.length, 0);
     setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: kind === "orders" ? true : prev.orderFlow, invoiceFlow: kind === "invoices" ? true : prev.invoiceFlow }));
     setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${waitingFiles.length}개를 읽어서 ${count}개 행을 시트에 반영했습니다.`);
+    if (kind === "orders") window.alert("작업 완료됨!");
   }
 
   function runOrderMacroFlow() {
