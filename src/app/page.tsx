@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import type { ClipboardEvent, FormEvent } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
@@ -1136,7 +1136,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
   const [error, setError] = useState("");
   const [docType, setDocType] = useState("기타");
   const [note, setNote] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   async function loadAttachments() {
     setLoading(true);
@@ -1159,26 +1160,45 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
     void loadAttachments();
   }, [order.id]);
 
+  function pickFiles(files: FileList | File[] | null) {
+    const next = Array.from(files || []);
+    setSelectedFiles(next);
+    if (next.length) setError("");
+  }
+
+  function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
+    pickFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragging(false);
+    pickFiles(event.dataTransfer.files);
+  }
+
   async function uploadAttachment() {
-    if (!file) {
+    if (!selectedFiles.length) {
       setError("업로드할 파일을 선택해 주세요.");
       return;
     }
     setUploading(true);
     setError("");
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("doc_type", docType);
-      form.append("note", note);
-      const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}/attachments`), {
-        method: "POST",
-        body: form,
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) throw new Error(data.error || "업로드에 실패했습니다.");
-      setFile(null);
+      for (const item of selectedFiles) {
+        const form = new FormData();
+        form.append("file", item);
+        form.append("doc_type", docType);
+        form.append("note", note);
+        const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}/attachments`), {
+          method: "POST",
+          body: form,
+          credentials: "include",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(`${item.name}: ${data.error || "업로드에 실패했습니다."}`);
+      }
+      setSelectedFiles([]);
       setNote("");
       setDocType("기타");
       await loadAttachments();
@@ -1218,18 +1238,44 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
         </div>
         <div className="max-h-[calc(90vh-76px)] overflow-y-auto p-5">
-          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1.4fr_160px_1fr_110px]">
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx"
-              onChange={(event) => setFile(event.target.files?.[0] || null)}
-              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold"
-            />
-            <select value={docType} onChange={(event) => setDocType(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold">
-              {attachmentDocTypes.map((type) => <option key={type}>{type}</option>)}
-            </select>
-            <input value={note} onChange={(event) => setNote(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" placeholder="메모" />
-            <button type="button" onClick={uploadAttachment} disabled={uploading} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{uploading ? "업로드 중" : "업로드"}</button>
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            className={`rounded-md border p-4 transition ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
+          >
+            <div className="grid gap-3 md:grid-cols-[1.4fr_160px_1fr_110px]">
+              <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 shadow-sm hover:bg-orange-50">
+                파일 선택
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx"
+                  onChange={handleFileInput}
+                  className="hidden"
+                />
+              </label>
+              <select value={docType} onChange={(event) => setDocType(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold">
+                {attachmentDocTypes.map((type) => <option key={type}>{type}</option>)}
+              </select>
+              <input value={note} onChange={(event) => setNote(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" placeholder="메모" />
+              <button type="button" onClick={uploadAttachment} disabled={uploading} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{uploading ? "업로드 중" : "업로드"}</button>
+            </div>
+            <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm font-bold text-slate-500">
+              파일을 여기로 끌어다 놓거나, 파일 선택 버튼으로 여러 개를 한 번에 선택하세요.
+              {selectedFiles.length > 0 && (
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  {selectedFiles.map((item) => (
+                    <span key={`${item.name}-${item.size}-${item.lastModified}`} className="rounded-md bg-orange-50 px-2 py-1 text-xs font-black text-orange-600">
+                      {item.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
           {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
