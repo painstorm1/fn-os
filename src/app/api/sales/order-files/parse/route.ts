@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
+const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
@@ -196,6 +197,14 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
   });
 }
 
+function readWorkbook(buffer: Buffer) {
+  return XLSX.read(buffer, {
+    type: "buffer",
+    cellDates: false,
+    ...(ORDER_FILE_PASSWORD ? { password: ORDER_FILE_PASSWORD } : {}),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
@@ -214,7 +223,7 @@ export async function POST(request: Request) {
 
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+      const workbook = readWorkbook(buffer);
       parsedFiles.push(file.name);
 
       for (const sheetName of workbook.SheetNames) {
