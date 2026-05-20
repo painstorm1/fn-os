@@ -3605,6 +3605,44 @@ function sortShippingRowsByOption(rows: string[][]) {
   return [...rows].sort((a, b) => String(a[optionIndex] || "").localeCompare(String(b[optionIndex] || ""), "ko"));
 }
 
+type DirectShippingPartner = "JB" | "케이모아";
+
+const jbDirectHeaders = salesSheetHeaders.송장출력용.filter((header) => header !== "정산예정금액" && header !== "송장번호");
+const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
+
+function mapJbDirectRow(source: string[], sequence: number) {
+  const mmdd = todayMmdd();
+  return jbDirectHeaders.map((header) => {
+    if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
+    const sourceIndex = salesSheetHeaders.송장출력용.indexOf(header);
+    return sourceIndex >= 0 ? source[sourceIndex] || "" : "";
+  });
+}
+
+function mapKemoreDirectRow(source: string[], sequence: number) {
+  const mmdd = todayMmdd();
+  const get = (header: string) => {
+    const sourceIndex = salesSheetHeaders.송장출력용.indexOf(header);
+    return sourceIndex >= 0 ? source[sourceIndex] || "" : "";
+  };
+  return [
+    `${mmdd}-에프엔-${String(sequence).padStart(3, "0")}`,
+    get("수량"),
+    get("수취인"),
+    get("수취인연락처1"),
+    get("수취인연락처2"),
+    get("주문옵션"),
+    get("우편번호"),
+    get("주소"),
+    "1",
+    "1",
+    "1",
+    get("배송요청사항"),
+    "에프엔",
+    "031-767-5454",
+  ];
+}
+
 function downloadTextFile(fileName: string, text: string, mime = "application/vnd.ms-excel;charset=utf-8") {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -3635,6 +3673,23 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
   URL.revokeObjectURL(url);
 }
 
+function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  worksheet["!cols"] = headers.map((header, index) => ({
+    wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
+  }));
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function timeLabel() {
   const nowDate = new Date();
   const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
@@ -3647,6 +3702,13 @@ function integratedOrderFileName() {
   const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
   const dd = String(nowDate.getDate()).padStart(2, "0");
   return `${mm}${dd}_FNOS통합발주`;
+}
+
+function todayMmdd() {
+  const nowDate = new Date();
+  const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
+  const dd = String(nowDate.getDate()).padStart(2, "0");
+  return `${mm}${dd}`;
 }
 
 function fnParcelSheetName(date = new Date()) {
@@ -3994,6 +4056,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState<File[]>([]);
   const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
+  const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
@@ -4182,21 +4245,36 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요. 예: 2행과 5행을 드래그 또는 Shift 선택");
       return;
     }
-    if (completedSalesTasks.directShipping) {
-      const ok = window.confirm("직송파일을 이미 만든 것으로 보입니다. 다시 만들까요?");
-      if (!ok) return;
+    const selectedPartner = window.prompt("거래처를 선택하세요: JB 또는 케이모아", "JB")?.trim();
+    if (!selectedPartner) return;
+    if (selectedPartner !== "JB" && selectedPartner !== "케이모아") {
+      window.alert("거래처는 JB 또는 케이모아 중 하나로 입력해 주세요.");
+      return;
     }
-    const choice = window.prompt("직송파일 거래처를 입력하세요.", "거래처 JB 케이모아");
-    if (!choice) return;
-    const directRows = selectedRows.map((row) => [choice, row[0] || "", row[1] || "", row[2] || "", row[5] || "", row[6] || "", row[7] || ""]);
-    const directSheets = {
-      송장출력용: directRows,
-      이카운트_송장입력: [],
-      "이카운트_판매입력": [],
-    };
-    downloadXlsxFile(`${timeLabel()}_직송_${choice.replace(/[\\/:*?"<>|]/g, "_")}.xlsx`, directSheets);
+
+    const partner = selectedPartner as DirectShippingPartner;
+    const headers = partner === "JB" ? jbDirectHeaders : kemoreDirectHeaders;
+    const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
+    const previousRows = directShippingRows[partner] || [];
+    const appendRows: string[][] = [];
+
+    for (const sourceRow of selectedRows) {
+      const preview = mapper(sourceRow, previousRows.length + appendRows.length + 1);
+      const isDuplicate = previousRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"))
+        || appendRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"));
+      if (!isDuplicate) appendRows.push(preview);
+    }
+
+    if (!appendRows.length) {
+      window.alert("이미 입력된 값과 일치합니다.");
+      return;
+    }
+
+    const nextRows = [...previousRows, ...appendRows];
+    setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
+    downloadTableXlsx(`${todayMmdd()}_${partner}직송.xlsx`, `${partner}직송`, headers, nextRows);
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
-    setMessage(`${choice} 직송파일을 선택한 ${selectedRows.length}개 행으로 생성했습니다.`);
+    setMessage(`${partner} 직송파일에 ${appendRows.length}개 행을 추가했습니다. 총 ${nextRows.length}개 행입니다.`);
   }
 
   async function sendSalesInput() {
@@ -4296,6 +4374,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setPendingInvoiceFiles([]);
     setSelectedSalesRange(null);
     setCompletedSalesTasks({});
+    setDirectShippingRows({ JB: [], 케이모아: [] });
     setActiveSheet("송장출력용");
     setSheets({
       송장출력용: makeSheetRows("송장출력용"),
