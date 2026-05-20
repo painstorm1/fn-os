@@ -175,7 +175,9 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     counters.set(countKey, next);
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
-    const amount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
+    const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
+    const isCoupang = alias === "C" || mallName.includes("쿠팡");
+    const amount = isCoupang ? rawAmount * 0.88 : rawAmount;
     const unit = qty ? amount / qty : amount;
     const contact1 = clean(pick(source, ["수취인연락처1"]));
     const contact2 = clean(pick(source, ["수취인연락처2"])) || contact1;
