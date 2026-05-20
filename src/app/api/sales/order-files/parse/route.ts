@@ -92,8 +92,38 @@ function fromDownData(row: Record<string, unknown>) {
   };
 }
 
+const knownHeaderNames = [
+  ...headers.송장출력용,
+  ...headers.이카운트_송장입력,
+  ...headers["이카운트 판매입력"],
+  "수집처",
+  "수집일자",
+  "품목코드(ERP)",
+  "쇼핑몰상품코드",
+  "품목명(ERP)",
+  "쇼핑몰품목key",
+  "쇼핑몰명",
+  "주문상태",
+  "상태별처리기능",
+];
+
 function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
+  const headerIndex = matrix.findIndex((row) => {
+    const values = row.map((cell) => clean(cell));
+    return values.filter((cell) => knownHeaderNames.includes(cell)).length >= 3;
+  });
+  if (headerIndex < 0) {
+    return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+  }
+  const headerRow = matrix[headerIndex].map((cell) => clean(cell));
+  return matrix.slice(headerIndex + 1).map((row) => {
+    const next: Record<string, unknown> = {};
+    headerRow.forEach((header, index) => {
+      if (header) next[header] = row[index] ?? "";
+    });
+    return next;
+  });
 }
 
 export async function POST(request: Request) {
