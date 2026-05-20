@@ -4052,6 +4052,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
+  const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
@@ -4229,26 +4230,33 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
 
-  function makeDirectShippingFile() {
+  function selectedShippingRows() {
+    return selectedSalesRange?.sheet === "송장출력용"
+      ? sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean))
+      : [];
+  }
+
+  function openDirectPartnerPicker() {
     if (!hasSalesRows(sheets.송장출력용)) {
       window.alert("직송파일을 만들 송장출력용 데이터가 없습니다.");
       return;
     }
-    const selectedRows = selectedSalesRange?.sheet === "송장출력용"
-      ? sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean))
-      : [];
+    const selectedRows = selectedShippingRows();
     if (!selectedRows.length) {
       window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요. 예: 2행과 5행을 드래그 또는 Shift 선택");
       return;
     }
-    const selectedPartner = window.prompt("거래처를 선택하세요: JB 또는 케이모아", "JB")?.trim();
-    if (!selectedPartner) return;
-    if (selectedPartner !== "JB" && selectedPartner !== "케이모아") {
-      window.alert("거래처는 JB 또는 케이모아 중 하나로 입력해 주세요.");
+    setDirectPartnerPickerOpen(true);
+  }
+
+  function makeDirectShippingFile(partner: DirectShippingPartner) {
+    const selectedRows = selectedShippingRows();
+    if (!selectedRows.length) {
+      window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요.");
+      setDirectPartnerPickerOpen(false);
       return;
     }
 
-    const partner = selectedPartner as DirectShippingPartner;
     const headers = partner === "JB" ? jbDirectHeaders : kemoreDirectHeaders;
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
     const previousRows = directShippingRows[partner] || [];
@@ -4263,6 +4271,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
     if (!appendRows.length) {
       window.alert("이미 입력된 값과 일치합니다.");
+      setDirectPartnerPickerOpen(false);
       return;
     }
 
@@ -4271,6 +4280,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     downloadTableXlsx(`${todayMmdd()}_${partner}직송.xlsx`, `${partner}직송`, headers, nextRows);
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
     setMessage(`${partner} 직송파일에 ${appendRows.length}개 행을 추가했습니다. 총 ${nextRows.length}개 행입니다.`);
+    setDirectPartnerPickerOpen(false);
   }
 
   async function sendSalesInput() {
@@ -4399,7 +4409,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <div className="mb-4 flex flex-wrap gap-2">
             <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>1. 발주파일 작업 실행</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>2. 송장출력용 내보내기</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={makeDirectShippingFile}>3. 직송파일 만들기</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openDirectPartnerPicker}>3. 직송파일 만들기</button>
             <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트_판매입력 전송</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>5. 송장번호 매칭</button>
             <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>6. FN_택배시트 반영</button>
@@ -4466,6 +4476,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             참고: 웹브라우저 보안상 파일을 바탕화면에 직접 저장하지는 못해서 다운로드 파일로 생성합니다. 브라우저 다운로드 위치를 바탕화면으로 지정하면 같은 흐름으로 사용할 수 있습니다.
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+          {directPartnerPickerOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+              <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-black">거래처</h3>
+                  <button type="button" onClick={() => setDirectPartnerPickerOpen(false)} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
+                </div>
+                <p className="mt-2 text-sm font-bold text-slate-500">직송파일 양식을 선택해 주세요.</p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button type="button" onClick={() => makeDirectShippingFile("JB")} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">JB</button>
+                  <button type="button" onClick={() => makeDirectShippingFile("케이모아")} className="rounded-md border border-slate-200 bg-white px-4 py-5 text-lg font-black text-slate-700 hover:bg-slate-50">케이모아</button>
+                </div>
+              </div>
+            </div>
+          )}
         </Panel>
       )}
 
