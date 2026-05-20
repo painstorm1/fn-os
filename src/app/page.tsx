@@ -3600,6 +3600,11 @@ function hasSalesRows(rows: string[][]) {
   return rows.some((row) => row.some((cell) => String(cell || "").trim()));
 }
 
+function sortShippingRowsByOption(rows: string[][]) {
+  const optionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
+  return [...rows].sort((a, b) => String(a[optionIndex] || "").localeCompare(String(b[optionIndex] || ""), "ko"));
+}
+
 function downloadTextFile(fileName: string, text: string, mime = "application/vnd.ms-excel;charset=utf-8") {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -4112,7 +4117,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSheets((prev) => {
       const nextSheets = { ...prev };
       (Object.keys(salesSheetHeaders) as SalesSheetName[]).forEach((sheet) => {
-        const rows = parsedSheets?.[sheet] || [];
+        const rows = sheet === "송장출력용"
+          ? sortShippingRowsByOption(parsedSheets?.[sheet] || [])
+          : parsedSheets?.[sheet] || [];
         if (rows.length) nextSheets[sheet] = padSalesRows(sheet, rows);
       });
       return nextSheets;
