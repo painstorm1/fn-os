@@ -3589,6 +3589,15 @@ function hasSalesRows(rows: string[][]) {
   return rows.some((row) => row.some((cell) => String(cell || "").trim()));
 }
 
+function classifyOrderUploadFileName(fileName: string) {
+  const lower = fileName.toLowerCase();
+  if (/esk\d*m/i.test(fileName) || lower.includes("ecount") || fileName.includes("이카운트")) return "이카운트 주문수집";
+  if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "현대 이지웰";
+  if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "오늘의 집";
+  if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "토스";
+  return "";
+}
+
 function sortShippingRowsByOption(rows: string[][]) {
   const optionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
   return [...rows].sort((a, b) => String(a[optionIndex] || "").localeCompare(String(b[optionIndex] || ""), "ko"));
@@ -4183,6 +4192,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
     const next = Array.from(files || []);
     if (!next.length) return;
+    if (kind === "orders") {
+      for (const file of next) {
+        if (!classifyOrderUploadFileName(file.name)) {
+          const ok = window.confirm(`${file.name} - 이 파일은 확인되지 않는 사이트의 정보입니다. 그래도 발주파일로 추가할까요?`);
+          if (!ok) return;
+        }
+      }
+    }
     if (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트_판매입력"])) {
       const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 실행하면 해당 시트 값이 덮어써질 수 있습니다. 파일을 대기 목록에 추가할까요?");
       if (!ok) return;

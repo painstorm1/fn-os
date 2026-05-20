@@ -5,6 +5,8 @@ import * as XLSX from "xlsx";
 export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
+type OrderSource = "ecount" | "todayhouse" | "toss" | "ezwell" | "unknown";
+
 const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
@@ -59,7 +61,21 @@ function asRow(row: Record<string, unknown>, sheet: SheetName) {
   return headers[sheet].map((header) => clean(row[header]));
 }
 
-function mallAlias(mallName: string, mallCode: string) {
+function stripPrefixTag(value: string) {
+  return value.replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
+function classifyOrderFileName(fileName: string): OrderSource {
+  const name = fileName.toLowerCase();
+  if (/esk\d*m/i.test(fileName) || name.includes("ecount") || name.includes("이카운트")) return "ecount";
+  if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "todayhouse";
+  if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "toss";
+  if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "ezwell";
+  return "unknown";
+}
+
+function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
+  if (forcedAlias) return forcedAlias;
   const name = mallName.toLowerCase();
   if (name.includes("펀앤파인")) return "FF";
   if (name.includes("에프엔") || name.includes("fn")) return "FN";
@@ -73,15 +89,16 @@ function mallAlias(mallName: string, mallCode: string) {
 
 function makeOrderOption(row: Record<string, unknown>) {
   const qty = Math.max(1, Math.round(parseNumber(pick(row, ["수량", "M 수량"]))) || 1);
-  const name = clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"])).replace(/^\[[^\]]+\]\s*/, "");
+  const name = stripPrefixTag(clean(pick(row, ["주문옵션", "품목명(ERP)", "품목명", "쇼핑몰상품명"])));
   return qty > 1 ? `${name}-★${qty}개` : name;
 }
 
 function isValidDownRow(row: Record<string, unknown>) {
-  const product = clean(pick(row, ["품목코드(ERP)", "품목코드", "품목명(ERP)", "품목명"]));
   const recipient = clean(pick(row, ["수취인"]));
   const orderNo = clean(pick(row, ["주문번호", "묶음주문번호"]));
-  return Boolean(product && recipient && orderNo);
+  const option = clean(pick(row, ["주문옵션", "품목명(ERP)", "품목명", "쇼핑몰상품명"]));
+  if (["수정 불가", "수정 가능"].includes(orderNo) || ["수정 불가", "수정 가능"].includes(recipient)) return false;
+  return Boolean(recipient && orderNo && option);
 }
 
 function buildFromDownRows(rows: Record<string, unknown>[]) {
@@ -96,13 +113,13 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const mallName = clean(pick(source, ["쇼핑몰명", "거래처명"]));
     const mallCode = clean(pick(source, ["쇼핑몰코드"]));
     const date = pick(source, ["수집일자", "일자"]);
-    const alias = mallAlias(mallName, mallCode);
+    const alias = mallAlias(mallName, mallCode, clean(source.__alias));
     const countKey = `${monthDay(date)}-${alias}`;
     const next = (counters.get(countKey) || 0) + 1;
     counters.set(countKey, next);
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
-    const amount = parseNumber(pick(source, ["정산예정금액", "공급가액"]));
+    const amount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
     const unit = qty ? amount / qty : amount;
     const contact1 = clean(pick(source, ["수취인연락처1"]));
     const contact2 = clean(pick(source, ["수취인연락처2"])) || contact1;
@@ -129,7 +146,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       clean(pick(source, ["주문번호"])),
       clean(pick(source, ["묶음주문번호"])),
       clean(pick(source, ["배송방법코드"])),
-      "",
+      clean(pick(source, ["송장번호"])),
     ]);
 
     sale.push([
@@ -164,6 +181,80 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
   };
 }
 
+function joinText(...values: unknown[]) {
+  return values.map(clean).filter(Boolean).join(" ").trim();
+}
+
+function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
+  if (source === "ecount" || source === "unknown") return rows;
+
+  return rows.map((row) => {
+    if (source === "todayhouse") {
+      return {
+        __alias: "O",
+        수집일자: pick(row, ["주문결제완료일", "출고예정일"]),
+        쇼핑몰명: "오늘의집",
+        쇼핑몰코드: "O",
+        주문번호: pick(row, ["주문번호"]),
+        묶음주문번호: pick(row, ["묶음배송그룹", "주문번호"]),
+        배송방법코드: pick(row, ["배송방법"]),
+        송장번호: pick(row, ["운송장번호"]),
+        수취인: pick(row, ["수취인명"]),
+        수취인연락처1: pick(row, ["수취인 연락처"]),
+        수취인연락처2: pick(row, ["수취인 연락처"]),
+        우편번호: pick(row, ["수취인 우편번호"]),
+        주소: joinText(pick(row, ["수취인 주소"]), pick(row, ["수취인 주소상세"])),
+        주문옵션: joinText(pick(row, ["상품명"]), pick(row, ["옵션명"])),
+        수량: pick(row, ["수량"]),
+        배송요청사항: pick(row, ["배송메모", "주문메모"]),
+        정산예정금액: pick(row, ["정산예정금액", "판매가*수량 + 조립비 + 배송비", "판매가 * 수량"]),
+      };
+    }
+
+    if (source === "toss") {
+      return {
+        __alias: "T",
+        수집일자: pick(row, ["주문일시", "발송기한"]),
+        쇼핑몰명: "토스",
+        쇼핑몰코드: "T",
+        주문번호: pick(row, ["주문번호"]),
+        묶음주문번호: pick(row, ["배송비 묶음 번호", "주문번호"]),
+        배송방법코드: pick(row, ["택배사"]),
+        송장번호: pick(row, ["송장번호"]),
+        수취인: pick(row, ["수령인명", "구매자명"]),
+        수취인연락처1: pick(row, ["수령인 연락처", "구매자 연락처"]),
+        수취인연락처2: pick(row, ["수령인 연락처", "구매자 연락처"]),
+        우편번호: pick(row, ["우편번호"]),
+        주소: pick(row, ["배송지"]),
+        주문옵션: joinText(pick(row, ["상품명"]), pick(row, ["옵션명"])),
+        수량: pick(row, ["주문건수"]),
+        배송요청사항: pick(row, ["주문요청사항"]),
+        정산예정금액: pick(row, ["주문금액"]),
+      };
+    }
+
+    return {
+      __alias: "Z",
+      수집일자: pick(row, ["주문일시", "주문확인일시"]),
+      쇼핑몰명: "현대이지웰",
+      쇼핑몰코드: "Z",
+      주문번호: pick(row, ["주문번호"]),
+      묶음주문번호: pick(row, ["장바구니 번호", "주문번호"]),
+      배송방법코드: pick(row, ["택배사"]),
+      송장번호: pick(row, ["운송장번호"]),
+      수취인: pick(row, ["수령자명", "주문자명"]),
+      수취인연락처1: pick(row, ["수령자 휴대폰번호", "주문자 휴대폰번호"]),
+      수취인연락처2: pick(row, ["수령자 휴대폰번호", "주문자 휴대폰번호"]),
+      우편번호: pick(row, ["우편번호"]),
+      주소: pick(row, ["주소"]),
+      주문옵션: joinText(pick(row, ["상품명"]), pick(row, ["옵션"])),
+      수량: pick(row, ["주문수량", "배송수량"]),
+      배송요청사항: pick(row, ["배송메시지(요청사항)"]),
+      정산예정금액: pick(row, ["실주문금액", "판매가격"]),
+    };
+  });
+}
+
 const knownHeaderNames = [
   ...headers.송장출력용,
   ...headers.이카운트_송장입력,
@@ -177,6 +268,24 @@ const knownHeaderNames = [
   "쇼핑몰명",
   "주문상태",
   "상태별처리기능",
+  "수령자명",
+  "수령자 휴대폰번호",
+  "배송메시지(요청사항)",
+  "주문일시",
+  "주문상품번호",
+  "상품명",
+  "옵션명",
+  "주문건수",
+  "수령인명",
+  "배송지",
+  "주문요청사항",
+  "주문금액",
+  "수취인명",
+  "수취인 연락처",
+  "수취인 우편번호",
+  "수취인 주소",
+  "수취인 주소상세",
+  "배송메모",
 ];
 
 function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
@@ -251,6 +360,7 @@ export async function POST(request: Request) {
     const parsedFiles: string[] = [];
 
     for (const file of files) {
+      const source = classifyOrderFileName(file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
       const workbook = await readWorkbook(buffer, workbookPassword);
       parsedFiles.push(file.name);
@@ -259,6 +369,11 @@ export async function POST(request: Request) {
         const worksheet = workbook.Sheets[sheetName];
         const rows = rowsFromWorksheet(worksheet).filter((row) => Object.values(row).some((value) => clean(value)));
         if (!rows.length) continue;
+
+        if (source !== "unknown" && source !== "ecount") {
+          downRows.push(...toCanonicalRows(rows, source));
+          continue;
+        }
 
         const isDownData = sheetName === "다운_데이터" || sheetName === "주문관리진행단계" || rows.some((row) => hasKeys(row, ["수집처", "품목코드(ERP)", "쇼핑몰상품코드", "쇼핑몰품목key"]));
         if (isDownData) {
