@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import officeCrypto from "officecrypto-tool";
 import * as XLSX from "xlsx";
 
 export const runtime = "nodejs";
@@ -197,12 +198,39 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
   });
 }
 
-function readWorkbook(buffer: Buffer) {
-  return XLSX.read(buffer, {
+function isWorkbookPasswordError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /password|encrypted|encryption|protected/i.test(message);
+}
+
+async function decryptWorkbookBuffer(buffer: Buffer) {
+  if (!ORDER_FILE_PASSWORD) {
+    throw new Error("암호화된 엑셀입니다. ORDER_FILE_PASSWORD 환경변수를 설정해 주세요.");
+  }
+
+  try {
+    return await officeCrypto.decrypt(buffer, { password: ORDER_FILE_PASSWORD });
+  } catch {
+    throw new Error("암호화된 엑셀을 열지 못했습니다. ORDER_FILE_PASSWORD 값을 확인해 주세요.");
+  }
+}
+
+async function readWorkbook(buffer: Buffer) {
+  const read = (input: Buffer) => XLSX.read(input, {
     type: "buffer",
     cellDates: false,
-    ...(ORDER_FILE_PASSWORD ? { password: ORDER_FILE_PASSWORD } : {}),
   });
+
+  if (officeCrypto.isEncrypted(buffer)) {
+    return read(await decryptWorkbookBuffer(buffer));
+  }
+
+  try {
+    return read(buffer);
+  } catch (error) {
+    if (!isWorkbookPasswordError(error)) throw error;
+    return read(await decryptWorkbookBuffer(buffer));
+  }
 }
 
 export async function POST(request: Request) {
@@ -223,7 +251,7 @@ export async function POST(request: Request) {
 
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const workbook = readWorkbook(buffer);
+      const workbook = await readWorkbook(buffer);
       parsedFiles.push(file.name);
 
       for (const sheetName of workbook.SheetNames) {
