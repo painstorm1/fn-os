@@ -203,33 +203,33 @@ function isWorkbookPasswordError(error: unknown) {
   return /password|encrypted|encryption|protected/i.test(message);
 }
 
-async function decryptWorkbookBuffer(buffer: Buffer) {
-  if (!ORDER_FILE_PASSWORD) {
+async function decryptWorkbookBuffer(buffer: Buffer, password: string) {
+  if (!password) {
     throw new Error("암호화된 엑셀입니다. ORDER_FILE_PASSWORD 환경변수를 설정해 주세요.");
   }
 
   try {
-    return await officeCrypto.decrypt(buffer, { password: ORDER_FILE_PASSWORD });
+    return await officeCrypto.decrypt(buffer, { password });
   } catch {
-    throw new Error("암호화된 엑셀을 열지 못했습니다. ORDER_FILE_PASSWORD 값을 확인해 주세요.");
+    throw new Error("암호화된 엑셀을 열지 못했습니다. 엑셀 비밀번호를 확인해 주세요.");
   }
 }
 
-async function readWorkbook(buffer: Buffer) {
+async function readWorkbook(buffer: Buffer, password: string) {
   const read = (input: Buffer) => XLSX.read(input, {
     type: "buffer",
     cellDates: false,
   });
 
   if (officeCrypto.isEncrypted(buffer)) {
-    return read(await decryptWorkbookBuffer(buffer));
+    return read(await decryptWorkbookBuffer(buffer, password));
   }
 
   try {
     return read(buffer);
   } catch (error) {
     if (!isWorkbookPasswordError(error)) throw error;
-    return read(await decryptWorkbookBuffer(buffer));
+    return read(await decryptWorkbookBuffer(buffer, password));
   }
 }
 
@@ -237,6 +237,7 @@ export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const files = form.getAll("files").filter((item): item is File => item instanceof File);
+    const workbookPassword = clean(form.get("order_file_password")) || ORDER_FILE_PASSWORD;
     if (!files.length) {
       return NextResponse.json({ ok: false, error: "업로드할 파일이 없습니다." }, { status: 400 });
     }
@@ -251,7 +252,7 @@ export async function POST(request: Request) {
 
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const workbook = await readWorkbook(buffer);
+      const workbook = await readWorkbook(buffer, workbookPassword);
       parsedFiles.push(file.name);
 
       for (const sheetName of workbook.SheetNames) {

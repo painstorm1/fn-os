@@ -4092,6 +4092,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [completedSalesTasks, setCompletedSalesTasks] = useState<Record<string, boolean>>({});
   const [pendingOrderFiles, setPendingOrderFiles] = useState<File[]>([]);
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState<File[]>([]);
+  const [orderFilePassword, setOrderFilePassword] = useState("");
   const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
@@ -4196,7 +4197,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${next.length}개를 대기 목록에 올렸습니다. 1번 버튼을 누르면 시트가 채워집니다.`);
   }
 
-  async function parseWaitingFiles(kind: "orders" | "invoices") {
+  async function parseWaitingFiles(kind: "orders" | "invoices", passwordOverride = orderFilePassword) {
     const waitingFiles = kind === "orders" ? pendingOrderFiles : pendingInvoiceFiles;
     if (!waitingFiles.length) {
       window.alert(kind === "orders" ? "먼저 발주파일을 업로드해 주세요." : "먼저 송장파일을 업로드해 주세요.");
@@ -4205,6 +4206,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage(`${waitingFiles.length}개 파일을 읽는 중입니다...`);
     const formData = new FormData();
     formData.append("kind", kind);
+    if (passwordOverride) formData.append("order_file_password", passwordOverride);
     waitingFiles.forEach((file) => formData.append("files", file));
     const res = await fetch("/api/sales/order-files/parse", {
       method: "POST",
@@ -4213,6 +4215,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
+      const errorMessage = data.error || "";
+      if (kind === "orders" && /ORDER_FILE_PASSWORD|password|protected|encrypted|암호/i.test(errorMessage)) {
+        const password = window.prompt("암호화된 엑셀입니다. 엑셀 비밀번호를 입력해 주세요.");
+        if (password) {
+          setOrderFilePassword(password);
+          await parseWaitingFiles(kind, password);
+          return;
+        }
+      }
       setMessage(data.error || "엑셀 파일을 읽지 못했습니다.");
       return;
     }
@@ -4431,6 +4442,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setUploadedFiles([]);
     setPendingOrderFiles([]);
     setPendingInvoiceFiles([]);
+    setOrderFilePassword("");
     setSelectedSalesRange(null);
     setCompletedSalesTasks({});
     setInvoiceMemoText("");
