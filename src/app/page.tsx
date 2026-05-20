@@ -1172,14 +1172,11 @@ function NativeImportWorkspace({ path }: { path: string }) {
   return <NativeOrders initialOpenOrderId={openOrderId} />;
 }
 
-const attachmentDocTypes = ["견적서", "송금증", "인보이스", "패킹리스트", "제품사진", "검수사진", "통관서류", "송장/배송자료", "기타"];
-
 function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrder; onClose: () => void; onChanged?: (count: number) => void }) {
   const [attachments, setAttachments] = useState<OrderAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-  const [docType, setDocType] = useState("기타");
   const [note, setNote] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -1233,7 +1230,6 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
       for (const item of selectedFiles) {
         const form = new FormData();
         form.append("file", item);
-        form.append("doc_type", docType);
         form.append("note", note);
         const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}/attachments`), {
           method: "POST",
@@ -1245,7 +1241,6 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
       }
       setSelectedFiles([]);
       setNote("");
-      setDocType("기타");
       await loadAttachments();
     } catch (err) {
       setError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
@@ -1292,7 +1287,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             onDrop={handleDrop}
             className={`rounded-md border p-4 transition ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
           >
-            <div className="grid gap-3 md:grid-cols-[1.4fr_160px_1fr_110px]">
+            <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_110px]">
               <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 shadow-sm hover:bg-orange-50">
                 파일 선택
                 <input
@@ -1303,9 +1298,6 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
                   className="hidden"
                 />
               </label>
-              <select value={docType} onChange={(event) => setDocType(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold">
-                {attachmentDocTypes.map((type) => <option key={type}>{type}</option>)}
-              </select>
               <input value={note} onChange={(event) => setNote(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" placeholder="메모" />
               <button type="button" onClick={uploadAttachment} disabled={uploading} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{uploading ? "업로드 중" : "업로드"}</button>
             </div>
@@ -1325,10 +1317,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
           <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
           {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
           <div className="mt-5 overflow-hidden rounded-md border border-slate-200">
-            <div className="grid grid-cols-[70px_1.5fr_120px_90px_130px_1fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
-              <span>유형</span>
+            <div className="grid grid-cols-[1.7fr_90px_130px_1fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
               <span>파일명</span>
-              <span>문서 유형</span>
               <span>크기</span>
               <span>업로드일</span>
               <span>메모</span>
@@ -1337,10 +1327,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             {loading ? (
               <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
             ) : attachments.length ? attachments.map((item) => (
-              <div key={item.id} className="grid grid-cols-[70px_1.5fr_120px_90px_130px_1fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
-                <span className="font-black text-orange-600">[{fileKind(item.file_name)}]</span>
-                <span className="break-all font-bold">{item.file_name || "-"}</span>
-                <span>{item.doc_type || "-"}</span>
+              <div key={item.id} className="grid grid-cols-[1.7fr_90px_130px_1fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
+                <span className="break-all font-bold"><span className="mr-2 font-black text-orange-600">[{fileKind(item.file_name)}]</span>{item.file_name || "-"}</span>
                 <span>{fileSize(item.file_size)}</span>
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
@@ -1358,6 +1346,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
     </div>
   );
 }
+
 
 function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: number | null }) {
   const [orders, setOrders] = useState<ImportOrder[]>([]);
