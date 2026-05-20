@@ -3882,12 +3882,18 @@ function SalesExcelGrid({
         onMouseUp={() => setSelecting(false)}
         className="max-h-[560px] overflow-auto outline-none"
       >
-        <table className="min-w-max border-collapse text-xs">
+        <table className="table-fixed border-collapse text-xs" style={{ width: 40 + colWidths.reduce((sum, width) => sum + width, 0) }}>
+          <colgroup>
+            <col style={{ width: 40 }} />
+            {headers.map((header, colIndex) => (
+              <col key={header} style={{ width: colWidths[colIndex] || 95 }} />
+            ))}
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100">
             <tr>
               <th className="w-10 border border-slate-200 px-2 py-2 text-slate-400">#</th>
               {headers.map((header, colIndex) => (
-                <th key={header} style={{ width: colWidths[colIndex] || 90 }} className="relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
+                <th key={header} style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }} className="relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
                   <div className="truncate">{header}</div>
                   <button
                     type="button"
@@ -3914,7 +3920,7 @@ function SalesExcelGrid({
                 {headers.map((header, colIndex) => (
                   <td
                     key={`${header}-${colIndex}`}
-                    style={{ width: colWidths[colIndex] || 90, height: rowHeights[rowIndex] || 30 }}
+                    style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95, height: rowHeights[rowIndex] || 30 }}
                     onMouseDown={(event) => {
                       if (event.button !== 0) return;
                       selectCell(rowIndex, colIndex, event.shiftKey);
