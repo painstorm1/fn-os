@@ -3708,6 +3708,7 @@ function fnParcelSheetName(date = new Date()) {
 
 type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
+type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
   return {
@@ -3722,6 +3723,17 @@ function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[
   if (sheet === "송장출력용" && header !== "주문옵션") return 95;
   const longest = [header, ...rows.map((row) => row[colIndex] || "")].reduce((max, value) => Math.max(max, String(value).length), 0);
   return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
+}
+
+function compareSalesCellValue(a: string, b: string) {
+  const left = String(a || "").trim();
+  const right = String(b || "").trim();
+  const leftNumber = Number(left.replace(/,/g, ""));
+  const rightNumber = Number(right.replace(/,/g, ""));
+  if (left && right && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return left.localeCompare(right, "ko", { numeric: true, sensitivity: "base" });
 }
 
 function SalesExcelGrid({
@@ -3746,11 +3758,14 @@ function SalesExcelGrid({
   const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
   const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => 30));
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
+  const [sortState, setSortState] = useState<SalesGridSort>(null);
+  const isShippingSheet = sheet === (Object.keys(salesSheetHeaders)[0] as SalesSheetName);
 
   useEffect(() => {
     setAnchor({ row: 0, col: 0 });
     setRange({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
     setEditing(null);
+    setSortState(null);
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
     setRowHeights(rows.map(() => 30));
   }, [sheet, resetKey]);
@@ -3790,6 +3805,22 @@ function SalesExcelGrid({
   }
   function addRow() {
     onChange([...rows, headers.map(() => "")]);
+  }
+  function sortByColumn(colIndex: number) {
+    if (!isShippingSheet) return;
+    const dir: "asc" | "desc" = sortState?.col === colIndex && sortState.dir === "asc" ? "desc" : "asc";
+    const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
+    const emptyRows = rows.filter((row) => !row.some((cell) => String(cell || "").trim()));
+    const sortedRows = [...filledRows].sort((a, b) => {
+      const result = compareSalesCellValue(a[colIndex] || "", b[colIndex] || "");
+      return dir === "asc" ? result : -result;
+    });
+    onChange([...sortedRows, ...emptyRows]);
+    setSortState({ col: colIndex, dir });
+    setAnchor({ row: 0, col: colIndex });
+    setRange({ startRow: 0, endRow: Math.max(0, sortedRows.length - 1), startCol: colIndex, endCol: colIndex });
+    setEditing(null);
+    gridRef.current?.focus();
   }
   function selectCell(row: number, col: number, extend = false) {
     const next = { row, col };
@@ -3893,12 +3924,24 @@ function SalesExcelGrid({
             <tr>
               <th className="w-10 border border-slate-200 px-2 py-2 text-slate-400">#</th>
               {headers.map((header, colIndex) => (
-                <th key={header} style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }} className="relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
-                  <div className="truncate">{header}</div>
+                <th
+                  key={header}
+                  style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }}
+                  onDoubleClick={() => sortByColumn(colIndex)}
+                  title={isShippingSheet ? "더블클릭하면 오름/내림차순 정렬" : undefined}
+                  className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isShippingSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
+                >
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span className="truncate">{header}</span>
+                    {isShippingSheet && sortState?.col === colIndex && (
+                      <span className="shrink-0 text-[10px] text-orange-600">{sortState.dir === "asc" ? "ASC" : "DESC"}</span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     aria-label={`${header} 열 너비 조절`}
                     onMouseDown={(event) => startColResize(event, colIndex)}
+                    onDoubleClick={(event) => event.stopPropagation()}
                     className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-orange-300"
                   />
                 </th>
