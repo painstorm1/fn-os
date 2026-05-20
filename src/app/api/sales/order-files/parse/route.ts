@@ -145,14 +145,14 @@ function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
 
 function makeOrderOption(row: Record<string, unknown>) {
   const qty = Math.max(1, Math.round(parseNumber(pick(row, ["수량", "M 수량"]))) || 1);
-  const name = stripPrefixTag(clean(pick(row, ["주문옵션", "품목명(ERP)", "품목명", "쇼핑몰상품명"])));
+  const name = stripPrefixTag(clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"])));
   return qty > 1 ? `${name}-★${qty}개` : name;
 }
 
 function isValidDownRow(row: Record<string, unknown>) {
   const recipient = clean(pick(row, ["수취인"]));
   const orderNo = clean(pick(row, ["주문번호", "묶음주문번호"]));
-  const option = clean(pick(row, ["주문옵션", "품목명(ERP)", "품목명", "쇼핑몰상품명"]));
+  const option = clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"]));
   if (["수정 불가", "수정 가능"].includes(orderNo) || ["수정 불가", "수정 가능"].includes(recipient)) return false;
   return Boolean(recipient && orderNo && option);
 }
