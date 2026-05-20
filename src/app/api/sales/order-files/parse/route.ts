@@ -71,7 +71,7 @@ function mallAlias(mallName: string, mallCode: string) {
 
 function makeOrderOption(row: Record<string, unknown>) {
   const qty = Math.max(1, Math.round(parseNumber(pick(row, ["수량", "M 수량"]))) || 1);
-  const name = clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"]));
+  const name = clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"])).replace(/^\[[^\]]+\]\s*/, "");
   return qty > 1 ? `${name}-★${qty}개` : name;
 }
 
