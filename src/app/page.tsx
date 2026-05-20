@@ -3637,6 +3637,12 @@ function timeLabel() {
   return `${mm}${dd}_발주건출력_${nowDate.getHours() < 12 ? "오전" : "오후"}`;
 }
 
+function fnParcelSheetName(date = new Date()) {
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  return `${yy}${mm}-${date.getMonth() + 1}월`;
+}
+
 type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
 
@@ -4193,6 +4199,41 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상 메모장을 생성했습니다.");
   }
 
+  async function applyFnParcelSheet() {
+    const shippingRows = sheets.송장출력용.filter((row) => row.some((cell) => String(cell || "").trim()));
+    if (!shippingRows.length) {
+      window.alert("FN_택배시트에 반영할 송장출력용 데이터가 없습니다.");
+      return;
+    }
+    const keyCount = new Map<string, number>();
+    shippingRows.forEach((row) => {
+      const key = [row[0], row[1], row[2], row[5], row[6]].map((value) => String(value || "").trim()).join("|");
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+    const duplicated = [...keyCount.values()].some((count) => count > 1);
+    if (duplicated) {
+      const ok = window.confirm("송장출력용 안에 중복으로 의심되는 행이 있습니다. 그래도 FN_택배시트 반영용으로 복사할까요?");
+      if (!ok) return;
+    }
+    if (completedSalesTasks.fnParcelApplied) {
+      const ok = window.confirm("FN_택배시트 반영 작업을 이미 실행한 것으로 보입니다. 같은 내용이 중복 붙여넣기 될 수 있습니다. 계속할까요?");
+      if (!ok) return;
+    }
+    const targetSheet = fnParcelSheetName();
+    const ok = window.confirm(`FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 ${shippingRows.length}개 행을 붙여넣기용으로 복사합니다. 계속할까요?`);
+    if (!ok) return;
+    const text = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || "").join("\t")).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
+      setMessage(`FN_택배시트 '${targetSheet}' 반영용 데이터 ${shippingRows.length}개 행을 클립보드에 복사했습니다. 해당 시트의 마지막 빈 행에 붙여넣어 주세요.`);
+    } catch {
+      downloadTextFile(`FN_택배시트_${targetSheet}_붙여넣기.txt`, text, "text/plain;charset=utf-8");
+      setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
+      setMessage(`클립보드 복사가 막혀 붙여넣기용 txt 파일로 생성했습니다. FN_택배시트 '${targetSheet}'에 붙여넣어 주세요.`);
+    }
+  }
+
   function resetSalesWorkspace() {
     const hasAnyRows = (Object.keys(salesSheetHeaders) as SalesSheetName[]).some((sheet) => hasSalesRows(sheets[sheet]));
     if (hasAnyRows || uploadedFiles.length) {
@@ -4231,6 +4272,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={makeDirectShippingFile}>3. 직송파일 만들기</button>
             <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트 판매입력 전송</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>5. 송장번호 매칭</button>
+            <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>6. FN_택배시트 반영</button>
           </div>
           <div
             onDragOver={(event) => {
