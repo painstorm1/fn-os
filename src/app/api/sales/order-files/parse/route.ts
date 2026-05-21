@@ -141,6 +141,42 @@ function stripPrefixTag(value: string) {
   return value.replace(/^\[[^\]]+\]\s*/, "").trim();
 }
 
+const orderOptionReplacements: Array<[string, string]> = [
+  ["제품선택: ", ""],
+  ["제품선택:", ""],
+  [" / 선글라스 색상: ", "_"],
+  [" / 사이즈: ", "_"],
+  [" / 색상: : ", "_"],
+  ["축구양말 / 모델: ", ""],
+  [" / 색상 사이즈: ", "_"],
+  [" / 색상: ", "_"],
+  ["길이:", "펀링크 180도 회전케이블"],
+  [" / 컬러: ", "_"],
+  ["TF인조잔디용 / 모델: ", ""],
+  ["앵클&신가드 / 모델: ", ""],
+  ["컬러: ", ""],
+  ["/ 모델 사이즈: ", ""],
+  ["충전기 어댑터: ", ""],
+  ["신가드&보호용품: ", ""],
+  ["변환젠더: ", ""],
+  [",색상:", "_"],
+  [" / 구성: ", "_"],
+  ["TF인조잔디용:", ""],
+  [":", "_"],
+  ["강력한 패딩 얼룩 제거 물티슈 얼룩 제거제 티슈 휴대용 8매, ", "얼룩 제거제 티슈 휴대용 8매_"],
+  ["Type C to USB A 3.0 C타입 이어폰 변환 젠더 USB아답터 ", "펀링크 USB3.0아답터 젠더_"],
+  ["안전인증 정식수입 휴대용 얼룩 제거제 키링 스테인 리무버 12ml 제품선택;휴대용 얼룩 제거제 키링", "휴대용 얼룩 제거제 키링"],
+  ["펀링크 C to C타입 180도 회전형 초고속 충전 케이블 PD60W USB-A젠더 포함 1개, ", "펀링크 C to C 케이블_"],
+];
+
+function normalizeOrderOptionText(value: string) {
+  let next = stripPrefixTag(value);
+  for (const [from, to] of orderOptionReplacements) {
+    next = next.split(from).join(to);
+  }
+  return next.replace(/_+/g, "_").replace(/\s+_/g, "_").replace(/_\s+/g, "_").trim();
+}
+
 function classifyOrderFileName(fileName: string): OrderSource {
   const name = fileName.toLowerCase();
   if (/esk\d*m/i.test(fileName) || name.includes("ecount") || name.includes("이카운트")) return "ecount";
@@ -186,7 +222,7 @@ function shouldIncludeInvoiceRow(alias: string) {
 
 function makeOrderOption(row: Record<string, unknown>) {
   const qty = Math.max(1, Math.round(parseNumber(pick(row, ["수량", "M 수량"]))) || 1);
-  const name = stripPrefixTag(clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"])));
+  const name = normalizeOrderOptionText(clean(pick(row, ["품목명(ERP)", "품목명", "주문옵션", "쇼핑몰상품명"])));
   return qty > 1 ? `${name}-★${qty}개` : name;
 }
 
