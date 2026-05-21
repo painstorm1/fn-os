@@ -4084,13 +4084,13 @@ function applyInvoiceTrackingToSheets(
       }
     });
 
-    const failedShipping = nextShipping
+    const failedShippingIndexes = nextShipping
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => rowHasValue(row) && !salesCellText(row[1]))
-      .map(({ index }) => `${index + 1}행`);
-    const failedInvoice = [...failedInvoiceIndexes]
-      .filter((index) => index >= 0)
-      .map((index) => `${index + 1}행`);
+      .map(({ index }) => index);
+    const failedInvoiceIndexesList = [...failedInvoiceIndexes].filter((index) => index >= 0);
+    const failedShipping = failedShippingIndexes.map((index) => `${index + 1}행`);
+    const failedInvoice = failedInvoiceIndexesList.map((index) => `${index + 1}행`);
 
     const manualRows = nextShipping
       .filter(rowHasValue)
@@ -4108,6 +4108,8 @@ function applyInvoiceTrackingToSheets(
       matchedInvoice,
       failedShipping,
       failedInvoice,
+      failedShippingIndexes,
+      failedInvoiceIndexes: failedInvoiceIndexesList,
       alreadyMatchedShipping,
       alreadyMatchedInvoice,
       manualRows,
@@ -4169,6 +4171,8 @@ function applyInvoiceTrackingToSheets(
     matchedInvoice,
     failedShipping: [] as string[],
     failedInvoice: [] as string[],
+    failedShippingIndexes: [] as number[],
+    failedInvoiceIndexes: [] as number[],
     alreadyMatchedShipping: 0,
     alreadyMatchedInvoice: 0,
     manualRows,
@@ -4518,12 +4522,14 @@ function SalesExcelGrid({
   onChange,
   onSelectionChange,
   resetKey = 0,
+  highlightedRows = [],
 }: {
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   resetKey?: number;
+  highlightedRows?: number[];
 }) {
   const headers = salesSheetHeaders[sheet];
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -4536,6 +4542,7 @@ function SalesExcelGrid({
   const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => 30));
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
+  const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
   const productCodeCol = headers.indexOf("품목코드");
   const [productSearch, setProductSearch] = useState<EcountProductSearchState>({
@@ -4804,9 +4811,11 @@ function SalesExcelGrid({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIndex) => (
+            {rows.map((row, rowIndex) => {
+              const isHighlightedRow = highlightedRowSet.has(rowIndex);
+              return (
               <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
-                <td className="relative border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-400">
+                <td className={`relative border px-2 py-1 text-center font-bold text-slate-400 ${isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-slate-50"}`}>
                   <button
                     type="button"
                     onMouseDown={(event) => {
@@ -4851,7 +4860,7 @@ function SalesExcelGrid({
                       if (selecting) setRange(normalizeRange(anchor, { row: rowIndex, col: colIndex }));
                     }}
                     onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
-                    className={`border p-0 align-middle ${isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : "border-slate-200 bg-white"}`}
+                    className={`border p-0 align-middle ${isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
                   >
                     {editing?.row === rowIndex && editing?.col === colIndex ? (
                       <input
@@ -4880,7 +4889,8 @@ function SalesExcelGrid({
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -5261,12 +5271,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
-  const [invoiceMatchReportText, setInvoiceMatchReportText] = useState("");
+  const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
-  useEscapeToClose(Boolean(invoiceMatchReportText), () => setInvoiceMatchReportText(""));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["이카운트_판매입력"]);
@@ -5478,6 +5487,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(kind === "orders" ? "먼저 발주파일을 업로드해 주세요." : "먼저 송장파일을 업로드해 주세요.");
       return;
     }
+    setSalesSheetHighlightedRows({});
     setMessage(`${waitingFiles.length}개 파일을 읽는 중입니다...`);
     const formData = new FormData();
     formData.append("kind", kind);
@@ -5709,6 +5719,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function matchInvoiceNumbers() {
+    setSalesSheetHighlightedRows({});
     if (!pendingInvoiceFiles.length) {
       window.alert("먼저 송장파일을 업로드해 주세요.");
       return;
@@ -5749,7 +5760,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       if (result.failedShipping.length || result.failedInvoice.length) {
         const failureMessage = invoiceFailureReport(result.failedShipping, result.failedInvoice);
-        setInvoiceMatchReportText(failureMessage);
+        setSalesSheetHighlightedRows({
+          송장출력용: result.failedShippingIndexes,
+          이카운트_송장입력: result.failedInvoiceIndexes,
+        });
+        window.alert(failureMessage);
         setMessage(failureMessage);
         return;
       }
@@ -5769,7 +5784,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const failureMessage = (result.failedShipping.length || result.failedInvoice.length)
       ? invoiceFailureReport(result.failedShipping, result.failedInvoice)
       : "";
-    if (failureMessage) setInvoiceMatchReportText(failureMessage);
+    setSalesSheetHighlightedRows({
+      송장출력용: result.failedShippingIndexes,
+      이카운트_송장입력: result.failedInvoiceIndexes,
+    });
+    window.alert(failureMessage || "송장매칭 성공");
     if (manualRows.length) {
       const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
       setInvoiceMemoText(memo);
@@ -5840,6 +5859,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSelectedSalesRange(null);
     setCompletedSalesTasks({});
     setInvoiceMemoText("");
+    setSalesSheetHighlightedRows({});
     setDirectShippingRows({ JB: [], 케이모아: [] });
     directShippingFileHandles.current = {};
     setActiveSheet("송장출력용");
@@ -5854,7 +5874,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!/^F[1-6]$/.test(event.key)) return;
       if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      if (directPartnerPickerOpen || invoiceMemoText || invoiceMatchReportText) return;
+      if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "F1") runOrderMacroFlow();
@@ -5973,6 +5993,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
             onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
             resetKey={salesGridResetKey}
+            highlightedRows={salesSheetHighlightedRows[activeSheet] || []}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 직송파일은 기본 다운로드 위치에 바로 생성됩니다. 같은 거래처로 다시 생성하면 현재 작업에 누적된 행까지 포함해 다시 내려받습니다.
@@ -6020,33 +6041,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 />
                 <div className="mt-4 flex justify-end">
                   <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
-                </div>
-              </div>
-            </div>
-          )}
-          {invoiceMatchReportText && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-              <div className="w-full max-w-xl rounded-lg bg-white p-5 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-black">송장매칭 실패</h3>
-                  <button type="button" onClick={() => setInvoiceMatchReportText("")} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
-                </div>
-                <textarea
-                  className="mt-4 h-52 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-sans text-sm font-bold leading-7 text-slate-800 outline-orange-400"
-                  value={invoiceMatchReportText}
-                  readOnly
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void navigator.clipboard?.writeText(invoiceMatchReportText)}
-                    className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-700"
-                  >
-                    복사
-                  </button>
-                  <button type="button" onClick={() => setInvoiceMatchReportText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
                 </div>
               </div>
             </div>
