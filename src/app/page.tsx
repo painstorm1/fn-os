@@ -5743,25 +5743,37 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     });
     const duplicated = [...keyCount.values()].some((count) => count > 1);
     if (duplicated) {
-      const ok = window.confirm("송장출력용 안에 중복으로 의심되는 행이 있습니다. 그래도 FN_택배시트 반영용으로 복사할까요?");
-      if (!ok) return;
-    }
-    if (completedSalesTasks.fnParcelApplied) {
-      const ok = window.confirm("FN_택배시트 반영 작업을 이미 실행한 것으로 보입니다. 같은 내용이 중복 붙여넣기 될 수 있습니다. 계속할까요?");
-      if (!ok) return;
+      window.alert("송장출력용 안에 중복으로 의심되는 행이 있습니다. 내용을 확인한 뒤 다시 실행해주세요.");
+      return;
     }
     const targetSheet = fnParcelSheetName();
-    const ok = window.confirm(`FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 ${shippingRows.length}개 행을 붙여넣기용으로 복사합니다. 계속할까요?`);
+    const ok = window.confirm(`FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 ${shippingRows.length}개 행을 구글시트에 반영합니다. 계속할까요?`);
     if (!ok) return;
-    const text = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || "").join("\t")).join("\n");
     try {
-      await navigator.clipboard.writeText(text);
+      const rows = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || ""));
+      const res = await fetch("/api/google/fn-parcel-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ sheetName: targetSheet, rows }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        if (data.duplicate) {
+          window.alert(`붙여넣으려는 값이 이미 구글시트에 존재합니다.\n중복 의심 행: ${(data.duplicateRows || []).join(", ") || data.duplicateCount || "확인 필요"}`);
+        } else {
+          window.alert(data.error || "FN_택배시트 반영에 실패했습니다.");
+        }
+        setMessage(data.error || "FN_택배시트 반영 실패");
+        return;
+      }
       setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
-      setMessage(`FN_택배시트 '${targetSheet}' 반영용 데이터 ${shippingRows.length}개 행을 클립보드에 복사했습니다. 해당 시트의 마지막 빈 행에 붙여넣어 주세요.`);
-    } catch {
-      downloadTextFile(`FN_택배시트_${targetSheet}_붙여넣기.txt`, text, "text/plain;charset=utf-8");
-      setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
-      setMessage(`클립보드 복사가 막혀 붙여넣기용 txt 파일로 생성했습니다. FN_택배시트 '${targetSheet}'에 붙여넣어 주세요.`);
+      window.alert(`FN_택배시트 '${targetSheet}'에 ${data.count || shippingRows.length}개 행을 반영했습니다.`);
+      setMessage(`FN_택배시트 '${targetSheet}'에 ${data.count || shippingRows.length}개 행을 반영했습니다.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "FN_택배시트 반영 실패";
+      window.alert(message);
+      setMessage(message);
     }
   }
 
