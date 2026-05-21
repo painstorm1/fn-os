@@ -924,6 +924,10 @@ function isMaterialItem(item?: ImportOrderItem | null) {
   return String(item?.item_type || "").toUpperCase() === "MATERIAL";
 }
 
+function isProductItem(item?: ImportOrderItem | null) {
+  return String(item?.item_type || "").toUpperCase() === "PRODUCT";
+}
+
 function orderItemFxRate(item: ImportOrderItem, detail: ImportOrderDetail) {
   const currency = item.item_currency || detail.order.currency || "CNY";
   return Number(detail.fx_rates?.[currency] || (currency === detail.order.currency ? detail.order.fx_rate : 0) || 1);
@@ -931,12 +935,17 @@ function orderItemFxRate(item: ImportOrderItem, detail: ImportOrderDetail) {
 
 function materialOnlyRows(detail: ImportOrderDetail, totalWon: number) {
   const items = (detail.items || []).filter((item) => Number(item.quantity || 0) > 0);
-  if (!items.length || items.some((item) => !isMaterialItem(item))) return [];
+  if (!items.length) return [];
+  const hasExplicitProduct = items.some((item) => isProductItem(item));
+  const allExplicitMaterial = items.every((item) => isMaterialItem(item));
+  const hasProductCostRows = Boolean(detail.cost_grid?.rows?.length);
+  if (!allExplicitMaterial && (hasExplicitProduct || hasProductCostRows)) return [];
   const baseAmounts = items.map((item) => Number(item.quantity || 0) * Number(item.unit_price || 0) * orderItemFxRate(item, detail));
   const baseTotal = baseAmounts.reduce((sum, value) => sum + value, 0);
+  const totalQty = items.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
   return items.map((item, index) => {
     const qty = Number(item.quantity || 0);
-    const ratio = baseTotal > 0 ? baseAmounts[index] / baseTotal : qty / Math.max(1, items.reduce((sum, row) => sum + Number(row.quantity || 0), 0));
+    const ratio = baseTotal > 0 ? baseAmounts[index] / baseTotal : qty / Math.max(1, totalQty);
     return {
       order_item_id: Number(item.id || index + 1),
       option_name: item.option_value || item.product_name || "부자재",
