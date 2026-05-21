@@ -3820,9 +3820,9 @@ function setWorksheetFontSize(worksheet: XLSX.WorkSheet, size = 11) {
   for (let row = range.s.r; row <= range.e.r; row += 1) {
     for (let col = range.s.c; col <= range.e.c; col += 1) {
       const address = XLSX.utils.encode_cell({ r: row, c: col });
-      const cell = worksheet[address] as (XLSX.CellObject & { s?: { font?: { sz?: number } } }) | undefined;
+      const cell = worksheet[address] as (XLSX.CellObject & { s?: { font?: { name?: string; sz?: number } } }) | undefined;
       if (!cell) continue;
-      cell.s = { ...(cell.s || {}), font: { ...(cell.s?.font || {}), sz: size } };
+      cell.s = { ...(cell.s || {}), font: { ...(cell.s?.font || {}), name: "맑은 고딕", sz: size } };
     }
   }
 }

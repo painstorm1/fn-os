@@ -148,6 +148,18 @@ function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
   if (name.includes("현대") || name.includes("이지웰")) return "Z";
   if (name.includes("오늘의집") || name.includes("오늘")) return "O";
   const code = clean(mallCode).toUpperCase();
+  const codeAlias: Record<string, string> = {
+    "00001": "FN",
+    "00002": "FF",
+    "00003": "11",
+    "00004": "C",
+    "00005": "G",
+    "00006": "A",
+    "00007": "K",
+    "00008": "S",
+    "00009": "L",
+  };
+  if (codeAlias[code]) return codeAlias[code];
   if (code === "L" || code.includes("LOTTE")) return "L";
   if (code === "S" || code.includes("SHINSEGAE")) return "S";
   return clean(mallCode) || "FN";
