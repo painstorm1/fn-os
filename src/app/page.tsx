@@ -29,6 +29,26 @@ function useEscapeToClose(enabled: boolean, onClose: () => void) {
   }, [enabled, onClose]);
 }
 
+function useF2Navigate(enabled: boolean, href: string) {
+  useEffect(() => {
+    if (!enabled) return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "F2") return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement
+      ) return;
+      event.preventDefault();
+      window.location.href = href;
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [enabled, href]);
+}
+
 const mainMenus = [
   "매출/재고",
   "수입관리",
@@ -766,6 +786,7 @@ type CostGridRow = {
   coupang_margin?: { amount?: number | null; pct?: number | null };
   naver_free_margin?: { amount?: number | null; pct?: number | null };
   naver_cod_margin?: { amount?: number | null; pct?: number | null };
+  material_only?: boolean;
 };
 
 type CostGrid = {
@@ -897,6 +918,45 @@ function sortFactories(factories?: ImportFactory[]) {
 
 function isMaterial(product?: ImportProduct | null) {
   return String(product?.item_type || "").toUpperCase() === "MATERIAL";
+}
+
+function isMaterialItem(item?: ImportOrderItem | null) {
+  return String(item?.item_type || "").toUpperCase() === "MATERIAL";
+}
+
+function orderItemFxRate(item: ImportOrderItem, detail: ImportOrderDetail) {
+  const currency = item.item_currency || detail.order.currency || "CNY";
+  return Number(detail.fx_rates?.[currency] || (currency === detail.order.currency ? detail.order.fx_rate : 0) || 1);
+}
+
+function materialOnlyRows(detail: ImportOrderDetail, totalWon: number) {
+  const items = (detail.items || []).filter((item) => Number(item.quantity || 0) > 0);
+  if (!items.length || items.some((item) => !isMaterialItem(item))) return [];
+  const baseAmounts = items.map((item) => Number(item.quantity || 0) * Number(item.unit_price || 0) * orderItemFxRate(item, detail));
+  const baseTotal = baseAmounts.reduce((sum, value) => sum + value, 0);
+  return items.map((item, index) => {
+    const qty = Number(item.quantity || 0);
+    const ratio = baseTotal > 0 ? baseAmounts[index] / baseTotal : qty / Math.max(1, items.reduce((sum, row) => sum + Number(row.quantity || 0), 0));
+    return {
+      order_item_id: Number(item.id || index + 1),
+      option_name: item.option_value || item.product_name || "부자재",
+      product_name: item.product_name || "부자재",
+      quantity: qty,
+      estimated_unit_cost: qty > 0 ? (totalWon * ratio) / qty : 0,
+      material_only: true,
+    };
+  });
+}
+
+function materialOnlyCostSummary(detail: ImportOrderDetail, totalWon: number) {
+  const rows = materialOnlyRows(detail, totalWon);
+  if (!rows.length) return { cardUnitCost: null as number | null, gridRows: [] as CostGridRow[] };
+  const distinctCosts = new Set(rows.map((row) => Math.round(Number(row.estimated_unit_cost || 0) * 100)));
+  const totalQty = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  if (rows.length === 1 || distinctCosts.size <= 1) {
+    return { cardUnitCost: totalQty > 0 ? totalWon / totalQty : null, gridRows: [] as CostGridRow[] };
+  }
+  return { cardUnitCost: null as number | null, gridRows: rows };
 }
 
 function materialSummary(materials?: ProductMaterialLink[]) {
@@ -1424,6 +1484,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
 
 
 function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: number | null }) {
+  useF2Navigate(true, importHref("/orders/new"));
   const [orders, setOrders] = useState<ImportOrder[]>([]);
   const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1487,7 +1548,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
   }, [loading, initialOpenOrderId]);
 
   return (
-    <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}>
+    <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>F2 +새 발주</Link>}>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           <form
@@ -1609,6 +1670,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const panelProductWon = Math.max(0, productWon - chinaExtraWon);
   const koreaExtraWon = Number(detail.cost_grid?.korea_extra_cost || orderExtraCost(order));
   const panelTotalWon = panelProductWon + Number(detail.cost_grid?.total_extra_cost || orderExtraCost(order));
+  const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
 
   useEffect(() => {
     setProductionDays(order.production_days != null ? String(order.production_days) : "");
@@ -1741,6 +1803,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <p className="flex justify-between"><span>제품합계(원화)</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>중국내 부대비용</span><b>{krw(chinaExtraWon)}</b></p>
             <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(koreaExtraWon)}</b></p>
+            {materialOnlyCost.cardUnitCost != null && <p className="flex justify-between"><span>예상원가</span><b>{krw(materialOnlyCost.cardUnitCost)}</b></p>}
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
             {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
           </div>
@@ -1778,14 +1841,15 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         </section>
       </aside>
       <div className="xl:col-span-2">
-        <CostMarginGrid orderId={order.id} grid={detail.cost_grid} />
+        <CostMarginGrid orderId={order.id} grid={detail.cost_grid} materialOnlyRows={materialOnlyCost.gridRows} />
       </div>
     </div>
   );
 }
 
-function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid }) {
-  const rows = grid?.rows || [];
+function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: number; grid?: CostGrid; materialOnlyRows?: CostGridRow[] }) {
+  const rows = materialOnlyRows.length ? materialOnlyRows : (grid?.rows || []);
+  const isMaterialOnlyGrid = materialOnlyRows.length > 0;
   const [prices, setPrices] = useState<Record<number, { coupang: string; naverFree: string; naverCod: string }>>(() => {
     const next: Record<number, { coupang: string; naverFree: string; naverCod: string }> = {};
     rows.forEach((row) => {
@@ -1857,7 +1921,7 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
     <section className="rounded-md border border-slate-200 bg-white">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-3">
         <h3 className="font-black">옵션별 원가/마진표</h3>
-        <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>
+        {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-[1120px] text-xs">
@@ -1876,6 +1940,20 @@ function CostMarginGrid({ orderId, grid }: { orderId: number; grid?: CostGrid })
               const cp = calc(price.coupang, unitCost, 0.12, 3000);
               const nf = calc(price.naverFree, unitCost, 0.06, 3000);
               const nc = calc(price.naverCod, unitCost, 0.06, 0);
+              if (row.material_only) {
+                return (
+                  <tr key={row.order_item_id || `${row.option_name}-${row.product_name}`} className="odd:bg-white even:bg-slate-50/50">
+                    <td className="border-r border-slate-200 px-2 py-2 font-bold">{row.option_name || row.product_name || "-"}</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.quantity || 0).toLocaleString("ko-KR")}</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
+                    <td colSpan={6} className="px-2 py-2 text-center font-bold text-slate-400">부자재 전용 원가 참고</td>
+                  </tr>
+                );
+              }
               return (
                 <tr key={row.order_item_id || `${row.option_name}-${row.product_name}`} className="odd:bg-white even:bg-slate-50/50">
                   <td className="border-r border-slate-200 px-2 py-2 font-bold">{row.option_name || row.product_name || "-"}</td>
@@ -2019,6 +2097,7 @@ function LegacyNativeOrders() {
 }
 
 function NativeProducts() {
+  useF2Navigate(true, importHref("/products/new"));
   const [products, setProducts] = useState<ImportProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"products" | "materials">("products");
@@ -2064,7 +2143,7 @@ function NativeProducts() {
     <Panel
       title="제품"
       subtitle="수입 제품 카탈로그"
-      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/products/new")}>+ 새 제품</Link>}
+      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/products/new")}>F2 +새 제품</Link>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <>
