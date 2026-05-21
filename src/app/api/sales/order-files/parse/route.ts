@@ -286,6 +286,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       ]);
     }
 
+    const productCode = clean(pick(source, ["품목코드(ERP)", "품목코드"]));
     sale.push([
       dateDigits(date),
       "",
@@ -296,8 +297,8 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       "",
       "",
       "",
-      clean(pick(source, ["품목코드(ERP)", "품목코드"])),
-      "",
+      productCode,
+      productCode ? clean(pick(source, ["품목명(ERP)", "품목명"])) : option,
       "",
       clean(pick(source, ["수량"])) || "1",
       unit ? comma(unit) : "",
@@ -314,7 +315,12 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       .sort((a, b) => compareOrderText(a.sortKey, b.sortKey))
       .map((item) => item.row),
     invoice,
-    sale,
+    sale: sale.sort((a, b) => {
+      const aMissingCode = clean(a[9]) ? 1 : 0;
+      const bMissingCode = clean(b[9]) ? 1 : 0;
+      if (aMissingCode !== bMissingCode) return aMissingCode - bMissingCode;
+      return 0;
+    }),
   };
 }
 
@@ -330,7 +336,7 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
       return {
         __alias: "O",
         수집일자: pick(row, ["주문결제완료일", "출고예정일"]),
-        쇼핑몰명: "오늘의집",
+        쇼핑몰명: "오늘의 집",
         쇼핑몰코드: "O",
         주문번호: pick(row, ["주문번호"]),
         묶음주문번호: pick(row, ["묶음배송그룹", "주문번호"]),

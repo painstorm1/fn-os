@@ -4049,7 +4049,7 @@ function SalesExcelGrid({
   const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => 30));
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
-  const isShippingSheet = sheet === (Object.keys(salesSheetHeaders)[0] as SalesSheetName);
+  const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
 
   useEffect(() => {
     setAnchor({ row: 0, col: 0 });
@@ -4097,7 +4097,6 @@ function SalesExcelGrid({
     onChange([...rows, headers.map(() => "")]);
   }
   function sortByColumn(colIndex: number) {
-    if (!isShippingSheet) return;
     const dir: "asc" | "desc" = sortState?.col === colIndex && sortState.dir === "asc" ? "desc" : "asc";
     const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
     const emptyRows = rows.filter((row) => !row.some((cell) => String(cell || "").trim()));
@@ -4218,12 +4217,12 @@ function SalesExcelGrid({
                   key={header}
                   style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }}
                   onDoubleClick={() => sortByColumn(colIndex)}
-                  title={isShippingSheet ? "더블클릭하면 오름/내림차순 정렬" : undefined}
-                  className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isShippingSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
+                  title={isSortableSheet ? "더블클릭하면 오름/내림차순 정렬" : undefined}
+                  className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isSortableSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
                 >
                   <div className="flex min-w-0 items-center gap-1">
                     <span className="truncate">{header}</span>
-                    {isShippingSheet && sortState?.col === colIndex && (
+                    {isSortableSheet && sortState?.col === colIndex && (
                       <span className="shrink-0 text-[10px] text-orange-600">{sortState.dir === "asc" ? "ASC" : "DESC"}</span>
                     )}
                   </div>
