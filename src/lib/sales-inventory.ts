@@ -1,13 +1,15 @@
-import { createUploadBatch, insertRows, selectRows, updateUploadBatch, upsertRows } from "./fnos-db";
+import { createUploadBatch, insertRows, patchRows, selectRows, updateUploadBatch, upsertRows } from "./fnos-db";
 import { fetchEcountInventory, fetchEcountProducts, hasEcountConfig, savePurchases, saveSales } from "./ecount-client";
 
 export type ImportResult = {
   ok: boolean;
   batch_id?: string;
   total_count: number;
+  db_saved_count?: number;
   success_count: number;
   fail_count: number;
   ecount_enabled: boolean;
+  message?: string;
   results: Array<{ index: number; ok: boolean; message?: string; slip_no?: string | null }>;
 };
 
@@ -84,14 +86,46 @@ function extractSlipNo(response: Record<string, unknown>) {
   return text(data?.SlipNo || data?.SLIP_NO || response.SlipNo || response.SLIP_NO);
 }
 
+function compactDate(value: unknown) {
+  return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function resultMessage(results: ImportResult["results"]) {
+  const messages = Array.from(new Set(results.map((item) => item.message).filter(Boolean)));
+  return messages.join(" / ");
+}
+
+async function patchSyncRows(
+  table: "sales" | "purchases",
+  inserted: Array<{ id: string }>,
+  values: Record<string, unknown>,
+) {
+  await Promise.all(
+    inserted
+      .map((row) => row.id)
+      .filter(Boolean)
+      .map((id) => patchRows(table, { id: `eq.${id}` }, values)),
+  );
+}
+
 export async function importSalesRows(rows: Array<Record<string, unknown>>, options: { sourceFileName?: string; syncEcount?: boolean } = {}): Promise<ImportResult> {
   const batch = await createUploadBatch("sales", options.sourceFileName, rows.length);
   const normalized = rows.map((row) => normalizeSaleRow(row, batch.id, options.sourceFileName));
   const inserted = await insertRows<{ id: string }>("sales", normalized);
-  const shouldSync = Boolean(options.syncEcount && hasEcountConfig());
+  const syncRequested = Boolean(options.syncEcount);
+  const shouldSync = Boolean(syncRequested && hasEcountConfig());
   const results: ImportResult["results"] = inserted.map((_, index) => ({ index, ok: true, message: "FN OS 저장 완료" }));
 
-  if (shouldSync && rows.length) {
+  if (syncRequested && !shouldSync) {
+    results.forEach((item) => {
+      item.ok = false;
+      item.message = "FN OS DB 저장 완료, 이카운트 환경변수 미설정으로 전송 실패";
+    });
+    await patchSyncRows("sales", inserted, {
+      ecount_sync_status: "FAIL",
+      ecount_sync_message: "ECOUNT environment variables are not configured.",
+    });
+  } else if (shouldSync && rows.length) {
     try {
       const response = await saveSales(normalized);
       const slipNo = extractSlipNo(response);
@@ -99,27 +133,75 @@ export async function importSalesRows(rows: Array<Record<string, unknown>>, opti
         item.message = "이카운트 전송 완료";
         item.slip_no = slipNo;
       });
+      await patchSyncRows("sales", inserted, {
+        ecount_sync_status: "SUCCESS",
+        ecount_sync_message: "이카운트 전송 완료",
+        ecount_slip_no: slipNo,
+        ecount_synced_at: new Date().toISOString(),
+      });
+      await insertRows("ecount_sync_logs", {
+        target_type: "sales",
+        target_id: batch.id,
+        api_name: "Sale/SaveSale",
+        request_payload: { total_count: rows.length },
+        response_payload: response,
+        status: "SUCCESS",
+      });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "이카운트 전송 실패";
       results.forEach((item) => {
         item.ok = false;
-        item.message = error instanceof Error ? error.message : "이카운트 전송 실패";
+        item.message = `FN OS DB 저장 완료, 이카운트 전송 실패: ${errorMessage}`;
+      });
+      await patchSyncRows("sales", inserted, {
+        ecount_sync_status: "FAIL",
+        ecount_sync_message: errorMessage,
+      });
+      await insertRows("ecount_sync_logs", {
+        target_type: "sales",
+        target_id: batch.id,
+        api_name: "Sale/SaveSale",
+        request_payload: { total_count: rows.length },
+        response_payload: null,
+        status: "FAIL",
+        error_message: errorMessage,
       });
     }
   }
 
   const success = results.filter((item) => item.ok).length;
   await updateUploadBatch(batch.id, success, rows.length - success);
-  return { ok: true, batch_id: batch.id, total_count: rows.length, success_count: success, fail_count: rows.length - success, ecount_enabled: shouldSync, results };
+  return {
+    ok: !syncRequested || success === rows.length,
+    batch_id: batch.id,
+    total_count: rows.length,
+    db_saved_count: inserted.length,
+    success_count: success,
+    fail_count: rows.length - success,
+    ecount_enabled: shouldSync,
+    message: resultMessage(results),
+    results,
+  };
 }
 
 export async function importPurchaseRows(rows: Array<Record<string, unknown>>, options: { sourceFileName?: string; syncEcount?: boolean } = {}): Promise<ImportResult> {
   const batch = await createUploadBatch("purchases", options.sourceFileName, rows.length);
   const normalized = rows.map((row) => normalizePurchaseRow(row, batch.id, options.sourceFileName));
   const inserted = await insertRows<{ id: string }>("purchases", normalized);
-  const shouldSync = Boolean(options.syncEcount && hasEcountConfig());
+  const syncRequested = Boolean(options.syncEcount);
+  const shouldSync = Boolean(syncRequested && hasEcountConfig());
   const results: ImportResult["results"] = inserted.map((_, index) => ({ index, ok: true, message: "FN OS 저장 완료" }));
 
-  if (shouldSync && rows.length) {
+  if (syncRequested && !shouldSync) {
+    results.forEach((item) => {
+      item.ok = false;
+      item.message = "FN OS DB 저장 완료, 이카운트 환경변수 미설정으로 전송 실패";
+    });
+    await patchSyncRows("purchases", inserted, {
+      ecount_sync_status: "FAIL",
+      ecount_sync_message: "ECOUNT environment variables are not configured.",
+    });
+  } else if (shouldSync && rows.length) {
     try {
       const response = await savePurchases(normalized);
       const slipNo = extractSlipNo(response);
@@ -127,41 +209,79 @@ export async function importPurchaseRows(rows: Array<Record<string, unknown>>, o
         item.message = "이카운트 전송 완료";
         item.slip_no = slipNo;
       });
+      await patchSyncRows("purchases", inserted, {
+        ecount_sync_status: "SUCCESS",
+        ecount_sync_message: "이카운트 전송 완료",
+        ecount_slip_no: slipNo,
+        ecount_synced_at: new Date().toISOString(),
+      });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "이카운트 전송 실패";
       results.forEach((item) => {
         item.ok = false;
-        item.message = error instanceof Error ? error.message : "이카운트 전송 실패";
+        item.message = `FN OS DB 저장 완료, 이카운트 전송 실패: ${errorMessage}`;
+      });
+      await patchSyncRows("purchases", inserted, {
+        ecount_sync_status: "FAIL",
+        ecount_sync_message: errorMessage,
       });
     }
   }
 
   const success = results.filter((item) => item.ok).length;
   await updateUploadBatch(batch.id, success, rows.length - success);
-  return { ok: true, batch_id: batch.id, total_count: rows.length, success_count: success, fail_count: rows.length - success, ecount_enabled: shouldSync, results };
+  return {
+    ok: !syncRequested || success === rows.length,
+    batch_id: batch.id,
+    total_count: rows.length,
+    db_saved_count: inserted.length,
+    success_count: success,
+    fail_count: rows.length - success,
+    ecount_enabled: shouldSync,
+    message: resultMessage(results),
+    results,
+  };
 }
 
 export async function dashboardSummary() {
-  const today = new Date().toISOString().slice(0, 10);
-  const month = today.slice(0, 7);
+  const today = new Date().toISOString().slice(0, 10).replace(/\D/g, "");
+  const month = today.slice(0, 6);
   const [sales, purchases, inventory, logs] = await Promise.all([
-    selectRows<Record<string, unknown>>("sales", { order: "io_date.desc,created_at.desc", limit: 50 }),
+    selectRows<Record<string, unknown>>("sales", { order: "io_date.desc,created_at.desc", limit: 1000 }),
     selectRows<Record<string, unknown>>("purchases", { order: "io_date.desc,created_at.desc", limit: 50 }),
     selectRows<Record<string, unknown>>("inventory_snapshots", { order: "synced_at.desc", limit: 200 }),
     selectRows<Record<string, unknown>>("ecount_sync_logs", { order: "created_at.desc", limit: 20 }),
   ]);
 
-  const todaySales = sales.filter((row) => String(row.io_date || "").startsWith(today));
-  const monthSales = sales.filter((row) => String(row.io_date || "").startsWith(month));
-  const salesAmount = (rows: Record<string, unknown>[]) => rows.reduce((sum, row) => sum + Number(row.supply_amt || 0), 0);
+  const todaySales = sales.filter((row) => compactDate(row.io_date) === today);
+  const monthSales = sales.filter((row) => compactDate(row.io_date).startsWith(month));
+  const rowAmount = (row: Record<string, unknown>) => Number(row.supply_amt || 0) || (Number(row.qty || 0) * Number(row.price || 0));
+  const salesAmount = (rows: Record<string, unknown>[]) => rows.reduce((sum, row) => sum + rowAmount(row), 0);
+  const grouped = (keyFn: (row: Record<string, unknown>) => string) => {
+    const map = new Map<string, { label: string; qty: number; amount: number; count: number }>();
+    sales.forEach((row) => {
+      const label = keyFn(row) || "-";
+      const current = map.get(label) || { label, qty: 0, amount: 0, count: 0 };
+      current.qty += Number(row.qty || 0);
+      current.amount += rowAmount(row);
+      current.count += 1;
+      map.set(label, current);
+    });
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount).slice(0, 30);
+  };
+  const dateGrouped = () => grouped((row) => compactDate(row.io_date) || String(row.io_date || "")).sort((a, b) => String(b.label).localeCompare(String(a.label))).slice(0, 30);
 
   return {
     today_sales: salesAmount(todaySales),
     month_sales: salesAmount(monthSales),
     today_qty: todaySales.reduce((sum, row) => sum + Number(row.qty || 0), 0),
-    month_purchase_amount: purchases.filter((row) => String(row.io_date || "").startsWith(month)).reduce((sum, row) => sum + Number(row.supply_amt || 0), 0),
+    month_purchase_amount: purchases.filter((row) => compactDate(row.io_date).startsWith(month)).reduce((sum, row) => sum + Number(row.supply_amt || 0), 0),
     inventory_risk_count: inventory.filter((row) => Number(row.bal_qty || 0) <= 5).length,
     sync_fail_count: logs.filter((row) => row.status === "FAIL").length,
     recent_sales: sales.slice(0, 10),
+    sales_by_date: dateGrouped(),
+    sales_by_customer: grouped((row) => String(row.cust_name || row.cust_code || "")),
+    sales_by_product: grouped((row) => String(row.prod_name || row.prod_cd || "")),
     recent_purchases: purchases.slice(0, 10),
     inventory: inventory.slice(0, 30),
     logs,
@@ -201,4 +321,3 @@ export async function syncInventory(payload: Record<string, unknown> = {}) {
   if (normalized.length) await insertRows("inventory_snapshots", normalized);
   return { ok: true, count: normalized.length, raw: response };
 }
-

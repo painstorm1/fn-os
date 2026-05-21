@@ -828,6 +828,9 @@ type SalesInventorySummary = {
   inventory_risk_count?: number;
   sync_fail_count?: number;
   recent_sales?: Array<Record<string, unknown>>;
+  sales_by_date?: Array<Record<string, unknown>>;
+  sales_by_customer?: Array<Record<string, unknown>>;
+  sales_by_product?: Array<Record<string, unknown>>;
   recent_purchases?: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
   logs?: Array<Record<string, unknown>>;
@@ -3878,6 +3881,32 @@ function salesRowObject(sheet: SalesSheetName, row: string[]) {
   return Object.fromEntries(salesSheetHeaders[sheet].map((header, index) => [header, salesCellText(row[index])]));
 }
 
+function importResultText(data: Record<string, unknown>, fallback = "") {
+  const total = Number(data.total_count || 0);
+  const success = Number(data.success_count || 0);
+  const fail = Number(data.fail_count || 0);
+  const saved = Number(data.db_saved_count || 0);
+  const results = Array.isArray(data.results) ? data.results as Array<Record<string, unknown>> : [];
+  const reasons = Array.from(
+    new Set(
+      [
+        data.message,
+        data.error,
+        ...results.map((item) => item.message),
+      ]
+        .map((value) => salesCellText(value))
+        .filter(Boolean),
+    ),
+  );
+  return [
+    fallback,
+    `DB 저장: ${saved || success || total}건`,
+    `성공: ${success}건`,
+    `실패: ${fail}건`,
+    `이유: ${reasons.join(" / ") || "정상 처리되었습니다."}`,
+  ].filter(Boolean).join("\n");
+}
+
 type ParsedInvoiceTrackingRow = {
   trackingNo?: string;
   recipient?: string;
@@ -5384,35 +5413,43 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendSalesInput() {
-    const headers = salesSheetHeaders["이카운트_판매입력"];
     const rows = sheets["이카운트_판매입력"]
-      .filter((row) => row.some(Boolean))
-      .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
+      .filter(rowHasValue)
+      .map((row) => salesRowObject("이카운트_판매입력", row));
     if (!rows.length) {
-      setMessage("전송할 판매입력 행이 없습니다.");
+      window.alert("전송할 판매입력 행이 없습니다.");
       return;
     }
     if (completedSalesTasks.salesSent) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${rows.length}건을 이카운트_판매입력으로 전송합니다. 계속할까요?`);
+      const ok = window.confirm(`${rows.length}건을 FN OS DB에 먼저 저장한 뒤 이카운트 판매입력으로 전송합니다. 계속할까요?`);
       if (!ok) return;
     }
-    const res = await fetch("/api/sales/import-ecount", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ rows, sync_ecount: true, source_file_name: "FN_OS_ONLINE_ORDER" }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "판매입력 전송 실패");
-      return;
+    setMessage("FN OS DB 저장 후 이카운트 판매입력으로 전송하는 중입니다...");
+    try {
+      const res = await fetch("/api/sales/import-ecount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows, sync_ecount: true, source_file_name: "FN_OS_ONLINE_ORDER" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const popup = importResultText(data, "EC_판매입력 결과");
+      window.alert(popup);
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || data.message || "판매입력 전송 실패");
+      } else {
+        setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
+        setMessage(`판매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
+      }
+      loadSummary();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "알 수 없는 오류";
+      window.alert(`EC_판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
+      setMessage(`판매입력 전송 실패: ${reason}`);
     }
-    setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
-    setMessage(`판매입력 전송 완료: ${data.success_count || 0}/${data.total_count || 0}건`);
-    loadSummary();
   }
 
   async function matchInvoiceNumbers() {
@@ -5771,6 +5808,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option>FAIL</option>
             </select>
           </div>
+          {activeTab === "판매내역" && <SalesSummaryGroups summary={summary} />}
           <SalesInventoryTable rows={recentRows} />
         </Panel>
       )}
@@ -5877,6 +5915,34 @@ function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> })
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SalesSummaryGroups({ summary }: { summary: SalesInventorySummary | null }) {
+  const groups = [
+    { title: "날짜별 매출", rows: summary?.sales_by_date || [] },
+    { title: "거래처별 매출", rows: summary?.sales_by_customer || [] },
+    { title: "품목별 매출", rows: summary?.sales_by_product || [] },
+  ];
+  return (
+    <div className="mb-4 grid gap-3 lg:grid-cols-3">
+      {groups.map((group) => (
+        <div key={group.title} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h3 className="text-sm font-black">{group.title}</h3>
+          <div className="mt-2 space-y-2">
+            {group.rows.slice(0, 5).map((row, index) => (
+              <div key={`${group.title}-${String(row.label || index)}`} className="grid grid-cols-[1fr_auto] gap-2 rounded bg-white px-2 py-2 text-xs">
+                <span className="truncate font-bold text-slate-700">{String(row.label || "-")}</span>
+                <span className="font-black">{krw(Number(row.amount || 0))}</span>
+                <span className="text-slate-500">{Number(row.count || 0).toLocaleString("ko-KR")}건</span>
+                <span className="text-right text-slate-500">{Number(row.qty || 0).toLocaleString("ko-KR")}개</span>
+              </div>
+            ))}
+            {!group.rows.length && <p className="rounded bg-white px-2 py-3 text-xs font-bold text-slate-400">데이터 없음</p>}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
