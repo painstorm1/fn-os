@@ -1,6 +1,10 @@
 type EcountLogin = {
   Data?: {
     SESSION_ID?: string;
+    Datas?: {
+      SESSION_ID?: string;
+      EXPIRE_DATE?: string;
+    };
     EXPIRE_DATE?: string;
   };
   Status?: string;
@@ -65,7 +69,7 @@ export async function getEcountSession() {
 
   const loginPath = env("ECOUNT_LOGIN_PATH") || "/OAPI/V2/OAPILogin";
   const data = await postJson<EcountLogin>(loginPath, loginPayload());
-  const sessionId = data?.Data?.SESSION_ID || (data as Record<string, string>)?.SESSION_ID;
+  const sessionId = data?.Data?.SESSION_ID || data?.Data?.Datas?.SESSION_ID || (data as Record<string, string>)?.SESSION_ID;
   if (!sessionId) throw new Error("ECOUNT login succeeded but SESSION_ID was not returned.");
 
   cachedSession = {
