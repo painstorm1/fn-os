@@ -5345,30 +5345,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function saveDirectShippingWorkbook(partner: DirectShippingPartner, headers: string[], rows: string[][]) {
     const fileName = `${todayMmdd()}_${partner}직송.xlsx`;
-    const picker = (window as WindowWithSaveFilePicker).showSaveFilePicker;
-    if (!picker) {
-      downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
-      return rows;
-    }
-    try {
-      const cachedHandle = directShippingFileHandles.current[partner];
-      const handle = cachedHandle
-        || await picker({
-          suggestedName: fileName,
-          types: [{ description: "Excel 파일", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
-        });
-      const writeRows = cachedHandle ? rows : mergeDirectShippingRows(partner, await readDirectShippingRowsFromHandle(handle, headers), rows);
-      const blob = tableXlsxBlob(`${partner}직송`, headers, writeRows);
-      directShippingFileHandles.current[partner] = handle;
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return writeRows;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
-      downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
-      return rows;
-    }
+    downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
+    return rows;
   }
 
   async function makeDirectShippingFile(partner: DirectShippingPartner) {
@@ -5692,7 +5670,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             resetKey={salesGridResetKey}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
-            참고: 웹브라우저 보안상 파일을 바탕화면에 직접 저장하지는 못해서 다운로드 파일로 생성합니다. 브라우저 다운로드 위치를 바탕화면으로 지정하면 같은 흐름으로 사용할 수 있습니다.
+            참고: 직송파일은 기본 다운로드 위치에 바로 생성됩니다. 같은 거래처로 다시 생성하면 현재 작업에 누적된 행까지 포함해 다시 내려받습니다.
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
           {directPartnerPickerOpen && (
