@@ -86,6 +86,22 @@ export async function postEcountApi<T>(defaultPath: string, payload: unknown, pa
   return postJson<T>(`${path}${separator}SESSION_ID=${encodeURIComponent(sessionId)}`, payload);
 }
 
+export async function postEcountApiWithFallback<T>(defaultPaths: string[], payload: unknown, pathEnvName?: string) {
+  const configuredPath = env(pathEnvName || "");
+  const paths = configuredPath ? [configuredPath] : defaultPaths;
+  let lastError: unknown;
+  for (const path of paths) {
+    try {
+      return await postEcountApi<T>(path, payload);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/404|No HTTP resource|EXP00001/i.test(message)) break;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "ECOUNT API request failed."));
+}
+
 export function toEcountDate(value: unknown) {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
 }
@@ -185,7 +201,14 @@ export async function registerEcountCustomer(row: Record<string, unknown>) {
 }
 
 export async function fetchEcountProducts(payload: Record<string, unknown> = {}) {
-  return postEcountApi<Record<string, unknown>>("/OAPI/V2/InventoryBasic/GetListInventoryBasicStatus", payload, "ECOUNT_PRODUCTS_PATH");
+  return postEcountApiWithFallback<Record<string, unknown>>(
+    [
+      "/OAPI/V2/InventoryBasic/GetListInventoryBasic",
+      "/OAPI/V2/InventoryBasic/GetListInventoryBasicStatus",
+    ],
+    payload,
+    "ECOUNT_PRODUCTS_PATH",
+  );
 }
 
 export async function fetchEcountInventory(payload: Record<string, unknown> = {}) {

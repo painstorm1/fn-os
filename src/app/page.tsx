@@ -4914,7 +4914,7 @@ function SalesExcelGrid({
               }
             }}
           >
-            <div className="flex items-center justify-between bg-blue-700 px-4 py-2 text-white">
+            <div className="flex items-center justify-between bg-slate-950 px-4 py-2 text-white">
               <strong>품목검색</strong>
               <button type="button" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))} className="text-xl leading-none">×</button>
             </div>
@@ -4935,16 +4935,16 @@ function SalesExcelGrid({
                     void searchEcountProducts(productSearch.query);
                   }
                 }}
-                className="min-w-0 flex-1 rounded border border-blue-400 px-3 py-2 text-sm outline-blue-500"
+                className="min-w-0 flex-1 rounded border border-orange-300 px-3 py-2 text-sm outline-orange-500"
                 placeholder="품목명 또는 품목코드"
               />
               <button
                 type="button"
                 onClick={() => void searchEcountProducts(productSearch.query)}
                 disabled={productSearch.loading}
-                className="rounded bg-blue-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50"
+                className="rounded bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600 disabled:opacity-50"
               >
-                {productSearch.loading ? "검색중" : "Search"}
+                {productSearch.loading ? "검색중" : "검색"}
               </button>
             </div>
             <div className="max-h-[420px] overflow-auto p-3">
@@ -4965,14 +4965,14 @@ function SalesExcelGrid({
                       key={`${item.code || "item"}-${index}`}
                       onMouseEnter={() => setProductSearch((prev) => ({ ...prev, selectedIndex: index }))}
                       onDoubleClick={() => selectProductSearchItem(item)}
-                      className={`cursor-pointer ${productSearch.selectedIndex === index ? "bg-blue-50" : "bg-white hover:bg-slate-50"}`}
+                      className={`cursor-pointer ${productSearch.selectedIndex === index ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
                     >
                       <td className="border border-slate-200 px-2 py-2 text-center">
                         <button type="button" onClick={() => selectProductSearchItem(item)} className="rounded border border-slate-300 px-2 py-1 text-xs font-black text-slate-600">
                           {index + 1}
                         </button>
                       </td>
-                      <td className="border border-slate-200 px-2 py-2 font-black text-blue-800">{item.code || "-"}</td>
+                      <td className="border border-slate-200 px-2 py-2 font-black text-orange-700">{item.code || "-"}</td>
                       <td className="border border-slate-200 px-2 py-2">{item.name || "-"}{item.size ? ` / ${item.size}` : ""}</td>
                       <td className="border border-slate-200 px-2 py-2 text-right">{item.inPrice || "-"}</td>
                       <td className="border border-slate-200 px-2 py-2 text-right">{item.outPrice || "-"}</td>
