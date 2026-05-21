@@ -9,6 +9,26 @@ import * as XLSX from "xlsx";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
+function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
+  if (event.key !== "Enter") return;
+  if (event.nativeEvent.isComposing) return;
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement) return;
+  if (target instanceof HTMLButtonElement) return;
+  event.preventDefault();
+}
+
+function useEscapeToClose(enabled: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!enabled) return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [enabled, onClose]);
+}
+
 const mainMenus = [
   "매출/재고",
   "수입관리",
@@ -1181,6 +1201,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
 
+  useEscapeToClose(true, onClose);
+
   async function loadAttachments() {
     setLoading(true);
     setError("");
@@ -2221,6 +2243,8 @@ function NativeProductForm({ id }: { id?: number }) {
   const [productLinkOpen, setProductLinkOpen] = useState(false);
   const [productLinkQuery, setProductLinkQuery] = useState("");
 
+  useEscapeToClose(productLinkOpen, () => setProductLinkOpen(false));
+
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -2419,7 +2443,7 @@ function NativeProductForm({ id }: { id?: number }) {
     <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
         <>
-        <form key={product?.id || "new"} onSubmit={submit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
+        <form key={product?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
           <div className="space-y-3" onPaste={handleImagePaste}>
             <div>
               <p className="text-sm font-black">제품 사진</p>
@@ -2764,6 +2788,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
   ]);
 
+  useEscapeToClose(catalogOpen, () => setCatalogOpen(false));
+
   useEffect(() => {
     const sourceId = id || copyId;
     if (!sourceId) return;
@@ -3003,7 +3029,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       action={<span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>}
     >
       {loading || detailLoading ? <p className="text-sm text-slate-500">데이터를 불러오는 중...</p> : (
-        <form key={order?.id || "new"} onSubmit={submit} className="grid gap-5">
+        <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <input type="hidden" name="platform" value={order?.platform || "FN_OS"} />
           <input type="hidden" name="currency" value={order?.currency || "CNY"} />
           <input type="hidden" name="fx_rate" value={String(fxRate)} />
@@ -3272,7 +3298,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
   return (
     <Panel title={id ? "발주 수정" : "새 발주 등록"} subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
-        <form key={order?.id || "new"} onSubmit={submit} className="grid gap-5">
+        <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <div className="grid gap-4 md:grid-cols-4">
             <Field label="주공장">
               <select className="field-input" name="factory_id" defaultValue={order?.factory_id || ""}>
@@ -3398,7 +3424,7 @@ function NativeSettings() {
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[360px_1fr]">
       <Panel title="환율" subtitle="KRW 기준 기본 환율" className="h-fit self-start">
-        <form onSubmit={saveRates} className="grid gap-3 sm:grid-cols-2">
+        <form onSubmit={saveRates} onKeyDown={preventEnterSubmit} className="grid gap-3 sm:grid-cols-2">
           {(["CNY", "USD", "JPY", "EUR"] as const).map((currency) => (
             <Field key={currency} label={`${currency} → KRW`}>
               <input className="field-input text-right" type="number" step="0.0001" name={currency} defaultValue={data?.rates?.[currency] || ""} />
@@ -4163,6 +4189,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
+
+  useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
+  useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
+
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
     송장출력용: makeSheetRows("송장출력용"),
     이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
