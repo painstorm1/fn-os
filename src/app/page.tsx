@@ -3934,6 +3934,107 @@ type WindowWithSaveFilePicker = Window & {
   }) => Promise<FileSystemFileHandleLike>;
 };
 
+type SalesWorkspaceSnapshot = {
+  dayKey: string;
+  activeSheet: SalesSheetName;
+  sheets: Record<SalesSheetName, string[][]>;
+  uploadedFileNames: string[];
+  pendingOrderFileNames: string[];
+  pendingInvoiceFileNames: string[];
+  completedSalesTasks: Record<string, boolean>;
+  orderFilePassword: string;
+  message: string;
+  directShippingRows: Record<DirectShippingPartner, string[][]>;
+};
+
+const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
+const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
+const SALES_WORKSPACE_DB_STORE = "files";
+const SALES_WORKSPACE_FILE_BUCKETS = ["uploaded", "pendingOrders", "pendingInvoices"] as const;
+type SalesWorkspaceFileBucket = typeof SALES_WORKSPACE_FILE_BUCKETS[number];
+
+function salesInitialSheets(): Record<SalesSheetName, string[][]> {
+  return {
+    송장출력용: makeSheetRows("송장출력용"),
+    이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
+    "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
+  };
+}
+
+function salesWorkspaceDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function openSalesWorkspaceDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SALES_WORKSPACE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(SALES_WORKSPACE_DB_STORE, { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function runSalesWorkspaceStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T> | void): Promise<T | undefined> {
+  return openSalesWorkspaceDb().then((db) => new Promise<T | undefined>((resolve, reject) => {
+    const tx = db.transaction(SALES_WORKSPACE_DB_STORE, mode);
+    const store = tx.objectStore(SALES_WORKSPACE_DB_STORE);
+    let request: IDBRequest<T> | void;
+    tx.oncomplete = () => {
+      db.close();
+      resolve(request ? request.result : undefined);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    request = action(store);
+  }));
+}
+
+async function saveSalesWorkspaceFiles(bucket: SalesWorkspaceFileBucket, files: File[]) {
+  if (typeof indexedDB === "undefined") return;
+  await runSalesWorkspaceStore("readwrite", (store) => {
+    files.forEach((file, index) => {
+      store.put({
+        id: `${bucket}:${index}`,
+        bucket,
+        index,
+        name: file.name,
+        type: file.type,
+        lastModified: file.lastModified,
+        blob: file,
+      });
+    });
+    for (let index = files.length; index < 80; index += 1) store.delete(`${bucket}:${index}`);
+  });
+}
+
+async function loadSalesWorkspaceFiles(bucket: SalesWorkspaceFileBucket) {
+  if (typeof indexedDB === "undefined") return [] as File[];
+  const records = await runSalesWorkspaceStore<Array<{ name: string; type?: string; lastModified?: number; blob: Blob; index?: number }>>("readonly", (store) => store.getAll());
+  return (records || [])
+    .filter((record) => String((record as { bucket?: string }).bucket || "") === bucket)
+    .sort((a, b) => Number(a.index || 0) - Number(b.index || 0))
+    .map((record) => new File([record.blob], record.name, { type: record.type || record.blob.type, lastModified: record.lastModified || Date.now() }));
+}
+
+async function clearSalesWorkspaceFiles() {
+  if (typeof indexedDB === "undefined") return;
+  await runSalesWorkspaceStore("readwrite", (store) => {
+    store.clear();
+  });
+}
+
+function clearSalesWorkspaceStorage() {
+  localStorage.removeItem(SALES_WORKSPACE_STORAGE_KEY);
+  void clearSalesWorkspaceFiles().catch(() => undefined);
+}
+
 const jbDirectHeaders = salesSheetHeaders.송장출력용.filter((header) => header !== "정산예정금액" && header !== "송장번호");
 const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
 
@@ -4544,15 +4645,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
+  const [workspaceRestored, setWorkspaceRestored] = useState(false);
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
 
-  const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>({
-    송장출력용: makeSheetRows("송장출력용"),
-    이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
-    "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
-  });
+  const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -4587,6 +4685,84 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEffect(() => {
     loadSummary();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreWorkspace() {
+      try {
+        const raw = localStorage.getItem(SALES_WORKSPACE_STORAGE_KEY);
+        if (!raw) return;
+        const snapshot = JSON.parse(raw) as Partial<SalesWorkspaceSnapshot>;
+        if (snapshot.dayKey !== salesWorkspaceDayKey()) {
+          clearSalesWorkspaceStorage();
+          return;
+        }
+        if (snapshot.activeSheet && salesSheetHeaders[snapshot.activeSheet]) setActiveSheet(snapshot.activeSheet);
+        if (snapshot.sheets) {
+          setSheets({
+            송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
+            이카운트_송장입력: padSalesRows("이카운트_송장입력", snapshot.sheets.이카운트_송장입력 || []),
+            "이카운트_판매입력": padSalesRows("이카운트_판매입력", snapshot.sheets["이카운트_판매입력"] || []),
+          });
+        }
+        setCompletedSalesTasks(snapshot.completedSalesTasks || {});
+        setOrderFilePassword(snapshot.orderFilePassword || "");
+        setMessage(snapshot.message || "");
+        setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
+        const [storedUploaded, storedOrders, storedInvoices] = await Promise.all([
+          loadSalesWorkspaceFiles("uploaded"),
+          loadSalesWorkspaceFiles("pendingOrders"),
+          loadSalesWorkspaceFiles("pendingInvoices"),
+        ]);
+        if (cancelled) return;
+        setUploadedFiles(storedUploaded);
+        setPendingOrderFiles(storedOrders);
+        setPendingInvoiceFiles(storedInvoices);
+        setSalesGridResetKey((value) => value + 1);
+      } catch {
+        clearSalesWorkspaceStorage();
+      } finally {
+        if (!cancelled) setWorkspaceRestored(true);
+      }
+    }
+    void restoreWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceRestored) return undefined;
+    const timer = window.setTimeout(() => {
+      try {
+        const snapshot: SalesWorkspaceSnapshot = {
+          dayKey: salesWorkspaceDayKey(),
+          activeSheet,
+          sheets,
+          uploadedFileNames: uploadedFiles.map((file) => file.name),
+          pendingOrderFileNames: pendingOrderFiles.map((file) => file.name),
+          pendingInvoiceFileNames: pendingInvoiceFiles.map((file) => file.name),
+          completedSalesTasks,
+          orderFilePassword,
+          message,
+          directShippingRows,
+        };
+        localStorage.setItem(SALES_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // 작업실 저장 공간이 부족하면 화면 작업은 그대로 유지하고, 다음 초기화 때 정리한다.
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [workspaceRestored, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows]);
+
+  useEffect(() => {
+    if (!workspaceRestored) return;
+    void Promise.all([
+      saveSalesWorkspaceFiles("uploaded", uploadedFiles),
+      saveSalesWorkspaceFiles("pendingOrders", pendingOrderFiles),
+      saveSalesWorkspaceFiles("pendingInvoices", pendingInvoiceFiles),
+    ]).catch(() => undefined);
+  }, [workspaceRestored, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles]);
 
   async function postRows(kind: "sales" | "purchases") {
     setMessage("");
@@ -5018,11 +5194,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setDirectShippingRows({ JB: [], 케이모아: [] });
     directShippingFileHandles.current = {};
     setActiveSheet("송장출력용");
-    setSheets({
-      송장출력용: makeSheetRows("송장출력용"),
-      이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
-      "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
-    });
+    setSheets(salesInitialSheets());
+    clearSalesWorkspaceStorage();
     setSalesGridResetKey((value) => value + 1);
     setMessage("이번 작업을 초기화했습니다.");
   }
