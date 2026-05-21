@@ -20,6 +20,21 @@ function clean(value: unknown) {
   return String(value).trim();
 }
 
+function cleanContact(value: unknown) {
+  const text = clean(value);
+  return text === "-" || text === "--" ? "" : text;
+}
+
+function normalizeContacts(contact1: unknown, contact2: unknown) {
+  const first = cleanContact(contact1);
+  const second = cleanContact(contact2);
+  const fallback = first || second;
+  return {
+    contact1: first || fallback,
+    contact2: second || fallback,
+  };
+}
+
 type OrderSortToken = { raw: string; rank: number; numberValue: number | null };
 
 function orderSortTokenize(value: string): OrderSortToken[] {
@@ -205,8 +220,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const isSettlementDeducted = ["C", "T", "S", "L"].includes(alias) || mallName.includes("쿠팡") || mallName.includes("토스") || mallName.includes("신세계") || mallName.includes("롯데");
     const amount = isSettlementDeducted ? rawAmount * 0.88 : rawAmount;
     const unit = qty ? amount / qty : amount;
-    const contact1 = clean(pick(source, ["수취인연락처1"]));
-    const contact2 = clean(pick(source, ["수취인연락처2"])) || contact1;
+    const { contact1, contact2 } = normalizeContacts(pick(source, ["수취인연락처1"]), pick(source, ["수취인연락처2"]));
     const option = makeOrderOption(source);
 
     shipping.push({
