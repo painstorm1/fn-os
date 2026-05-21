@@ -4659,6 +4659,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("이번 작업을 초기화했습니다.");
   }
 
+  useEffect(() => {
+    if (section !== "online") return undefined;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!/^F[1-6]$/.test(event.key)) return;
+      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (directPartnerPickerOpen || invoiceMemoText) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "F1") runOrderMacroFlow();
+      if (event.key === "F2") exportShippingSheet();
+      if (event.key === "F3") openDirectPartnerPicker();
+      if (event.key === "F4") void sendSalesInput();
+      if (event.key === "F5") matchInvoiceNumbers();
+      if (event.key === "F6") void applyFnParcelSheet();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  });
+
   const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
 
   return (
