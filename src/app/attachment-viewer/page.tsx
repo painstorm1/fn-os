@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 
 function fileExtension(name: string, url: string) {
@@ -12,12 +12,26 @@ function isImage(ext: string) {
   return ["jpg", "jpeg", "png", "webp", "gif"].includes(ext);
 }
 
-function isSheet(ext: string) {
-  return ["xlsx", "xls", "xlsm", "csv"].includes(ext);
+function isOfficeFile(ext: string) {
+  return ["xlsx", "xls", "xlsm", "csv", "doc", "docx", "ppt", "pptx"].includes(ext);
 }
 
-function isDocument(ext: string) {
-  return ["doc", "docx", "ppt", "pptx"].includes(ext);
+async function downloadFile(url: string, name: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = name || "attachment";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 function ViewerContent() {
@@ -29,14 +43,6 @@ function ViewerContent() {
   useEffect(() => {
     document.title = name;
   }, [name]);
-
-  const viewerUrl = useMemo(() => {
-    if (!url) return "";
-    if (isSheet(ext) || isDocument(ext)) {
-      return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(url)}`;
-    }
-    return url;
-  }, [ext, url]);
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
@@ -65,8 +71,35 @@ function ViewerContent() {
         </section>
       ) : ext === "pdf" ? (
         <iframe title={name} src={url} className="h-[calc(100vh-65px)] w-full border-0 bg-white" />
-      ) : isSheet(ext) || isDocument(ext) ? (
-        <iframe title={name} src={viewerUrl} className="h-[calc(100vh-65px)] w-full border-0 bg-white" />
+      ) : isOfficeFile(ext) ? (
+        <section className="flex min-h-[calc(100vh-65px)] items-center justify-center p-6">
+          <div className="w-full max-w-xl rounded-md border border-slate-200 bg-white p-6 text-center shadow-sm">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-md bg-orange-50 text-lg font-black text-orange-600">
+              {ext ? ext.toUpperCase() : "FILE"}
+            </div>
+            <h2 className="mt-4 break-all text-base font-black">{name}</h2>
+            <p className="mt-2 text-sm font-bold text-slate-500">
+              엑셀/문서 파일은 브라우저 보안 정책 때문에 웹 미리보기가 차단될 수 있습니다.
+            </p>
+            <div className="mt-5 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => void downloadFile(url, name)}
+                className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
+              >
+                파일 다운로드
+              </button>
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
+              >
+                원본 열기
+              </a>
+            </div>
+          </div>
+        </section>
       ) : (
         <section className="p-8">
           <div className="rounded-md border border-slate-200 bg-white p-6 shadow-sm">
