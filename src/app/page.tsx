@@ -1474,14 +1474,14 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
               <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
             ) : attachments.length ? attachments.map((item) => (
               <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
-                <button type="button" onClick={() => openAttachment(item)} className="flex min-w-0 items-center gap-2 text-left font-bold hover:underline">
+                <button type="button" onClick={() => openAttachment(item)} className="flex min-w-0 cursor-pointer items-center gap-2 text-left font-bold underline-offset-4 hover:text-orange-600 hover:underline">
                   <FileTypeIcon name={item.file_name} />
                   <span className="min-w-0 break-all">{item.file_name || "-"}</span>
                 </button>
                 <span>{fileSize(item.file_size)}</span>
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
-                <span className="flex justify-end gap-2">
+                <span className="flex justify-center gap-2 text-center">
                   <button type="button" onClick={() => openAttachment(item)} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
                   <button type="button" onClick={() => deleteAttachment(item)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
                 </span>
