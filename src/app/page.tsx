@@ -3776,11 +3776,35 @@ function downloadTextFile(fileName: string, text: string, mime = "application/vn
   URL.revokeObjectURL(url);
 }
 
+function toSettlementExportValue(value: string) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalized = text.replace(/[₩원,\s]/g, "");
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : value;
+}
+
+function exportSheetRows(name: SalesSheetName, rows: string[][]) {
+  const settlementIndex = salesSheetHeaders[name].indexOf("정산예정금액");
+  if (name !== "송장출력용" || settlementIndex < 0) return rows;
+  return rows.map((row) => row.map((cell, index) => index === settlementIndex ? toSettlementExportValue(cell) : cell));
+}
+
 function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetName, string[][]>>) {
   const workbook = XLSX.utils.book_new();
   (Object.keys(sheets) as SalesSheetName[]).forEach((name) => {
     const rows = sheets[name] || [];
-    const worksheet = XLSX.utils.aoa_to_sheet([salesSheetHeaders[name], ...rows]);
+    const exportRows = exportSheetRows(name, rows);
+    const worksheet = XLSX.utils.aoa_to_sheet([salesSheetHeaders[name], ...exportRows]);
+    if (name === "송장출력용") {
+      const settlementIndex = salesSheetHeaders[name].indexOf("정산예정금액");
+      if (settlementIndex >= 0) {
+        for (let rowIndex = 1; rowIndex <= exportRows.length; rowIndex += 1) {
+          const address = XLSX.utils.encode_cell({ r: rowIndex, c: settlementIndex });
+          if (worksheet[address]?.t === "n") worksheet[address].z = "#,##0";
+        }
+      }
+    }
     worksheet["!cols"] = salesSheetHeaders[name].map((header, index) => ({
       wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
     }));
