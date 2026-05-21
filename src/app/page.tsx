@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
@@ -3687,11 +3687,11 @@ function salesSortTokenize(value: string): SalesSortToken[] {
   return matches
     .map((raw) => {
       const numberValue = /^\d/.test(raw) ? Number(raw) : null;
-      const rank = /^[A-Za-z]+$/.test(raw)
+      const rank = numberValue !== null && Number.isFinite(numberValue)
         ? 0
-        : /^[\uAC00-\uD7A3]+$/.test(raw)
+        : /^[A-Za-z]+$/.test(raw)
           ? 1
-          : numberValue !== null && Number.isFinite(numberValue)
+          : /^[\uAC00-\uD7A3]+$/.test(raw)
             ? 2
             : 3;
       return { raw, rank, numberValue };
@@ -3842,7 +3842,7 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
     worksheet["!cols"] = salesExportColumnWidths(salesSheetHeaders[name], rows);
     XLSX.utils.book_append_sheet(workbook, worksheet, name);
   });
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
   const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

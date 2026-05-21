@@ -31,11 +31,11 @@ function orderSortTokenize(value: string): OrderSortToken[] {
   return matches
     .map((raw) => {
       const numberValue = /^\d/.test(raw) ? Number(raw) : null;
-      const rank = /^[A-Za-z]+$/.test(raw)
+      const rank = numberValue !== null && Number.isFinite(numberValue)
         ? 0
-        : /^[\uAC00-\uD7A3]+$/.test(raw)
+        : /^[A-Za-z]+$/.test(raw)
           ? 1
-          : numberValue !== null && Number.isFinite(numberValue)
+          : /^[\uAC00-\uD7A3]+$/.test(raw)
             ? 2
             : 3;
       return { raw, rank, numberValue };
@@ -141,11 +141,20 @@ function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
   if (name.includes("펀앤파인")) return "FF";
   if (name.includes("에프엔") || name.includes("fn")) return "FN";
   if (name.includes("쿠팡")) return "C";
+  if (name.includes("롯데")) return "L";
+  if (name.includes("신세계")) return "S";
   if (name.includes("11번가") || name.includes("11st")) return "11";
   if (name.includes("토스")) return "T";
   if (name.includes("현대") || name.includes("이지웰")) return "Z";
   if (name.includes("오늘의집") || name.includes("오늘")) return "O";
+  const code = clean(mallCode).toUpperCase();
+  if (code === "L" || code.includes("LOTTE")) return "L";
+  if (code === "S" || code.includes("SHINSEGAE")) return "S";
   return clean(mallCode) || "FN";
+}
+
+function shouldIncludeInvoiceRow(alias: string) {
+  return !["O", "T", "Z", "L", "S"].includes(clean(alias).toUpperCase());
 }
 
 function makeOrderOption(row: Record<string, unknown>) {
@@ -204,13 +213,15 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       ],
     });
 
-    invoice.push([
-      mallCode,
-      clean(pick(source, ["주문번호"])),
-      clean(pick(source, ["묶음주문번호"])),
-      clean(pick(source, ["배송방법코드"])),
-      clean(pick(source, ["송장번호"])),
-    ]);
+    if (shouldIncludeInvoiceRow(alias)) {
+      invoice.push([
+        mallCode,
+        clean(pick(source, ["\uC8FC\uBB38\uBC88\uD638"])),
+        clean(pick(source, ["\uBB36\uC74C\uC8FC\uBB38\uBC88\uD638"])),
+        clean(pick(source, ["\uBC30\uC1A1\uBC29\uBC95\uCF54\uB4DC"])),
+        clean(pick(source, ["\uC1A1\uC7A5\uBC88\uD638"])),
+      ]);
+    }
 
     sale.push([
       dateDigits(date),
