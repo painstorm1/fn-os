@@ -61,6 +61,10 @@ const menuSlugs: Record<string, string> = {
 
 const slugMenus = Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key]));
 
+function goToInternal(href: string) {
+  window.location.href = href;
+}
+
 const kpis = [
   { label: "오늘 매출", value: "1,284,000원", tone: "text-emerald-600", note: "+12.4%" },
   { label: "광고비", value: "182,500원", tone: "text-sky-600", note: "ROAS 421%" },
@@ -282,7 +286,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                   if (activeMenu === "매출/재고") {
                     event.preventDefault();
                     setSalesOpen((open) => !open);
+                    return;
                   }
+                  event.preventDefault();
+                  goToInternal("/?menu=sales&salesSection=online");
                 }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -300,7 +307,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                   if (activeMenu === "수입관리") {
                     event.preventDefault();
                     setImportOpen((open) => !open);
+                    return;
                   }
+                  event.preventDefault();
+                  goToInternal("/?menu=import");
                 }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -311,6 +321,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
             ) : (
               <Link
                 href={`/?menu=${menuSlugs[item]}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  goToInternal(`/?menu=${menuSlugs[item]}`);
+                }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
                 }`}
@@ -324,6 +338,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                   <Link
                     key={sub.section}
                     href={`/?menu=sales&salesSection=${sub.section}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToInternal(`/?menu=sales&salesSection=${sub.section}`);
+                    }}
                     className={`block rounded-md px-3 py-2 text-xs font-black ${
                       salesSection === sub.section ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
                     }`}
@@ -341,6 +359,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                     href={`/?menu=import&section=${encodeURIComponent(sub.path)}`}
                     onMouseEnter={() => warmImportCache(sub.path)}
                     onFocus={() => warmImportCache(sub.path)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
+                    }}
                     className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs font-black ${
                       importPath === sub.path ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
                     }`}
