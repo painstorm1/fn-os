@@ -523,7 +523,7 @@ function RightTools() {
   }
 
   return (
-    <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="LCL 배송요금" defaultOpen>
         <select
           value={lcl.method}
@@ -4846,7 +4846,7 @@ function SalesRightTools() {
   }
 
   return (
-    <aside className="hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white px-4 py-6 xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="이카운트 연결" defaultOpen>
         <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-black">
           <span className={`h-3 w-3 rounded-full ${health?.ecount_configured ? "bg-emerald-500" : "bg-rose-500"}`} />
