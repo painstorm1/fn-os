@@ -5080,7 +5080,7 @@ function SalesRightTools() {
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <ToolSection title="상품 간편조회" defaultOpen>
+      <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
         <input
           value={lookupQuery}
           onChange={(event) => setLookupQuery(event.target.value)}
@@ -5131,7 +5131,7 @@ function SalesRightTools() {
         )}
       </ToolSection>
 
-      <ToolSection title="간편 등록" defaultOpen>
+      <ToolSection title="간편 등록" showChevron={false}>
         <div className="grid grid-cols-2 gap-2">
           <button type="button" onClick={() => setRegisterMode("product")} className={`rounded-md border px-2 py-2 text-xs font-black ${registerMode === "product" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>제품등록</button>
           <button type="button" onClick={() => setRegisterMode("customer")} className={`rounded-md border px-2 py-2 text-xs font-black ${registerMode === "customer" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>거래처등록</button>
@@ -5166,7 +5166,7 @@ function SalesRightTools() {
         </div>
       </ToolSection>
 
-      <ToolSection title="간편 입력" defaultOpen>
+      <ToolSection title="간편 입력" showChevron={false}>
         <div className="grid grid-cols-2 gap-2">
           <button type="button" onClick={() => setInputMode("sales")} className={`rounded-md border px-2 py-2 text-xs font-black ${inputMode === "sales" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>판매입력</button>
           <button type="button" onClick={() => setInputMode("purchase")} className={`rounded-md border px-2 py-2 text-xs font-black ${inputMode === "purchase" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>구매입력</button>
