@@ -6,6 +6,14 @@ export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
 type OrderSource = "ecount" | "todayhouse" | "toss" | "ezwell" | "unknown";
+type ParsedInvoiceRow = {
+  trackingNo: string;
+  recipient: string;
+  phone: string;
+  address: string;
+  fileName: string;
+  sourceRow: number;
+};
 
 const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
@@ -450,6 +458,24 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
   });
 }
 
+function parseInvoiceRowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) {
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
+  const rows: ParsedInvoiceRow[] = [];
+  matrix.forEach((row, rowIndex) => {
+    const trackingNo = clean(row[7]);
+    const count = Math.max(1, Math.round(parseNumber(row[14])) || 1);
+    const recipient = clean(row[20]);
+    const phone = clean(row[21]);
+    const address = clean(row[23]);
+    if (!trackingNo || !recipient || !phone || !address) return;
+    if (/송장|운송장|받는분|수취인/i.test(`${trackingNo} ${recipient}`)) return;
+    for (let index = 0; index < count; index += 1) {
+      rows.push({ trackingNo, recipient, phone, address, fileName, sourceRow: rowIndex + 1 });
+    }
+  });
+  return rows;
+}
+
 function isWorkbookPasswordError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /password|encrypted|encryption|protected/i.test(message);
@@ -489,9 +515,24 @@ export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const files = form.getAll("files").filter((item): item is File => item instanceof File);
+    const kind = clean(form.get("kind"));
     const workbookPassword = clean(form.get("order_file_password")) || ORDER_FILE_PASSWORD;
     if (!files.length) {
       return NextResponse.json({ ok: false, error: "업로드할 파일이 없습니다." }, { status: 400 });
+    }
+
+    if (kind === "invoices") {
+      const invoiceRows: ParsedInvoiceRow[] = [];
+      const parsedFiles: string[] = [];
+      for (const file of files) {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const workbook = await readWorkbook(buffer, workbookPassword);
+        parsedFiles.push(file.name);
+        for (const sheetName of workbook.SheetNames) {
+          invoiceRows.push(...parseInvoiceRowsFromWorksheet(workbook.Sheets[sheetName], file.name));
+        }
+      }
+      return NextResponse.json({ ok: true, files: parsedFiles, invoiceRows });
     }
 
     const result: Record<SheetName, string[][]> = {

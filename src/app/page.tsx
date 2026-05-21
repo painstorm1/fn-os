@@ -3878,10 +3878,129 @@ function salesRowObject(sheet: SalesSheetName, row: string[]) {
   return Object.fromEntries(salesSheetHeaders[sheet].map((header, index) => [header, salesCellText(row[index])]));
 }
 
+type ParsedInvoiceTrackingRow = {
+  trackingNo?: string;
+  recipient?: string;
+  phone?: string;
+  address?: string;
+  fileName?: string;
+  sourceRow?: number;
+};
+
+function normalizeInvoiceName(value: unknown) {
+  return salesCellText(value).replace(/\s+/g, "");
+}
+
+function normalizeInvoicePhone(value: unknown) {
+  return salesCellText(value).replace(/[-\s()]/g, "");
+}
+
+function normalizeInvoiceAddress(value: unknown) {
+  return salesCellText(value).replace(/\s+/g, "");
+}
+
+function invoiceMatchKey(name: unknown, phone: unknown, address: unknown) {
+  return `${normalizeInvoiceName(name)}|${normalizeInvoicePhone(phone)}|${normalizeInvoiceAddress(address)}`;
+}
+
+const invoiceMallCodeByAlias: Record<string, string> = {
+  FN: "00001",
+  FF: "00002",
+  "11": "00003",
+  C: "00004",
+  G: "00005",
+  A: "00006",
+  K: "00007",
+  S: "00008",
+  L: "00009",
+};
+
+function parseShippingCode(value: string) {
+  const parts = salesCellText(value).split("-");
+  const alias = parts[1] || "";
+  const serial = Number((parts[2] || "").replace(/\D/g, ""));
+  return {
+    alias,
+    mallCode: invoiceMallCodeByAlias[alias] || alias,
+    serial: Number.isFinite(serial) ? serial : 0,
+  };
+}
+
 function applyInvoiceTrackingToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
   parsedSheets: Partial<Record<SalesSheetName, string[][]>>,
+  invoiceRows: ParsedInvoiceTrackingRow[] = [],
 ) {
+  if (invoiceRows.length) {
+    const nextShipping = currentSheets.송장출력용.map((row) => [...row]);
+    const nextInvoice = currentSheets.이카운트_송장입력.map((row) => [...row]);
+    const usedShipping = new Set<number>();
+    let matchedShipping = 0;
+    let matchedInvoice = 0;
+    const failedShipping: string[] = [];
+    const failedInvoice: string[] = [];
+
+    const invoiceRowsByMall = new Map<string, number[]>();
+    nextInvoice.forEach((row, index) => {
+      const mallCode = salesCellText(row[0]);
+      if (!mallCode) return;
+      const list = invoiceRowsByMall.get(mallCode) || [];
+      list.push(index);
+      invoiceRowsByMall.set(mallCode, list);
+    });
+
+    invoiceRows.forEach((invoiceRow) => {
+      const trackingNo = salesCellText(invoiceRow.trackingNo);
+      const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
+      const shippingIndex = nextShipping.findIndex((row, index) => {
+        if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[1])) return false;
+        const name = row[2];
+        const phone1 = row[3];
+        const phone2 = row[4];
+        const address = row[6];
+        return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
+      });
+
+      if (shippingIndex < 0) {
+        failedShipping.push(`${invoiceRow.fileName || "송장파일"} ${invoiceRow.sourceRow || "-"}행 · ${invoiceRow.recipient || "-"} · ${invoiceRow.phone || "-"}`);
+        return;
+      }
+
+      usedShipping.add(shippingIndex);
+      nextShipping[shippingIndex][1] = trackingNo;
+      matchedShipping += 1;
+
+      const { mallCode, serial } = parseShippingCode(nextShipping[shippingIndex][0]);
+      const candidateIndexes = invoiceRowsByMall.get(mallCode) || [];
+      const invoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes.find((index) => !salesCellText(nextInvoice[index]?.[4]));
+      if (invoiceIndex !== undefined && nextInvoice[invoiceIndex]) {
+        nextInvoice[invoiceIndex][4] = trackingNo;
+        matchedInvoice += 1;
+      } else if (!["O", "T", "Z", "L", "S"].includes(mallCode)) {
+        failedInvoice.push(`${nextShipping[shippingIndex][0]} · ${invoiceRow.recipient || "-"} · ${trackingNo}`);
+      }
+    });
+
+    const manualRows = nextShipping
+      .filter(rowHasValue)
+      .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
+      .filter((row) => salesCellText(row[1]))
+      .map((row) => `${row[0]} ${row[2]} ${row[1]}`);
+
+    return {
+      sheets: {
+        ...currentSheets,
+        송장출력용: nextShipping,
+        이카운트_송장입력: nextInvoice,
+      },
+      matchedShipping,
+      matchedInvoice,
+      failedShipping,
+      failedInvoice,
+      manualRows,
+    };
+  }
+
   const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
   const parsedInvoiceRows = (parsedSheets.이카운트_송장입력 || []).filter(rowHasValue);
   const trackingByShippingCode = new Map<string, string>();
@@ -3935,6 +4054,8 @@ function applyInvoiceTrackingToSheets(
     },
     matchedShipping,
     matchedInvoice,
+    failedShipping: [] as string[],
+    failedInvoice: [] as string[],
     manualRows,
   };
 }
@@ -4998,7 +5119,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
-    const next = Array.from(files || []);
+    const incoming = Array.from(files || []);
+    const existingNames = new Set(uploadedFiles.map((file) => file.name));
+    const duplicatedNames = incoming.filter((file) => existingNames.has(file.name)).map((file) => file.name);
+    const next = incoming.filter((file) => !existingNames.has(file.name));
+    if (duplicatedNames.length) {
+      setMessage(`이미 업로드된 파일은 제외했습니다: ${duplicatedNames.join(", ")}`);
+    }
     if (!next.length) return;
     if (kind === "orders") {
       for (const file of next) {
@@ -5318,28 +5445,35 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     const parsedSheets = data.sheets as Partial<Record<SalesSheetName, string[][]>>;
-    const result = applyInvoiceTrackingToSheets(sheets, parsedSheets);
+    const invoiceRows = (data.invoiceRows || []) as ParsedInvoiceTrackingRow[];
+    const result = applyInvoiceTrackingToSheets(sheets, parsedSheets, invoiceRows);
 
     if (!result.matchedShipping && !result.matchedInvoice) {
-      const ok = window.confirm("기존 시트와 매칭되는 송장번호를 찾지 못했습니다. 송장파일과 주문번호/쇼핑몰코드를 확인해 주세요. 그래도 작업 완료로 표시할까요?");
-      if (!ok) {
-        setMessage("송장번호 매칭 결과가 없습니다.");
-        return;
-      }
+      setMessage("송장번호 매칭 결과가 없습니다. 수취인/연락처/주소를 확인해 주세요.");
+      return;
     }
 
     setSheets(result.sheets);
-    setPendingInvoiceFiles([]);
     setSalesGridResetKey((value) => value + 1);
-    setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: true }));
+    if (!result.failedShipping.length && !result.failedInvoice.length) {
+      setPendingInvoiceFiles([]);
+      setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: true }));
+    } else {
+      setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: false }));
+    }
     const manualRows = result.manualRows;
+    const failureMessage = [
+      result.failedShipping.length ? `송장출력용 매칭 실패 ${result.failedShipping.length}건: ${result.failedShipping.slice(0, 5).join(" / ")}` : "",
+      result.failedInvoice.length ? `이카운트_송장입력 매칭 실패 ${result.failedInvoice.length}건: ${result.failedInvoice.slice(0, 5).join(" / ")}` : "",
+    ].filter(Boolean).join("\n");
+    if (failureMessage) window.alert(failureMessage);
     if (manualRows.length) {
       const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
       setInvoiceMemoText(memo);
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.`);
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
     } else {
       setInvoiceMemoText("");
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상은 없습니다.`);
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상은 없습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
     }
   }
 
