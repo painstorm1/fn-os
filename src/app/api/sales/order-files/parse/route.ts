@@ -101,6 +101,11 @@ function monthDay(value: unknown) {
   return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function todayMonthDay() {
+  const now = new Date();
+  return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function pick(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -170,14 +175,14 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const mallCode = clean(pick(source, ["쇼핑몰코드"]));
     const date = pick(source, ["수집일자", "일자"]);
     const alias = mallAlias(mallName, mallCode, clean(source.__alias));
-    const countKey = `${monthDay(date)}-${alias}`;
+    const countKey = `${todayMonthDay()}-${alias}`;
     const next = (counters.get(countKey) || 0) + 1;
     counters.set(countKey, next);
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
     const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
-    const isCoupang = alias === "C" || mallName.includes("쿠팡");
-    const amount = isCoupang ? rawAmount * 0.88 : rawAmount;
+    const isSettlementDeducted = alias === "C" || alias === "T" || mallName.includes("쿠팡") || mallName.includes("토스");
+    const amount = isSettlementDeducted ? rawAmount * 0.88 : rawAmount;
     const unit = qty ? amount / qty : amount;
     const contact1 = clean(pick(source, ["수취인연락처1"]));
     const contact2 = clean(pick(source, ["수취인연락처2"])) || contact1;
@@ -308,7 +313,7 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
       주문옵션: joinText(pick(row, ["상품명"]), pick(row, ["옵션"])),
       수량: pick(row, ["주문수량", "배송수량"]),
       배송요청사항: pick(row, ["배송메시지(요청사항)"]),
-      정산예정금액: pick(row, ["실주문금액", "판매가격"]),
+      정산예정금액: pick(row, ["매입가", "실주문금액", "판매가격"]),
     };
   });
 }
