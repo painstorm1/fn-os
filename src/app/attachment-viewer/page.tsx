@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { useSearchParams } from "next/navigation";
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 
 type PreviewCell = {
@@ -17,7 +18,21 @@ type PreviewSheet = {
   rows: Array<Array<PreviewCell | null>>;
   colWidths: number[];
   rowHeights: number[];
+  images: PreviewImage[];
 };
+
+type PreviewImage = {
+  id: string;
+  src: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+const ROW_HEADER_WIDTH = 48;
+const COLUMN_HEADER_HEIGHT = 28;
+const EMU_PER_PIXEL = 9525;
 
 function fileExtension(name: string, url: string) {
   const source = name || url.split("?")[0] || "";
@@ -107,6 +122,151 @@ function cellStyle(cell: XLSX.CellObject | undefined): CSSProperties {
   };
 }
 
+function parseXml(text: string) {
+  return new DOMParser().parseFromString(text, "application/xml");
+}
+
+function xmlNodes(parent: ParentNode, localName: string) {
+  return Array.from(parent.querySelectorAll("*")).filter((node) => node.localName === localName);
+}
+
+function firstXmlNode(parent: ParentNode, localName: string) {
+  return xmlNodes(parent, localName)[0];
+}
+
+function xmlText(parent: ParentNode, localName: string) {
+  return firstXmlNode(parent, localName)?.textContent?.trim() || "0";
+}
+
+function relId(node: Element, attrName = "id") {
+  return node.getAttribute(`r:${attrName}`) || node.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", attrName) || "";
+}
+
+function relMap(xml: string) {
+  const doc = parseXml(xml);
+  const map = new Map<string, string>();
+  xmlNodes(doc, "Relationship").forEach((node) => {
+    const id = (node as Element).getAttribute("Id");
+    const target = (node as Element).getAttribute("Target");
+    if (id && target) map.set(id, target);
+  });
+  return map;
+}
+
+function resolveZipTarget(basePath: string, target: string) {
+  if (!target) return "";
+  const cleanTarget = target.replace(/\\/g, "/");
+  if (cleanTarget.startsWith("/")) return cleanTarget.slice(1);
+  if (cleanTarget.startsWith("xl/")) return cleanTarget;
+
+  const parts = basePath.split("/").slice(0, -1);
+  cleanTarget.split("/").forEach((part) => {
+    if (!part || part === ".") return;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  });
+  return parts.join("/");
+}
+
+function emuToPx(value: string | number | null | undefined) {
+  return Math.round(Number(value || 0) / EMU_PER_PIXEL);
+}
+
+function sumBefore(values: number[], index: number) {
+  return values.slice(0, Math.max(0, index)).reduce((sum, value) => sum + value, 0);
+}
+
+function imageMimeType(path: string) {
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  return "image/png";
+}
+
+function anchorPoint(node: Element, localName: "from" | "to", colWidths: number[], rowHeights: number[]) {
+  const point = firstXmlNode(node, localName) as Element | undefined;
+  if (!point) return { left: ROW_HEADER_WIDTH, top: COLUMN_HEADER_HEIGHT };
+
+  const col = Number(xmlText(point, "col") || 0);
+  const row = Number(xmlText(point, "row") || 0);
+  const colOff = emuToPx(xmlText(point, "colOff"));
+  const rowOff = emuToPx(xmlText(point, "rowOff"));
+
+  return {
+    left: ROW_HEADER_WIDTH + sumBefore(colWidths, col) + colOff,
+    top: COLUMN_HEADER_HEIGHT + sumBefore(rowHeights, row) + rowOff,
+  };
+}
+
+async function extractSheetImages(buffer: ArrayBuffer, sheetName: string, colWidths: number[], rowHeights: number[]): Promise<PreviewImage[]> {
+  try {
+    const zip = await JSZip.loadAsync(buffer);
+    const workbookXml = await zip.file("xl/workbook.xml")?.async("text");
+    const workbookRelsXml = await zip.file("xl/_rels/workbook.xml.rels")?.async("text");
+    if (!workbookXml || !workbookRelsXml) return [];
+
+    const workbookDoc = parseXml(workbookXml);
+    const sheetNode = xmlNodes(workbookDoc, "sheet").find((node) => (node as Element).getAttribute("name") === sheetName) as Element | undefined;
+    const sheetRelId = sheetNode ? relId(sheetNode) : "";
+    if (!sheetRelId) return [];
+
+    const workbookRels = relMap(workbookRelsXml);
+    const sheetPath = resolveZipTarget("xl/workbook.xml", workbookRels.get(sheetRelId) || "");
+    const sheetRelPath = sheetPath.replace(/^(.+\/)([^/]+)$/, "$1_rels/$2.rels");
+    const sheetRelsXml = await zip.file(sheetRelPath)?.async("text");
+    if (!sheetRelsXml) return [];
+
+    const drawingTarget = Array.from(relMap(sheetRelsXml).values()).find((target) => target.includes("drawing"));
+    if (!drawingTarget) return [];
+
+    const drawingPath = resolveZipTarget(sheetPath, drawingTarget);
+    const drawingXml = await zip.file(drawingPath)?.async("text");
+    const drawingRelsPath = drawingPath.replace(/^(.+\/)([^/]+)$/, "$1_rels/$2.rels");
+    const drawingRelsXml = await zip.file(drawingRelsPath)?.async("text");
+    if (!drawingXml || !drawingRelsXml) return [];
+
+    const drawingRels = relMap(drawingRelsXml);
+    const drawingDoc = parseXml(drawingXml);
+    const anchors = [...xmlNodes(drawingDoc, "twoCellAnchor"), ...xmlNodes(drawingDoc, "oneCellAnchor")] as Element[];
+    const images: PreviewImage[] = [];
+
+    for (const [index, anchor] of anchors.entries()) {
+      const blip = firstXmlNode(anchor, "blip") as Element | undefined;
+      const imageRelId = blip ? relId(blip, "embed") : "";
+      const mediaTarget = imageRelId ? drawingRels.get(imageRelId) : "";
+      if (!mediaTarget) continue;
+
+      const mediaPath = resolveZipTarget(drawingPath, mediaTarget);
+      const mediaFile = zip.file(mediaPath);
+      if (!mediaFile) continue;
+
+      const from = anchorPoint(anchor, "from", colWidths, rowHeights);
+      const toNode = firstXmlNode(anchor, "to") as Element | undefined;
+      let width = 160;
+      let height = 120;
+
+      if (toNode) {
+        const to = anchorPoint(anchor, "to", colWidths, rowHeights);
+        width = Math.max(24, to.left - from.left);
+        height = Math.max(24, to.top - from.top);
+      } else {
+        const extNode = firstXmlNode(anchor, "ext") as Element | undefined;
+        width = Math.max(24, emuToPx(extNode?.getAttribute("cx")));
+        height = Math.max(24, emuToPx(extNode?.getAttribute("cy")));
+      }
+
+      const blob = await mediaFile.async("blob");
+      const src = URL.createObjectURL(new Blob([blob], { type: imageMimeType(mediaPath) }));
+      images.push({ id: `${mediaPath}-${index}`, src, left: from.left, top: from.top, width, height });
+    }
+
+    return images;
+  } catch {
+    return [];
+  }
+}
+
 function buildPreviewSheet(worksheet: XLSX.WorkSheet, sheetName: string): PreviewSheet {
   const decoded = worksheet["!ref"] ? XLSX.utils.decode_range(worksheet["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
   const maxRows = Math.min(200, decoded.e.r + 1);
@@ -149,7 +309,7 @@ function buildPreviewSheet(worksheet: XLSX.WorkSheet, sheetName: string): Previe
     };
   }));
 
-  return { name: sheetName, rows, colWidths, rowHeights };
+  return { name: sheetName, rows, colWidths, rowHeights, images: [] };
 }
 
 function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
@@ -159,6 +319,7 @@ function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    let imageUrls: string[] = [];
 
     async function load() {
       setLoading(true);
@@ -171,7 +332,14 @@ function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
         const firstSheetName = workbook.SheetNames[0];
         if (!firstSheetName) throw new Error("표시할 시트가 없습니다.");
         const worksheet = workbook.Sheets[firstSheetName];
-        if (!cancelled) setPreview(buildPreviewSheet(worksheet, firstSheetName));
+        const sheetPreview = buildPreviewSheet(worksheet, firstSheetName);
+        const images = await extractSheetImages(buffer, firstSheetName, sheetPreview.colWidths, sheetPreview.rowHeights);
+        imageUrls = images.map((image) => image.src);
+        if (!cancelled) {
+          setPreview({ ...sheetPreview, images });
+        } else {
+          imageUrls.forEach((src) => URL.revokeObjectURL(src));
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "미리보기를 만들지 못했습니다.");
       } finally {
@@ -182,6 +350,7 @@ function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
     void load();
     return () => {
       cancelled = true;
+      imageUrls.forEach((src) => URL.revokeObjectURL(src));
     };
   }, [url]);
 
@@ -207,34 +376,45 @@ function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
         <span className="rounded-md bg-orange-50 px-2 py-1 text-orange-600">{preview.name}</span>
         <span className="text-xs text-slate-500">최대 200행까지 미리보기</span>
       </div>
-      <table className="border-collapse bg-white" style={{ tableLayout: "fixed" }}>
-        <colgroup>
-          <col style={{ width: 48 }} />
-          {preview.colWidths.map((width, index) => <col key={index} style={{ width }} />)}
-        </colgroup>
-        <thead>
-          <tr>
-            <th className="sticky left-0 top-0 z-20 border border-slate-200 bg-slate-100 px-2 py-1 text-center text-xs font-black text-slate-500">#</th>
-            {preview.colWidths.map((_, index) => (
-              <th key={index} className="sticky top-0 z-10 border border-slate-200 bg-slate-100 px-2 py-1 text-center text-xs font-black text-slate-500">
-                {columnLabel(index)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {preview.rows.map((row, rowIndex) => (
-            <tr key={rowIndex} style={{ height: preview.rowHeights[rowIndex] }}>
-              <th className="sticky left-0 z-10 border border-slate-200 bg-slate-50 px-2 py-1 text-center text-xs font-black text-slate-400">{rowIndex + 1}</th>
-              {row.map((cell, colIndex) => cell ? (
-                <td key={colIndex} rowSpan={cell.rowSpan} colSpan={cell.colSpan} className="px-2 py-1" style={cell.style}>
-                  {cell.value}
-                </td>
-              ) : null)}
+      <div className="relative inline-block">
+        <table className="border-collapse bg-white" style={{ tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: ROW_HEADER_WIDTH }} />
+            {preview.colWidths.map((width, index) => <col key={index} style={{ width }} />)}
+          </colgroup>
+          <thead>
+            <tr style={{ height: COLUMN_HEADER_HEIGHT }}>
+              <th className="sticky left-0 top-0 z-20 border border-slate-200 bg-slate-100 px-2 py-1 text-center text-xs font-black text-slate-500">#</th>
+              {preview.colWidths.map((_, index) => (
+                <th key={index} className="sticky top-0 z-10 border border-slate-200 bg-slate-100 px-2 py-1 text-center text-xs font-black text-slate-500">
+                  {columnLabel(index)}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {preview.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} style={{ height: preview.rowHeights[rowIndex] }}>
+                <th className="sticky left-0 z-10 border border-slate-200 bg-slate-50 px-2 py-1 text-center text-xs font-black text-slate-400">{rowIndex + 1}</th>
+                {row.map((cell, colIndex) => cell ? (
+                  <td key={colIndex} rowSpan={cell.rowSpan} colSpan={cell.colSpan} className="px-2 py-1" style={cell.style}>
+                    {cell.value}
+                  </td>
+                ) : null)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {preview.images.map((image) => (
+          <img
+            key={image.id}
+            src={image.src}
+            alt=""
+            className="pointer-events-none absolute z-[5] object-contain"
+            style={{ left: image.left, top: image.top, width: image.width, height: image.height }}
+          />
+        ))}
+      </div>
     </section>
   );
 }
