@@ -945,6 +945,15 @@ function fileIcon(name?: string) {
   return "FILE";
 }
 
+function attachmentViewerUrl(item: OrderAttachment) {
+  if (!item.file_url) return "";
+  const params = new URLSearchParams({
+    url: item.file_url,
+    name: item.file_name || "첨부파일",
+  });
+  return `/attachment-viewer?${params.toString()}`;
+}
+
 function fmtPct(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `${Number(value).toFixed(1)}%`;
@@ -1384,7 +1393,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
                 <span className="flex justify-end gap-2">
-                  <button type="button" onClick={() => item.file_url && window.open(item.file_url, "_blank", "noopener,noreferrer")} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
+                  <button type="button" onClick={() => item.file_url && window.open(attachmentViewerUrl(item), "_blank", "noopener,noreferrer")} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
                   <button type="button" onClick={() => deleteAttachment(item)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
                 </span>
               </div>
