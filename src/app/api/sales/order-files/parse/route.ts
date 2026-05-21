@@ -130,6 +130,10 @@ function todayMonthDay() {
   return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function orderRunTimeCode() {
+  return new Date().getHours() < 12 ? "A" : "P";
+}
+
 function pick(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -248,6 +252,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
   const shipping: Array<{ sortKey: string; row: string[] }> = [];
   const invoice: string[][] = [];
   const sale: string[][] = [];
+  const runCode = orderRunTimeCode();
 
   for (const source of rows) {
     if (!isValidDownRow(source)) continue;
@@ -271,7 +276,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     shipping.push({
       sortKey: `${option}\u0000${countKey}-${String(next).padStart(3, "0")}`,
       row: [
-        `${countKey}-A${String(next).padStart(3, "0")}`,
+        `${countKey}-${runCode}${String(next).padStart(3, "0")}`,
         clean(pick(source, ["송장번호"])),
         clean(pick(source, ["수취인"])),
         contact1,
