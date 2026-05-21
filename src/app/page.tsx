@@ -1029,6 +1029,11 @@ function attachmentViewerUrl(item: OrderAttachment) {
   return `/attachment-viewer?${params.toString()}`;
 }
 
+function openAttachment(item: OrderAttachment) {
+  const url = attachmentViewerUrl(item);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function fmtPct(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `${Number(value).toFixed(1)}%`;
@@ -1454,21 +1459,21 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
               <span>크기</span>
               <span>업로드일</span>
               <span>메모</span>
-              <span className="text-right">작업</span>
+              <span className="text-center">작업</span>
             </div>
             {loading ? (
               <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
             ) : attachments.length ? attachments.map((item) => (
               <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
-                <span className="flex min-w-0 items-center gap-2 font-bold">
+                <button type="button" onClick={() => openAttachment(item)} className="flex min-w-0 items-center gap-2 text-left font-bold hover:underline">
                   <FileTypeIcon name={item.file_name} />
                   <span className="min-w-0 break-all">{item.file_name || "-"}</span>
-                </span>
+                </button>
                 <span>{fileSize(item.file_size)}</span>
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
                 <span className="flex justify-end gap-2">
-                  <button type="button" onClick={() => item.file_url && window.open(attachmentViewerUrl(item), "_blank", "noopener,noreferrer")} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
+                  <button type="button" onClick={() => openAttachment(item)} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
                   <button type="button" onClick={() => deleteAttachment(item)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
                 </span>
               </div>
