@@ -948,13 +948,13 @@ function fileIconType(name?: string) {
 function FileTypeIcon({ name }: { name?: string }) {
   const type = fileIconType(name);
   const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
-  const mark = type === "image" ? "M6 13l2-2 2 2 3-4 3 4" : type === "sheet" ? "M7 8h6M7 11h6M7 14h4" : type === "pdf" ? "M7 14c2-5 4-5 7-1M8 12c1 1 4 1 6-1" : "M7 9h6M7 12h6M7 15h4";
+  const letter = type === "pdf" ? "P" : type === "image" ? "J" : type === "sheet" ? "X" : type === "doc" ? "D" : "F";
   return (
     <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-orange-50 ${color}`} aria-hidden="true">
       <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
         <path d="M14 3v5h5" />
-        <path d={mark} />
+        <text x="12" y="16" textAnchor="middle" className="fill-current stroke-0 text-[9px] font-black">{letter}</text>
       </svg>
     </span>
   );
@@ -1505,12 +1505,12 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
             <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
             <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
           </form>
-          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_36px_96px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
+          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_44px_88px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
             <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span /><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
-              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_36px_96px_90px]">
+              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_44px_88px_90px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
                   {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-14 w-14 rounded-md object-cover" /> : <span className="h-14 w-14 rounded-md bg-slate-100" />}
@@ -1526,7 +1526,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                     event.stopPropagation();
                     setFolderOrder(order);
                   }}
-                  className="relative inline-flex h-7 w-7 items-center justify-center justify-self-center text-lg leading-none hover:text-orange-600"
+                  className="relative mx-auto inline-flex h-7 w-7 items-center justify-center text-lg leading-none hover:text-orange-600"
                   aria-label="첨부파일"
                 >
                   📁
