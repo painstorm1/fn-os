@@ -1015,6 +1015,10 @@ function fileIconType(name?: string) {
   return "file";
 }
 
+function isExcelAttachment(item: OrderAttachment) {
+  return /\.(xlsx|xlsm|xls|csv)$/i.test(item.file_name || "");
+}
+
 function FileTypeIcon({ name }: { name?: string }) {
   const type = fileIconType(name);
   const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
@@ -1039,7 +1043,33 @@ function attachmentViewerUrl(item: OrderAttachment) {
   return `/attachment-viewer?${params.toString()}`;
 }
 
-function openAttachment(item: OrderAttachment) {
+async function openAttachment(item: OrderAttachment) {
+  if (isExcelAttachment(item)) {
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (popup) {
+      popup.document.write("<title>Google Sheets 열기</title><p style=\"font-family:Arial,sans-serif;padding:24px\">Google Sheets로 여는 중입니다...</p>");
+    }
+    try {
+      const res = await fetch("/api/google/attachment-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          attachmentId: item.id,
+          fileName: item.file_name,
+          fileUrl: item.file_url,
+          mimeType: item.mime_type,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false || !data.url) throw new Error(data.error || "Google Sheets로 열 수 없습니다.");
+      if (popup) popup.location.href = data.url;
+      else window.open(data.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      popup?.close();
+      alert(error instanceof Error ? error.message : "Google Sheets로 열 수 없습니다.");
+    }
+    return;
+  }
   const url = attachmentViewerUrl(item);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
