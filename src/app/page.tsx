@@ -4424,6 +4424,18 @@ type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
+type EcountProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
+type EcountProductSearchState = {
+  open: boolean;
+  row: number;
+  col: number;
+  query: string;
+  searchedQuery: string;
+  results: EcountProductSearchItem[];
+  selectedIndex: number;
+  loading: boolean;
+  error: string;
+};
 
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
   return {
@@ -4476,6 +4488,18 @@ function SalesExcelGrid({
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
+  const productCodeCol = headers.indexOf("품목코드");
+  const [productSearch, setProductSearch] = useState<EcountProductSearchState>({
+    open: false,
+    row: 0,
+    col: productCodeCol,
+    query: "",
+    searchedQuery: "",
+    results: [],
+    selectedIndex: 0,
+    loading: false,
+    error: "",
+  });
 
   useEffect(() => {
     setAnchor({ row: 0, col: 0 });
@@ -4483,6 +4507,7 @@ function SalesExcelGrid({
     setSelectedRows([]);
     setEditing(null);
     setSortState(null);
+    setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: productCodeCol, query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
     setRowHeights(rows.map(() => 30));
   }, [sheet, resetKey]);
@@ -4519,6 +4544,56 @@ function SalesExcelGrid({
 
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     onChange(rows.map((row, r) => r === rowIndex ? row.map((cell, c) => c === colIndex ? value : cell) : row));
+  }
+  async function searchEcountProducts(query: string) {
+    const keyword = query.trim();
+    if (!keyword) {
+      setProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
+      return;
+    }
+    setProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
+    try {
+      const res = await fetch("/api/ecount/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: keyword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: data.error || "품목검색 실패" }));
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        return;
+      }
+      const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
+    } catch (error) {
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+    }
+  }
+  function openProductSearch(rowIndex: number, colIndex: number, query: string) {
+    setProductSearch({
+      open: true,
+      row: rowIndex,
+      col: colIndex,
+      query,
+      searchedQuery: "",
+      results: [],
+      selectedIndex: 0,
+      loading: false,
+      error: "",
+    });
+    void searchEcountProducts(query);
+  }
+  function selectProductSearchItem(item: EcountProductSearchItem) {
+    if (!item.code) return;
+    updateCell(productSearch.row, productSearch.col, item.code);
+    setProductSearch((prev) => ({ ...prev, open: false }));
+    setEditing(null);
+    setAnchor({ row: productSearch.row, col: productSearch.col });
+    setRange({ startRow: productSearch.row, endRow: productSearch.row, startCol: productSearch.col, endCol: productSearch.col });
+    window.setTimeout(() => gridRef.current?.focus(), 0);
   }
   function addRow() {
     onChange([...rows, headers.map(() => "")]);
@@ -4736,7 +4811,17 @@ function SalesExcelGrid({
                         onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
                         onBlur={() => setEditing(null)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === "Escape") setEditing(null);
+                          if (event.key === "Enter") {
+                            const value = (event.currentTarget as HTMLInputElement).value.trim();
+                            if (sheet === "이카운트_판매입력" && colIndex === productCodeCol && value) {
+                              event.preventDefault();
+                              openProductSearch(rowIndex, colIndex, value);
+                              setEditing(null);
+                              return;
+                            }
+                            setEditing(null);
+                          }
+                          if (event.key === "Escape") setEditing(null);
                         }}
                         className="h-full w-full bg-white px-2 text-xs outline-orange-400"
                       />
@@ -4750,6 +4835,117 @@ function SalesExcelGrid({
           </tbody>
         </table>
       </div>
+      {productSearch.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/20 pt-20"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setProductSearch((prev) => ({ ...prev, open: false }));
+          }}
+        >
+          <div
+            className="w-[720px] overflow-hidden rounded-md border border-slate-300 bg-white shadow-2xl"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setProductSearch((prev) => ({ ...prev, open: false }));
+                return;
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(Math.max(0, prev.results.length - 1), prev.selectedIndex + 1) }));
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) }));
+                return;
+              }
+              if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) {
+                event.preventDefault();
+                selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
+              }
+            }}
+          >
+            <div className="flex items-center justify-between bg-blue-700 px-4 py-2 text-white">
+              <strong>품목검색</strong>
+              <button type="button" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))} className="text-xl leading-none">×</button>
+            </div>
+            <div className="flex items-center gap-2 border-b border-slate-200 p-3">
+              <span className="shrink-0 text-sm font-black text-slate-800">품목검색</span>
+              <input
+                autoFocus
+                value={productSearch.query}
+                onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (productSearch.results.length && productSearch.query.trim() === productSearch.searchedQuery && productSearch.results[productSearch.selectedIndex]) {
+                      selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
+                      return;
+                    }
+                    void searchEcountProducts(productSearch.query);
+                  }
+                }}
+                className="min-w-0 flex-1 rounded border border-blue-400 px-3 py-2 text-sm outline-blue-500"
+                placeholder="품목명 또는 품목코드"
+              />
+              <button
+                type="button"
+                onClick={() => void searchEcountProducts(productSearch.query)}
+                disabled={productSearch.loading}
+                className="rounded bg-blue-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50"
+              >
+                {productSearch.loading ? "검색중" : "Search"}
+              </button>
+            </div>
+            <div className="max-h-[420px] overflow-auto p-3">
+              {productSearch.error && <div className="mb-2 rounded bg-rose-50 p-3 text-sm font-black text-rose-600">{productSearch.error}</div>}
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-100 text-left text-slate-600">
+                    <th className="w-14 border border-slate-200 px-2 py-2 text-center">선택</th>
+                    <th className="w-32 border border-slate-200 px-2 py-2">품목코드</th>
+                    <th className="border border-slate-200 px-2 py-2">품목명[규격]</th>
+                    <th className="w-24 border border-slate-200 px-2 py-2">입고단가</th>
+                    <th className="w-24 border border-slate-200 px-2 py-2">출고단가</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productSearch.results.map((item, index) => (
+                    <tr
+                      key={`${item.code || "item"}-${index}`}
+                      onMouseEnter={() => setProductSearch((prev) => ({ ...prev, selectedIndex: index }))}
+                      onDoubleClick={() => selectProductSearchItem(item)}
+                      className={`cursor-pointer ${productSearch.selectedIndex === index ? "bg-blue-50" : "bg-white hover:bg-slate-50"}`}
+                    >
+                      <td className="border border-slate-200 px-2 py-2 text-center">
+                        <button type="button" onClick={() => selectProductSearchItem(item)} className="rounded border border-slate-300 px-2 py-1 text-xs font-black text-slate-600">
+                          {index + 1}
+                        </button>
+                      </td>
+                      <td className="border border-slate-200 px-2 py-2 font-black text-blue-800">{item.code || "-"}</td>
+                      <td className="border border-slate-200 px-2 py-2">{item.name || "-"}{item.size ? ` / ${item.size}` : ""}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-right">{item.inPrice || "-"}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-right">{item.outPrice || "-"}</td>
+                    </tr>
+                  ))}
+                  {!productSearch.loading && !productSearch.results.length && (
+                    <tr>
+                      <td colSpan={5} className="border border-slate-200 px-3 py-10 text-center text-sm font-bold text-slate-500">
+                        검색 결과가 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+              <span>Enter 선택 · ↑↓ 이동 · Esc 닫기</span>
+              <button type="button" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))} className="rounded border border-slate-300 bg-white px-3 py-2 font-black text-slate-700">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
