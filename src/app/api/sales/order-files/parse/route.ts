@@ -11,6 +11,7 @@ type ParsedInvoiceRow = {
   recipient: string;
   phone: string;
   address: string;
+  productCode: string;
   fileName: string;
   sourceRow: number;
 };
@@ -467,10 +468,11 @@ function parseInvoiceRowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) 
     const recipient = clean(row[20]);
     const phone = clean(row[21]);
     const address = clean(row[23]);
+    const productCode = clean(row[24]);
     if (!trackingNo || !recipient || !phone || !address) return;
     if (/송장|운송장|받는분|수취인/i.test(`${trackingNo} ${recipient}`)) return;
     for (let index = 0; index < count; index += 1) {
-      rows.push({ trackingNo, recipient, phone, address, fileName, sourceRow: rowIndex + 1 });
+      rows.push({ trackingNo, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
     }
   });
   return rows;

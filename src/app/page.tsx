@@ -3912,6 +3912,7 @@ type ParsedInvoiceTrackingRow = {
   recipient?: string;
   phone?: string;
   address?: string;
+  productCode?: string;
   fileName?: string;
   sourceRow?: number;
 };
@@ -3955,6 +3956,25 @@ function parseShippingCode(value: string) {
   };
 }
 
+function isInvoiceInputExcludedMall(aliasOrCode: string, productCode?: string) {
+  const value = salesCellText(aliasOrCode);
+  const product = salesCellText(productCode).toUpperCase();
+  if (["L", "S", "O", "T", "Z"].includes(value)) return true;
+  if (["00008", "00009"].includes(value)) return true;
+  if (/^\d{4}-[LSOTZ]-/i.test(product)) return true;
+  return false;
+}
+
+function invoiceFailureReport(shippingRows: string[], invoiceRows: string[]) {
+  return [
+    `송장출력용 매칭 실패 : ${shippingRows.length}건`,
+    shippingRows.length ? shippingRows.join(", ") : "-",
+    "",
+    `이카운트_송장입력 매칭 실패 : ${invoiceRows.length}건`,
+    invoiceRows.length ? invoiceRows.join(", ") : "-",
+  ].join("\n");
+}
+
 function applyInvoiceTrackingToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
   parsedSheets: Partial<Record<SalesSheetName, string[][]>>,
@@ -3966,8 +3986,9 @@ function applyInvoiceTrackingToSheets(
     const usedShipping = new Set<number>();
     let matchedShipping = 0;
     let matchedInvoice = 0;
-    const failedShipping: string[] = [];
-    const failedInvoice: string[] = [];
+    const failedInvoiceIndexes = new Set<number>();
+    let alreadyMatchedShipping = 0;
+    let alreadyMatchedInvoice = 0;
 
     const invoiceRowsByMall = new Map<string, number[]>();
     nextInvoice.forEach((row, index) => {
@@ -3991,7 +4012,15 @@ function applyInvoiceTrackingToSheets(
       });
 
       if (shippingIndex < 0) {
-        failedShipping.push(`${invoiceRow.fileName || "송장파일"} ${invoiceRow.sourceRow || "-"}행 · ${invoiceRow.recipient || "-"} · ${invoiceRow.phone || "-"}`);
+        const alreadyIndex = nextShipping.findIndex((row) => {
+          if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo) return false;
+          const name = row[2];
+          const phone1 = row[3];
+          const phone2 = row[4];
+          const address = row[6];
+          return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
+        });
+        if (alreadyIndex >= 0) alreadyMatchedShipping += 1;
         return;
       }
 
@@ -3999,16 +4028,29 @@ function applyInvoiceTrackingToSheets(
       nextShipping[shippingIndex][1] = trackingNo;
       matchedShipping += 1;
 
-      const { mallCode, serial } = parseShippingCode(nextShipping[shippingIndex][0]);
+      const { alias, mallCode, serial } = parseShippingCode(nextShipping[shippingIndex][0]);
       const candidateIndexes = invoiceRowsByMall.get(mallCode) || [];
       const invoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes.find((index) => !salesCellText(nextInvoice[index]?.[4]));
       if (invoiceIndex !== undefined && nextInvoice[invoiceIndex]) {
-        nextInvoice[invoiceIndex][4] = trackingNo;
-        matchedInvoice += 1;
-      } else if (!["O", "T", "Z", "L", "S"].includes(mallCode)) {
-        failedInvoice.push(`${nextShipping[shippingIndex][0]} · ${invoiceRow.recipient || "-"} · ${trackingNo}`);
+        if (salesCellText(nextInvoice[invoiceIndex][4]) === trackingNo) {
+          alreadyMatchedInvoice += 1;
+        } else {
+          nextInvoice[invoiceIndex][4] = trackingNo;
+          matchedInvoice += 1;
+        }
+      } else if (!isInvoiceInputExcludedMall(alias || mallCode, invoiceRow.productCode)) {
+        const failedInvoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes[0];
+        if (failedInvoiceIndex !== undefined) failedInvoiceIndexes.add(failedInvoiceIndex);
       }
     });
+
+    const failedShipping = nextShipping
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => rowHasValue(row) && !salesCellText(row[1]))
+      .map(({ index }) => `${index + 1}행`);
+    const failedInvoice = [...failedInvoiceIndexes]
+      .filter((index) => index >= 0)
+      .map((index) => `${index + 1}행`);
 
     const manualRows = nextShipping
       .filter(rowHasValue)
@@ -4026,6 +4068,8 @@ function applyInvoiceTrackingToSheets(
       matchedInvoice,
       failedShipping,
       failedInvoice,
+      alreadyMatchedShipping,
+      alreadyMatchedInvoice,
       manualRows,
     };
   }
@@ -4085,6 +4129,8 @@ function applyInvoiceTrackingToSheets(
     matchedInvoice,
     failedShipping: [] as string[],
     failedInvoice: [] as string[],
+    alreadyMatchedShipping: 0,
+    alreadyMatchedInvoice: 0,
     manualRows,
   };
 }
@@ -4986,10 +5032,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
+  const [invoiceMatchReportText, setInvoiceMatchReportText] = useState("");
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
+  useEscapeToClose(Boolean(invoiceMatchReportText), () => setInvoiceMatchReportText(""));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const [jsonText, setJsonText] = useState(`[
@@ -5440,7 +5488,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     if (completedSalesTasks.invoiceMatched) {
-      const ok = window.confirm("송장번호 매칭을 이미 실행한 것으로 보입니다. 다시 실행할까요?");
+      const ok = window.confirm("송장매칭이 이미 되었습니다. 다시 매칭하시겠어요?");
       if (!ok) return;
     }
 
@@ -5464,6 +5512,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const result = applyInvoiceTrackingToSheets(sheets, parsedSheets, invoiceRows);
 
     if (!result.matchedShipping && !result.matchedInvoice) {
+      const already = Number(result.alreadyMatchedShipping || 0) + Number(result.alreadyMatchedInvoice || 0);
+      if (already > 0) {
+        const ok = window.confirm("송장매칭이 이미 되었습니다. 다시 매칭하시겠어요?");
+        if (!ok) return;
+      }
+      if (result.failedShipping.length || result.failedInvoice.length) {
+        const failureMessage = invoiceFailureReport(result.failedShipping, result.failedInvoice);
+        setInvoiceMatchReportText(failureMessage);
+        setMessage(failureMessage);
+        return;
+      }
       setMessage("송장번호 매칭 결과가 없습니다. 수취인/연락처/주소를 확인해 주세요.");
       return;
     }
@@ -5477,11 +5536,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: false }));
     }
     const manualRows = result.manualRows;
-    const failureMessage = [
-      result.failedShipping.length ? `송장출력용 매칭 실패 ${result.failedShipping.length}건: ${result.failedShipping.slice(0, 5).join(" / ")}` : "",
-      result.failedInvoice.length ? `이카운트_송장입력 매칭 실패 ${result.failedInvoice.length}건: ${result.failedInvoice.slice(0, 5).join(" / ")}` : "",
-    ].filter(Boolean).join("\n");
-    if (failureMessage) window.alert(failureMessage);
+    const failureMessage = (result.failedShipping.length || result.failedInvoice.length)
+      ? invoiceFailureReport(result.failedShipping, result.failedInvoice)
+      : "";
+    if (failureMessage) setInvoiceMatchReportText(failureMessage);
     if (manualRows.length) {
       const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
       setInvoiceMemoText(memo);
@@ -5554,7 +5612,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!/^F[1-6]$/.test(event.key)) return;
       if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      if (directPartnerPickerOpen || invoiceMemoText) return;
+      if (directPartnerPickerOpen || invoiceMemoText || invoiceMatchReportText) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "F1") runOrderMacroFlow();
@@ -5715,6 +5773,33 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 />
                 <div className="mt-4 flex justify-end">
                   <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {invoiceMatchReportText && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+              <div className="w-full max-w-xl rounded-lg bg-white p-5 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-black">송장매칭 실패</h3>
+                  <button type="button" onClick={() => setInvoiceMatchReportText("")} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
+                </div>
+                <textarea
+                  className="mt-4 h-52 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-mono text-sm font-bold text-slate-800 outline-orange-400"
+                  value={invoiceMatchReportText}
+                  readOnly
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void navigator.clipboard?.writeText(invoiceMatchReportText)}
+                    className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-700"
+                  >
+                    복사
+                  </button>
+                  <button type="button" onClick={() => setInvoiceMatchReportText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
                 </div>
               </div>
             </div>
