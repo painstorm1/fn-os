@@ -291,8 +291,15 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
   }, [activeMenu]);
 
   return (
-    <aside className="hidden h-screen w-[280px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-6 py-5 lg:block">
-      <Link href="/?menu=dashboard" className="mb-4 block">
+    <aside className="hidden min-h-screen w-[280px] shrink-0 border-r border-slate-200 bg-white px-6 py-5 lg:block">
+      <Link
+        href="/?menu=dashboard"
+        className="mb-4 block"
+        onClick={(event) => {
+          event.preventDefault();
+          goToInternal("/?menu=dashboard");
+        }}
+      >
         <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
 
