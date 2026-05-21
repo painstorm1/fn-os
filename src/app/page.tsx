@@ -4709,12 +4709,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }
         >
           <div className="mb-4 flex flex-wrap gap-2">
-            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>1. 발주파일 작업 실행</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>2. 송장출력용 내보내기</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openDirectPartnerPicker}>3. 직송파일 만들기</button>
-            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>4. 이카운트_판매입력 전송</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>5. 송장번호 매칭</button>
-            <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>6. FN_택배시트 반영</button>
+            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>F1. 발주 작업 실행</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>F2. 송장출력용 엑셀</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openDirectPartnerPicker}>F3. 직송파일 생성</button>
+            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F4. EC_판매입력 전송</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>F5. 송장번호 매칭</button>
+            <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
           </div>
           <div
             onDragOver={(event) => {
