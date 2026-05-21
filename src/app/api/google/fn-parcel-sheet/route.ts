@@ -19,7 +19,7 @@ function normalizePrivateKey(value: string) {
 }
 
 function sheetRange(sheetName: string) {
-  return `'${sheetName.replace(/'/g, "''")}'`;
+  return `'${sheetName.replace(/'/g, "''")}'!A:ZZ`;
 }
 
 function normalizeRow(row: unknown[]) {
