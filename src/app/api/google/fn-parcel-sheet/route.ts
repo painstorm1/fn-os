@@ -26,6 +26,19 @@ function normalizeRow(row: unknown[]) {
   return row.map((cell) => String(cell ?? "").trim()).join("\t");
 }
 
+function readableGoogleSheetsError(message: string) {
+  if (message.includes("not supported for this document") || message.includes("must not be an Office file")) {
+    return "FN_택배시트 반영 대상이 구글 스프레드시트가 아니라 엑셀(.xlsx) 파일입니다. 해당 파일을 Google Sheets로 변환한 뒤, 변환된 구글시트 URL의 spreadsheet ID를 GOOGLE_SHEETS_SPREADSHEET_ID에 넣어주세요.";
+  }
+  if (message.includes("Requested entity was not found")) {
+    return "GOOGLE_SHEETS_SPREADSHEET_ID를 찾을 수 없습니다. 구글시트 ID가 맞는지, 서비스 계정 이메일에 해당 시트 편집 권한을 공유했는지 확인해주세요.";
+  }
+  if (message.includes("The caller does not have permission") || message.includes("PERMISSION_DENIED")) {
+    return "구글시트 접근 권한이 없습니다. GOOGLE_SERVICE_ACCOUNT_EMAIL 값을 해당 구글시트에 편집자로 공유해주세요.";
+  }
+  return message;
+}
+
 async function getGoogleAccessToken() {
   const email = env("GOOGLE_SERVICE_ACCOUNT_EMAIL");
   const privateKey = env("GOOGLE_PRIVATE_KEY");
@@ -76,7 +89,7 @@ async function googleSheetsFetch(path: string, init: RequestInit = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(String(data.error?.message || data.error || `Google Sheets API error ${response.status}`));
+    throw new Error(readableGoogleSheetsError(String(data.error?.message || data.error || `Google Sheets API error ${response.status}`)));
   }
   return data;
 }
