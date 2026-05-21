@@ -75,7 +75,7 @@ export async function getEcountSession() {
   return sessionId;
 }
 
-async function postEcountApi<T>(defaultPath: string, payload: unknown, pathEnvName?: string) {
+export async function postEcountApi<T>(defaultPath: string, payload: unknown, pathEnvName?: string) {
   const sessionId = await getEcountSession();
   const path = env(pathEnvName || "") || defaultPath;
   const separator = path.includes("?") ? "&" : "?";
@@ -120,12 +120,64 @@ export function purchasePayload(rows: Array<Record<string, unknown>>) {
   };
 }
 
+export function productRegisterPayload(row: Record<string, unknown>) {
+  return {
+    InventoryBasicList: [
+      {
+        BulkDatas: {
+          UPLOAD_SER_NO: "1",
+          PROD_CD: String(row.prod_cd || row.PROD_CD || row["품목코드"] || ""),
+          PROD_DES: String(row.prod_name || row.PROD_DES || row.PROD_NAME || row["품목명"] || ""),
+          SIZE_DES: String(row.size_des || row.SIZE_DES || row["규격"] || ""),
+          IN_PRICE: String(row.in_price || row.IN_PRICE || row["입고단가"] || ""),
+          OUT_PRICE: String(row.out_price || row.OUT_PRICE || row["출고단가"] || ""),
+          REMARKS: String(row.remarks || row.REMARKS || row["비고"] || ""),
+        },
+      },
+    ],
+  };
+}
+
+export function customerRegisterPayload(row: Record<string, unknown>) {
+  return {
+    CustList: [
+      {
+        BulkDatas: {
+          UPLOAD_SER_NO: "1",
+          CUST: String(row.cust_code || row.CUST || row["거래처코드"] || ""),
+          CUST_DES: String(row.cust_name || row.CUST_DES || row.CUST_NAME || row["거래처명"] || ""),
+          BIZ_NO: String(row.biz_no || row.BIZ_NO || row["사업자번호"] || ""),
+          CEO_NAME: String(row.ceo_name || row.CEO_NAME || row["대표자"] || ""),
+          TEL: String(row.tel || row.TEL || row["연락처"] || ""),
+          REMARKS: String(row.remarks || row.REMARKS || row["비고"] || ""),
+        },
+      },
+    ],
+  };
+}
+
 export async function saveSales(rows: Array<Record<string, unknown>>) {
   return postEcountApi<Record<string, unknown>>("/OAPI/V2/Sale/SaveSale", salePayload(rows), "ECOUNT_SAVE_SALE_PATH");
 }
 
 export async function savePurchases(rows: Array<Record<string, unknown>>) {
   return postEcountApi<Record<string, unknown>>("/OAPI/V2/Purchases/SavePurchases", purchasePayload(rows), "ECOUNT_SAVE_PURCHASES_PATH");
+}
+
+export async function registerEcountProduct(row: Record<string, unknown>) {
+  return postEcountApi<Record<string, unknown>>(
+    "/OAPI/V2/InventoryBasic/SaveInventoryBasic",
+    productRegisterPayload(row),
+    "ECOUNT_SAVE_PRODUCT_PATH",
+  );
+}
+
+export async function registerEcountCustomer(row: Record<string, unknown>) {
+  return postEcountApi<Record<string, unknown>>(
+    "/OAPI/V2/Cust/SaveCust",
+    customerRegisterPayload(row),
+    "ECOUNT_SAVE_CUSTOMER_PATH",
+  );
 }
 
 export async function fetchEcountProducts(payload: Record<string, unknown> = {}) {
@@ -135,4 +187,3 @@ export async function fetchEcountProducts(payload: Record<string, unknown> = {})
 export async function fetchEcountInventory(payload: Record<string, unknown> = {}) {
   return postEcountApi<Record<string, unknown>>("/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus", payload, "ECOUNT_INVENTORY_PATH");
 }
-

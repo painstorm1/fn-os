@@ -4548,11 +4548,42 @@ function SalesExcelGrid({
 
 function SalesRightTools() {
   const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
-  const [lookupMode, setLookupMode] = useState<"products" | "inventory">("products");
   const [lookupQuery, setLookupQuery] = useState("");
-  const [lookupResult, setLookupResult] = useState("");
-  const [registerMode, setRegisterMode] = useState<"product" | "customer" | "">("");
-  const [inputMode, setInputMode] = useState<"sales" | "purchase" | "">("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResult, setLookupResult] = useState<{
+    product?: { code?: string; name?: string; inPrice?: string; outPrice?: string } | null;
+    products?: Array<{ code?: string; name?: string; inPrice?: string; outPrice?: string }>;
+    inventory?: Array<{ whCode?: string; whName?: string; qty?: string }>;
+    error?: string;
+  } | null>(null);
+  const [registerMode, setRegisterMode] = useState<"product" | "customer">("product");
+  const [registerForm, setRegisterForm] = useState({
+    prod_cd: "",
+    prod_name: "",
+    size_des: "",
+    in_price: "",
+    out_price: "",
+    cust_code: "",
+    cust_name: "",
+    biz_no: "",
+    ceo_name: "",
+    tel: "",
+    remarks: "",
+  });
+  const [registerMessage, setRegisterMessage] = useState("");
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [inputMode, setInputMode] = useState<"sales" | "purchase">("sales");
+  const [inputForm, setInputForm] = useState({
+    io_date: new Date().toISOString().slice(0, 10).replace(/\D/g, ""),
+    cust_code: "",
+    wh_cd: "100",
+    prod_cd: "",
+    qty: "",
+    price: "",
+    remarks: "",
+  });
+  const [inputMessage, setInputMessage] = useState("");
+  const [inputLoading, setInputLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/system/sales-inventory-health", { credentials: "include" })
@@ -4561,18 +4592,86 @@ function SalesRightTools() {
       .catch(() => setHealth(null));
   }, []);
 
+  function updateRegisterField(key: keyof typeof registerForm, value: string) {
+    setRegisterForm((form) => ({ ...form, [key]: value }));
+  }
+
+  function updateInputField(key: keyof typeof inputForm, value: string) {
+    setInputForm((form) => ({ ...form, [key]: value }));
+  }
+
   async function quickLookup() {
-    const endpoint = lookupMode === "products" ? "/api/ecount/products" : "/api/ecount/inventory";
-    const res = await fetch(endpoint, { credentials: "include" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      setLookupResult(data.error || "조회 실패");
+    const query = lookupQuery.trim();
+    if (!query) {
+      setLookupResult({ error: "상품명을 입력해 주세요." });
       return;
     }
-    const rows = lookupMode === "products" ? data.products || [] : data.inventory || [];
-    const q = lookupQuery.trim().toLowerCase();
-    const matched = rows.filter((row: Record<string, unknown>) => JSON.stringify(row).toLowerCase().includes(q)).slice(0, 5);
-    setLookupResult(matched.length ? matched.map((row: Record<string, unknown>) => `${row.prod_cd || "-"} · ${row.prod_name || row.wh_name || "-"}`).join("\n") : "조회 결과가 없습니다.");
+    setLookupLoading(true);
+    setLookupResult(null);
+    try {
+      const res = await fetch("/api/ecount/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setLookupResult({ error: data.error || "상품 조회 실패" });
+        return;
+      }
+      setLookupResult(data);
+    } catch (error) {
+      setLookupResult({ error: error instanceof Error ? error.message : "상품 조회 실패" });
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  async function submitRegister() {
+    setRegisterLoading(true);
+    setRegisterMessage("");
+    try {
+      const res = await fetch("/api/ecount/quick-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ mode: registerMode, form: registerForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setRegisterMessage(data.error || "등록 실패");
+        return;
+      }
+      setRegisterMessage(registerMode === "product" ? "제품등록 전송 완료" : "거래처등록 전송 완료");
+    } catch (error) {
+      setRegisterMessage(error instanceof Error ? error.message : "등록 실패");
+    } finally {
+      setRegisterLoading(false);
+    }
+  }
+
+  async function submitInput() {
+    setInputLoading(true);
+    setInputMessage("");
+    try {
+      const res = await fetch("/api/ecount/quick-input", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ mode: inputMode, form: inputForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setInputMessage(data.error || "입력 실패");
+        return;
+      }
+      setInputMessage(inputMode === "sales" ? "판매입력 전송 완료" : "구매입력 전송 완료");
+    } catch (error) {
+      setInputMessage(error instanceof Error ? error.message : "입력 실패");
+    } finally {
+      setInputLoading(false);
+    }
   }
 
   return (
@@ -4584,43 +4683,114 @@ function SalesRightTools() {
         </div>
       </ToolSection>
 
-      <ToolSection title="간편 조회" defaultOpen>
-        <div className="mb-2 grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => setLookupMode("products")} className={`rounded-md border px-2 py-2 text-xs font-black ${lookupMode === "products" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>품목조회</button>
-          <button type="button" onClick={() => setLookupMode("inventory")} className={`rounded-md border px-2 py-2 text-xs font-black ${lookupMode === "inventory" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>창고별재고</button>
-        </div>
-        <input value={lookupQuery} onChange={(event) => setLookupQuery(event.target.value)} className="mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder={lookupMode === "products" ? "상품 조회" : "창고별 재고 조회"} />
-        <button type="button" onClick={quickLookup} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white">조회</button>
-        {lookupResult && <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">{lookupResult}</pre>}
+      <ToolSection title="상품 간편조회" defaultOpen>
+        <input
+          value={lookupQuery}
+          onChange={(event) => setLookupQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void quickLookup();
+          }}
+          className="mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-orange-400"
+          placeholder="상품명 조회"
+        />
+        <button type="button" onClick={quickLookup} disabled={lookupLoading} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
+          {lookupLoading ? "조회 중" : "조회"}
+        </button>
+        {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
+        {lookupResult?.product && (
+          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+            <div className="mb-2 font-black text-slate-950">{lookupResult.product.name || "-"}</div>
+            <div className="grid grid-cols-[72px_1fr] gap-y-1 text-slate-600">
+              <span>품목코드</span><b className="text-slate-950">{lookupResult.product.code || "-"}</b>
+              <span>입고단가</span><b className="text-slate-950">{lookupResult.product.inPrice || "-"}</b>
+              <span>출고단가</span><b className="text-slate-950">{lookupResult.product.outPrice || "-"}</b>
+            </div>
+          </div>
+        )}
+        {lookupResult?.products && lookupResult.products.length > 1 && (
+          <div className="mt-2 rounded-md border border-slate-200 p-2">
+            <div className="mb-1 text-xs font-black text-slate-500">포함 상품 {lookupResult.products.length}건</div>
+            <div className="grid gap-1">
+              {lookupResult.products.slice(1, 5).map((item, index) => (
+                <div key={`${item.code}-${index}`} className="truncate text-xs font-bold text-slate-600">
+                  {item.code || "-"} · {item.name || "-"}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {lookupResult?.product && (
+          <div className="mt-2 rounded-md border border-slate-200">
+            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black">창고별 재고현황</div>
+            <div className="grid gap-1 p-2">
+              {lookupResult.inventory?.length ? lookupResult.inventory.map((item, index) => (
+                <div key={`${item.whCode}-${index}`} className="flex items-center justify-between rounded bg-white px-2 py-1 text-xs font-bold">
+                  <span className="truncate">{item.whName || item.whCode || "창고"}</span>
+                  <span className="text-slate-950">{item.qty || "0"}</span>
+                </div>
+              )) : <div className="px-2 py-2 text-xs font-bold text-slate-500">창고별 재고가 없습니다.</div>}
+            </div>
+          </div>
+        )}
       </ToolSection>
 
       <ToolSection title="간편 등록" defaultOpen>
         <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => setRegisterMode(registerMode === "product" ? "" : "product")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">제품등록</button>
-          <button type="button" onClick={() => setRegisterMode(registerMode === "customer" ? "" : "customer")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">거래처등록</button>
+          <button type="button" onClick={() => setRegisterMode("product")} className={`rounded-md border px-2 py-2 text-xs font-black ${registerMode === "product" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>제품등록</button>
+          <button type="button" onClick={() => setRegisterMode("customer")} className={`rounded-md border px-2 py-2 text-xs font-black ${registerMode === "customer" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>거래처등록</button>
         </div>
-        {registerMode && (
-          <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
-            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder={registerMode === "product" ? "품목명" : "거래처명"} />
-            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder={registerMode === "product" ? "품목코드" : "거래처코드"} />
-            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white">등록 준비</button>
-          </div>
-        )}
+        <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
+          {registerMode === "product" ? (
+            <>
+              <input value={registerForm.prod_cd} onChange={(event) => updateRegisterField("prod_cd", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="품목코드 *" />
+              <input value={registerForm.prod_name} onChange={(event) => updateRegisterField("prod_name", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="품목명 *" />
+              <input value={registerForm.size_des} onChange={(event) => updateRegisterField("size_des", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="규격" />
+              <div className="grid grid-cols-2 gap-2">
+                <input value={registerForm.in_price} onChange={(event) => updateRegisterField("in_price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="입고단가" />
+                <input value={registerForm.out_price} onChange={(event) => updateRegisterField("out_price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="출고단가" />
+              </div>
+            </>
+          ) : (
+            <>
+              <input value={registerForm.cust_code} onChange={(event) => updateRegisterField("cust_code", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="거래처코드 *" />
+              <input value={registerForm.cust_name} onChange={(event) => updateRegisterField("cust_name", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="거래처명 *" />
+              <input value={registerForm.biz_no} onChange={(event) => updateRegisterField("biz_no", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="사업자번호" />
+              <div className="grid grid-cols-2 gap-2">
+                <input value={registerForm.ceo_name} onChange={(event) => updateRegisterField("ceo_name", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="대표자" />
+                <input value={registerForm.tel} onChange={(event) => updateRegisterField("tel", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="연락처" />
+              </div>
+            </>
+          )}
+          <input value={registerForm.remarks} onChange={(event) => updateRegisterField("remarks", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="비고" />
+          <button type="button" onClick={submitRegister} disabled={registerLoading} className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+            {registerLoading ? "전송 중" : registerMode === "product" ? "제품등록 전송" : "거래처등록 전송"}
+          </button>
+          {registerMessage && <div className="rounded-md bg-white px-2 py-2 text-xs font-black text-slate-600">{registerMessage}</div>}
+        </div>
       </ToolSection>
 
       <ToolSection title="간편 입력" defaultOpen>
         <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => setInputMode(inputMode === "sales" ? "" : "sales")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">판매입력</button>
-          <button type="button" onClick={() => setInputMode(inputMode === "purchase" ? "" : "purchase")} className="rounded-md border border-slate-200 px-2 py-2 text-xs font-black">구매입력</button>
+          <button type="button" onClick={() => setInputMode("sales")} className={`rounded-md border px-2 py-2 text-xs font-black ${inputMode === "sales" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>판매입력</button>
+          <button type="button" onClick={() => setInputMode("purchase")} className={`rounded-md border px-2 py-2 text-xs font-black ${inputMode === "purchase" ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200"}`}>구매입력</button>
         </div>
-        {inputMode && (
-          <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
-            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="품목코드" />
-            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="수량" />
-            <input className="rounded-md border border-slate-200 px-2 py-2 text-xs" placeholder="단가" />
-            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white">{inputMode === "sales" ? "판매입력 준비" : "구매입력 준비"}</button>
+        <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-3">
+          <input value={inputForm.io_date} onChange={(event) => updateInputField("io_date", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="일자 YYYYMMDD *" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={inputForm.cust_code} onChange={(event) => updateInputField("cust_code", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="거래처코드" />
+            <input value={inputForm.wh_cd} onChange={(event) => updateInputField("wh_cd", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="창고코드 *" />
           </div>
-        )}
+          <input value={inputForm.prod_cd} onChange={(event) => updateInputField("prod_cd", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="품목코드 *" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={inputForm.qty} onChange={(event) => updateInputField("qty", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="수량 *" />
+            <input value={inputForm.price} onChange={(event) => updateInputField("price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="단가 *" />
+          </div>
+          <input value={inputForm.remarks} onChange={(event) => updateInputField("remarks", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="적요" />
+          <button type="button" onClick={submitInput} disabled={inputLoading} className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+            {inputLoading ? "전송 중" : inputMode === "sales" ? "판매입력 전송" : "구매입력 전송"}
+          </button>
+          {inputMessage && <div className="rounded-md bg-white px-2 py-2 text-xs font-black text-slate-600">{inputMessage}</div>}
+        </div>
       </ToolSection>
     </aside>
   );
