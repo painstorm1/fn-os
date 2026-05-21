@@ -936,9 +936,13 @@ function fileSize(value?: number) {
   return `${bytes.toLocaleString("ko-KR")}B`;
 }
 
-function fileKind(name?: string) {
-  const ext = (name || "").split(".").pop()?.toUpperCase();
-  return ext || "FILE";
+function fileIcon(name?: string) {
+  const ext = (name || "").split(".").pop()?.toLowerCase();
+  if (ext === "pdf") return "PDF";
+  if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext || "")) return "IMG";
+  if (["xlsx", "xls", "xlsm", "csv"].includes(ext || "")) return "XLS";
+  if (["doc", "docx"].includes(ext || "")) return "DOC";
+  return "FILE";
 }
 
 function fmtPct(value?: number | null) {
@@ -1316,7 +1320,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
       <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-black">발주 폴더 - {title}</h2>
+            <h2 className="text-lg font-black">첨부파일 - {title}</h2>
             <p className="mt-1 text-xs font-bold text-slate-500">견적서, 송금증, 인보이스, 사진 자료를 발주건 안에 보관합니다.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
@@ -1372,7 +1376,10 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
               <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
             ) : attachments.length ? attachments.map((item) => (
               <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
-                <span className="break-all font-bold"><span className="mr-2 font-black text-orange-600">[{fileKind(item.file_name)}]</span>{item.file_name || "-"}</span>
+                <span className="flex min-w-0 items-center gap-2 font-bold">
+                  <span className="inline-flex h-7 w-9 shrink-0 items-center justify-center rounded bg-orange-50 text-[10px] font-black text-orange-600">{fileIcon(item.file_name)}</span>
+                  <span className="min-w-0 break-all">{item.file_name || "-"}</span>
+                </span>
                 <span>{fileSize(item.file_size)}</span>
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
@@ -1474,12 +1481,12 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
             <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
             <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
           </form>
-          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
-            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span>
+          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px_44px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
+            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span><span />
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
-              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-4 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px]">
+              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-4 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_128px_90px_44px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
                   {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-14 w-14 rounded-md object-cover" /> : <span className="h-14 w-14 rounded-md bg-slate-100" />}
@@ -1490,6 +1497,23 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                 <span className="text-right font-black">{krw(order.total_won)}</span>
                 <span className="pr-3 text-right font-black text-orange-600">{productionDueText(order)}</span>
                 <span className="flex justify-center"><StatusPill status={order.status} /></span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFolderOrder(order);
+                  }}
+                  className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-base hover:border-orange-300 hover:bg-orange-50"
+                  aria-label="첨부파일"
+                >
+                  📁
+                  {Number(order.attachment_count || 0) > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-black text-white">
+                      {order.attachment_count}
+                    </span>
+                  )}
+                </button>
               </div>
               {expandedId === order.id && (
                 details[order.id]
@@ -1506,7 +1530,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                     }
                     setDetails((prev) => ({ ...prev, [order.id]: next }));
                     void loadOrders();
-                  }} onOpenFolder={() => setFolderOrder(details[order.id]?.order || order)} />
+                  }} />
                   : <div className="border-b border-slate-200 p-5 text-sm font-bold text-slate-500">상세 불러오는 중...</div>
               )}
             </div>
@@ -1525,7 +1549,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
   );
 }
 
-function NativeOrderQuickEditor({ detail, onSaved, onOpenFolder }: { detail: ImportOrderDetail; onSaved: (detail: ImportOrderDetail | null) => void; onOpenFolder?: () => void }) {
+function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail; onSaved: (detail: ImportOrderDetail | null) => void }) {
   const order = detail.order;
   const [saving, setSaving] = useState(false);
   const [stageValues, setStageValues] = useState<StageValues>(stageValuesFromOrder(order));
@@ -1657,9 +1681,6 @@ function NativeOrderQuickEditor({ detail, onSaved, onOpenFolder }: { detail: Imp
         <div className="flex items-center justify-between gap-3">
           <div><b>{order.order_date || order.paid_date || "-"}</b> <StatusPill status={order.status} /></div>
           <div className="flex gap-2">
-            <button type="button" onClick={onOpenFolder} className="inline-flex h-9 items-center rounded-md border border-orange-200 bg-orange-50 px-3 text-sm font-black text-orange-600">
-              📁 발주 폴더{Number(order.attachment_count || 0) > 0 ? ` ${order.attachment_count}` : ""}
-            </button>
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
             <button type="button" onClick={deleteOrder} className="inline-flex h-9 items-center rounded-md border border-rose-300 px-3 text-sm font-black text-rose-600">삭제</button>
