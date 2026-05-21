@@ -950,11 +950,11 @@ function FileTypeIcon({ name }: { name?: string }) {
   const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
   const letter = type === "pdf" ? "P" : type === "image" ? "J" : type === "sheet" ? "X" : type === "doc" ? "D" : "F";
   return (
-    <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-orange-50 ${color}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center ${color}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
         <path d="M14 3v5h5" />
-        <text x="12" y="16" textAnchor="middle" className="fill-current stroke-0 text-[9px] font-black">{letter}</text>
+        <text x="12" y="17" textAnchor="middle" className="fill-current stroke-0 text-[12px] font-black">{letter}</text>
       </svg>
     </span>
   );
