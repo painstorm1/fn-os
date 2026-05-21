@@ -3653,7 +3653,7 @@ function StatusPill({ status }: { status?: string }) {
 type SalesSheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
-  송장출력용: ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "이카운트_판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
 };
@@ -3752,6 +3752,79 @@ function sortShippingRowsByOption(rows: string[][]) {
   return [...rows].sort((a, b) => compareMixedKoreanText(String(a[optionIndex] || ""), String(b[optionIndex] || "")));
 }
 
+function salesCellText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function rowHasValue(row: string[]) {
+  return row.some((cell) => salesCellText(cell));
+}
+
+function salesRowObject(sheet: SalesSheetName, row: string[]) {
+  return Object.fromEntries(salesSheetHeaders[sheet].map((header, index) => [header, salesCellText(row[index])]));
+}
+
+function applyInvoiceTrackingToSheets(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  parsedSheets: Partial<Record<SalesSheetName, string[][]>>,
+) {
+  const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
+  const parsedInvoiceRows = (parsedSheets.이카운트_송장입력 || []).filter(rowHasValue);
+  const trackingByShippingCode = new Map<string, string>();
+  const trackingByOrderNo = new Map<string, string>();
+  const trackingByBundleNo = new Map<string, string>();
+
+  parsedShippingRows.forEach((row) => {
+    const item = salesRowObject("송장출력용", row);
+    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
+  });
+  parsedInvoiceRows.forEach((row) => {
+    const item = salesRowObject("이카운트_송장입력", row);
+    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
+    if (item.주문번호 && item.송장번호) trackingByOrderNo.set(item.주문번호, item.송장번호);
+    if (item.묶음주문번호 && item.송장번호) trackingByBundleNo.set(item.묶음주문번호, item.송장번호);
+  });
+
+  let matchedShipping = 0;
+  let matchedInvoice = 0;
+  const nextShipping = currentSheets.송장출력용.map((row) => {
+    if (!rowHasValue(row)) return row;
+    const item = salesRowObject("송장출력용", row);
+    const tracking = trackingByShippingCode.get(item.쇼핑몰코드);
+    if (!tracking || item.송장번호 === tracking) return row;
+    matchedShipping += 1;
+    return row.map((cell, index) => index === 1 ? tracking : cell);
+  });
+
+  const nextInvoice = currentSheets.이카운트_송장입력.map((row) => {
+    if (!rowHasValue(row)) return row;
+    const item = salesRowObject("이카운트_송장입력", row);
+    const tracking = trackingByOrderNo.get(item.주문번호)
+      || trackingByBundleNo.get(item.묶음주문번호)
+      || trackingByShippingCode.get(item.쇼핑몰코드);
+    if (!tracking || item.송장번호 === tracking) return row;
+    matchedInvoice += 1;
+    return row.map((cell, index) => index === 4 ? tracking : cell);
+  });
+
+  const manualRows = nextShipping
+    .filter(rowHasValue)
+    .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
+    .filter((row) => salesCellText(row[1]))
+    .map((row) => `${row[0]} ${row[2]} ${row[1]}`);
+
+  return {
+    sheets: {
+      ...currentSheets,
+      송장출력용: nextShipping,
+      이카운트_송장입력: nextInvoice,
+    },
+    matchedShipping,
+    matchedInvoice,
+    manualRows,
+  };
+}
+
 type DirectShippingPartner = "JB" | "케이모아";
 
 const jbDirectHeaders = salesSheetHeaders.송장출력용.filter((header) => header !== "정산예정금액" && header !== "송장번호");
@@ -3808,10 +3881,22 @@ function toSettlementExportValue(value: string) {
   return Number.isFinite(numeric) ? numeric : value;
 }
 
-function exportSheetRows(name: SalesSheetName, rows: string[][]) {
-  const settlementIndex = salesSheetHeaders[name].indexOf("정산예정금액");
-  if (name !== "송장출력용" || settlementIndex < 0) return rows;
-  return rows.map((row) => row.map((cell, index) => index === settlementIndex ? toSettlementExportValue(cell) : cell));
+function exportSheetRowsWithHeaders(name: SalesSheetName, rows: string[][]) {
+  let headers = [...salesSheetHeaders[name]];
+  let exportRows: Array<Array<string | number>> = rows.map((row) => headers.map((_, index) => row[index] || ""));
+  if (name === "송장출력용") {
+    const trackingIndex = headers.indexOf("송장번호");
+    const hasTracking = trackingIndex >= 0 && exportRows.some((row) => salesCellText(row[trackingIndex]));
+    if (trackingIndex >= 0 && !hasTracking) {
+      headers = headers.filter((_, index) => index !== trackingIndex);
+      exportRows = exportRows.map((row) => row.filter((_, index) => index !== trackingIndex));
+    }
+    const settlementIndex = headers.indexOf("정산예정금액");
+    if (settlementIndex >= 0) {
+      exportRows = exportRows.map((row) => row.map((cell, index) => index === settlementIndex ? toSettlementExportValue(String(cell || "")) : cell));
+    }
+  }
+  return { headers, rows: exportRows };
 }
 
 function setWorksheetFontSize(worksheet: XLSX.WorkSheet, size = 11) {
@@ -3827,9 +3912,9 @@ function setWorksheetFontSize(worksheet: XLSX.WorkSheet, size = 11) {
   }
 }
 
-function salesExportColumnWidths(headers: string[], rows: string[][]) {
+function salesExportColumnWidths(headers: string[], rows: Array<Array<string | number>>) {
   return headers.map((header, index) => {
-    if (index !== 0 && index !== 6) return { wch: 8 };
+    if (index !== 0 && header !== "주문옵션") return { wch: 8 };
     const maxLength = Math.max(
       String(header || "").length,
       ...rows.map((row) => String(row[index] || "").length),
@@ -3842,10 +3927,10 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
   const workbook = XLSX.utils.book_new();
   (Object.keys(sheets) as SalesSheetName[]).forEach((name) => {
     const rows = sheets[name] || [];
-    const exportRows = exportSheetRows(name, rows);
-    const worksheet = XLSX.utils.aoa_to_sheet([salesSheetHeaders[name], ...exportRows]);
+    const { headers, rows: exportRows } = exportSheetRowsWithHeaders(name, rows);
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...exportRows]);
     if (name === "송장출력용") {
-      const settlementIndex = salesSheetHeaders[name].indexOf("정산예정금액");
+      const settlementIndex = headers.indexOf("정산예정금액");
       if (settlementIndex >= 0) {
         for (let rowIndex = 1; rowIndex <= exportRows.length; rowIndex += 1) {
           const address = XLSX.utils.encode_cell({ r: rowIndex, c: settlementIndex });
@@ -3854,7 +3939,7 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
       }
     }
     setWorksheetFontSize(worksheet, 11);
-    worksheet["!cols"] = salesExportColumnWidths(salesSheetHeaders[name], rows);
+    worksheet["!cols"] = salesExportColumnWidths(headers, exportRows);
     XLSX.utils.book_append_sheet(workbook, worksheet, name);
   });
   const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
@@ -4400,7 +4485,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
       }
     }
-    if (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트_판매입력"])) {
+    if (kind === "orders" && (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트_판매입력"]))) {
       const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 실행하면 해당 시트 값이 덮어써질 수 있습니다. 파일을 대기 목록에 추가할까요?");
       if (!ok) return;
     }
@@ -4410,8 +4495,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     } else {
       setPendingInvoiceFiles((prev) => [...prev, ...next]);
     }
-    setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: false }));
-    setMessage(`${kind === "orders" ? "발주" : "송장"}파일 ${next.length}개를 대기 목록에 올렸습니다. 1번 버튼을 누르면 시트가 채워집니다.`);
+    setCompletedSalesTasks((prev) => ({
+      ...prev,
+      orderFlow: kind === "orders" ? false : prev.orderFlow,
+      invoiceFlow: kind === "invoices" ? false : prev.invoiceFlow,
+      invoiceMatched: kind === "invoices" ? false : prev.invoiceMatched,
+    }));
+    setMessage(kind === "orders"
+      ? `발주파일 ${next.length}개를 대기 목록에 올렸습니다. F1 버튼을 누르면 시트가 채워집니다.`
+      : `송장파일 ${next.length}개를 업로드했습니다. F5 송장번호 매칭을 누르면 기존 시트에 반영됩니다.`);
   }
 
   async function parseWaitingFiles(kind: "orders" | "invoices", passwordOverride = orderFilePassword) {
@@ -4587,8 +4679,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     loadSummary();
   }
 
-  function matchInvoiceNumbers() {
-    if (!pendingInvoiceFiles.length && !completedSalesTasks.invoiceFlow) {
+  async function matchInvoiceNumbers() {
+    if (!pendingInvoiceFiles.length) {
       window.alert("먼저 송장파일을 업로드해 주세요.");
       return;
     }
@@ -4600,18 +4692,45 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("송장번호 매칭을 이미 실행한 것으로 보입니다. 다시 실행할까요?");
       if (!ok) return;
     }
-    const manualRows = sheets.송장출력용
-      .filter((row) => row.some(Boolean))
-      .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
-      .map((row) => `${row[0]} ${row[1]} ${row[2] || ""}`);
-    setCompletedSalesTasks((prev) => ({ ...prev, invoiceMatched: true }));
+
+    setMessage(`${pendingInvoiceFiles.length}개 송장파일을 읽어서 기존 시트에 매칭하는 중입니다...`);
+    const formData = new FormData();
+    formData.append("kind", "invoices");
+    if (orderFilePassword) formData.append("order_file_password", orderFilePassword);
+    pendingInvoiceFiles.forEach((file) => formData.append("files", file));
+    const res = await fetch("/api/sales/order-files/parse", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "송장파일을 읽지 못했습니다.");
+      return;
+    }
+    const parsedSheets = data.sheets as Partial<Record<SalesSheetName, string[][]>>;
+    const result = applyInvoiceTrackingToSheets(sheets, parsedSheets);
+
+    if (!result.matchedShipping && !result.matchedInvoice) {
+      const ok = window.confirm("기존 시트와 매칭되는 송장번호를 찾지 못했습니다. 송장파일과 주문번호/쇼핑몰코드를 확인해 주세요. 그래도 작업 완료로 표시할까요?");
+      if (!ok) {
+        setMessage("송장번호 매칭 결과가 없습니다.");
+        return;
+      }
+    }
+
+    setSheets(result.sheets);
+    setPendingInvoiceFiles([]);
+    setSalesGridResetKey((value) => value + 1);
+    setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: true }));
+    const manualRows = result.manualRows;
     if (manualRows.length) {
       const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
       setInvoiceMemoText(memo);
-      setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상 메모장을 화면에 표시했습니다.");
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.`);
     } else {
       setInvoiceMemoText("");
-      setMessage("송장번호 매칭을 실행했습니다. 직접 입력 대상은 없습니다.");
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상은 없습니다.`);
     }
   }
 

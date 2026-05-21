@@ -10,7 +10,7 @@ type OrderSource = "ecount" | "todayhouse" | "toss" | "ezwell" | "unknown";
 const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
-  송장출력용: ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   이카운트_판매입력: ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
 };
@@ -263,6 +263,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       sortKey: `${option}\u0000${countKey}-${String(next).padStart(3, "0")}`,
       row: [
         `${countKey}-A${String(next).padStart(3, "0")}`,
+        clean(pick(source, ["송장번호"])),
         clean(pick(source, ["수취인"])),
         contact1,
         contact2,
