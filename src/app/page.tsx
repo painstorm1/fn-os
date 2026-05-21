@@ -3799,6 +3799,30 @@ function exportSheetRows(name: SalesSheetName, rows: string[][]) {
   return rows.map((row) => row.map((cell, index) => index === settlementIndex ? toSettlementExportValue(cell) : cell));
 }
 
+function setWorksheetFontSize(worksheet: XLSX.WorkSheet, size = 11) {
+  const range = worksheet["!ref"] ? XLSX.utils.decode_range(worksheet["!ref"]) : null;
+  if (!range) return;
+  for (let row = range.s.r; row <= range.e.r; row += 1) {
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      const address = XLSX.utils.encode_cell({ r: row, c: col });
+      const cell = worksheet[address] as (XLSX.CellObject & { s?: { font?: { sz?: number } } }) | undefined;
+      if (!cell) continue;
+      cell.s = { ...(cell.s || {}), font: { ...(cell.s?.font || {}), sz: size } };
+    }
+  }
+}
+
+function salesExportColumnWidths(headers: string[], rows: string[][]) {
+  return headers.map((header, index) => {
+    if (index !== 0 && index !== 6) return { wch: 8 };
+    const maxLength = Math.max(
+      String(header || "").length,
+      ...rows.map((row) => String(row[index] || "").length),
+    );
+    return { wch: Math.min(Math.max(maxLength + 2, 8), 80) };
+  });
+}
+
 function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetName, string[][]>>) {
   const workbook = XLSX.utils.book_new();
   (Object.keys(sheets) as SalesSheetName[]).forEach((name) => {
@@ -3814,9 +3838,8 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
         }
       }
     }
-    worksheet["!cols"] = salesSheetHeaders[name].map((header, index) => ({
-      wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
-    }));
+    setWorksheetFontSize(worksheet, 11);
+    worksheet["!cols"] = salesExportColumnWidths(salesSheetHeaders[name], rows);
     XLSX.utils.book_append_sheet(workbook, worksheet, name);
   });
   const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
