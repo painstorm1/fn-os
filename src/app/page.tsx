@@ -5785,7 +5785,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <button type="button" onClick={() => setInvoiceMatchReportText("")} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
                 </div>
                 <textarea
-                  className="mt-4 h-52 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-mono text-sm font-bold text-slate-800 outline-orange-400"
+                  className="mt-4 h-52 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-sans text-sm font-bold leading-7 text-slate-800 outline-orange-400"
                   value={invoiceMatchReportText}
                   readOnly
                   autoFocus
