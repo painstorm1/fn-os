@@ -176,6 +176,10 @@ function sumBefore(values: number[], index: number) {
   return values.slice(0, Math.max(0, index)).reduce((sum, value) => sum + value, 0);
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function imageMimeType(path: string) {
   const ext = path.split(".").pop()?.toLowerCase();
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -184,19 +188,50 @@ function imageMimeType(path: string) {
   return "image/png";
 }
 
-function anchorPoint(node: Element, localName: "from" | "to", colWidths: number[], rowHeights: number[]) {
+type AnchorMarker = {
+  col: number;
+  row: number;
+  colOff: number;
+  rowOff: number;
+};
+
+type ImageAnchor = {
+  id: string;
+  src: string;
+  from: AnchorMarker;
+  to?: AnchorMarker;
+  extWidth: number;
+  extHeight: number;
+  naturalWidth: number;
+  naturalHeight: number;
+};
+
+function anchorMarker(node: Element, localName: "from" | "to"): AnchorMarker | null {
   const point = firstXmlNode(node, localName) as Element | undefined;
-  if (!point) return { left: ROW_HEADER_WIDTH, top: COLUMN_HEADER_HEIGHT };
+  if (!point) return null;
 
   const col = Number(xmlText(point, "col") || 0);
   const row = Number(xmlText(point, "row") || 0);
   const colOff = emuToPx(xmlText(point, "colOff"));
   const rowOff = emuToPx(xmlText(point, "rowOff"));
 
+  return { col, row, colOff, rowOff };
+}
+
+function markerPoint(marker: AnchorMarker, colWidths: number[], rowHeights: number[]) {
   return {
-    left: ROW_HEADER_WIDTH + sumBefore(colWidths, col) + colOff,
-    top: COLUMN_HEADER_HEIGHT + sumBefore(rowHeights, row) + rowOff,
+    left: ROW_HEADER_WIDTH + sumBefore(colWidths, marker.col) + marker.colOff,
+    top: COLUMN_HEADER_HEIGHT + sumBefore(rowHeights, marker.row) + marker.rowOff,
   };
+}
+
+function loadImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width || 0, height: image.naturalHeight || image.height || 0 });
+    image.onerror = () => resolve({ width: 0, height: 0 });
+    image.src = src;
+  });
 }
 
 async function extractSheetImages(buffer: ArrayBuffer, sheetName: string, colWidths: number[], rowHeights: number[]): Promise<PreviewImage[]> {
@@ -229,7 +264,7 @@ async function extractSheetImages(buffer: ArrayBuffer, sheetName: string, colWid
     const drawingRels = relMap(drawingRelsXml);
     const drawingDoc = parseXml(drawingXml);
     const anchors = [...xmlNodes(drawingDoc, "twoCellAnchor"), ...xmlNodes(drawingDoc, "oneCellAnchor")] as Element[];
-    const images: PreviewImage[] = [];
+    const imageAnchors: ImageAnchor[] = [];
 
     for (const [index, anchor] of anchors.entries()) {
       const blip = firstXmlNode(anchor, "blip") as Element | undefined;
@@ -241,25 +276,58 @@ async function extractSheetImages(buffer: ArrayBuffer, sheetName: string, colWid
       const mediaFile = zip.file(mediaPath);
       if (!mediaFile) continue;
 
-      const from = anchorPoint(anchor, "from", colWidths, rowHeights);
-      const toNode = firstXmlNode(anchor, "to") as Element | undefined;
-      let width = 160;
-      let height = 120;
-
-      if (toNode) {
-        const to = anchorPoint(anchor, "to", colWidths, rowHeights);
-        width = Math.max(24, to.left - from.left);
-        height = Math.max(24, to.top - from.top);
-      } else {
-        const extNode = firstXmlNode(anchor, "ext") as Element | undefined;
-        width = Math.max(24, emuToPx(extNode?.getAttribute("cx")));
-        height = Math.max(24, emuToPx(extNode?.getAttribute("cy")));
-      }
+      const from = anchorMarker(anchor, "from");
+      if (!from) continue;
+      const to = anchorMarker(anchor, "to") || undefined;
+      const extNode = firstXmlNode(anchor, "ext") as Element | undefined;
+      const extWidth = emuToPx(extNode?.getAttribute("cx"));
+      const extHeight = emuToPx(extNode?.getAttribute("cy"));
 
       const blob = await mediaFile.async("blob");
       const src = URL.createObjectURL(new Blob([blob], { type: imageMimeType(mediaPath) }));
-      images.push({ id: `${mediaPath}-${index}`, src, left: from.left, top: from.top, width, height });
+      const size = await loadImageSize(src);
+      imageAnchors.push({
+        id: `${mediaPath}-${index}`,
+        src,
+        from,
+        to,
+        extWidth,
+        extHeight,
+        naturalWidth: size.width,
+        naturalHeight: size.height,
+      });
     }
+
+    imageAnchors.forEach((image) => {
+      const fallbackWidth = image.extWidth || image.naturalWidth || 120;
+      const fallbackHeight = image.extHeight || image.naturalHeight || 90;
+      const rowSpan = image.to ? Math.max(1, image.to.row - image.from.row) : 1;
+      const colSpan = image.to ? Math.max(1, image.to.col - image.from.col) : 1;
+
+      if (rowSpan <= 2 && image.from.row < rowHeights.length) {
+        rowHeights[image.from.row] = Math.max(rowHeights[image.from.row], clamp(fallbackHeight + 10, 54, 118));
+      }
+      if (colSpan <= 2 && image.from.col < colWidths.length) {
+        colWidths[image.from.col] = Math.max(colWidths[image.from.col], clamp(fallbackWidth + 12, 74, 190));
+      }
+    });
+
+    const images = imageAnchors.map((image) => {
+      const from = markerPoint(image.from, colWidths, rowHeights);
+      const to = image.to ? markerPoint(image.to, colWidths, rowHeights) : null;
+      const boxWidth = Math.max(24, to ? to.left - from.left : image.extWidth || image.naturalWidth || 120);
+      const boxHeight = Math.max(24, to ? to.top - from.top : image.extHeight || image.naturalHeight || 90);
+      const naturalWidth = image.naturalWidth || boxWidth;
+      const naturalHeight = image.naturalHeight || boxHeight;
+      const padding = 5;
+      const scale = Math.min((boxWidth - padding * 2) / naturalWidth, (boxHeight - padding * 2) / naturalHeight);
+      const width = Math.max(20, Math.round(naturalWidth * scale));
+      const height = Math.max(20, Math.round(naturalHeight * scale));
+      const left = Math.round(from.left + (boxWidth - width) / 2);
+      const top = Math.round(from.top + (boxHeight - height) / 2);
+
+      return { id: image.id, src: image.src, left, top, width, height };
+    });
 
     return images;
   } catch {
