@@ -3826,6 +3826,20 @@ function applyInvoiceTrackingToSheets(
 }
 
 type DirectShippingPartner = "JB" | "케이모아";
+type FileSystemWritableLike = {
+  write: (data: Blob) => Promise<void>;
+  close: () => Promise<void>;
+};
+type FileSystemFileHandleLike = {
+  getFile?: () => Promise<File>;
+  createWritable: () => Promise<FileSystemWritableLike>;
+};
+type WindowWithSaveFilePicker = Window & {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types?: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<FileSystemFileHandleLike>;
+};
 
 const jbDirectHeaders = salesSheetHeaders.송장출력용.filter((header) => header !== "정산예정금액" && header !== "송장번호");
 const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
@@ -3869,6 +3883,15 @@ function downloadTextFile(fileName: string, text: string, mime = "application/vn
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -3952,21 +3975,20 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
   URL.revokeObjectURL(url);
 }
 
-function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
+function tableXlsxBlob(sheetName: string, headers: string[], rows: string[][]) {
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  setWorksheetFontSize(worksheet, 11);
   worksheet["!cols"] = headers.map((header, index) => ({
     wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
   }));
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+  return new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
+  downloadBlob(fileName, tableXlsxBlob(sheetName, headers, rows));
 }
 
 function timeLabel() {
@@ -3998,6 +4020,7 @@ function fnParcelSheetName(date = new Date()) {
 
 type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
+type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
@@ -4036,13 +4059,14 @@ function SalesExcelGrid({
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
-  onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange) => void;
+  onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   resetKey?: number;
 }) {
   const headers = salesSheetHeaders[sheet];
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
   const [range, setRange] = useState<SalesGridRange>({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [selecting, setSelecting] = useState(false);
   const [editing, setEditing] = useState<SalesGridCell | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
@@ -4054,6 +4078,7 @@ function SalesExcelGrid({
   useEffect(() => {
     setAnchor({ row: 0, col: 0 });
     setRange({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
+    setSelectedRows([]);
     setEditing(null);
     setSortState(null);
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
@@ -4065,8 +4090,8 @@ function SalesExcelGrid({
   }, [rows.length]);
 
   useEffect(() => {
-    onSelectionChange?.(sheet, range);
-  }, [sheet, range, onSelectionChange]);
+    onSelectionChange?.(sheet, range, selectedRows);
+  }, [sheet, range, selectedRows, onSelectionChange]);
 
   useEffect(() => {
     if (!resize) return;
@@ -4115,18 +4140,33 @@ function SalesExcelGrid({
     const next = { row, col };
     const base = extend ? anchor : next;
     if (!extend) setAnchor(next);
+    setSelectedRows([]);
     setRange(normalizeRange(base, next));
     setEditing(null);
     gridRef.current?.focus();
   }
+  function toggleRow(row: number) {
+    setSelectedRows((prev) => {
+      const next = prev.includes(row) ? prev.filter((value) => value !== row) : [...prev, row].sort((a, b) => a - b);
+      if (next.length) {
+        setRange({ startRow: row, endRow: row, startCol: 0, endCol: headers.length - 1 });
+        setAnchor({ row, col: 0 });
+      }
+      return next;
+    });
+    setEditing(null);
+    gridRef.current?.focus();
+  }
   function isSelected(row: number, col: number) {
-    return row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol;
+    return selectedRows.includes(row) || (row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
   }
   function copyRange(event: ClipboardEvent<HTMLDivElement>) {
-    const text = rows
-      .slice(range.startRow, range.endRow + 1)
-      .map((row) => row.slice(range.startCol, range.endCol + 1).join("\t"))
-      .join("\n");
+    const text = selectedRows.length
+      ? selectedRows.map((rowIndex) => rows[rowIndex]?.join("\t") || "").join("\n")
+      : rows
+        .slice(range.startRow, range.endRow + 1)
+        .map((row) => row.slice(range.startCol, range.endCol + 1).join("\t"))
+        .join("\n");
     event.clipboardData.setData("text/plain", text);
     event.preventDefault();
   }
@@ -4241,7 +4281,24 @@ function SalesExcelGrid({
             {rows.map((row, rowIndex) => (
               <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
                 <td className="relative border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-400">
-                  {rowIndex + 1}
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return;
+                      event.preventDefault();
+                      if (event.ctrlKey || event.metaKey) {
+                        toggleRow(rowIndex);
+                        return;
+                      }
+                      setSelectedRows([]);
+                      setAnchor({ row: rowIndex, col: 0 });
+                      setRange({ startRow: rowIndex, endRow: rowIndex, startCol: 0, endCol: headers.length - 1 });
+                      gridRef.current?.focus();
+                    }}
+                    className="w-full text-center"
+                  >
+                    {rowIndex + 1}
+                  </button>
                   <button
                     type="button"
                     aria-label={`${rowIndex + 1}행 높이 조절`}
@@ -4255,6 +4312,12 @@ function SalesExcelGrid({
                     style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95, height: rowHeights[rowIndex] || 30 }}
                     onMouseDown={(event) => {
                       if (event.button !== 0) return;
+                      if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault();
+                        toggleRow(rowIndex);
+                        setSelecting(false);
+                        return;
+                      }
                       selectCell(rowIndex, colIndex, event.shiftKey);
                       setSelecting(true);
                     }}
@@ -4382,9 +4445,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [pendingOrderFiles, setPendingOrderFiles] = useState<File[]>([]);
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState<File[]>([]);
   const [orderFilePassword, setOrderFilePassword] = useState("");
-  const [selectedSalesRange, setSelectedSalesRange] = useState<{ sheet: SalesSheetName; range: SalesGridRange } | null>(null);
+  const [selectedSalesRange, setSelectedSalesRange] = useState<SalesGridSelection | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
+  const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
 
@@ -4594,9 +4658,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function selectedShippingRows() {
-    return selectedSalesRange?.sheet === "송장출력용"
-      ? sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean))
-      : [];
+    if (selectedSalesRange?.sheet !== "송장출력용") return [];
+    if (selectedSalesRange.rowIndexes?.length) {
+      return selectedSalesRange.rowIndexes
+        .map((rowIndex) => sheets.송장출력용[rowIndex])
+        .filter((row): row is string[] => Boolean(row && row.some(Boolean)));
+    }
+    return sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean));
   }
 
   function openDirectPartnerPicker() {
@@ -4612,7 +4680,73 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setDirectPartnerPickerOpen(true);
   }
 
-  function makeDirectShippingFile(partner: DirectShippingPartner) {
+  async function readDirectShippingRowsFromHandle(handle: FileSystemFileHandleLike, headers: string[]) {
+    if (!handle.getFile) return [];
+    try {
+      const file = await handle.getFile();
+      if (!file.size) return [];
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) return [];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawRows = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, blankrows: false, defval: "" });
+      if (!rawRows.length) return [];
+      const [firstRow, ...bodyRows] = rawRows.map((row) => headers.map((_, index) => String(row[index] ?? "")));
+      const hasHeader = headers.every((header, index) => String(firstRow[index] || "").trim() === header);
+      return (hasHeader ? bodyRows : [firstRow, ...bodyRows]).filter((row) => row.some(Boolean));
+    } catch {
+      return [];
+    }
+  }
+
+  function directShippingCode(partner: DirectShippingPartner, sequence: number) {
+    return partner === "JB" ? `${todayMmdd()}-JB-${String(sequence).padStart(3, "0")}` : `${todayMmdd()}-에프엔-${String(sequence).padStart(3, "0")}`;
+  }
+
+  function mergeDirectShippingRows(partner: DirectShippingPartner, existingRows: string[][], nextRows: string[][]) {
+    const seen = new Set(existingRows.map((row) => row.slice(1).join("\t")));
+    const merged = [...existingRows];
+    for (const row of nextRows) {
+      const key = row.slice(1).join("\t");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const nextRow = [...row];
+      nextRow[0] = directShippingCode(partner, merged.length + 1);
+      merged.push(nextRow);
+    }
+    return merged;
+  }
+
+  async function saveDirectShippingWorkbook(partner: DirectShippingPartner, headers: string[], rows: string[][]) {
+    const fileName = `${todayMmdd()}_${partner}직송.xlsx`;
+    const picker = (window as WindowWithSaveFilePicker).showSaveFilePicker;
+    if (!picker) {
+      downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
+      return rows;
+    }
+    try {
+      const cachedHandle = directShippingFileHandles.current[partner];
+      const handle = cachedHandle
+        || await picker({
+          suggestedName: fileName,
+          types: [{ description: "Excel 파일", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+        });
+      const writeRows = cachedHandle ? rows : mergeDirectShippingRows(partner, await readDirectShippingRowsFromHandle(handle, headers), rows);
+      const blob = tableXlsxBlob(`${partner}직송`, headers, writeRows);
+      directShippingFileHandles.current[partner] = handle;
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return writeRows;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
+      return rows;
+    }
+  }
+
+  async function makeDirectShippingFile(partner: DirectShippingPartner) {
     const selectedRows = selectedShippingRows();
     if (!selectedRows.length) {
       window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요.");
@@ -4639,10 +4773,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
 
     const nextRows = [...previousRows, ...appendRows];
-    setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
-    downloadTableXlsx(`${todayMmdd()}_${partner}직송.xlsx`, `${partner}직송`, headers, nextRows);
+    let savedRows = nextRows;
+    try {
+      savedRows = await saveDirectShippingWorkbook(partner, headers, nextRows);
+    } catch {
+      setDirectPartnerPickerOpen(false);
+      setMessage("직송파일 저장을 취소했습니다.");
+      return;
+    }
+    setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
-    setMessage(`${partner} 직송파일에 ${appendRows.length}개 행을 추가했습니다. 총 ${nextRows.length}개 행입니다.`);
+    setMessage(`${partner} 직송파일에 ${appendRows.length}개 행을 추가했습니다. 총 ${savedRows.length}개 행입니다.`);
     setDirectPartnerPickerOpen(false);
   }
 
@@ -4782,6 +4923,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setCompletedSalesTasks({});
     setInvoiceMemoText("");
     setDirectShippingRows({ JB: [], 케이모아: [] });
+    directShippingFileHandles.current = {};
     setActiveSheet("송장출력용");
     setSheets({
       송장출력용: makeSheetRows("송장출력용"),
@@ -4889,7 +5031,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             sheet={activeSheet}
             rows={sheets[activeSheet]}
             onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
-            onSelectionChange={(sheet, range) => setSelectedSalesRange({ sheet, range })}
+            onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
             resetKey={salesGridResetKey}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
@@ -4897,7 +5039,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
           {directPartnerPickerOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              onKeyDown={(event) => {
+                if (event.key === "1") {
+                  event.preventDefault();
+                  void makeDirectShippingFile("JB");
+                }
+                if (event.key === "2") {
+                  event.preventDefault();
+                  void makeDirectShippingFile("케이모아");
+                }
+              }}
+            >
               <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-black">거래처</h3>
@@ -4905,8 +5059,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </div>
                 <p className="mt-2 text-sm font-bold text-slate-500">직송파일 양식을 선택해 주세요.</p>
                 <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button type="button" onClick={() => makeDirectShippingFile("JB")} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">JB</button>
-                  <button type="button" onClick={() => makeDirectShippingFile("케이모아")} className="rounded-md border border-slate-200 bg-white px-4 py-5 text-lg font-black text-slate-700 hover:bg-slate-50">케이모아</button>
+                  <button type="button" autoFocus onClick={() => void makeDirectShippingFile("JB")} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">1. JB</button>
+                  <button type="button" onClick={() => void makeDirectShippingFile("케이모아")} className="rounded-md border border-slate-200 bg-white px-4 py-5 text-lg font-black text-slate-700 hover:bg-slate-50">2. 케이모아</button>
                 </div>
               </div>
             </div>
