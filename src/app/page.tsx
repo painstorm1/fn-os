@@ -936,13 +936,28 @@ function fileSize(value?: number) {
   return `${bytes.toLocaleString("ko-KR")}B`;
 }
 
-function fileIcon(name?: string) {
+function fileIconType(name?: string) {
   const ext = (name || "").split(".").pop()?.toLowerCase();
-  if (ext === "pdf") return "PDF";
-  if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext || "")) return "IMG";
-  if (["xlsx", "xls", "xlsm", "csv"].includes(ext || "")) return "XLS";
-  if (["doc", "docx"].includes(ext || "")) return "DOC";
-  return "FILE";
+  if (ext === "pdf") return "pdf";
+  if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext || "")) return "image";
+  if (["xlsx", "xls", "xlsm", "csv"].includes(ext || "")) return "sheet";
+  if (["doc", "docx"].includes(ext || "")) return "doc";
+  return "file";
+}
+
+function FileTypeIcon({ name }: { name?: string }) {
+  const type = fileIconType(name);
+  const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
+  const mark = type === "image" ? "M6 13l2-2 2 2 3-4 3 4" : type === "sheet" ? "M7 8h6M7 11h6M7 14h4" : type === "pdf" ? "M7 14c2-5 4-5 7-1M8 12c1 1 4 1 6-1" : "M7 9h6M7 12h6M7 15h4";
+  return (
+    <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-orange-50 ${color}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+        <path d="M14 3v5h5" />
+        <path d={mark} />
+      </svg>
+    </span>
+  );
 }
 
 function attachmentViewerUrl(item: OrderAttachment) {
@@ -1386,7 +1401,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             ) : attachments.length ? attachments.map((item) => (
               <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
                 <span className="flex min-w-0 items-center gap-2 font-bold">
-                  <span className="inline-flex h-7 w-9 shrink-0 items-center justify-center rounded bg-orange-50 text-[10px] font-black text-orange-600">{fileIcon(item.file_name)}</span>
+                  <FileTypeIcon name={item.file_name} />
                   <span className="min-w-0 break-all">{item.file_name || "-"}</span>
                 </span>
                 <span>{fileSize(item.file_size)}</span>
