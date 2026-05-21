@@ -3872,6 +3872,18 @@ function salesRowObject(sheet: SalesSheetName, row: string[]) {
   return Object.fromEntries(salesSheetHeaders[sheet].map((header, index) => [header, salesCellText(row[index])]));
 }
 
+function salesMoneyValue(value: unknown) {
+  const normalized = salesCellText(value).replace(/[^\d.-]/g, "");
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function salesSupplyAmountTotal(rows: string[][]) {
+  const supplyIndex = salesSheetHeaders["이카운트_판매입력"].indexOf("공급가액");
+  if (supplyIndex < 0) return 0;
+  return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
+}
+
 function importResultText(data: Record<string, unknown>, fallback = "") {
   const total = Number(data.total_count || 0);
   const success = Number(data.success_count || 0);
@@ -5220,6 +5232,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(invoiceMatchReportText), () => setInvoiceMatchReportText(""));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
+  const salesSupplyTotal = salesSupplyAmountTotal(sheets["이카운트_판매입력"]);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -5911,6 +5924,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 {sheet}
               </button>
             ))}
+            {activeSheet === "이카운트_판매입력" && (
+              <span className="inline-flex items-center rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">
+                판매입력 총 금액 : {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원
+              </span>
+            )}
           </div>
           <SalesExcelGrid
             sheet={activeSheet}
