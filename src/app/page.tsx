@@ -836,15 +836,6 @@ type SalesInventorySummary = {
   logs?: Array<Record<string, unknown>>;
 };
 
-type SalesInventoryHealth = {
-  ok?: boolean;
-  db_configured?: boolean;
-  db_ready?: boolean;
-  ecount_configured?: boolean;
-  tables?: Array<{ table: string; ok: boolean; message?: string }>;
-  next_steps?: string[];
-};
-
 function apiUrl(path: string) {
   return `${IMPORT_ERP_URL}${path}`;
 }
@@ -4763,8 +4754,9 @@ function SalesExcelGrid({
   );
 }
 
+const ECOUNT_CONNECTION_ERROR_MESSAGE = "이카운트 API와의 연결이 잘 되지 않습니다. 유효기간 등을 확인해주세요.";
+
 function SalesRightTools() {
-  const [health, setHealth] = useState<SalesInventoryHealth | null>(null);
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<{
@@ -4802,13 +4794,6 @@ function SalesRightTools() {
   const [inputMessage, setInputMessage] = useState("");
   const [inputLoading, setInputLoading] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/system/sales-inventory-health", { credentials: "include" })
-      .then((res) => res.json())
-      .then(setHealth)
-      .catch(() => setHealth(null));
-  }, []);
-
   function updateRegisterField(key: keyof typeof registerForm, value: string) {
     setRegisterForm((form) => ({ ...form, [key]: value }));
   }
@@ -4834,11 +4819,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
         setLookupResult({ error: data.error || "상품 조회 실패" });
         return;
       }
       setLookupResult(data);
     } catch (error) {
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
       setLookupResult({ error: error instanceof Error ? error.message : "상품 조회 실패" });
     } finally {
       setLookupLoading(false);
@@ -4857,11 +4844,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
         setRegisterMessage(data.error || "등록 실패");
         return;
       }
       setRegisterMessage(registerMode === "product" ? "제품등록 전송 완료" : "거래처등록 전송 완료");
     } catch (error) {
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
       setRegisterMessage(error instanceof Error ? error.message : "등록 실패");
     } finally {
       setRegisterLoading(false);
@@ -4880,11 +4869,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
         setInputMessage(data.error || "입력 실패");
         return;
       }
       setInputMessage(inputMode === "sales" ? "판매입력 전송 완료" : "구매입력 전송 완료");
     } catch (error) {
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
       setInputMessage(error instanceof Error ? error.message : "입력 실패");
     } finally {
       setInputLoading(false);
@@ -4893,13 +4884,6 @@ function SalesRightTools() {
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <ToolSection title="이카운트 연결" defaultOpen>
-        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-black">
-          <span className={`h-3 w-3 rounded-full ${health?.ecount_configured ? "bg-emerald-500" : "bg-rose-500"}`} />
-          {health?.ecount_configured ? "연동 설정됨" : "연동 미설정"}
-        </div>
-      </ToolSection>
-
       <ToolSection title="상품 간편조회" defaultOpen>
         <input
           value={lookupQuery}
