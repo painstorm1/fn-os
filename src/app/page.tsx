@@ -1331,7 +1331,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             onDrop={handleDrop}
             className={`rounded-md border p-4 transition ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
           >
-            <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_110px]">
+            <div className="grid gap-3 md:grid-cols-[1.8fr_0.7fr_110px]">
               <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 shadow-sm hover:bg-orange-50">
                 파일 선택
                 <input
@@ -1361,7 +1361,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
           <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
           {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
           <div className="mt-5 overflow-hidden rounded-md border border-slate-200">
-            <div className="grid grid-cols-[1.7fr_90px_130px_1fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
+            <div className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
               <span>파일명</span>
               <span>크기</span>
               <span>업로드일</span>
@@ -1371,7 +1371,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             {loading ? (
               <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
             ) : attachments.length ? attachments.map((item) => (
-              <div key={item.id} className="grid grid-cols-[1.7fr_90px_130px_1fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
+              <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
                 <span className="break-all font-bold"><span className="mr-2 font-black text-orange-600">[{fileKind(item.file_name)}]</span>{item.file_name || "-"}</span>
                 <span>{fileSize(item.file_size)}</span>
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
