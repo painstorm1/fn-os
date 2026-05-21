@@ -3784,6 +3784,27 @@ function classifyOrderUploadFileName(fileName: string) {
   return "";
 }
 
+function salesUploadFileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function classifyInvoiceUploadFileName(fileName: string) {
+  if (fileName.includes("파일접수 상세내역") || fileName.toLowerCase().includes("fn0310")) return "송장파일";
+  return "";
+}
+
+function salesUploadBadge(fileName: string, kind: "orders" | "invoices") {
+  const orderType = kind === "orders" ? classifyOrderUploadFileName(fileName) : "";
+  const invoiceType = kind === "invoices" ? classifyInvoiceUploadFileName(fileName) || "송장파일" : "";
+  const type = orderType || invoiceType;
+  if (type === "이카운트 주문수집") return { mark: "E", label: "이카운트", className: "border-blue-200 bg-blue-50 text-blue-700" };
+  if (type === "오늘의 집") return { mark: "O", label: "오늘의 집", className: "border-violet-200 bg-violet-50 text-violet-700" };
+  if (type === "현대 이지웰") return { mark: "Z", label: "이지웰", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+  if (type === "토스") return { mark: "T", label: "토스", className: "border-sky-200 bg-sky-50 text-sky-700" };
+  if (type === "송장파일") return { mark: "CJ", label: "송장", className: "border-indigo-200 bg-indigo-50 text-indigo-700" };
+  return { mark: "?", label: "미확인", className: "border-slate-200 bg-white text-slate-600" };
+}
+
 type SalesSortToken = { raw: string; rank: number; numberValue: number | null };
 
 function salesSortTokenize(value: string): SalesSortToken[] {
@@ -5008,6 +5029,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       : `송장파일 ${next.length}개를 업로드했습니다. F5 송장번호 매칭을 누르면 기존 시트에 반영됩니다.`);
   }
 
+  function removeUploadedSalesFile(target: File) {
+    const key = salesUploadFileKey(target);
+    const keep = (file: File) => salesUploadFileKey(file) !== key;
+    setUploadedFiles((prev) => prev.filter(keep));
+    setPendingOrderFiles((prev) => prev.filter(keep));
+    setPendingInvoiceFiles((prev) => prev.filter(keep));
+    setMessage(`${target.name} 업로드를 취소했습니다.`);
+  }
+
   async function parseWaitingFiles(kind: "orders" | "invoices", passwordOverride = orderFilePassword) {
     const waitingFiles = kind === "orders" ? pendingOrderFiles : pendingInvoiceFiles;
     if (!waitingFiles.length) {
@@ -5440,9 +5470,29 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
             {uploadedFiles.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {uploadedFiles.map((file) => (
-                  <span key={`${file.name}-${file.size}-${file.lastModified}`} className="rounded-md bg-white px-2 py-1 text-xs font-black text-slate-600">{file.name}</span>
-                ))}
+                {uploadedFiles.map((file) => {
+                  const key = salesUploadFileKey(file);
+                  const kind = pendingInvoiceFiles.some((invoiceFile) => salesUploadFileKey(invoiceFile) === key) ? "invoices" : "orders";
+                  const badge = salesUploadBadge(file.name, kind);
+                  return (
+                    <span
+                      key={key}
+                      title={`${badge.label} · ${file.name}`}
+                      className={`inline-flex h-8 w-[200px] items-center gap-2 rounded-md border px-2 text-xs font-black ${badge.className}`}
+                    >
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded bg-white/80 px-1 text-[10px] font-black">{badge.mark}</span>
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        aria-label={`${file.name} 업로드 취소`}
+                        onClick={() => removeUploadedSalesFile(file)}
+                        className="shrink-0 rounded px-1 text-xs font-black opacity-70 hover:bg-white hover:opacity-100"
+                      >
+                        X
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             )}
             {(pendingOrderFiles.length > 0 || pendingInvoiceFiles.length > 0) && (
