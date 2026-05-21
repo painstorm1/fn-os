@@ -1490,12 +1490,12 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
             <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
             <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
           </form>
-          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_44px_128px_90px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
+          <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_36px_96px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
             <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span /><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
-              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-4 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_44px_128px_90px]">
+              <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_36px_96px_90px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
                   {order.repr_image ? <img src={assetUrl(order.repr_image)} alt="" className="h-14 w-14 rounded-md object-cover" /> : <span className="h-14 w-14 rounded-md bg-slate-100" />}
@@ -1511,7 +1511,7 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                     event.stopPropagation();
                     setFolderOrder(order);
                   }}
-                  className="relative inline-flex h-9 w-9 items-center justify-center text-lg leading-none hover:text-orange-600"
+                  className="relative inline-flex h-7 w-7 items-center justify-center justify-self-center text-lg leading-none hover:text-orange-600"
                   aria-label="첨부파일"
                 >
                   📁
