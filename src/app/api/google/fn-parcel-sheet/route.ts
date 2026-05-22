@@ -35,7 +35,7 @@ function firstEmptyRow(values: unknown[][]) {
   values.forEach((row, index) => {
     if (row.some((cell) => String(cell ?? "").trim())) lastFilled = index + 1;
   });
-  return lastFilled + 1;
+  return Math.max(2, lastFilled + 1);
 }
 
 function normalizeAmount(value: unknown): string | number {
@@ -122,15 +122,59 @@ async function googleSheetsFetch(path: string, init: RequestInit = {}) {
   return data;
 }
 
+function previousMonthSheetName(sheetName: string) {
+  const match = /^(\d{2})(\d{2})$/.exec(sheetName);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!month || month < 1 || month > 12) return "";
+  const previousYear = month === 1 ? year - 1 : year;
+  const previousMonth = month === 1 ? 12 : month - 1;
+  return `${String(previousYear).padStart(2, "0")}${String(previousMonth).padStart(2, "0")}`;
+}
+
+async function clearSheetBody(spreadsheetId: string, sheetName: string) {
+  await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(`${quotedSheetName(sheetName)}!A2:K`)}:clear`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 async function resolveSheetName(spreadsheetId: string, requestedSheetName: string) {
-  const metadata = await googleSheetsFetch(`${spreadsheetId}?fields=sheets(properties(title))`);
-  const titles = Array.isArray(metadata.sheets)
-    ? metadata.sheets.map((sheet: { properties?: { title?: string } }) => String(sheet.properties?.title || ""))
+  const metadata = await googleSheetsFetch(`${spreadsheetId}?fields=sheets(properties(sheetId,title))`);
+  const sheets: { id?: number; title: string }[] = Array.isArray(metadata.sheets)
+    ? metadata.sheets.map((sheet: { properties?: { sheetId?: number; title?: string } }) => ({
+      id: sheet.properties?.sheetId,
+      title: String(sheet.properties?.title || ""),
+    }))
     : [];
+  const titles = sheets.map((sheet) => sheet.title);
 
   if (titles.includes(requestedSheetName)) return requestedSheetName;
   const compactName = requestedSheetName.split("-")[0];
   if (compactName && titles.includes(compactName)) return compactName;
+
+  const newSheetName = compactName || requestedSheetName;
+  const previousSheetName = previousMonthSheetName(newSheetName);
+  const previousSheet = sheets.find((sheet) => sheet.title === previousSheetName && typeof sheet.id === "number");
+
+  if (previousSheet?.id !== undefined) {
+    await googleSheetsFetch(`${spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({
+        requests: [
+          {
+            duplicateSheet: {
+              sourceSheetId: previousSheet.id,
+              newSheetName,
+            },
+          },
+        ],
+      }),
+    });
+    await clearSheetBody(spreadsheetId, newSheetName);
+    return newSheetName;
+  }
 
   await googleSheetsFetch(`${spreadsheetId}:batchUpdate`, {
     method: "POST",
@@ -139,14 +183,14 @@ async function resolveSheetName(spreadsheetId: string, requestedSheetName: strin
         {
           addSheet: {
             properties: {
-              title: compactName || requestedSheetName,
+              title: newSheetName,
             },
           },
         },
       ],
     }),
   });
-  return compactName || requestedSheetName;
+  return newSheetName;
 }
 
 export async function POST(request: NextRequest) {
