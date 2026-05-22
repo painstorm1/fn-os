@@ -30,6 +30,10 @@ function normalizeRow(row: unknown[]) {
   return row.slice(0, 11).map((cell) => String(cell ?? "").trim()).join("\t");
 }
 
+function normalizeDuplicateKey(row: unknown[]) {
+  return row.slice(0, 8).map((cell) => String(cell ?? "").trim()).join("\t");
+}
+
 function firstEmptyRow(values: unknown[][]) {
   let lastFilled = 0;
   values.forEach((row, index) => {
@@ -198,7 +202,7 @@ export async function POST(request: NextRequest) {
     const spreadsheetId = env("GOOGLE_SHEETS_SPREADSHEET_ID");
     if (!spreadsheetId) throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID가 설정되지 않았습니다.");
 
-    const body = (await request.json().catch(() => ({}))) as { sheetName?: string; rows?: unknown[][]; allowPartial?: boolean };
+    const body = (await request.json().catch(() => ({}))) as { sheetName?: string; rows?: unknown[][] };
     const requestedSheetName = String(body.sheetName || "").trim();
     const rows = Array.isArray(body.rows) ? body.rows.map(cleanParcelRow) : [];
     const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
@@ -210,23 +214,22 @@ export async function POST(request: NextRequest) {
     const range = sheetRange(sheetName);
     const existing = await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`);
     const existingRows = Array.isArray(existing.values) ? existing.values as unknown[][] : [];
-    const existingSet = new Set(existingRows.map(normalizeRow).filter(Boolean));
-    const rowStates = filledRows.map((row, index) => ({ rowNumber: index + 1, row, key: normalizeRow(row) }));
+    const existingSet = new Set(existingRows.map(normalizeDuplicateKey).filter(Boolean));
+    const rowStates = filledRows.map((row, index) => ({ rowNumber: index + 1, row, key: normalizeDuplicateKey(row) }));
     const duplicates = rowStates.filter((item) => item.key && existingSet.has(item.key));
     const uniqueRows = rowStates.filter((item) => item.key && !existingSet.has(item.key)).map((item) => item.row);
 
-    if (duplicates.length && (!uniqueRows.length || !body.allowPartial)) {
+    if (!uniqueRows.length) {
       return NextResponse.json({
-        ok: false,
-        duplicate: true,
-        partialAvailable: uniqueRows.length > 0,
+        ok: true,
+        sheetName,
+        requestedSheetName,
+        count: 0,
         duplicateCount: duplicates.length,
         duplicateRows: duplicates.map((item) => item.rowNumber),
-        uniqueCount: uniqueRows.length,
-        error: uniqueRows.length
-          ? "중복 행이 있습니다. 중복되지 않는 행만 반영할 수 있습니다."
-          : "반영할 수 있는 새 행이 없습니다. 모든 행이 이미 구글시트에 있습니다.",
-      }, { status: 409 });
+        allDuplicate: duplicates.length > 0,
+        updatedRange: "",
+      });
     }
 
     const startRow = firstEmptyRow(existingRows);

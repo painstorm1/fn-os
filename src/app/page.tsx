@@ -6079,16 +6079,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("FN_택배시트에 반영할 송장출력용 데이터가 없습니다.");
       return;
     }
-    const keyCount = new Map<string, number>();
-    shippingRows.forEach((row) => {
-      const key = [row[0], row[1], row[2], row[5], row[6]].map((value) => String(value || "").trim()).join("|");
-      keyCount.set(key, (keyCount.get(key) || 0) + 1);
-    });
-    const duplicated = [...keyCount.values()].some((count) => count > 1);
-    if (duplicated) {
-      window.alert("송장출력용 안에 중복으로 의심되는 행이 있습니다. 내용을 확인한 뒤 다시 실행해주세요.");
-      return;
-    }
     const targetSheet = fnParcelSheetName();
     const ok = window.confirm(`FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 ${shippingRows.length}개 행을 구글시트에 반영합니다. 계속할까요?`);
     if (!ok) return;
@@ -6102,41 +6092,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        if (data.duplicate) {
-          const rowsText = (data.duplicateRows || []).join(", ") || data.duplicateCount || "확인 필요";
-          if (data.partialAvailable && data.uniqueCount) {
-            const partialOk = window.confirm(`중복 행: ${rowsText}\n중복되지 않는 ${data.uniqueCount}개 행만 반영하시겠습니까?`);
-            if (!partialOk) {
-              setMessage("FN_택배시트 반영을 취소했습니다.");
-              return;
-            }
-            const partialRes = await fetch("/api/google/fn-parcel-sheet", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({ sheetName: targetSheet, rows, allowPartial: true }),
-            });
-            const partialData = await partialRes.json().catch(() => ({}));
-            if (!partialRes.ok || partialData.ok === false) {
-              window.alert(partialData.error || "FN_택배시트 반영에 실패했습니다.");
-              setMessage(partialData.error || "FN_택배시트 반영 실패");
-              return;
-            }
-            setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
-            window.alert(`FN_택배시트 '${partialData.sheetName || targetSheet}'에 ${partialData.count || data.uniqueCount}개 행을 반영했습니다.`);
-            setMessage(`FN_택배시트 '${partialData.sheetName || targetSheet}'에 ${partialData.count || data.uniqueCount}개 행을 반영했습니다.`);
-            return;
-          }
-          window.alert(`붙여넣으려는 값이 이미 구글시트에 존재합니다.\n중복 행: ${rowsText}`);
-        } else {
-          window.alert(data.error || "FN_택배시트 반영에 실패했습니다.");
-        }
+        window.alert(data.error || "FN_택배시트 반영에 실패했습니다.");
         setMessage(data.error || "FN_택배시트 반영 실패");
         return;
       }
       setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
-      window.alert(`FN_택배시트 '${targetSheet}'에 ${data.count || shippingRows.length}개 행을 반영했습니다.`);
-      setMessage(`FN_택배시트 '${targetSheet}'에 ${data.count || shippingRows.length}개 행을 반영했습니다.`);
+      const reflectedCount = Number(data.count || 0);
+      const duplicateCount = Number(data.duplicateCount || 0);
+      const resultMessage = reflectedCount === 0 && duplicateCount > 0
+        ? "새로운 행이 없습니다. 모든 행이 이미 구글시트에 있습니다."
+        : duplicateCount > 0
+          ? `새로운 ${reflectedCount}개의 행만 반영되었습니다.`
+          : `FN_택배시트 '${data.sheetName || targetSheet}'에 ${reflectedCount || shippingRows.length}개 행을 반영했습니다.`;
+      window.alert(resultMessage);
+      setMessage(resultMessage);
     } catch (error) {
       const message = error instanceof Error ? error.message : "FN_택배시트 반영 실패";
       window.alert(message);
