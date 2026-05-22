@@ -3973,6 +3973,25 @@ function invoiceMatchKey(name: unknown, phone: unknown, address: unknown) {
   return `${normalizeInvoiceName(name)}|${normalizeInvoicePhone(phone)}|${normalizeInvoiceAddress(address)}`;
 }
 
+function invoiceProductCodeKey(value: unknown) {
+  return salesCellText(value).toUpperCase().replace(/\s+/g, "");
+}
+
+function looksLikeInvoicePhone(value: unknown) {
+  return normalizeInvoicePhone(value).length >= 8;
+}
+
+function normalizeShippingRowForTracking(row: string[]) {
+  const expectedLength = salesSheetHeaders.송장출력용.length;
+  const legacyWithoutTracking = rowHasValue(row)
+    && row.length <= expectedLength - 1
+    && salesCellText(row[1])
+    && looksLikeInvoicePhone(row[2])
+    && looksLikeInvoicePhone(row[3]);
+  if (!legacyWithoutTracking) return [...row];
+  return [row[0] || "", "", ...row.slice(1)];
+}
+
 const invoiceMallCodeByAlias: Record<string, string> = {
   FN: "00001",
   FF: "00002",
@@ -4021,9 +4040,10 @@ function applyInvoiceTrackingToSheets(
   invoiceRows: ParsedInvoiceTrackingRow[] = [],
 ) {
   if (invoiceRows.length) {
-    const nextShipping = currentSheets.송장출력용.map((row) => [...row]);
+    const nextShipping = currentSheets.송장출력용.map((row) => normalizeShippingRowForTracking(row));
     const nextInvoice = currentSheets.이카운트_송장입력.map((row) => [...row]);
     const usedShipping = new Set<number>();
+    const failedShippingIndexes = new Set<number>();
     let matchedShipping = 0;
     let matchedInvoice = 0;
     const failedInvoiceIndexes = new Set<number>();
@@ -4042,7 +4062,8 @@ function applyInvoiceTrackingToSheets(
     invoiceRows.forEach((invoiceRow) => {
       const trackingNo = salesCellText(invoiceRow.trackingNo);
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
-      const shippingIndex = nextShipping.findIndex((row, index) => {
+      const productKey = invoiceProductCodeKey(invoiceRow.productCode);
+      const shippingIndexByAddress = nextShipping.findIndex((row, index) => {
         if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[1])) return false;
         const name = row[2];
         const phone1 = row[3];
@@ -4050,6 +4071,15 @@ function applyInvoiceTrackingToSheets(
         const address = row[6];
         return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
       });
+      const shippingIndexByCode = productKey
+        ? nextShipping.findIndex((row, index) => (
+          !usedShipping.has(index)
+          && rowHasValue(row)
+          && !salesCellText(row[1])
+          && invoiceProductCodeKey(row[0]) === productKey
+        ))
+        : -1;
+      const shippingIndex = shippingIndexByAddress >= 0 ? shippingIndexByAddress : shippingIndexByCode;
 
       if (shippingIndex < 0) {
         const alreadyIndex = nextShipping.findIndex((row) => {
@@ -4058,9 +4088,15 @@ function applyInvoiceTrackingToSheets(
           const phone1 = row[3];
           const phone2 = row[4];
           const address = row[6];
-          return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
+          return invoiceKey === invoiceMatchKey(name, phone1, address)
+            || invoiceKey === invoiceMatchKey(name, phone2, address)
+            || (productKey && invoiceProductCodeKey(row[0]) === productKey);
         });
         if (alreadyIndex >= 0) alreadyMatchedShipping += 1;
+        const highlightIndex = productKey
+          ? nextShipping.findIndex((row) => rowHasValue(row) && invoiceProductCodeKey(row[0]) === productKey)
+          : -1;
+        if (highlightIndex >= 0) failedShippingIndexes.add(highlightIndex);
         return;
       }
 
@@ -4081,15 +4117,13 @@ function applyInvoiceTrackingToSheets(
       } else if (!isInvoiceInputExcludedMall(alias || mallCode, invoiceRow.productCode)) {
         const failedInvoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes[0];
         if (failedInvoiceIndex !== undefined) failedInvoiceIndexes.add(failedInvoiceIndex);
+        else failedShippingIndexes.add(shippingIndex);
       }
     });
 
-    const failedShippingIndexes = nextShipping
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => rowHasValue(row) && !salesCellText(row[1]))
-      .map(({ index }) => index);
+    const failedShippingIndexesList = [...failedShippingIndexes].filter((index) => index >= 0);
     const failedInvoiceIndexesList = [...failedInvoiceIndexes].filter((index) => index >= 0);
-    const failedShipping = failedShippingIndexes.map((index) => `${index + 1}행`);
+    const failedShipping = failedShippingIndexesList.map((index) => `${index + 1}행`);
     const failedInvoice = failedInvoiceIndexesList.map((index) => `${index + 1}행`);
 
     const manualRows = nextShipping
@@ -4108,7 +4142,7 @@ function applyInvoiceTrackingToSheets(
       matchedInvoice,
       failedShipping,
       failedInvoice,
-      failedShippingIndexes,
+      failedShippingIndexes: failedShippingIndexesList,
       failedInvoiceIndexes: failedInvoiceIndexesList,
       alreadyMatchedShipping,
       alreadyMatchedInvoice,
