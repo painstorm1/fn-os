@@ -201,13 +201,13 @@ export async function registerEcountCustomer(row: Record<string, unknown>) {
 }
 
 export async function fetchEcountProducts(payload: Record<string, unknown> = {}) {
-  return postEcountApiWithFallback<Record<string, unknown>>(
-    [
-      "/OAPI/V2/InventoryBasic/GetListInventoryBasic",
-      "/OAPI/V2/InventoryBasic/GetListInventoryBasicStatus",
-    ],
-    payload,
-    "ECOUNT_PRODUCTS_PATH",
+  return postEcountApi<Record<string, unknown>>(
+    "/OAPI/V2/InventoryBasic/GetBasicProductsList",
+    {
+      PROD_CD: "",
+      PROD_TYPE: "0",
+      ...payload,
+    },
   );
 }
 

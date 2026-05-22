@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     const query = String(body.query || "").trim();
     if (!query) return NextResponse.json({ ok: false, error: "상품명을 입력해 주세요." }, { status: 400 });
 
-    const productResponse = await fetchEcountProducts({});
+    const productResponse = await fetchEcountProducts({ PROD_CD: "", PROD_TYPE: "0" });
     const q = query.toLowerCase();
     const products = collectRecords(productResponse, isProductRecord)
       .map(normalizeProduct)
