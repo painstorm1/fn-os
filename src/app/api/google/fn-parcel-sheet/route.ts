@@ -18,8 +18,12 @@ function normalizePrivateKey(value: string) {
   return value.replace(/\\n/g, "\n");
 }
 
+function quotedSheetName(sheetName: string) {
+  return `'${sheetName.replace(/'/g, "''")}'`;
+}
+
 function sheetRange(sheetName: string) {
-  return `'${sheetName.replace(/'/g, "''")}'!A:ZZ`;
+  return `${quotedSheetName(sheetName)}!A1:ZZ`;
 }
 
 function normalizeRow(row: unknown[]) {
@@ -94,6 +98,30 @@ async function googleSheetsFetch(path: string, init: RequestInit = {}) {
   return data;
 }
 
+async function ensureSheetExists(spreadsheetId: string, sheetName: string) {
+  const metadata = await googleSheetsFetch(`${spreadsheetId}?fields=sheets(properties(title))`);
+  const titles = Array.isArray(metadata.sheets)
+    ? metadata.sheets.map((sheet: { properties?: { title?: string } }) => String(sheet.properties?.title || ""))
+    : [];
+
+  if (titles.includes(sheetName)) return;
+
+  await googleSheetsFetch(`${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: sheetName,
+            },
+          },
+        },
+      ],
+    }),
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const spreadsheetId = env("GOOGLE_SHEETS_SPREADSHEET_ID");
@@ -105,6 +133,8 @@ export async function POST(request: NextRequest) {
     const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
     if (!sheetName) return NextResponse.json({ ok: false, error: "반영할 시트명이 없습니다." }, { status: 400 });
     if (!filledRows.length) return NextResponse.json({ ok: false, error: "반영할 데이터가 없습니다." }, { status: 400 });
+
+    await ensureSheetExists(spreadsheetId, sheetName);
 
     const range = sheetRange(sheetName);
     const existing = await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`);
