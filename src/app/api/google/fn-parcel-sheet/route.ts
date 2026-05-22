@@ -23,11 +23,35 @@ function quotedSheetName(sheetName: string) {
 }
 
 function sheetRange(sheetName: string) {
-  return `${quotedSheetName(sheetName)}!A1:ZZ`;
+  return `${quotedSheetName(sheetName)}!A:K`;
 }
 
 function normalizeRow(row: unknown[]) {
-  return row.map((cell) => String(cell ?? "").trim()).join("\t");
+  return row.slice(0, 11).map((cell) => String(cell ?? "").trim()).join("\t");
+}
+
+function firstEmptyRow(values: unknown[][]) {
+  let lastFilled = 0;
+  values.forEach((row, index) => {
+    if (row.some((cell) => String(cell ?? "").trim())) lastFilled = index + 1;
+  });
+  return lastFilled + 1;
+}
+
+function normalizeAmount(value: unknown): string | number {
+  const text = String(value ?? "").trim().replace(/^'/, "").replace(/,/g, "");
+  if (!text) return "";
+  const number = Number(text);
+  return Number.isFinite(number) ? number : String(value ?? "");
+}
+
+function cleanParcelRow(row: unknown[]) {
+  const cleaned: (string | number)[] = Array.from({ length: 11 }, (_, index) => {
+    const value = row[index];
+    return typeof value === "number" ? value : String(value ?? "");
+  });
+  cleaned[10] = normalizeAmount(cleaned[10]);
+  return cleaned;
 }
 
 function readableGoogleSheetsError(message: string) {
@@ -98,13 +122,15 @@ async function googleSheetsFetch(path: string, init: RequestInit = {}) {
   return data;
 }
 
-async function ensureSheetExists(spreadsheetId: string, sheetName: string) {
+async function resolveSheetName(spreadsheetId: string, requestedSheetName: string) {
   const metadata = await googleSheetsFetch(`${spreadsheetId}?fields=sheets(properties(title))`);
   const titles = Array.isArray(metadata.sheets)
     ? metadata.sheets.map((sheet: { properties?: { title?: string } }) => String(sheet.properties?.title || ""))
     : [];
 
-  if (titles.includes(sheetName)) return;
+  if (titles.includes(requestedSheetName)) return requestedSheetName;
+  const compactName = requestedSheetName.split("-")[0];
+  if (compactName && titles.includes(compactName)) return compactName;
 
   await googleSheetsFetch(`${spreadsheetId}:batchUpdate`, {
     method: "POST",
@@ -113,13 +139,14 @@ async function ensureSheetExists(spreadsheetId: string, sheetName: string) {
         {
           addSheet: {
             properties: {
-              title: sheetName,
+              title: compactName || requestedSheetName,
             },
           },
         },
       ],
     }),
   });
+  return compactName || requestedSheetName;
 }
 
 export async function POST(request: NextRequest) {
@@ -127,44 +154,53 @@ export async function POST(request: NextRequest) {
     const spreadsheetId = env("GOOGLE_SHEETS_SPREADSHEET_ID");
     if (!spreadsheetId) throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID가 설정되지 않았습니다.");
 
-    const body = (await request.json().catch(() => ({}))) as { sheetName?: string; rows?: unknown[][] };
-    const sheetName = String(body.sheetName || "").trim();
-    const rows = Array.isArray(body.rows) ? body.rows.map((row) => row.map((cell) => String(cell ?? ""))) : [];
+    const body = (await request.json().catch(() => ({}))) as { sheetName?: string; rows?: unknown[][]; allowPartial?: boolean };
+    const requestedSheetName = String(body.sheetName || "").trim();
+    const rows = Array.isArray(body.rows) ? body.rows.map(cleanParcelRow) : [];
     const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
-    if (!sheetName) return NextResponse.json({ ok: false, error: "반영할 시트명이 없습니다." }, { status: 400 });
+    if (!requestedSheetName) return NextResponse.json({ ok: false, error: "반영할 시트명이 없습니다." }, { status: 400 });
     if (!filledRows.length) return NextResponse.json({ ok: false, error: "반영할 데이터가 없습니다." }, { status: 400 });
 
-    await ensureSheetExists(spreadsheetId, sheetName);
+    const sheetName = await resolveSheetName(spreadsheetId, requestedSheetName);
 
     const range = sheetRange(sheetName);
     const existing = await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`);
     const existingRows = Array.isArray(existing.values) ? existing.values as unknown[][] : [];
     const existingSet = new Set(existingRows.map(normalizeRow).filter(Boolean));
-    const duplicates = filledRows
-      .map((row, index) => ({ rowNumber: index + 1, key: normalizeRow(row) }))
-      .filter((item) => item.key && existingSet.has(item.key));
+    const rowStates = filledRows.map((row, index) => ({ rowNumber: index + 1, row, key: normalizeRow(row) }));
+    const duplicates = rowStates.filter((item) => item.key && existingSet.has(item.key));
+    const uniqueRows = rowStates.filter((item) => item.key && !existingSet.has(item.key)).map((item) => item.row);
 
-    if (duplicates.length) {
+    if (duplicates.length && (!uniqueRows.length || !body.allowPartial)) {
       return NextResponse.json({
         ok: false,
         duplicate: true,
+        partialAvailable: uniqueRows.length > 0,
         duplicateCount: duplicates.length,
         duplicateRows: duplicates.map((item) => item.rowNumber),
-        error: "붙여넣으려는 값이 이미 구글시트에 존재합니다.",
+        uniqueCount: uniqueRows.length,
+        error: uniqueRows.length
+          ? "중복 행이 있습니다. 중복되지 않는 행만 반영할 수 있습니다."
+          : "반영할 수 있는 새 행이 없습니다. 모든 행이 이미 구글시트에 있습니다.",
       }, { status: 409 });
     }
 
-    const appendPath = `${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    const appended = await googleSheetsFetch(appendPath, {
-      method: "POST",
-      body: JSON.stringify({ values: filledRows }),
+    const startRow = firstEmptyRow(existingRows);
+    const endRow = startRow + uniqueRows.length - 1;
+    const updateRange = `${quotedSheetName(sheetName)}!A${startRow}:K${endRow}`;
+    const updated = await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=RAW`, {
+      method: "PUT",
+      body: JSON.stringify({ values: uniqueRows }),
     });
 
     return NextResponse.json({
       ok: true,
       sheetName,
-      count: filledRows.length,
-      updatedRange: appended.updates?.updatedRange || "",
+      requestedSheetName,
+      count: uniqueRows.length,
+      duplicateCount: duplicates.length,
+      duplicateRows: duplicates.map((item) => item.rowNumber),
+      updatedRange: updated.updatedRange || "",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "FN_택배시트 반영 실패";

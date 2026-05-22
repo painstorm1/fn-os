@@ -4504,7 +4504,7 @@ function todayMmdd() {
 function fnParcelSheetName(date = new Date()) {
   const yy = String(date.getFullYear()).slice(-2);
   const mm = String(date.getMonth() + 1).padStart(2, "0");
-  return `${yy}${mm}-${date.getMonth() + 1}월`;
+  return `${yy}${mm}`;
 }
 
 type SalesGridCell = { row: number; col: number };
@@ -5863,7 +5863,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         if (data.duplicate) {
-          window.alert(`붙여넣으려는 값이 이미 구글시트에 존재합니다.\n중복 의심 행: ${(data.duplicateRows || []).join(", ") || data.duplicateCount || "확인 필요"}`);
+          const rowsText = (data.duplicateRows || []).join(", ") || data.duplicateCount || "확인 필요";
+          if (data.partialAvailable && data.uniqueCount) {
+            const partialOk = window.confirm(`중복 행: ${rowsText}\n중복되지 않는 ${data.uniqueCount}개 행만 반영하시겠습니까?`);
+            if (!partialOk) {
+              setMessage("FN_택배시트 반영을 취소했습니다.");
+              return;
+            }
+            const partialRes = await fetch("/api/google/fn-parcel-sheet", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ sheetName: targetSheet, rows, allowPartial: true }),
+            });
+            const partialData = await partialRes.json().catch(() => ({}));
+            if (!partialRes.ok || partialData.ok === false) {
+              window.alert(partialData.error || "FN_택배시트 반영에 실패했습니다.");
+              setMessage(partialData.error || "FN_택배시트 반영 실패");
+              return;
+            }
+            setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
+            window.alert(`FN_택배시트 '${partialData.sheetName || targetSheet}'에 ${partialData.count || data.uniqueCount}개 행을 반영했습니다.`);
+            setMessage(`FN_택배시트 '${partialData.sheetName || targetSheet}'에 ${partialData.count || data.uniqueCount}개 행을 반영했습니다.`);
+            return;
+          }
+          window.alert(`붙여넣으려는 값이 이미 구글시트에 존재합니다.\n중복 행: ${rowsText}`);
         } else {
           window.alert(data.error || "FN_택배시트 반영에 실패했습니다.");
         }
