@@ -267,7 +267,14 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
     const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
-    const isSettlementDeducted = ["C", "T", "S", "L"].includes(alias) || mallName.includes("쿠팡") || mallName.includes("토스") || mallName.includes("신세계") || mallName.includes("롯데");
+    const isSettlementDeducted =
+      ["C", "T", "S", "L", "K"].includes(alias) ||
+      mallName.includes("쿠팡") ||
+      mallName.includes("토스") ||
+      mallName.includes("신세계") ||
+      mallName.includes("롯데") ||
+      mallName.includes("카카오") ||
+      mallName.includes("톡딜");
     const amount = isSettlementDeducted ? rawAmount * 0.88 : rawAmount;
     const unit = qty ? amount / qty : amount;
     const { contact1, contact2 } = normalizeContacts(pick(source, ["수취인연락처1"]), pick(source, ["수취인연락처2"]));
