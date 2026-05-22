@@ -249,7 +249,7 @@ export async function dashboardSummary() {
   const [sales, purchases, inventory, logs] = await Promise.all([
     selectRows<Record<string, unknown>>("sales", { order: "io_date.desc,created_at.desc", limit: 1000 }),
     selectRows<Record<string, unknown>>("purchases", { order: "io_date.desc,created_at.desc", limit: 50 }),
-    selectRows<Record<string, unknown>>("inventory_snapshots", { order: "synced_at.desc", limit: 200 }),
+    selectRows<Record<string, unknown>>("inventory_current", { order: "synced_at.desc", limit: 200 }),
     selectRows<Record<string, unknown>>("ecount_sync_logs", { order: "created_at.desc", limit: 20 }),
   ]);
 
@@ -309,18 +309,18 @@ export async function syncProducts(payload: Record<string, unknown> = {}) {
 
 export async function syncInventory(payload: Record<string, unknown> = {}) {
   const response = await fetchEcountInventory(payload);
-  const rows = Array.isArray(response.Data) ? response.Data : Array.isArray(response.data) ? response.data : [];
-  const today = new Date().toISOString().slice(0, 10);
+  const rows = extractEcountResultRows(response);
+  const baseDate = String(payload.BASE_DATE || new Date().toISOString().slice(0, 10).replace(/\D/g, ""));
   const normalized = rows.map((row: Record<string, unknown>) => ({
-    snapshot_date: today,
     wh_cd: text(row.WH_CD || row.wh_cd),
     wh_name: text(row.WH_DES || row.WH_NAME || row.wh_name),
     prod_cd: text(row.PROD_CD || row.prod_cd),
     prod_name: text(row.PROD_DES || row.PROD_NAME || row.prod_name),
-    size_des: text(row.SIZE_DES || row.size_des),
+    size_des: text(row.PROD_SIZE_DES || row.SIZE_DES || row.size_des),
     bal_qty: num(row.BAL_QTY || row.qty || row.BALANCE_QTY) || 0,
+    base_date: baseDate,
     synced_at: new Date().toISOString(),
   })).filter((row) => row.prod_cd);
-  if (normalized.length) await insertRows("inventory_snapshots", normalized);
+  if (normalized.length) await upsertRows("inventory_current", normalized, "wh_cd,prod_cd");
   return { ok: true, count: normalized.length, raw: response };
 }

@@ -65,7 +65,7 @@ const importSubMenus = [
 
 const salesSubMenus = [
   { label: "온라인 발주", section: "online" },
-  { label: "판매/구매 내역", section: "history" },
+  { label: "판매/구매", section: "history" },
   { label: "재고현황", section: "inventory" },
   { label: "기초관리", section: "master" },
 ];
@@ -5286,6 +5286,246 @@ function SalesRightTools() {
   );
 }
 
+function SalesSyncTools() {
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResult, setLookupResult] = useState<{
+    product?: { code?: string; name?: string; inPrice?: string; outPrice?: string } | null;
+    products?: Array<{ code?: string; name?: string; inPrice?: string; outPrice?: string }>;
+    inventory?: Array<{ whCode?: string; whName?: string; qty?: string; syncedAt?: string }>;
+    message?: string;
+    error?: string;
+  } | null>(null);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncLoading, setSyncLoading] = useState<"" | "products" | "customers" | "warehouses" | "inventory">("");
+  const customerFileRef = useRef<HTMLInputElement>(null);
+  const warehouseFileRef = useRef<HTMLInputElement>(null);
+
+  async function quickLookup() {
+    const query = lookupQuery.trim();
+    if (!query) {
+      setLookupResult({ error: "상품명을 입력해 주세요." });
+      return;
+    }
+    setLookupLoading(true);
+    setLookupResult(null);
+    try {
+      const res = await fetch("/api/ecount/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setLookupResult({ error: data.error || "상품 조회 실패" });
+        return;
+      }
+      setLookupResult(data);
+    } catch (error) {
+      setLookupResult({ error: error instanceof Error ? error.message : "상품 조회 실패" });
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  async function syncProductsFromEcount() {
+    setSyncLoading("products");
+    setSyncMessage("");
+    try {
+      const res = await fetch("/api/ecount/products/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ PROD_CD: "", PROD_TYPE: "" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        setSyncMessage(data.error || "상품정보 동기화 실패");
+        return;
+      }
+      setSyncMessage(`상품정보 ${data.count || 0}건을 동기화했습니다.`);
+    } catch (error) {
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      setSyncMessage(error instanceof Error ? error.message : "상품정보 동기화 실패");
+    } finally {
+      setSyncLoading("");
+    }
+  }
+
+  async function uploadCustomersFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSyncLoading("customers");
+    setSyncMessage("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/ecount/customers/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setSyncMessage(data.error || "거래처정보 업로드 실패");
+        return;
+      }
+      setSyncMessage(`거래처정보 ${data.count || 0}건을 업로드했습니다.`);
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "거래처정보 업로드 실패");
+    } finally {
+      setSyncLoading("");
+      event.target.value = "";
+    }
+  }
+
+  async function uploadWarehousesFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSyncLoading("warehouses");
+    setSyncMessage("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/ecount/warehouses/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setSyncMessage(data.error || "창고정보 업로드 실패");
+        return;
+      }
+      setSyncMessage(`창고정보 ${data.count || 0}건을 업로드했습니다.`);
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "창고정보 업로드 실패");
+    } finally {
+      setSyncLoading("");
+      event.target.value = "";
+    }
+  }
+
+  async function syncInventoryFromEcount() {
+    setSyncLoading("inventory");
+    setSyncMessage("");
+    try {
+      const baseDate = new Date().toISOString().slice(0, 10).replace(/\D/g, "");
+      const res = await fetch("/api/ecount/inventory/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ PROD_CD: "", WH_CD: "", BASE_DATE: baseDate }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        setSyncMessage(data.error || "재고 동기화 실패");
+        return;
+      }
+      setSyncMessage(`재고 ${data.count || 0}건을 동기화했습니다.`);
+    } catch (error) {
+      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      setSyncMessage(error instanceof Error ? error.message : "재고 동기화 실패");
+    } finally {
+      setSyncLoading("");
+    }
+  }
+
+  return (
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
+        <input
+          value={lookupQuery}
+          onChange={(event) => setLookupQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void quickLookup();
+          }}
+          className="mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-orange-400"
+          placeholder="상품명 조회"
+        />
+        <button type="button" onClick={quickLookup} disabled={lookupLoading} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
+          {lookupLoading ? "조회 중" : "조회"}
+        </button>
+        {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
+        {lookupResult?.message && !lookupResult.product && <div className="mt-2 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{lookupResult.message}</div>}
+        {lookupResult?.product && (
+          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+            <div className="mb-2 font-black text-slate-950">{lookupResult.product.name || "-"}</div>
+            <div className="grid grid-cols-[76px_1fr] gap-y-1 text-slate-600">
+              <span>품목코드</span><b className="text-slate-950">{lookupResult.product.code || "-"}</b>
+              <span>품목명</span><b className="text-slate-950">{lookupResult.product.name || "-"}</b>
+              <span>입고단가</span><b className="text-slate-950">{lookupResult.product.inPrice || "-"}</b>
+              <span>출고단가</span><b className="text-slate-950">{lookupResult.product.outPrice || "-"}</b>
+            </div>
+          </div>
+        )}
+        {lookupResult?.products && lookupResult.products.length > 1 && (
+          <div className="mt-2 rounded-md border border-slate-200 p-2">
+            <div className="mb-1 text-xs font-black text-slate-500">포함 상품 {lookupResult.products.length}건</div>
+            <div className="grid gap-1">
+              {lookupResult.products.slice(1, 6).map((item, index) => (
+                <div key={`${item.code}-${index}`} className="truncate text-xs font-bold text-slate-600">
+                  {item.code || "-"} · {item.name || "-"}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {lookupResult?.product && (
+          <div className="mt-2 rounded-md border border-slate-200">
+            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black">창고별 재고현황</div>
+            <div className="grid gap-1 p-2">
+              {lookupResult.inventory?.length ? lookupResult.inventory.map((item, index) => (
+                <div key={`${item.whCode}-${index}`} className="flex items-center justify-between rounded bg-white px-2 py-1 text-xs font-bold">
+                  <span className="truncate">{item.whName || item.whCode || "창고"}</span>
+                  <span className="text-slate-950">{item.qty || "0"}</span>
+                </div>
+              )) : <div className="px-2 py-2 text-xs font-bold text-slate-500">동기화된 창고별 재고가 없습니다.</div>}
+            </div>
+          </div>
+        )}
+      </ToolSection>
+
+      <ToolSection title="상품정보 동기화" showChevron={false}>
+        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
+          이카운트 품목조회 API로 products 테이블을 갱신합니다.
+        </div>
+        <button type="button" onClick={syncProductsFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+          {syncLoading === "products" ? "동기화 중" : "상품정보 동기화"}
+        </button>
+      </ToolSection>
+
+      <ToolSection title="거래처정보 업로드/동기화" showChevron={false}>
+        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
+          FN_거래처, FN_창고 엑셀을 업로드해 FN OS 기준정보에 저장합니다.
+        </div>
+        <input ref={customerFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadCustomersFile} />
+        <input ref={warehouseFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadWarehousesFile} />
+        <button type="button" onClick={() => customerFileRef.current?.click()} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-black text-orange-600 disabled:opacity-50">
+          {syncLoading === "customers" ? "업로드 중" : "거래처 엑셀 업로드"}
+        </button>
+        <button type="button" onClick={() => warehouseFileRef.current?.click()} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-50">
+          {syncLoading === "warehouses" ? "업로드 중" : "창고 엑셀 업로드"}
+        </button>
+      </ToolSection>
+
+      <ToolSection title="재고 동기화" showChevron={false}>
+        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
+          이카운트 창고별 재고현황을 가져와 inventory_current 최신 캐시를 갱신합니다.
+        </div>
+        <button type="button" onClick={syncInventoryFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+          {syncLoading === "inventory" ? "동기화 중" : "재고 동기화"}
+        </button>
+      </ToolSection>
+
+      {syncMessage && <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{syncMessage}</div>}
+    </aside>
+  );
+}
+
 function SalesInventoryWorkspace({ section }: { section: string }) {
   const defaultTab = section === "history" ? "판매내역" : section === "inventory" ? "재고현황" : section === "master" ? "품목관리" : "온라인 발주";
   const [activeTab, setActiveTab] = useState(defaultTab);
@@ -6380,7 +6620,7 @@ function HomeContent() {
           )}
         </section>
         {activeSlug === "import" && <RightTools />}
-        {activeSlug === "sales" && <SalesRightTools />}
+        {activeSlug === "sales" && <SalesSyncTools />}
       </div>
     </main>
   );

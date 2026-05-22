@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     const first = products[0] || null;
     let inventory: ReturnType<typeof normalizeInventory>[] = [];
     if (first?.code) {
-      const inventoryRows = await selectRows<AnyRecord>("inventory_snapshots", {
+      const inventoryRows = await selectRows<AnyRecord>("inventory_current", {
         prod_cd: `eq.${first.code}`,
         order: "synced_at.desc",
         limit: 100,

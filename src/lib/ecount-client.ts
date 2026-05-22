@@ -52,19 +52,35 @@ async function postJson<T>(path: string, payload: unknown) {
     body: JSON.stringify(payload),
     cache: "no-store",
   });
+  if (response.status === 412) {
+    throw new Error("이카운트 API 호출 제한을 초과했습니다. 잠시 후 다시 시도해 주세요.");
+  }
+  const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
+  if (!contentType.toLowerCase().includes("json")) {
+    throw new Error(`ECOUNT API returned non JSON response: ${response.status}. ${text.slice(0, 500)}`);
+  }
   let data: T;
   try {
     data = JSON.parse(text) as T;
   } catch {
-    const extra = response.status === 412 ? " 이카운트 API 호출 제한을 초과했을 수 있습니다." : "";
-    throw new Error(`ECOUNT API returned non JSON response: ${response.status}.${extra}`);
+    throw new Error(`ECOUNT API returned invalid JSON response: ${response.status}. ${text.slice(0, 500)}`);
   }
   if (!response.ok) {
-    const extra = response.status === 412 ? " 이카운트 API 호출 제한을 초과했을 수 있습니다." : "";
-    throw new Error(`ECOUNT API error ${response.status}:${extra} ${text.slice(0, 500)}`);
+    throw new Error(`ECOUNT API error ${response.status}: ${JSON.stringify(parseMaybeJson(data)).slice(0, 1000)}`);
   }
   return data;
+}
+
+export function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
 }
 
 export async function getEcountSession() {
@@ -146,15 +162,17 @@ export function purchasePayload(rows: Array<Record<string, unknown>>) {
 
 export function productRegisterPayload(row: Record<string, unknown>) {
   return {
-    InventoryBasicList: [
+    ProductList: [
       {
         BulkDatas: {
-          UPLOAD_SER_NO: "1",
           PROD_CD: String(row.prod_cd || row.PROD_CD || row["품목코드"] || ""),
           PROD_DES: String(row.prod_name || row.PROD_DES || row.PROD_NAME || row["품목명"] || ""),
+          PROD_TYPE: String(row.prod_type || row.PROD_TYPE || "3"),
+          BAL_FLAG: String(row.bal_flag || row.BAL_FLAG || "1"),
           SIZE_DES: String(row.size_des || row.SIZE_DES || row["규격"] || ""),
           IN_PRICE: String(row.in_price || row.IN_PRICE || row["입고단가"] || ""),
           OUT_PRICE: String(row.out_price || row.OUT_PRICE || row["출고단가"] || ""),
+          BAR_CODE: String(row.barcode || row.BAR_CODE || ""),
           REMARKS: String(row.remarks || row.REMARKS || row["비고"] || ""),
         },
       },
@@ -167,10 +185,8 @@ export function customerRegisterPayload(row: Record<string, unknown>) {
     CustList: [
       {
         BulkDatas: {
-          UPLOAD_SER_NO: "1",
-          CUST: String(row.cust_code || row.CUST || row["거래처코드"] || ""),
-          CUST_DES: String(row.cust_name || row.CUST_DES || row.CUST_NAME || row["거래처명"] || ""),
-          BIZ_NO: String(row.biz_no || row.BIZ_NO || row["사업자번호"] || ""),
+          BUSINESS_NO: String(row.cust_code || row.BUSINESS_NO || row.CUST || row["거래처코드"] || ""),
+          CUST_NAME: String(row.cust_name || row.CUST_NAME || row.CUST_DES || row["거래처명"] || ""),
           CEO_NAME: String(row.ceo_name || row.CEO_NAME || row["대표자"] || ""),
           TEL: String(row.tel || row.TEL || row["연락처"] || ""),
           REMARKS: String(row.remarks || row.REMARKS || row["비고"] || ""),
@@ -190,7 +206,7 @@ export async function savePurchases(rows: Array<Record<string, unknown>>) {
 
 export async function registerEcountProduct(row: Record<string, unknown>) {
   return postEcountApi<Record<string, unknown>>(
-    "/OAPI/V2/InventoryBasic/SaveInventoryBasic",
+    "/OAPI/V2/InventoryBasic/SaveBasicProduct",
     productRegisterPayload(row),
     "ECOUNT_SAVE_PRODUCT_PATH",
   );
@@ -198,7 +214,7 @@ export async function registerEcountProduct(row: Record<string, unknown>) {
 
 export async function registerEcountCustomer(row: Record<string, unknown>) {
   return postEcountApi<Record<string, unknown>>(
-    "/OAPI/V2/Cust/SaveCust",
+    "/OAPI/V2/AccountBasic/SaveBasicCust",
     customerRegisterPayload(row),
     "ECOUNT_SAVE_CUSTOMER_PATH",
   );
@@ -216,33 +232,44 @@ export async function fetchEcountProducts(payload: Record<string, unknown> = {})
 }
 
 export async function fetchEcountInventory(payload: Record<string, unknown> = {}) {
-  return postEcountApi<Record<string, unknown>>("/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus", payload, "ECOUNT_INVENTORY_PATH");
+  const today = new Date().toISOString().slice(0, 10).replace(/\D/g, "");
+  return postEcountApi<Record<string, unknown>>(
+    "/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatusByLocation",
+    {
+      PROD_CD: "",
+      WH_CD: "",
+      BASE_DATE: today,
+      BAL_FLAG: "N",
+      DEL_GUBUN: "N",
+      DEL_LOCATION_YN: "N",
+      ...payload,
+    },
+    "ECOUNT_INVENTORY_PATH",
+  );
 }
 
 export function extractEcountResultRows(response: Record<string, unknown>) {
   const data = response.Data as Record<string, unknown> | undefined;
   const candidates = [
     data?.Result,
+    data?.ResultDetails,
     data?.Data,
     data,
     response.Result,
+    response.ResultDetails,
     response.Data,
     response,
   ];
 
   for (const candidate of candidates) {
-    if (!candidate) continue;
-    if (Array.isArray(candidate)) return candidate as Record<string, unknown>[];
-    if (typeof candidate === "string") {
-      const trimmed = candidate.trim();
-      if (!trimmed) continue;
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
-        if (parsed && typeof parsed === "object") return [parsed as Record<string, unknown>];
-      } catch {
-        continue;
-      }
+    const parsed = parseMaybeJson(candidate);
+    if (!parsed) continue;
+    if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+    if (parsed && typeof parsed === "object") {
+      const inner = parsed as Record<string, unknown>;
+      const result = parseMaybeJson(inner.Result || inner.ResultDetails || inner.Data);
+      if (Array.isArray(result)) return result as Record<string, unknown>[];
+      return [inner];
     }
   }
 

@@ -7,8 +7,9 @@ const REQUIRED_TABLES = [
   "sales",
   "purchases",
   "products",
+  "customers",
   "product_mappings",
-  "inventory_snapshots",
+  "inventory_current",
   "ecount_sync_logs",
 ];
 

@@ -21,6 +21,16 @@ export function hasDbConfig() {
   return Boolean(SUPABASE_URL && SUPABASE_KEY);
 }
 
+function friendlySupabaseError(text: string, status: number) {
+  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|customers|warehouses|inventory_current|inventory_snapshots|ecount_sync_logs/i.test(text)) {
+    return "FN OS 매출/재고 DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
+  }
+  if (/row-level security|violates row-level security/i.test(text)) {
+    return "Supabase 권한 정책 때문에 저장이 차단되었습니다. Vercel의 SUPABASE_SERVICE_ROLE_KEY 또는 RLS 정책을 확인해 주세요.";
+  }
+  return text || `Supabase request failed: ${status}`;
+}
+
 function restUrl(table: string, query?: Record<string, QueryValue>) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase environment variables are not configured.", 503);
   const url = new URL(`/rest/v1/${table}`, SUPABASE_URL);
@@ -47,7 +57,7 @@ async function request<T>(table: string, init: RequestInit = {}, query?: Record<
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new FnosDbError(text || `Supabase request failed: ${response.status}`, response.status);
+    throw new FnosDbError(friendlySupabaseError(text, response.status), response.status);
   }
 
   if (response.status === 204) return null as T;
@@ -102,4 +112,3 @@ export async function createUploadBatch(batchType: string, sourceFileName: strin
 export async function updateUploadBatch(id: string, successCount: number, failCount: number) {
   return patchRows("upload_batches", { id: `eq.${id}` }, { success_count: successCount, fail_count: failCount });
 }
-

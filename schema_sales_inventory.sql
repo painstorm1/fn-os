@@ -91,6 +91,35 @@ alter table products add column if not exists unit text;
 alter table products add column if not exists in_price double precision;
 alter table products add column if not exists out_price double precision;
 
+create table if not exists customers (
+  id uuid primary key default gen_random_uuid(),
+  cust_code text not null unique,
+  cust_name text,
+  ceo_name text,
+  tel text,
+  mobile text,
+  search_text text,
+  is_active boolean default true,
+  transfer_info text,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists warehouses (
+  id uuid primary key default gen_random_uuid(),
+  wh_cd text not null unique,
+  wh_name text,
+  wh_type text,
+  process_name text,
+  outsource_cust_name text,
+  is_active boolean default true,
+  branch_name text,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists product_mappings (
   id uuid primary key default gen_random_uuid(),
   mall_name text,
@@ -116,6 +145,21 @@ create table if not exists inventory_snapshots (
   created_at timestamptz not null default now()
 );
 
+create table if not exists inventory_current (
+  id uuid primary key default gen_random_uuid(),
+  wh_cd text not null default '',
+  wh_name text,
+  prod_cd text not null,
+  prod_name text,
+  size_des text,
+  bal_qty double precision default 0,
+  base_date text,
+  synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (wh_cd, prod_cd)
+);
+
 create table if not exists ecount_sync_logs (
   id uuid primary key default gen_random_uuid(),
   target_type text,
@@ -134,5 +178,9 @@ create index if not exists idx_sales_prod_cd on sales(prod_cd);
 create index if not exists idx_sales_batch on sales(upload_batch_id);
 create index if not exists idx_purchases_io_date on purchases(io_date);
 create index if not exists idx_purchases_prod_cd on purchases(prod_cd);
+create index if not exists idx_customers_name on customers(cust_name);
+create index if not exists idx_warehouses_name on warehouses(wh_name);
+create index if not exists idx_inventory_current_prod on inventory_current(prod_cd);
+create index if not exists idx_inventory_current_synced_at on inventory_current(synced_at desc);
 create index if not exists idx_inventory_prod_date on inventory_snapshots(prod_cd, snapshot_date);
 create index if not exists idx_inventory_synced_at on inventory_snapshots(synced_at desc);
