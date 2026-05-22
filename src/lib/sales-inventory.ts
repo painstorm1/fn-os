@@ -1,5 +1,5 @@
 import { createUploadBatch, insertRows, patchRows, selectRows, updateUploadBatch, upsertRows } from "./fnos-db";
-import { fetchEcountInventory, fetchEcountProducts, hasEcountConfig, savePurchases, saveSales } from "./ecount-client";
+import { extractEcountResultRows, fetchEcountInventory, fetchEcountProducts, hasEcountConfig, savePurchases, saveSales } from "./ecount-client";
 
 export type ImportResult = {
   ok: boolean;
@@ -290,12 +290,15 @@ export async function dashboardSummary() {
 
 export async function syncProducts(payload: Record<string, unknown> = {}) {
   const response = await fetchEcountProducts(payload);
-  const rows = Array.isArray(response.Data) ? response.Data : Array.isArray(response.data) ? response.data : [];
+  const rows = extractEcountResultRows(response);
   const normalized = rows.map((row: Record<string, unknown>) => ({
     prod_cd: text(row.PROD_CD || row.prod_cd),
     prod_name: text(row.PROD_DES || row.PROD_NAME || row.prod_name),
     size_des: text(row.SIZE_DES || row.size_des),
     prod_type: text(row.PROD_TYPE || row.prod_type),
+    unit: text(row.UNIT || row.unit),
+    in_price: num(row.IN_PRICE || row.in_price),
+    out_price: num(row.OUT_PRICE || row.out_price),
     barcode: text(row.BAR_CODE || row.BARCODE || row.barcode),
     is_active: row.USE_YN === "N" ? false : true,
     last_synced_at: new Date().toISOString(),

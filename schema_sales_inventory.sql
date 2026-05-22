@@ -77,12 +77,19 @@ create table if not exists products (
   prod_name text,
   size_des text,
   prod_type text,
+  unit text,
+  in_price double precision,
+  out_price double precision,
   barcode text,
   is_active boolean default true,
   last_synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table products add column if not exists unit text;
+alter table products add column if not exists in_price double precision;
+alter table products add column if not exists out_price double precision;
 
 create table if not exists product_mappings (
   id uuid primary key default gen_random_uuid(),
@@ -129,4 +136,3 @@ create index if not exists idx_purchases_io_date on purchases(io_date);
 create index if not exists idx_purchases_prod_cd on purchases(prod_cd);
 create index if not exists idx_inventory_prod_date on inventory_snapshots(prod_cd, snapshot_date);
 create index if not exists idx_inventory_synced_at on inventory_snapshots(synced_at desc);
-

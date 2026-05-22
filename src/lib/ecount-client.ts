@@ -57,9 +57,13 @@ async function postJson<T>(path: string, payload: unknown) {
   try {
     data = JSON.parse(text) as T;
   } catch {
-    throw new Error(`ECOUNT API returned non JSON response: ${response.status}`);
+    const extra = response.status === 412 ? " 이카운트 API 호출 제한을 초과했을 수 있습니다." : "";
+    throw new Error(`ECOUNT API returned non JSON response: ${response.status}.${extra}`);
   }
-  if (!response.ok) throw new Error(`ECOUNT API error ${response.status}: ${text.slice(0, 500)}`);
+  if (!response.ok) {
+    const extra = response.status === 412 ? " 이카운트 API 호출 제한을 초과했을 수 있습니다." : "";
+    throw new Error(`ECOUNT API error ${response.status}:${extra} ${text.slice(0, 500)}`);
+  }
   return data;
 }
 
@@ -205,7 +209,7 @@ export async function fetchEcountProducts(payload: Record<string, unknown> = {})
     "/OAPI/V2/InventoryBasic/GetBasicProductsList",
     {
       PROD_CD: "",
-      PROD_TYPE: "0",
+      PROD_TYPE: "",
       ...payload,
     },
   );
@@ -213,4 +217,34 @@ export async function fetchEcountProducts(payload: Record<string, unknown> = {})
 
 export async function fetchEcountInventory(payload: Record<string, unknown> = {}) {
   return postEcountApi<Record<string, unknown>>("/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus", payload, "ECOUNT_INVENTORY_PATH");
+}
+
+export function extractEcountResultRows(response: Record<string, unknown>) {
+  const data = response.Data as Record<string, unknown> | undefined;
+  const candidates = [
+    data?.Result,
+    data?.Data,
+    data,
+    response.Result,
+    response.Data,
+    response,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (Array.isArray(candidate)) return candidate as Record<string, unknown>[];
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+        if (parsed && typeof parsed === "object") return [parsed as Record<string, unknown>];
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return [];
 }
