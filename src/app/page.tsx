@@ -4643,7 +4643,7 @@ function SalesExcelGrid({
     }
     setProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
     try {
-      const res = await fetch("/api/ecount/quick-lookup", {
+      const res = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -4652,14 +4652,14 @@ function SalesExcelGrid({
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: data.error || "품목검색 실패" }));
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         return;
       }
       const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
       setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
     } catch (error) {
       setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
     }
   }
   function openProductSearch(rowIndex: number, colIndex: number, query: string) {
@@ -5043,7 +5043,7 @@ function SalesExcelGrid({
   );
 }
 
-const ECOUNT_CONNECTION_ERROR_MESSAGE = "외부 API 연결은 제거되었습니다. FN OS 자체 DB 기준으로 처리합니다.";
+const FNOS_DB_ERROR_MESSAGE = "FN OS 자체 DB 처리 중 문제가 발생했습니다. Supabase 테이블과 환경변수를 확인해 주세요.";
 
 function SalesRightTools() {
   const [lookupQuery, setLookupQuery] = useState("");
@@ -5100,7 +5100,7 @@ function SalesRightTools() {
     setLookupLoading(true);
     setLookupResult(null);
     try {
-      const res = await fetch("/api/ecount/quick-lookup", {
+      const res = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5108,13 +5108,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         setLookupResult({ error: data.error || "상품 조회 실패" });
         return;
       }
       setLookupResult(data);
     } catch (error) {
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
       setLookupResult({ error: error instanceof Error ? error.message : "상품 조회 실패" });
     } finally {
       setLookupLoading(false);
@@ -5125,7 +5125,7 @@ function SalesRightTools() {
     setRegisterLoading(true);
     setRegisterMessage("");
     try {
-      const res = await fetch("/api/ecount/quick-register", {
+      const res = await fetch("/api/fnos/quick-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5133,13 +5133,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         setRegisterMessage(data.error || "등록 실패");
         return;
       }
       setRegisterMessage(registerMode === "product" ? "제품등록 전송 완료" : "거래처등록 전송 완료");
     } catch (error) {
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
       setRegisterMessage(error instanceof Error ? error.message : "등록 실패");
     } finally {
       setRegisterLoading(false);
@@ -5150,7 +5150,7 @@ function SalesRightTools() {
     setInputLoading(true);
     setInputMessage("");
     try {
-      const res = await fetch("/api/ecount/quick-input", {
+      const res = await fetch("/api/fnos/quick-input", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5158,13 +5158,13 @@ function SalesRightTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         setInputMessage(data.error || "입력 실패");
         return;
       }
       setInputMessage(inputMode === "sales" ? "판매입력 전송 완료" : "구매입력 전송 완료");
     } catch (error) {
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
       setInputMessage(error instanceof Error ? error.message : "입력 실패");
     } finally {
       setInputLoading(false);
@@ -5310,7 +5310,7 @@ function SalesSyncTools() {
     setLookupLoading(true);
     setLookupResult(null);
     try {
-      const res = await fetch("/api/ecount/quick-lookup", {
+      const res = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5333,7 +5333,7 @@ function SalesSyncTools() {
     setSyncLoading("products");
     setSyncMessage("");
     try {
-      const res = await fetch("/api/ecount/products/sync", {
+      const res = await fetch("/api/fnos/products/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5341,13 +5341,13 @@ function SalesSyncTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         setSyncMessage(data.error || "상품정보 동기화 실패");
         return;
       }
       setSyncMessage(`상품정보 ${data.count || 0}건을 동기화했습니다.`);
     } catch (error) {
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
       setSyncMessage(error instanceof Error ? error.message : "상품정보 동기화 실패");
     } finally {
       setSyncLoading("");
@@ -5362,7 +5362,7 @@ function SalesSyncTools() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/ecount/customers/upload", {
+      const res = await fetch("/api/fnos/customers/upload", {
         method: "POST",
         credentials: "include",
         body: formData,
@@ -5389,7 +5389,7 @@ function SalesSyncTools() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/ecount/warehouses/upload", {
+      const res = await fetch("/api/fnos/warehouses/upload", {
         method: "POST",
         credentials: "include",
         body: formData,
@@ -5413,7 +5413,7 @@ function SalesSyncTools() {
     setSyncMessage("");
     try {
       const baseDate = new Date().toISOString().slice(0, 10).replace(/\D/g, "");
-      const res = await fetch("/api/ecount/inventory/sync", {
+      const res = await fetch("/api/fnos/inventory/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -5421,13 +5421,13 @@ function SalesSyncTools() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+        window.alert(FNOS_DB_ERROR_MESSAGE);
         setSyncMessage(data.error || "재고 동기화 실패");
         return;
       }
       setSyncMessage(`재고 ${data.count || 0}건을 동기화했습니다.`);
     } catch (error) {
-      window.alert(ECOUNT_CONNECTION_ERROR_MESSAGE);
+      window.alert(FNOS_DB_ERROR_MESSAGE);
       setSyncMessage(error instanceof Error ? error.message : "재고 동기화 실패");
     } finally {
       setSyncLoading("");
@@ -5491,7 +5491,7 @@ function SalesSyncTools() {
 
       <ToolSection title="상품정보 동기화" showChevron={false}>
         <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-          이카운트 품목조회 API로 products 테이블을 갱신합니다.
+          FN OS products 테이블을 기준 상품정보로 갱신합니다.
         </div>
         <button type="button" onClick={syncProductsFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
           {syncLoading === "products" ? "동기화 중" : "상품정보 동기화"}
@@ -5514,7 +5514,7 @@ function SalesSyncTools() {
 
       <ToolSection title="재고 동기화" showChevron={false}>
         <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-          이카운트 창고별 재고현황을 가져와 inventory_current 최신 캐시를 갱신합니다.
+          FN OS inventory_current 최신 재고 캐시를 갱신합니다.
         </div>
         <button type="button" onClick={syncInventoryFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
           {syncLoading === "inventory" ? "동기화 중" : "재고 동기화"}
@@ -5693,7 +5693,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function sync(target: "products" | "inventory") {
     setMessage("");
-    const res = await fetch(`/api/ecount/${target}/sync`, {
+    const res = await fetch(`/api/fnos/${target}/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -5964,7 +5964,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${rows.length}건을 FN OS DB에 먼저 저장한 뒤 이카운트 판매입력으로 전송합니다. 계속할까요?`);
+      const ok = window.confirm(`${rows.length}건을 FN OS 판매 DB에 저장합니다. 계속할까요?`);
       if (!ok) return;
     }
     setMessage("FN OS 판매 DB에 저장하는 중입니다...");
@@ -6333,7 +6333,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
               <h3 className="font-black">엑셀/VBA 전송 대기</h3>
               <p className="mt-2 text-sm font-bold text-slate-600">
-                엑셀 매크로에서 아래 엔드포인트로 rows 배열을 보내면 FN OS DB에 먼저 저장되고, 옵션에 따라 이카운트로 전송됩니다.
+                엑셀 매크로에서 아래 엔드포인트로 rows 배열을 보내면 FN OS 판매 DB에 저장됩니다.
               </p>
               <div className="mt-4 rounded-md bg-white p-3 text-xs font-bold text-slate-600">
                 <p>엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import" : "POST /api/purchases/import"}</code></p>
@@ -6367,7 +6367,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
 
       {(activeTab === "판매내역" || activeTab === "구매내역") && (
-        <Panel title={activeTab} subtitle="이카운트 판매조회 API가 없으므로 FN OS DB 기준으로 조회합니다.">
+        <Panel title={activeTab} subtitle="FN OS 자체 판매/구매 DB 기준으로 조회합니다.">
           <div className="mb-3 grid gap-2 md:grid-cols-4">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 거래처명 검색" />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
@@ -6387,10 +6387,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {activeTab === "품목관리" && (
         <Panel
           title="품목관리"
-          subtitle="이카운트 품목조회 API로 품목 마스터를 동기화하고, 쇼핑몰 SKU와 ERP 품목코드를 매핑합니다."
+          subtitle="FN OS 품목 마스터를 관리하고, 쇼핑몰 SKU와 내부 품목코드를 매핑합니다."
           action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("products")}>품목 동기화</button>}
         >
-          <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-600">매핑 구조: 쇼핑몰 SKU → FN SKU → 이카운트 PROD_CD. 다음 단계에서 미매칭 리스트와 수정 UI를 붙이면 됩니다.</p>
+          <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-600">매핑 구조: 쇼핑몰 SKU → FN SKU → FN OS 품목코드. 다음 단계에서 미매칭 리스트와 수정 UI를 붙이면 됩니다.</p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
@@ -6398,7 +6398,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {(activeTab === "재고현황" || activeTab === "품절예측") && (
         <Panel
           title={activeTab}
-          subtitle="이카운트 재고현황/창고별 재고를 FN OS에 저장하고 판매 DB와 결합해 품절 위험을 계산합니다."
+          subtitle="FN OS 재고 DB를 판매 DB와 결합해 품절 위험을 계산합니다."
           action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
         >
           <div className="overflow-x-auto">
@@ -6481,7 +6481,7 @@ function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> })
               <td className="py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
               <td className="py-2 text-right">{Number(row.price || 0).toLocaleString("ko-KR")}</td>
               <td className="py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
-              <td className="py-2 text-center"><StatusPill status={String(row.ecount_sync_status || "PENDING")} /></td>
+              <td className="py-2 text-center"><StatusPill status={String(row.sync_status || row.ecount_sync_status || "SAVED")} /></td>
             </tr>
           ))}
         </tbody>
@@ -6602,3 +6602,4 @@ export default function Home() {
     </Suspense>
   );
 }
+

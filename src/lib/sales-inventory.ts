@@ -248,3 +248,4 @@ export async function upsertLocalProducts(rows: Record<string, unknown>[]) {
 export async function markBatchStatus(id: string, status: string) {
   return patchRows("upload_batches", { id: `eq.${id}` }, { status });
 }
+

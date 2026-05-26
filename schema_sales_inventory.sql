@@ -1,5 +1,5 @@
 -- FN OS sales/inventory ERP schema for Supabase/PostgreSQL.
--- Direction: FN OS DB is the source of truth. ECOUNT-specific sync is no longer required.
+-- Direction: FN OS DB is the source of truth for sales, purchasing, product, and inventory data.
 -- Run the whole file in the Supabase SQL editor.
 
 create extension if not exists pgcrypto;
