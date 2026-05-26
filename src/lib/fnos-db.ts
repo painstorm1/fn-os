@@ -22,11 +22,11 @@ export function hasDbConfig() {
 }
 
 function friendlySupabaseError(text: string, status: number) {
-  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|customers|warehouses|inventory_current|inventory_snapshots|ecount_sync_logs/i.test(text)) {
+  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|customers|warehouses|inventory_current|inventory_snapshots|api_sync_logs/i.test(text)) {
     return "FN OS 매출/재고 DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
   }
   if (/row-level security|violates row-level security/i.test(text)) {
-    return "Supabase 권한 정책 때문에 저장이 차단되었습니다. Vercel의 SUPABASE_SERVICE_ROLE_KEY 또는 RLS 정책을 확인해 주세요.";
+    return "Supabase 권한 정책 때문에 요청이 차단되었습니다. Vercel에 SUPABASE_SERVICE_ROLE_KEY가 설정되어 있는지 확인해 주세요.";
   }
   return text || `Supabase request failed: ${status}`;
 }
@@ -101,10 +101,12 @@ export async function patchRows<T>(table: string, filters: Record<string, QueryV
 export async function createUploadBatch(batchType: string, sourceFileName: string | undefined, totalCount: number) {
   const [batch] = await insertRows<{ id: string }>("upload_batches", {
     batch_type: batchType,
+    source_name: "fn_os",
     source_file_name: sourceFileName || null,
     total_count: totalCount,
     success_count: 0,
     fail_count: 0,
+    status: "SAVED",
   });
   return batch;
 }

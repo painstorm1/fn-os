@@ -9,12 +9,12 @@ function text(value: unknown) {
 
 function normalizeProduct(row: AnyRecord) {
   return {
-    code: text(row.prod_cd || row.PROD_CD),
-    name: text(row.prod_name || row.PROD_DES || row.PROD_NAME),
-    size: text(row.size_des || row.SIZE_DES),
+    code: text(row.product_code || row.sku || row.prod_cd || row.PROD_CD),
+    name: text(row.product_name || row.prod_name || row.PROD_DES || row.PROD_NAME),
+    size: text(row.option_name || row.size_des || row.SIZE_DES),
     unit: text(row.unit || row.UNIT),
-    inPrice: text(row.in_price || row.IN_PRICE),
-    outPrice: text(row.out_price || row.OUT_PRICE),
+    inPrice: text(row.cost_price || row.in_price || row.IN_PRICE),
+    outPrice: text(row.standard_price || row.out_price || row.OUT_PRICE),
     raw: row,
   };
 }
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     const query = text(body.query);
     if (!query) return NextResponse.json({ ok: false, error: "상품명을 입력해 주세요." }, { status: 400 });
 
-    const dbRows = await selectRows<AnyRecord>("products", { order: "prod_name.asc", limit: 2000 });
+    const dbRows = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2000 });
     const products = dbRows
       .map(normalizeProduct)
       .filter((row) => includesQuery(row, query))
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     let inventory: ReturnType<typeof normalizeInventory>[] = [];
     if (first?.code) {
       const inventoryRows = await selectRows<AnyRecord>("inventory_current", {
-        prod_cd: `eq.${first.code}`,
+        sku: `eq.${first.code}`,
         order: "synced_at.desc",
         limit: 100,
       });

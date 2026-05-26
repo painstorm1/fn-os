@@ -1,16 +1,20 @@
 import { NextResponse } from "next/server";
-import { hasEcountConfig } from "@/lib/ecount-client";
 import { hasDbConfig, selectRows } from "@/lib/fnos-db";
 
 const REQUIRED_TABLES = [
-  "upload_batches",
+  "sales_channels",
+  "customers",
+  "products",
+  "warehouses",
+  "orders",
+  "order_items",
+  "shipments",
   "sales",
   "purchases",
-  "products",
-  "customers",
-  "product_mappings",
   "inventory_current",
-  "ecount_sync_logs",
+  "inventory_movements",
+  "upload_batches",
+  "api_sync_logs",
 ];
 
 async function checkTable(table: string) {
@@ -25,7 +29,6 @@ async function checkTable(table: string) {
 
 export async function GET() {
   const dbConfigured = hasDbConfig();
-  const ecountConfigured = hasEcountConfig();
   const tables = dbConfigured ? await Promise.all(REQUIRED_TABLES.map(checkTable)) : [];
   const dbReady = dbConfigured && tables.every((item) => item.ok);
 
@@ -33,12 +36,11 @@ export async function GET() {
     ok: dbReady,
     db_configured: dbConfigured,
     db_ready: dbReady,
-    ecount_configured: ecountConfigured,
     tables,
+    mode: "fn_os_erp",
     next_steps: [
       dbConfigured ? null : "Vercel 환경변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 입력하세요.",
       dbConfigured && !dbReady ? "Supabase SQL Editor에서 schema_sales_inventory.sql을 실행하세요." : null,
-      ecountConfigured ? null : "ECOUNT_ZONE, ECOUNT_BASE_URL, ECOUNT_COM_CODE, ECOUNT_USER_ID, ECOUNT_API_CERT_KEY를 입력하세요.",
     ].filter(Boolean),
   });
 }

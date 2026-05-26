@@ -5043,7 +5043,7 @@ function SalesExcelGrid({
   );
 }
 
-const ECOUNT_CONNECTION_ERROR_MESSAGE = "이카운트 API와의 연결이 잘 되지 않습니다. 유효기간 등을 확인해주세요.";
+const ECOUNT_CONNECTION_ERROR_MESSAGE = "외부 API 연결은 제거되었습니다. FN OS 자체 DB 기준으로 처리합니다.";
 
 function SalesRightTools() {
   const [lookupQuery, setLookupQuery] = useState("");
@@ -5675,12 +5675,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setMessage("JSON 형식이 올바르지 않습니다. VBA에서는 rows 배열로 보내면 됩니다.");
       return;
     }
-    const endpoint = kind === "sales" ? "/api/sales/import-ecount" : "/api/purchases/import-ecount";
+    const endpoint = kind === "sales" ? "/api/sales/import" : "/api/purchases/import";
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ rows, sync_ecount: false, source_file_name: "FN_OS_WEB" }),
+      body: JSON.stringify({ rows, source_file_name: "FN_OS_WEB" }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
@@ -5967,16 +5967,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm(`${rows.length}건을 FN OS DB에 먼저 저장한 뒤 이카운트 판매입력으로 전송합니다. 계속할까요?`);
       if (!ok) return;
     }
-    setMessage("FN OS DB 저장 후 이카운트 판매입력으로 전송하는 중입니다...");
+    setMessage("FN OS 판매 DB에 저장하는 중입니다...");
     try {
-      const res = await fetch("/api/sales/import-ecount", {
+      const res = await fetch("/api/sales/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ rows, sync_ecount: true, source_file_name: "FN_OS_ONLINE_ORDER" }),
+        body: JSON.stringify({ rows, source_file_name: "FN_OS_ONLINE_ORDER" }),
       });
       const data = await res.json().catch(() => ({}));
-      const popup = importResultText(data, "EC_판매입력 결과");
+      const popup = importResultText(data, "FN OS 판매입력 결과");
       window.alert(popup);
       if (!res.ok || data.ok === false) {
         setMessage(data.error || data.message || "판매입력 전송 실패");
@@ -5987,7 +5987,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       loadSummary();
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
-      window.alert(`EC_판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
+      window.alert(`FN OS 판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
       setMessage(`판매입력 전송 실패: ${reason}`);
     }
   }
@@ -6174,7 +6174,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>F1. 발주 작업 실행</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>F2. 송장출력용 엑셀</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openDirectPartnerPicker}>F3. 직송파일 생성</button>
-            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F4. EC_판매입력 전송</button>
+            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F4. FN 판매입력 저장</button>
             <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>F5. 송장번호 매칭</button>
             <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
           </div>
@@ -6336,9 +6336,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 엑셀 매크로에서 아래 엔드포인트로 rows 배열을 보내면 FN OS DB에 먼저 저장되고, 옵션에 따라 이카운트로 전송됩니다.
               </p>
               <div className="mt-4 rounded-md bg-white p-3 text-xs font-bold text-slate-600">
-                <p>엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import-ecount" : "POST /api/purchases/import-ecount"}</code></p>
+                <p>엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import" : "POST /api/purchases/import"}</code></p>
                 <p className="mt-1">인증: <code>x-fnos-api-key: FN_OS_API_KEY</code></p>
-                <p className="mt-1">요청 예: <code>{`{ "rows": [...], "sync_ecount": true }`}</code></p>
+                <p className="mt-1">요청 예: <code>{`{ "rows": [...] }`}</code></p>
               </div>
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
