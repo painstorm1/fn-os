@@ -7117,18 +7117,12 @@ type ExpenseUploadItem = {
 
 const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
 const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙"];
-const accountingUploadSlots = [
-  { key: "국민카드 1", label: "국민카드 1", tone: "orange" },
-  { key: "국민카드 2", label: "국민카드 2", tone: "orange" },
-  { key: "국민은행", label: "국민은행", tone: "blue" },
-  { key: "기업은행", label: "기업은행", tone: "blue" },
-];
 
 function AccountingWorkspace() {
   const [activeTab, setActiveTab] = useState(accountingTabs[0]);
   const [summary, setSummary] = useState<AccountingSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [sourceType, setSourceType] = useState("국민카드 1");
+  const [sourceType, setSourceType] = useState("자동 분류");
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const [parsedFiles, setParsedFiles] = useState<Array<Record<string, unknown>>>([]);
@@ -7166,6 +7160,17 @@ function AccountingWorkspace() {
     return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
   }
 
+  function inferExpenseSourceType(fileName: string, fallback = sourceType) {
+    const name = fileName.toLowerCase();
+    if (/국민.*카드|kb.*card|kbcard|국민카드/.test(name)) return "국민카드";
+    if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
+    if (/기업.*은행|ibk|기업은행/.test(name)) return "기업은행";
+    if (/세금계산서|전자세금|tax/.test(name)) return "세금계산서";
+    if (/광고|ad|ads|naver|meta|google/.test(name)) return "광고비";
+    if (/택배|배송|운임|물류|cj|대한통운/.test(name)) return "택배비";
+    return fallback === "자동 분류" ? "기타" : fallback;
+  }
+
   function addExpenseFiles(files: FileList | File[] | null, nextSourceType = sourceType) {
     const nextFiles = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
     if (!nextFiles.length) {
@@ -7174,7 +7179,7 @@ function AccountingWorkspace() {
     }
     const existing = new Set(uploadedExpenseFiles.map(expenseFileKey));
     const fresh = nextFiles
-      .map((file) => ({ file, sourceType: nextSourceType }))
+      .map((file) => ({ file, sourceType: inferExpenseSourceType(file.name, nextSourceType) }))
       .filter((item) => !existing.has(expenseFileKey(item)));
     if (!fresh.length) {
       setMessage("이미 대기 목록에 있는 파일입니다.");
@@ -7189,11 +7194,6 @@ function AccountingWorkspace() {
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     addExpenseFiles(event.target.files);
     event.target.value = "";
-  }
-
-  function pickExpenseSlot(slotKey: string) {
-    setSourceType(slotKey);
-    setMessage(`${slotKey} 파일을 올릴 준비가 됐습니다.`);
   }
 
   function onExpenseDrop(event: DragEvent<HTMLDivElement>) {
@@ -7302,7 +7302,7 @@ function AccountingWorkspace() {
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
-  const bankCardExpense = expenses.filter((row) => ["국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
+  const bankCardExpense = expenses.filter((row) => ["국민카드", "국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
   const bankCardTotal = bankCardExpense.reduce((total, row) => total + asNumber(row.total_amount || row.amount), 0);
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
@@ -7353,68 +7353,38 @@ function AccountingWorkspace() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-black">비용 파일 작업실</h2>
-                <p className="mt-1 text-xs font-bold text-slate-500">기본 업로드 슬롯: 국민카드 2개, 국민은행 1개, 기업은행 1개</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">국민카드 2개, 국민은행 1개, 기업은행 1개 파일을 한 번에 올립니다.</p>
               </div>
-              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm font-bold" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+              <select className="field-input h-9 rounded-md border border-slate-200 px-3 text-xs font-black text-slate-600" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+                <option>자동 분류</option>
                 {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
             </div>
 
             <div
-              className="mt-4 grid gap-3 lg:grid-cols-[auto_auto_auto_auto_1fr]"
+              className="mt-3 grid gap-3 lg:grid-cols-[180px_1fr_auto_auto]"
               onDragOver={(event) => event.preventDefault()}
               onDrop={onExpenseDrop}
             >
-              {accountingUploadSlots.map((slot) => (
-                <label
-                  key={slot.key}
-                  className={`flex h-10 cursor-pointer items-center justify-center rounded-md border px-5 text-sm font-black ${
-                    sourceType === slot.key
-                      ? "border-orange-300 bg-orange-50 text-orange-600"
-                      : slot.tone === "blue"
-                        ? "border-blue-200 bg-white text-blue-600 hover:bg-blue-50"
-                        : "border-orange-200 bg-white text-orange-600 hover:bg-orange-50"
-                  }`}
-                  onClick={() => pickExpenseSlot(slot.key)}
-                >
-                  {slot.label} 업로드
-                  <input
-                    className="hidden"
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    multiple
-                    onChange={(event) => {
-                      addExpenseFiles(event.target.files, slot.key);
-                      event.target.value = "";
-                    }}
-                  />
-                </label>
-              ))}
-              <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-5 text-sm font-black text-slate-600 hover:bg-slate-50" onClick={() => pickExpenseSlot("기타")}>
-                기타 파일
-                <input
-                  className="hidden"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  multiple
-                  onChange={(event) => {
-                    addExpenseFiles(event.target.files, "기타");
-                    event.target.value = "";
-                  }}
-                />
+              <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-5 text-sm font-black text-orange-600 hover:bg-orange-100">
+                파일 선택
+                <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
               </label>
               <div className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm font-black text-slate-500">
-                파일을 여러 개 끌어다 놓을 수 있습니다.
+                국민카드 2개 / 국민은행 / 기업은행 파일을 모두 드래그앤드롭
               </div>
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
-                선택 유형 <b className="text-slate-950">{sourceType}</b> · 대기 파일 {pendingUploadCount.toLocaleString("ko-KR")}개
+              <div className="flex h-10 items-center justify-center rounded-md bg-slate-100 px-3 text-xs font-black text-slate-600">
+                대기 {pendingUploadCount.toLocaleString("ko-KR")}개
               </div>
               <button type="button" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="h-10 rounded-md border border-slate-300 px-4 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
                 {parsing ? "생성 중" : "데이터 생성"}
               </button>
+            </div>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="rounded-md bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+                파일명에 국민카드, 국민은행, 기업은행이 있으면 출처를 자동으로 잡습니다.
+              </div>
               <button type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
                 {uploading ? "저장 중" : "DB 저장"}
               </button>

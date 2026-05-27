@@ -33,6 +33,17 @@ function classifyExpense(vendor: string, description: string, sourceType: string
   return "기타";
 }
 
+function inferSourceType(fileName: string, fallback: string) {
+  const name = fileName.toLowerCase();
+  if (/국민.*카드|kb.*card|kbcard|국민카드/.test(name)) return "국민카드";
+  if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
+  if (/기업.*은행|ibk|기업은행/.test(name)) return "기업은행";
+  if (/세금계산서|전자세금|tax/.test(name)) return "세금계산서";
+  if (/광고|ad|ads|naver|meta|google/.test(name)) return "광고비";
+  if (/택배|배송|운임|물류|cj|대한통운/.test(name)) return "택배비";
+  return fallback;
+}
+
 function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
   return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "", raw: false }).filter((row) =>
     Object.values(row).some((value) => clean(value)),
@@ -44,7 +55,7 @@ export async function parseExpenseFiles(files: File[], sourceType: string, fileS
   const filesSummary: Array<{ name: string; source_type: string; sheet_count: number; row_count: number }> = [];
 
   for (const [fileIndex, file] of files.entries()) {
-    const fileSourceType = clean(fileSourceTypes[fileIndex]) || sourceType;
+    const fileSourceType = clean(fileSourceTypes[fileIndex]) || inferSourceType(file.name, sourceType);
     const buffer = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
     let fileRowCount = 0;
