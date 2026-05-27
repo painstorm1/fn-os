@@ -98,22 +98,25 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string) {
   const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
   const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
   const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * USD_KRW_RATE) : 0);
+  const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "purchase_conversions"]));
+  const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "purchase_conversion_value"]));
+  const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
+  const coupangSales = numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]));
   const conversions = isCoupang
-    ? numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]))
-    : numberValue(first(row, ["conversions", "총 전환수", "구매완료 전환수", "전환수", "전환", "결과", "ccnt"]));
+    ? coupangOrders
+    : purchaseConversions || numberValue(first(row, ["conversions", "전환수", "전환", "결과", "ccnt"]));
   const conversionValue = isCoupang
-    ? numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]))
-    : numberValue(first(row, ["conversion_value", "총 전환매출액", "구매완료 전환매출액", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
+    ? coupangSales
+    : purchaseValue || numberValue(first(row, ["conversion_value", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
   const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "클릭률"])) || pct(clicks, impressions);
   const cpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"])) || (clicks > 0 ? cost / clicks : 0);
-  const cvr = percentValue(first(row, ["cvr", "CVR", "총 전환율(%)", "전환율"])) || pct(conversions, clicks);
+  const cvr = pct(conversions, clicks);
   const roas = percentValue(first(row, [
+    "구매완료 광고수익률(%)",
+    "purchase_roas",
+    ...(isCoupang ? ["총광고수익률(14일)", "총광고수익률(1일)"] : []),
     "roas",
     "ROAS",
-    "총 광고수익률(%)",
-    "구매완료 광고수익률(%)",
-    "총광고수익률(14일)",
-    "총광고수익률(1일)",
   ])) || pct(conversionValue, cost);
   const productCode = text(first(row, [
     "product_code",
