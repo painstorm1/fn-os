@@ -23,7 +23,7 @@ export function hasDbConfig() {
 }
 
 function friendlySupabaseError(text: string, status: number) {
-  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|product_boms|product_bom_items|customers|warehouses|inventory_current|inventory_snapshots|api_sync_logs|ad_daily_metrics|expense_entries|expense_categories|expense_upload_batches|expenses|payment_records|customer_payables|archive_items/i.test(text)) {
+  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|product_boms|product_bom_items|customers|warehouses|inventory_current|inventory_snapshots|api_sync_logs|ad_daily_metrics|expense_entries|expense_categories|expense_upload_batches|expenses|payment_records|customer_payables|import_product_sku_links|import_purchase_sku_allocations|archive_items/i.test(text)) {
     return "FN OS DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
   }
   if (/row-level security|violates row-level security/i.test(text)) {

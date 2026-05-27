@@ -8,7 +8,7 @@ import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx-js-style";
 import ArchiveWorkspace from "./archive-workspace";
 
-const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
+const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || "http://localhost:5500";
 
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
@@ -502,7 +502,7 @@ function RightTools() {
       return;
     }
     try {
-      const res = await fetch(`${IMPORT_ERP_URL}/api/lcl-fee?method=${encodeURIComponent(next.method)}&cbm=${encodeURIComponent(cbm.toFixed(3))}`, {
+      const res = await fetch(`${IMPORT_API_URL}/api/lcl-fee?method=${encodeURIComponent(next.method)}&cbm=${encodeURIComponent(cbm.toFixed(3))}`, {
         credentials: "include",
       });
       const data = await res.json();
@@ -520,7 +520,7 @@ function RightTools() {
         `총 금액: ${won(total)}`,
       ].join("\n"));
     } catch {
-      setLclResult("수입ERP 서버 연결을 확인해 주세요. localhost:5500이 켜져 있어야 계산됩니다.");
+      setLclResult("수입관리 서버 연결을 확인해 주세요. localhost:5500이 켜져 있어야 계산됩니다.");
     }
   }
 
@@ -697,6 +697,43 @@ type ImportProduct = {
   linked_products?: MaterialProductLink[];
 };
 
+type FnProduct = {
+  id: string;
+  product_id?: string;
+  sku?: string;
+  product_code?: string;
+  product_name?: string;
+  option_name?: string;
+  image_url?: string;
+  current_stock?: number;
+  available_stock?: number;
+  standard_price?: number;
+  cost_price?: number;
+  currency?: string;
+};
+
+type ImportSkuLink = {
+  id?: string;
+  import_product_id?: number;
+  product_id: string;
+  sku?: string;
+  default_ratio?: number;
+  default_qty?: number;
+  is_primary?: boolean;
+  memo?: string;
+  product?: FnProduct | null;
+};
+
+type ImportBomStatus = {
+  product_id: string;
+  sku?: string;
+  product_name?: string;
+  has_bom?: boolean;
+  components?: Array<{ component?: FnProduct | null; component_sku?: string; qty_per_unit?: number; shortage?: boolean }>;
+  shortage?: boolean;
+  status?: string;
+};
+
 type ProductMaterialLink = {
   material_id: number;
   material_name?: string;
@@ -731,6 +768,22 @@ type ImportFormData = {
   products: ImportProduct[];
   materials?: ImportProduct[];
 };
+
+function fnProductSku(product?: FnProduct | null) {
+  return product?.sku || product?.product_code || product?.id || "-";
+}
+
+function fnProductName(product?: FnProduct | null) {
+  return product?.product_name || "-";
+}
+
+function fnProductOption(product?: FnProduct | null) {
+  return product?.option_name || "-";
+}
+
+function fnProductPrice(product?: FnProduct | null) {
+  return Number(product?.cost_price || product?.standard_price || 0);
+}
 
 type OrderLine = {
   product_id: string;
@@ -840,12 +893,19 @@ type SalesInventorySummary = {
   sales_by_customer?: Array<Record<string, unknown>>;
   sales_by_product?: Array<Record<string, unknown>>;
   recent_purchases?: Array<Record<string, unknown>>;
+  recent_orders?: Array<Record<string, unknown>>;
+  recent_order_items?: Array<Record<string, unknown>>;
+  recent_shipments?: Array<Record<string, unknown>>;
+  recent_inventory_movements?: Array<Record<string, unknown>>;
+  sales_channels?: Array<Record<string, unknown>>;
+  purchases_by_customer?: Array<Record<string, unknown>>;
+  purchases_by_product?: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
   logs?: Array<Record<string, unknown>>;
 };
 
 function apiUrl(path: string) {
-  return `${IMPORT_ERP_URL}${path}`;
+  return `${IMPORT_API_URL}${path}`;
 }
 
 type CacheEntry<T> = {
@@ -911,7 +971,7 @@ function importHref(path: string) {
 function assetUrl(path?: string) {
   if (!path) return "";
   if (path.startsWith("http") || path.startsWith("data:image/")) return path;
-  return `${IMPORT_ERP_URL}/static/${path.replace(/^\/?static\//, "")}`;
+  return `${IMPORT_API_URL}/static/${path.replace(/^\/?static\//, "")}`;
 }
 
 function sortFactories(factories?: ImportFactory[]) {
@@ -1278,11 +1338,11 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
     };
   }, []);
 
-  if (loading) return <Panel title="수입제품 현황"><p className="text-sm text-slate-500">수입ERP 데이터를 불러오는 중...</p></Panel>;
+  if (loading) return <Panel title="수입제품 현황"><p className="text-sm text-slate-500">수입관리 데이터를 불러오는 중...</p></Panel>;
 
   return (
     <div className={`grid gap-4 ${compact ? "xl:grid-cols-[1fr_320px]" : "2xl:grid-cols-[1fr_360px]"}`}>
-      <Panel title="최근 발주" subtitle="수입ERP 데이터 원장 기준 최근 5건">
+      <Panel title="최근 발주" subtitle="수입관리 데이터 원장 기준 최근 5건">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-slate-200 text-xs text-slate-500">
@@ -1815,7 +1875,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       onSaved(null);
     } catch {
-      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
     }
   }
 
@@ -2130,7 +2190,7 @@ function LegacyNativeOrders() {
   return (
     <Panel
       title="발주"
-      subtitle="FN OS 안으로 흡수한 수입ERP 발주 목록"
+      subtitle="FN OS 안으로 흡수한 수입관리 발주 목록"
       action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
@@ -2265,13 +2325,21 @@ function useImportFormData() {
 
 function NativeProductDetail({ id }: { id: number }) {
   const [detail, setDetail] = useState<ImportProductDetail | null>(null);
+  const [skuLinks, setSkuLinks] = useState<ImportSkuLink[]>([]);
+  const [bomRows, setBomRows] = useState<ImportBomStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
-    cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000)
-      .then((next) => {
-        if (alive) setDetail(next);
+    Promise.all([
+      cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000),
+      fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" }).then((res) => res.json()).catch(() => ({})),
+    ])
+      .then(([next, linkData]) => {
+        if (!alive) return;
+        setDetail(next);
+        setSkuLinks(linkData.links || []);
+        setBomRows(linkData.bom || []);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2295,7 +2363,7 @@ function NativeProductDetail({ id }: { id: number }) {
       sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch {
-      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
     }
   }
 
@@ -2303,7 +2371,7 @@ function NativeProductDetail({ id }: { id: number }) {
   return (
     <Panel
       title={product?.name || "제품 상세"}
-      subtitle={product ? `${product.factory_name || "-"}` : "수입ERP 제품 데이터"}
+      subtitle={product ? `${product.factory_name || "-"}` : "수입관리 제품 데이터"}
       action={<div className="flex gap-2">
         <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600" onClick={deleteProduct}>삭제</button>
         <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>
@@ -2334,6 +2402,64 @@ function NativeProductDetail({ id }: { id: number }) {
               <Info label="옵션" value={product.options || "-"} wide />
               <Info label="메모" value={product.note || "-"} wide />
             </div>
+            <section className="rounded-md border border-slate-200">
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                  <h3 className="font-black">옵션/연동 SKU</h3>
+                  <p className="mt-1 text-xs font-bold text-slate-500">연동 SKU {skuLinks.length.toLocaleString("ko-KR")}개 · 대표 SKU: {fnProductSku((skuLinks.find((link) => link.is_primary) || skuLinks[0])?.product)}</p>
+                </div>
+                <Link className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-600" href={importHref(`/products/${id}/edit`)}>SKU 추가</Link>
+              </div>
+              <div className="overflow-x-auto p-4">
+                <table className="w-full min-w-[840px] text-sm">
+                  <thead className="border-b border-slate-200 text-xs text-slate-500">
+                    <tr>
+                      <th className="py-2 text-left">이미지</th>
+                      <th className="py-2 text-left">SKU</th>
+                      <th className="py-2 text-left">품목명</th>
+                      <th className="py-2 text-left">옵션</th>
+                      <th className="py-2 text-right">현재재고</th>
+                      <th className="py-2 text-right">가용재고</th>
+                      <th className="py-2 text-right">기본 배분비율</th>
+                      <th className="py-2 text-center">상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {skuLinks.map((link) => {
+                      const fnProduct = link.product;
+                      return (
+                        <tr key={link.product_id} className="border-b border-slate-100">
+                          <td className="py-2"><div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}</div></td>
+                          <td className="py-2 font-black">{fnProductSku(fnProduct)}</td>
+                          <td className="py-2">{fnProductName(fnProduct)}</td>
+                          <td className="py-2">{fnProductOption(fnProduct)}</td>
+                          <td className="py-2 text-right">{Number(fnProduct?.current_stock || 0).toLocaleString("ko-KR")}</td>
+                          <td className="py-2 text-right">{Number(fnProduct?.available_stock || 0).toLocaleString("ko-KR")}</td>
+                          <td className="py-2 text-right">{Number(link.default_ratio || 1).toLocaleString("ko-KR")}</td>
+                          <td className="py-2 text-center"><StatusPill status={link.is_primary ? "대표" : "연결"} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!skuLinks.length && <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-400">연동된 SKU가 없습니다.</p>}
+              </div>
+            </section>
+            <section className="rounded-md border border-slate-200">
+              <h3 className="border-b border-slate-200 px-4 py-3 font-black">BOM 현황</h3>
+              <div className="grid gap-2 p-4">
+                {bomRows.map((row) => (
+                  <div key={row.product_id} className="grid gap-2 rounded-md bg-slate-50 p-3 text-sm md:grid-cols-[1.3fr_120px_1.6fr_150px_90px]">
+                    <b>{row.product_name || row.sku || "-"}</b>
+                    <span className={row.has_bom ? "font-bold text-emerald-600" : "font-bold text-slate-500"}>{row.has_bom ? "BOM 등록 완료" : "BOM 미등록"}</span>
+                    <span className="text-slate-600">{(row.components || []).map((item) => fnProductName(item.component) || item.component_sku).filter(Boolean).join(" / ") || "-"}</span>
+                    <span className={row.shortage ? "font-bold text-rose-600" : "font-bold text-emerald-600"}>{row.has_bom ? (row.shortage ? "부자재 부족" : "부자재 재고 정상") : "-"}</span>
+                    <StatusPill status={row.status || "-"} />
+                  </div>
+                ))}
+                {!bomRows.length && <p className="text-sm text-slate-500">연동 SKU가 있으면 BOM 현황이 표시됩니다.</p>}
+              </div>
+            </section>
             <section className="rounded-md border border-slate-200">
               <h3 className="border-b border-slate-200 px-4 py-3 font-black">발주 이력</h3>
               <div className="grid gap-2 p-4">
@@ -2382,7 +2508,7 @@ function GptMiniProductBox() {
     setLoading(true);
     setResult("GPTmini 조회 중...");
     try {
-      const res = await fetch(`${IMPORT_ERP_URL}/api/gptmini/hs`, {
+      const res = await fetch(`${IMPORT_API_URL}/api/gptmini/hs`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2396,7 +2522,7 @@ function GptMiniProductBox() {
       );
       setResult(data.answer);
     } catch (error) {
-      setResult(error instanceof Error ? error.message : "수입ERP 서버 연결을 확인해 주세요.");
+      setResult(error instanceof Error ? error.message : "수입관리 서버 연결을 확인해 주세요.");
     } finally {
       setLoading(false);
     }
@@ -2429,6 +2555,130 @@ function GptMiniProductBox() {
   );
 }
 
+function FnProductPickerModal({
+  open,
+  selected,
+  onClose,
+  onApply,
+}: {
+  open: boolean;
+  selected: ImportSkuLink[];
+  onClose: () => void;
+  onApply: (links: ImportSkuLink[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [products, setProducts] = useState<FnProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState<ImportSkuLink[]>(selected);
+
+  useEffect(() => {
+    if (open) setDraft(selected);
+  }, [open, selected]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("q", query.trim());
+    fetch(`/api/fnos/products/search?${params.toString()}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setProducts(data.products || []);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, query]);
+
+  if (!open) return null;
+
+  const selectedIds = new Set(draft.map((item) => item.product_id));
+  function toggle(product: FnProduct) {
+    setDraft((prev) => {
+      if (prev.some((item) => item.product_id === product.id)) return prev.filter((item) => item.product_id !== product.id);
+      return [...prev, {
+        product_id: product.id,
+        sku: fnProductSku(product),
+        default_ratio: 1,
+        default_qty: 0,
+        is_primary: prev.length === 0,
+        product,
+      }];
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
+      <div className="w-full max-w-6xl rounded-md bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <h3 className="text-lg font-black">FN 상품에서 찾기</h3>
+          <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
+        </div>
+        <div className="grid gap-3 p-5">
+          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU / 품목명 / 옵션 검색" autoFocus />
+          <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
+            <table className="w-full min-w-[940px] text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th className="py-2 text-left">이미지</th>
+                  <th className="py-2 text-left">SKU</th>
+                  <th className="py-2 text-left">품목명</th>
+                  <th className="py-2 text-left">옵션</th>
+                  <th className="py-2 text-right">현재재고</th>
+                  <th className="py-2 text-right">가용재고</th>
+                  <th className="py-2 text-right">표준단가</th>
+                  <th className="py-2 text-center">선택</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((product) => {
+                  const checked = selectedIds.has(product.id);
+                  return (
+                    <tr key={product.id} className="border-b border-slate-100">
+                      <td className="py-2">
+                        <div className="h-11 w-11 overflow-hidden rounded-md bg-slate-100">
+                          {product.image_url && <img src={product.image_url} alt="" className="h-full w-full object-cover" />}
+                        </div>
+                      </td>
+                      <td className="py-2 font-black">{fnProductSku(product)}</td>
+                      <td className="py-2">{fnProductName(product)}</td>
+                      <td className="py-2">{fnProductOption(product)}</td>
+                      <td className="py-2 text-right">{Number(product.current_stock || 0).toLocaleString("ko-KR")}</td>
+                      <td className="py-2 text-right">{Number(product.available_stock || 0).toLocaleString("ko-KR")}</td>
+                      <td className="py-2 text-right">{krw(fnProductPrice(product))}</td>
+                      <td className="py-2 text-center">
+                        <button type="button" className={`h-8 rounded-md px-3 text-xs font-black ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-orange-500 text-white"}`} onClick={() => toggle(product)}>
+                          {checked ? "선택됨" : "추가"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!products.length && (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-sm font-bold text-slate-400">{loading ? "검색 중..." : "검색 결과가 없습니다."}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-bold text-slate-500">선택 {draft.length.toLocaleString("ko-KR")}개</span>
+            <div className="flex gap-2">
+              <button type="button" className="h-10 rounded-md border border-slate-300 px-5 text-sm font-bold" onClick={onClose}>취소</button>
+              <button type="button" className="h-10 rounded-md bg-slate-950 px-5 text-sm font-black text-white" onClick={() => onApply(draft)}>반영</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NativeProductForm({ id }: { id?: number }) {
   const { data, loading } = useImportFormData();
   const [product, setProduct] = useState<ImportProduct | null>(null);
@@ -2446,8 +2696,11 @@ function NativeProductForm({ id }: { id?: number }) {
   const [linkedProducts, setLinkedProducts] = useState<MaterialProductLink[]>([]);
   const [productLinkOpen, setProductLinkOpen] = useState(false);
   const [productLinkQuery, setProductLinkQuery] = useState("");
+  const [fnProductPickerOpen, setFnProductPickerOpen] = useState(false);
+  const [fnSkuLinks, setFnSkuLinks] = useState<ImportSkuLink[]>([]);
 
   useEscapeToClose(productLinkOpen, () => setProductLinkOpen(false));
+  useEscapeToClose(fnProductPickerOpen, () => setFnProductPickerOpen(false));
 
   useEffect(() => {
     return () => {
@@ -2581,6 +2834,20 @@ function NativeProductForm({ id }: { id?: number }) {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setFnSkuLinks(data.links || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
@@ -2607,6 +2874,14 @@ function NativeProductForm({ id }: { id?: number }) {
         throw new Error(res.status === 413 ? "이미지 용량이 너무 큽니다. 더 작은 이미지로 저장해 주세요." : `서버가 JSON이 아닌 응답을 반환했습니다. (${res.status})`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
+      if (fnSkuLinks.length || id) {
+        await fetch("/api/fnos/import-product-links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ import_product_id: id || json.product?.id, links: fnSkuLinks }),
+        });
+      }
       invalidateApiCache("/api/fnos/products");
       invalidateApiCache("/api/fnos/form-data");
       sessionStorage.removeItem("fnos-products-cache");
@@ -2644,7 +2919,7 @@ function NativeProductForm({ id }: { id?: number }) {
   }
 
   return (
-    <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입ERP 원장에 저장합니다.">
+    <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입관리 원장에 저장합니다.">
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
         <>
         <form key={product?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
@@ -2702,6 +2977,17 @@ function NativeProductForm({ id }: { id?: number }) {
                   <option value="MATERIAL">부자재</option>
                 </select>
               </Field>
+              {itemType === "PRODUCT" ? (
+                <Field label="FN OS SKU">
+                  <button
+                    type="button"
+                    className="h-[38px] w-full rounded-md border border-orange-200 bg-orange-50 px-3 text-sm font-black text-orange-700 hover:bg-orange-100"
+                    onClick={() => setFnProductPickerOpen(true)}
+                  >
+                    FN상품에서 찾기
+                  </button>
+                </Field>
+              ) : null}
               {itemType === "MATERIAL" ? (
                 <>
                   <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_stock ?? product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
@@ -2773,6 +3059,34 @@ function NativeProductForm({ id }: { id?: number }) {
               )}
             </div>
             <Field label="메모"><textarea className="field-input" name="note" defaultValue={product?.note || ""} /></Field>
+            {itemType === "PRODUCT" && (
+              <section className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-black">연동 SKU 목록</h3>
+                  <span className="text-xs font-bold text-slate-500">{fnSkuLinks.length.toLocaleString("ko-KR")}개 연결</span>
+                </div>
+                <div className="grid gap-2">
+                  {fnSkuLinks.map((link, index) => {
+                    const fnProduct = link.product;
+                    return (
+                      <div key={link.product_id} className="grid items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm md:grid-cols-[44px_1fr_92px_92px_88px]">
+                        <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
+                          {fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-black">{fnProductName(fnProduct)}</p>
+                          <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · {fnProductOption(fnProduct)}</p>
+                        </div>
+                        <input className="field-input h-8 text-right" type="number" min="0" step="0.01" value={link.default_ratio || 1} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_ratio: Number(event.target.value || 0) || 1 } : item))} />
+                        <label className="flex items-center justify-center gap-1 text-xs font-black text-slate-600"><input type="radio" checked={Boolean(link.is_primary)} onChange={() => setFnSkuLinks((prev) => prev.map((item, itemIndex) => ({ ...item, is_primary: itemIndex === index })))} /> 대표</label>
+                        <button type="button" className="h-8 rounded-md border border-rose-200 text-xs font-black text-rose-600" onClick={() => setFnSkuLinks((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>연결 해제</button>
+                      </div>
+                    );
+                  })}
+                  {!fnSkuLinks.length && <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-400">연동된 FN OS SKU가 없습니다.</p>}
+                </div>
+              </section>
+            )}
             {itemType === "PRODUCT" && (
               <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
@@ -2859,9 +3173,181 @@ function NativeProductForm({ id }: { id?: number }) {
             </div>
           </div>
         )}
+        <FnProductPickerModal
+          open={fnProductPickerOpen}
+          selected={fnSkuLinks}
+          onClose={() => setFnProductPickerOpen(false)}
+          onApply={(links) => {
+            const primaryExists = links.some((link) => link.is_primary);
+            setFnSkuLinks(links.map((link, index) => ({ ...link, is_primary: primaryExists ? Boolean(link.is_primary) : index === 0 })));
+            const primary = links.find((link) => link.is_primary) || links[0];
+            if (primary?.product) {
+              if (!product && primary.product.product_name) {
+                const nameInput = document.querySelector<HTMLInputElement>('input[name="name"]');
+                if (nameInput && !nameInput.value) nameInput.value = primary.product.product_name || "";
+              }
+              if (primary.product.image_url && !previewUrl && !pastedImageDataUrl) setPreviewUrl(primary.product.image_url);
+            }
+            setFnProductPickerOpen(false);
+          }}
+        />
         </>
       )}
     </Panel>
+  );
+}
+
+function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; onClose: () => void }) {
+  const order = detail.order;
+  const [linksByImportProduct, setLinksByImportProduct] = useState<Record<number, ImportSkuLink[]>>({});
+  const [allocations, setAllocations] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const productIds = Array.from(new Set((detail.items || []).map((item) => Number(item.product_id || 0)).filter(Boolean)));
+    Promise.all(productIds.map((productId) => (
+      fetch(`/api/fnos/import-product-links?import_product_id=${productId}`, { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => [productId, data.links || []] as const)
+        .catch(() => [productId, []] as const)
+    ))).then((entries) => {
+      if (!alive) return;
+      const nextLinks = Object.fromEntries(entries);
+      setLinksByImportProduct(nextLinks);
+      const nextAllocations: Record<string, number> = {};
+      (detail.items || []).forEach((item) => {
+        const importProductId = Number(item.product_id || 0);
+        const links = nextLinks[importProductId] || [];
+        const qty = Number(item.quantity || 0);
+        const ratioTotal = links.reduce((sum, link) => sum + Number(link.default_ratio || 1), 0) || links.length || 1;
+        links.forEach((link) => {
+          nextAllocations[`${importProductId}:${link.product_id}`] = Math.round((qty * Number(link.default_ratio || 1) / ratioTotal) * 100) / 100;
+        });
+      });
+      setAllocations(nextAllocations);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [detail.items]);
+
+  function equalAllocate(importProductId: number, qty: number) {
+    const links = linksByImportProduct[importProductId] || [];
+    if (!links.length) return;
+    const perQty = Math.round((qty / links.length) * 100) / 100;
+    setAllocations((prev) => ({
+      ...prev,
+      ...Object.fromEntries(links.map((link) => [`${importProductId}:${link.product_id}`, perQty])),
+    }));
+  }
+
+  function ratioAllocate(importProductId: number, qty: number) {
+    const links = linksByImportProduct[importProductId] || [];
+    const total = links.reduce((sum, link) => sum + Number(link.default_ratio || 1), 0) || 1;
+    setAllocations((prev) => ({
+      ...prev,
+      ...Object.fromEntries(links.map((link) => [`${importProductId}:${link.product_id}`, Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
+    }));
+  }
+
+  async function saveReceipt() {
+    setSaving(true);
+    setMessage("");
+    const rows = (detail.items || []).flatMap((item) => {
+      const importProductId = Number(item.product_id || 0);
+      return (linksByImportProduct[importProductId] || []).map((link) => ({
+        import_order_id: order.id,
+        import_product_id: importProductId,
+        product_id: link.product_id,
+        sku: link.sku || link.product?.sku,
+        allocated_qty: allocations[`${importProductId}:${link.product_id}`] || 0,
+        unit_cost: Number(item.unit_price || 0),
+      }));
+    }).filter((row) => row.allocated_qty > 0);
+    try {
+      const res = await fetch("/api/fnos/import-receipts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          purchase_date: order.fn_arrived || formatDateKey(new Date()),
+          supplier_name: order.factory_name || "",
+          source_ref_id: order.id,
+          memo: `${order.repr_product || order.order_code || "수입관리"} / ${order.order_code || order.id} / ${order.shipping_method || ""} / ${order.note || ""}`,
+          allocations: rows,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.error || "구매/입고 생성 실패");
+      setMessage(`구매/입고 ${data.count || rows.length}건을 생성했습니다.`);
+      window.setTimeout(onClose, 900);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "구매/입고 생성 실패");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
+      <div className="w-full max-w-6xl rounded-md bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h3 className="text-lg font-black">SKU별 수량 배분</h3>
+            <p className="mt-1 text-sm font-bold text-slate-500">purchase_date = {order.fn_arrived || "FN입고일 없음"}</p>
+          </div>
+          <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
+        </div>
+        <div className="grid max-h-[70vh] gap-4 overflow-auto p-5">
+          {(detail.items || []).map((item) => {
+            const importProductId = Number(item.product_id || 0);
+            const links = linksByImportProduct[importProductId] || [];
+            const qty = Number(item.quantity || 0);
+            const allocatedTotal = links.reduce((sum, link) => sum + Number(allocations[`${importProductId}:${link.product_id}`] || 0), 0);
+            return (
+              <section key={item.id || importProductId} className="rounded-md border border-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                  <div>
+                    <b>{item.product_name || "-"}</b>
+                    <span className="ml-3 text-sm font-bold text-slate-500">수입 수량 {qty.toLocaleString("ko-KR")} / 배분 {allocatedTotal.toLocaleString("ko-KR")}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" className="h-8 rounded-md border border-slate-300 px-3 text-xs font-black" onClick={() => equalAllocate(importProductId, qty)}>동일 수량</button>
+                    <button type="button" className="h-8 rounded-md border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-600" onClick={() => ratioAllocate(importProductId, qty)}>기본 비율</button>
+                  </div>
+                </div>
+                <div className="grid gap-2 p-3">
+                  {links.map((link) => {
+                    const key = `${importProductId}:${link.product_id}`;
+                    const fnProduct = link.product;
+                    return (
+                      <div key={link.product_id} className="grid items-center gap-2 rounded-md bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_120px_120px]">
+                        <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}</div>
+                        <div>
+                          <p className="font-black">{fnProductName(fnProduct)}</p>
+                          <p className="text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · 재고 {Number(fnProduct?.available_stock || 0).toLocaleString("ko-KR")}</p>
+                        </div>
+                        <span className="text-right text-xs font-bold text-slate-500">비율 {Number(link.default_ratio || 1)}</span>
+                        <input className="field-input h-9 text-right" type="number" min="0" step="0.01" value={allocations[key] || 0} onChange={(event) => setAllocations((prev) => ({ ...prev, [key]: Number(event.target.value || 0) }))} />
+                        <span className="text-right font-black">{krw(Number(item.unit_price || 0))}</span>
+                      </div>
+                    );
+                  })}
+                  {!links.length && <p className="rounded-md bg-amber-50 px-3 py-3 text-sm font-bold text-amber-700">이 수입관리 제품에 연결된 FN OS SKU가 없습니다. 먼저 제품 상세에서 SKU를 연결해 주세요.</p>}
+                </div>
+              </section>
+            );
+          })}
+          {message && <p className="rounded-md bg-orange-50 px-3 py-3 text-sm font-black text-orange-600">{message}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="h-10 rounded-md border border-slate-300 px-5 text-sm font-bold" onClick={onClose}>나중에</button>
+            <button type="button" className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving} onClick={saveReceipt}>{saving ? "생성 중..." : "구매/입고 생성"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2901,7 +3387,7 @@ function NativeOrderDetail({ id }: { id: number }) {
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       window.location.href = importHref("/orders");
     } catch {
-      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
     } finally {
       setDeleting(false);
     }
@@ -2910,7 +3396,7 @@ function NativeOrderDetail({ id }: { id: number }) {
   return (
     <Panel
       title={order?.order_code || "발주 상세"}
-      subtitle={order ? `${order.factory_name || "-"} · ${order.status || "-"}` : "수입ERP 발주 데이터"}
+      subtitle={order ? `${order.factory_name || "-"} · ${order.status || "-"}` : "수입관리 발주 데이터"}
       action={
         order ? (
           <div className="flex gap-2">
@@ -3202,7 +3688,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
       window.location.href = importHref("/orders");
     } catch {
-      alert("삭제 요청이 서버에 닿지 않았습니다. 수입ERP 서버를 확인해주세요.");
+      alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
     }
   }
 
@@ -3743,7 +4229,7 @@ function LegacyNativeSettings() {
 
   return (
     <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
-      <Panel title="환율" subtitle="수입ERP 설정값">
+      <Panel title="환율" subtitle="수입관리 설정값">
         <div className="grid gap-2">
           {Object.entries(data?.rates || {}).map(([currency, rate]) => (
             <div key={currency} className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm">
@@ -3787,18 +4273,18 @@ function StatusPill({ status }: { status?: string }) {
   return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
 }
 
-type SalesSheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
+type SalesSheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  "이카운트_판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  "FN판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
 };
 
 const salesInitialRows: Record<SalesSheetName, string[][]> = {
   송장출력용: [],
-  이카운트_송장입력: [],
-  "이카운트_판매입력": [],
+  FN송장입력: [],
+  "FN판매입력": [],
 };
 
 function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
@@ -3821,7 +4307,7 @@ function hasSalesRows(rows: string[][]) {
 
 function classifyOrderUploadFileName(fileName: string) {
   const lower = fileName.toLowerCase();
-  if (/esk\d*m/i.test(fileName) || lower.includes("ecount") || fileName.includes("이카운트")) return "이카운트 주문수집";
+  if (/esk\d*m/i.test(fileName) || fileName.toLowerCase().includes("legacy-order")) return "레거시 주문수집";
   if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "현대 이지웰";
   if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "오늘의 집";
   if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "토스";
@@ -3841,7 +4327,7 @@ function salesUploadBadge(fileName: string, kind: "orders" | "invoices") {
   const orderType = kind === "orders" ? classifyOrderUploadFileName(fileName) : "";
   const invoiceType = kind === "invoices" ? classifyInvoiceUploadFileName(fileName) || "송장파일" : "";
   const type = orderType || invoiceType;
-  if (type === "이카운트 주문수집") return { mark: "E", label: "이카운트", className: "border-blue-200 bg-blue-50 text-blue-700" };
+  if (type === "레거시 주문수집") return { mark: "E", label: "레거시", className: "border-blue-200 bg-blue-50 text-blue-700" };
   if (type === "오늘의 집") return { mark: "O", label: "오늘의 집", className: "border-violet-200 bg-violet-50 text-violet-700" };
   if (type === "현대 이지웰") return { mark: "Z", label: "이지웰", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
   if (type === "토스") return { mark: "T", label: "토스", className: "border-sky-200 bg-sky-50 text-sky-700" };
@@ -3929,7 +4415,7 @@ function salesMoneyValue(value: unknown) {
 }
 
 function salesSupplyAmountTotal(rows: string[][]) {
-  const supplyIndex = salesSheetHeaders["이카운트_판매입력"].indexOf("공급가액");
+  const supplyIndex = salesSheetHeaders["FN판매입력"].indexOf("공급가액");
   if (supplyIndex < 0) return 0;
   return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
 }
@@ -4042,7 +4528,7 @@ function invoiceFailureReport(shippingRows: string[], invoiceRows: string[]) {
     `송장출력용 매칭 실패 : ${shippingRows.length}건`,
     shippingRows.length ? shippingRows.join(", ") : "-",
     "",
-    `이카운트_송장입력 매칭 실패 : ${invoiceRows.length}건`,
+    `FN송장입력 매칭 실패 : ${invoiceRows.length}건`,
     invoiceRows.length ? invoiceRows.join(", ") : "-",
   ].join("\n");
 }
@@ -4054,7 +4540,7 @@ function applyInvoiceTrackingToSheets(
 ) {
   if (invoiceRows.length) {
     const nextShipping = currentSheets.송장출력용.map((row) => normalizeShippingRowForTracking(row));
-    const nextInvoice = currentSheets.이카운트_송장입력.map((row) => [...row]);
+    const nextInvoice = currentSheets.FN송장입력.map((row) => [...row]);
     const usedShipping = new Set<number>();
     const failedShippingIndexes = new Set<number>();
     let matchedShipping = 0;
@@ -4149,7 +4635,7 @@ function applyInvoiceTrackingToSheets(
       sheets: {
         ...currentSheets,
         송장출력용: nextShipping,
-        이카운트_송장입력: nextInvoice,
+        FN송장입력: nextInvoice,
       },
       matchedShipping,
       matchedInvoice,
@@ -4164,7 +4650,7 @@ function applyInvoiceTrackingToSheets(
   }
 
   const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
-  const parsedInvoiceRows = (parsedSheets.이카운트_송장입력 || []).filter(rowHasValue);
+  const parsedInvoiceRows = (parsedSheets.FN송장입력 || []).filter(rowHasValue);
   const trackingByShippingCode = new Map<string, string>();
   const trackingByOrderNo = new Map<string, string>();
   const trackingByBundleNo = new Map<string, string>();
@@ -4174,7 +4660,7 @@ function applyInvoiceTrackingToSheets(
     if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
   });
   parsedInvoiceRows.forEach((row) => {
-    const item = salesRowObject("이카운트_송장입력", row);
+    const item = salesRowObject("FN송장입력", row);
     if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
     if (item.주문번호 && item.송장번호) trackingByOrderNo.set(item.주문번호, item.송장번호);
     if (item.묶음주문번호 && item.송장번호) trackingByBundleNo.set(item.묶음주문번호, item.송장번호);
@@ -4191,9 +4677,9 @@ function applyInvoiceTrackingToSheets(
     return row.map((cell, index) => index === 1 ? tracking : cell);
   });
 
-  const nextInvoice = currentSheets.이카운트_송장입력.map((row) => {
+  const nextInvoice = currentSheets.FN송장입력.map((row) => {
     if (!rowHasValue(row)) return row;
-    const item = salesRowObject("이카운트_송장입력", row);
+    const item = salesRowObject("FN송장입력", row);
     const tracking = trackingByOrderNo.get(item.주문번호)
       || trackingByBundleNo.get(item.묶음주문번호)
       || trackingByShippingCode.get(item.쇼핑몰코드);
@@ -4212,7 +4698,7 @@ function applyInvoiceTrackingToSheets(
     sheets: {
       ...currentSheets,
       송장출력용: nextShipping,
-      이카운트_송장입력: nextInvoice,
+      FN송장입력: nextInvoice,
     },
     matchedShipping,
     matchedInvoice,
@@ -4264,8 +4750,8 @@ type SalesWorkspaceFileBucket = typeof SALES_WORKSPACE_FILE_BUCKETS[number];
 function salesInitialSheets(): Record<SalesSheetName, string[][]> {
   return {
     송장출력용: makeSheetRows("송장출력용"),
-    이카운트_송장입력: makeSheetRows("이카운트_송장입력"),
-    "이카운트_판매입력": makeSheetRows("이카운트_판매입력"),
+    FN송장입력: makeSheetRows("FN송장입력"),
+    "FN판매입력": makeSheetRows("FN판매입력"),
   };
 }
 
@@ -4918,7 +5404,7 @@ function SalesExcelGrid({
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             const value = (event.currentTarget as HTMLInputElement).value.trim();
-                            if (sheet === "이카운트_판매입력" && colIndex === productCodeCol && value) {
+                            if (sheet === "FN판매입력" && colIndex === productCodeCol && value) {
                               event.preventDefault();
                               openProductSearch(rowIndex, colIndex, value);
                               setEditing(null);
@@ -5572,7 +6058,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
-  const salesSupplyTotal = salesSupplyAmountTotal(sheets["이카운트_판매입력"]);
+  const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -5587,10 +6073,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     "적요": ""
   }
 ]`);
-
-  useEffect(() => {
-    setActiveTab(defaultTab);
-  }, [defaultTab]);
 
   function loadSummary() {
     fetch("/api/dashboard/summary", { credentials: "include" })
@@ -5608,6 +6090,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     loadSummary();
   }, []);
 
+  const salesTabs = [
+    "온라인 발주",
+    "주문확인",
+    "송장/출고",
+    "판매내역",
+    "구매내역",
+    "기간별 현황",
+    "재고현황",
+    "재고수정",
+    "채널관리",
+    "품목관리",
+  ];
+
   useEffect(() => {
     let cancelled = false;
     async function restoreWorkspace() {
@@ -5623,8 +6118,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (snapshot.sheets) {
           setSheets({
             송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
-            이카운트_송장입력: padSalesRows("이카운트_송장입력", snapshot.sheets.이카운트_송장입력 || []),
-            "이카운트_판매입력": padSalesRows("이카운트_판매입력", snapshot.sheets["이카운트_판매입력"] || []),
+            FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
+            "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
           });
         }
         setCompletedSalesTasks(snapshot.completedSalesTasks || {});
@@ -5745,7 +6240,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
       }
     }
-    if (kind === "orders" && (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.이카운트_송장입력) || hasSalesRows(sheets["이카운트_판매입력"]))) {
+    if (kind === "orders" && (hasSalesRows(sheets.송장출력용) || hasSalesRows(sheets.FN송장입력) || hasSalesRows(sheets["FN판매입력"]))) {
       const ok = window.confirm("현재 작업 중인 시트 값이 있습니다. 새 파일을 실행하면 해당 시트 값이 덮어써질 수 있습니다. 파일을 대기 목록에 추가할까요?");
       if (!ok) return;
     }
@@ -5973,9 +6468,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendSalesInput() {
-    const rows = sheets["이카운트_판매입력"]
+    const rows = sheets["FN판매입력"]
       .filter(rowHasValue)
-      .map((row) => salesRowObject("이카운트_판매입력", row));
+      .map((row) => salesRowObject("FN판매입력", row));
     if (!rows.length) {
       window.alert("전송할 판매입력 행이 없습니다.");
       return;
@@ -6056,7 +6551,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const failureMessage = invoiceFailureReport(result.failedShipping, result.failedInvoice);
         setSalesSheetHighlightedRows({
           송장출력용: result.failedShippingIndexes,
-          이카운트_송장입력: result.failedInvoiceIndexes,
+          FN송장입력: result.failedInvoiceIndexes,
         });
         window.alert(failureMessage);
         setMessage(failureMessage);
@@ -6080,16 +6575,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       : "";
     setSalesSheetHighlightedRows({
       송장출력용: result.failedShippingIndexes,
-      이카운트_송장입력: result.failedInvoiceIndexes,
+      FN송장입력: result.failedInvoiceIndexes,
     });
     window.alert(failureMessage || "송장매칭 성공");
     if (manualRows.length) {
       const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
       setInvoiceMemoText(memo);
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, FN송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
     } else {
       setInvoiceMemoText("");
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, 이카운트_송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상은 없습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
+      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건, FN송장입력 ${result.matchedInvoice}건 반영. 직접 입력 대상은 없습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
     }
   }
 
@@ -6179,6 +6674,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   return (
     <div className="space-y-4">
+      <div className="sticky top-0 z-20 -mx-1 overflow-x-auto bg-[#f6f7f9]/95 px-1 py-2 backdrop-blur">
+        <div className="flex min-w-max gap-2">
+          {salesTabs.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`h-10 rounded-md px-4 text-sm font-black ${
+                activeTab === tab ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {activeTab === "온라인 발주" && (
         <Panel
           title="온라인 발주"
@@ -6268,7 +6780,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 {sheet}
               </button>
             ))}
-            {activeSheet === "이카운트_판매입력" && (
+            {activeSheet === "FN판매입력" && (
               <span className="inline-flex items-center rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">
                 판매입력 총 금액 : {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원
               </span>
@@ -6454,20 +6966,183 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
+      {activeTab === "주문확인" && (
+        <Panel title="주문확인" subtitle="수집된 주문을 출고 가능 상태로 정리합니다. 미매칭, 재고부족, 중복, 보류/제외 상태를 확인하는 작업대입니다.">
+          <div className="mb-3 grid gap-2 md:grid-cols-5">
+            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
+              <option>전체 주문상태</option>
+              <option>collected</option>
+              <option>confirmed</option>
+              <option>hold</option>
+              <option>excluded</option>
+              <option>ready_to_ship</option>
+            </select>
+            <button type="button" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-700">미매칭 상품</button>
+            <button type="button" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700">재고부족</button>
+            <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">중복 확인</button>
+            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white">확정 저장</button>
+          </div>
+          <OrderCheckTable orders={summary?.recent_orders || []} items={summary?.recent_order_items || []} />
+        </Panel>
+      )}
+
+      {activeTab === "기간별 현황" && (
+        <Panel title="기간별 판매/구매 현황" subtitle="FN OS DB 기준 거래처별, 품목별, 기간별 금액을 집계합니다.">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SummaryGroupCard title="거래처별 판매" rows={summary?.sales_by_customer || []} />
+            <SummaryGroupCard title="품목별 판매" rows={summary?.sales_by_product || []} />
+            <SummaryGroupCard title="거래처별 구매" rows={summary?.purchases_by_customer || []} />
+            <SummaryGroupCard title="품목별 구매" rows={summary?.purchases_by_product || []} />
+          </div>
+        </Panel>
+      )}
+
+      {activeTab === "재고수정" && (
+        <Panel title="재고수정" subtitle="수동 조정은 inventory_movements에 adjustment_plus / adjustment_minus로 기록하고 현재고를 갱신하는 구조입니다.">
+          <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="border-b border-slate-200 text-xs text-slate-500">
+                  <tr><th className="py-2 text-left">일시</th><th className="py-2 text-left">유형</th><th className="py-2 text-left">SKU</th><th className="py-2 text-right">수량</th><th className="py-2 text-left">메모</th></tr>
+                </thead>
+                <tbody>
+                  {(summary?.recent_inventory_movements || []).map((row, index) => (
+                    <tr key={String(row.id || index)} className="border-b border-slate-100">
+                      <td className="py-2 font-bold">{String(row.movement_date || row.created_at || "-").slice(0, 16)}</td>
+                      <td className="py-2"><StatusPill status={String(row.movement_type || "-")} /></td>
+                      <td className="py-2">{String(row.sku || "-")}</td>
+                      <td className="py-2 text-right font-black">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
+                      <td className="py-2">{String(row.memo || "-")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-black">조정 입력 예정 필드</h3>
+              <p className="mt-2 text-sm font-bold text-slate-600">품목/SKU, 창고, 증가/감소, 수량, 사유, 조정자를 입력받아 다음 단계에서 저장 API를 연결합니다.</p>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {activeTab === "채널관리" && (
+        <Panel
+          title="쇼핑몰 채널 관리"
+          subtitle="주문수집 대상 쇼핑몰과 API/엑셀 수집 방식을 관리합니다."
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={async () => {
+            const res = await fetch("/api/fnos/sales-channels", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ seed: true }) });
+            const data = await res.json().catch(() => ({}));
+            setMessage(data.ok ? `기본 채널 ${data.count || 0}개를 저장했습니다.` : data.error || "채널 저장 실패");
+            loadSummary();
+          }}>기본 채널 생성</button>}
+        >
+          <ChannelTable rows={summary?.sales_channels || []} />
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
       {activeTab === "송장/출고" && (
-        <Panel title="송장/출고" subtitle="송장출력용, 이카운트_송장입력 시트 구조를 웹 DB로 옮기는 영역입니다.">
+        <Panel title="송장/출고" subtitle="송장출력용, FN송장입력 시트 구조를 웹 DB로 옮기는 영역입니다.">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
               <h3 className="font-black">송장출력용</h3>
               <p className="mt-2 text-sm text-slate-600">쇼핑몰코드, 수취인, 연락처, 우편번호, 주소, 주문옵션, 수량, 배송요청사항, 정산예정금액을 저장할 예정입니다.</p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-black">이카운트_송장입력</h3>
+              <h3 className="font-black">FN송장입력</h3>
               <p className="mt-2 text-sm text-slate-600">주문번호, 묶음주문번호, 배송방법코드, 송장번호 매칭 및 입력 상태를 관리합니다.</p>
             </div>
           </div>
         </Panel>
       )}
+    </div>
+  );
+}
+
+function OrderCheckTable({ orders, items }: { orders: Array<Record<string, unknown>>; items: Array<Record<string, unknown>> }) {
+  const itemCountByOrder = new Map<string, number>();
+  items.forEach((item) => {
+    const key = String(item.order_id || "");
+    if (!key) return;
+    itemCountByOrder.set(key, (itemCountByOrder.get(key) || 0) + 1);
+  });
+  if (!orders.length) {
+    return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 수집된 주문이 없습니다.</div>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="border-b border-slate-200 text-xs text-slate-500">
+          <tr><th className="py-2 text-left">수집일</th><th className="py-2 text-left">쇼핑몰</th><th className="py-2 text-left">주문번호</th><th className="py-2 text-left">수취인</th><th className="py-2 text-left">주소</th><th className="py-2 text-right">품목</th><th className="py-2 text-center">상태</th></tr>
+        </thead>
+        <tbody>
+          {orders.map((row, index) => (
+            <tr key={String(row.id || index)} className="border-b border-slate-100">
+              <td className="py-2 font-bold">{String(row.collected_at || row.created_at || "-").slice(0, 16)}</td>
+              <td className="py-2">{String(row.channel_name || "-")}</td>
+              <td className="py-2 font-bold">{String(row.order_no || "-")}</td>
+              <td className="py-2">{String(row.receiver_name || "-")}</td>
+              <td className="max-w-[360px] truncate py-2">{String(row.address || "-")}</td>
+              <td className="py-2 text-right">{(itemCountByOrder.get(String(row.id || "")) || 0).toLocaleString("ko-KR")}</td>
+              <td className="py-2 text-center"><StatusPill status={String(row.order_status || "collected")} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SummaryGroupCard({ title, rows }: { title: string; rows: Array<Record<string, unknown>> }) {
+  const max = Math.max(1, ...rows.map((row) => Number(row.amount || 0)));
+  return (
+    <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <h3 className="text-sm font-black">{title}</h3>
+      <div className="mt-3 space-y-3">
+        {rows.slice(0, 10).map((row, index) => {
+          const amount = Number(row.amount || 0);
+          return (
+            <div key={`${title}-${String(row.label || index)}`}>
+              <div className="mb-1 flex justify-between gap-3 text-xs">
+                <span className="truncate font-bold text-slate-700">{String(row.label || "-")}</span>
+                <span className="font-black">{krw(amount)}</span>
+              </div>
+              <div className="h-2 rounded bg-white"><div className="h-2 rounded bg-orange-500" style={{ width: `${Math.max(4, (amount / max) * 100)}%` }} /></div>
+            </div>
+          );
+        })}
+        {!rows.length && <p className="rounded bg-white px-2 py-6 text-center text-xs font-bold text-slate-400">데이터 없음</p>}
+      </div>
+    </section>
+  );
+}
+
+function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
+  if (!rows.length) {
+    return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">기본 채널을 생성하면 쇼핑몰 목록이 표시됩니다.</div>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="border-b border-slate-200 text-xs text-slate-500">
+          <tr><th className="py-2 text-left">쇼핑몰코드</th><th className="py-2 text-left">쇼핑몰명</th><th className="py-2 text-left">ID</th><th className="py-2 text-left">거래처명</th><th className="py-2 text-center">수집처</th><th className="py-2 text-center">API</th><th className="py-2 text-center">상태</th><th className="py-2 text-left">마지막 수집</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={String(row.id || row.channel_code || index)} className="border-b border-slate-100">
+              <td className="py-2 font-black">{String(row.channel_code || "-")}</td>
+              <td className="py-2">{String(row.channel_name || "-")}</td>
+              <td className="py-2">{String(row.seller_id || "-")}</td>
+              <td className="py-2">{String(row.customer_name || "-")}</td>
+              <td className="py-2 text-center"><StatusPill status={String(row.channel_type || "excel")} /></td>
+              <td className="py-2 text-center">{row.api_enabled ? "Y" : "N"}</td>
+              <td className="py-2 text-center"><StatusPill status={String(row.api_status || (row.is_active === false ? "미사용" : "사용"))} /></td>
+              <td className="py-2">{String(row.last_synced_at || "-").slice(0, 16)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -6501,7 +7176,7 @@ function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> })
               <td className="py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
               <td className="py-2 text-right">{Number(row.price || 0).toLocaleString("ko-KR")}</td>
               <td className="py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
-              <td className="py-2 text-center"><StatusPill status={String(row.sync_status || row.ecount_sync_status || "SAVED")} /></td>
+              <td className="py-2 text-center"><StatusPill status={String(row.sync_status || "SAVED")} /></td>
             </tr>
           ))}
         </tbody>
@@ -6555,7 +7230,7 @@ function Dashboard() {
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-black">수입제품 현황</h2>
-            <p className="mt-1 text-sm text-slate-500">수입ERP 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
+            <p className="mt-1 text-sm text-slate-500">수입관리 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
           </div>
           <div className="flex gap-2">
             <Link className="inline-flex h-9 items-center rounded-md bg-orange-500 px-3 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>
@@ -6614,9 +7289,9 @@ function inferAdSourceKey(fileName: string): AdSourceKey {
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "coupang";
   if (name.includes("쇼핑검색") || name.includes("shopping")) return "naver-shopping";
   if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "naver-adboost";
-  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형") || name.includes("네이버g")) return "naver-gfa";
-  if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("페이스북") || name.includes("메타")) return "meta-gfa";
-  if (name.includes("캠페인_")) return "naver-adboost";
+  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형")) return "naver-gfa";
+  if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("메타")) return "meta-gfa";
+  if (name.includes("캠페인")) return "naver-adboost";
   if (name.includes("naver") || name.includes("검색") || name.includes("네이버")) return "naver-shopping";
   return "naver-shopping";
 }
@@ -6634,6 +7309,20 @@ function adNumber(value: unknown) {
 
 function adPercent(value: unknown) {
   return `${adNumber(value).toFixed(1)}%`;
+}
+
+function adDateInput(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
+  const today = new Date();
+  const end = new Date(today);
+  end.setDate(today.getDate() - 1);
+  const start = new Date(end);
+  const days = preset === "yesterday" ? 1 : preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
+  start.setDate(end.getDate() - days + 1);
+  return { from: adDateInput(start), to: adDateInput(end) };
 }
 
 function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
@@ -6735,6 +7424,7 @@ function AdsWorkflowSummary() {
 }
 
 function AdsAnalysisWorkspace() {
+  const defaultRange = adRangeForPreset("30d");
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
@@ -6742,10 +7432,14 @@ function AdsAnalysisWorkspace() {
   const [message, setMessage] = useState("");
   const [mappingSku, setMappingSku] = useState("");
   const [mappingProduct, setMappingProduct] = useState<AdsMetricRow | null>(null);
+  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("30d");
+  const [dateFrom, setDateFrom] = useState(defaultRange.from);
+  const [dateTo, setDateTo] = useState(defaultRange.to);
 
   const loadSummary = () => {
     setLoading(true);
-    fetch("/api/fnos/ads/summary", { cache: "no-store" })
+    const params = new URLSearchParams({ from: dateFrom, to: dateTo });
+    fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "광고 분석 조회 실패" }))
@@ -6755,7 +7449,14 @@ function AdsAnalysisWorkspace() {
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [dateFrom, dateTo]);
+
+  function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
+    const range = adRangeForPreset(preset);
+    setRangePreset(preset);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }
 
   function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
     const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
@@ -6889,6 +7590,51 @@ function AdsAnalysisWorkspace() {
         )}
       </section>
 
+      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-black text-slate-800">분석 기간</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">업로드된 광고 DB에서 선택 기간만 다시 집계합니다.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              ["yesterday", "어제"],
+              ["7d", "최근 1주일"],
+              ["14d", "최근 2주"],
+              ["30d", "최근 30일"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => applyRangePreset(key as "yesterday" | "7d" | "14d" | "30d")}
+                className={`h-9 rounded-md border px-3 text-xs font-black ${rangePreset === key ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
+              >
+                {label}
+              </button>
+            ))}
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => {
+                setRangePreset("custom");
+                setDateFrom(event.target.value);
+              }}
+              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
+            />
+            <span className="text-xs font-black text-slate-400">~</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => {
+                setRangePreset("custom");
+                setDateTo(event.target.value);
+              }}
+              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
+            />
+          </div>
+        </div>
+      </section>
+
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
@@ -6977,7 +7723,9 @@ function AdsRightPanel() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/fnos/ads/summary", { cache: "no-store" })
+    const range = adRangeForPreset("30d");
+    const params = new URLSearchParams(range);
+    fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
         if (alive) setSummary(data);

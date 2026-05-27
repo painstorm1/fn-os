@@ -6,25 +6,13 @@ using System.Threading;
 class FnOsStart
 {
     const string FnOsDir = @"D:\Codex_work\FN_WORK_APP\FN_OS";
-    const string ImportErpDir = @"D:\Codex_work\FN_WORK_APP\수입ERP";
     const string NodeExe = @"C:\Program Files\nodejs\node.exe";
-    const string PythonExe = @"C:\Users\pains\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe";
     const string FnOsUrl = "http://localhost:3000";
 
     static int Main()
     {
         try
         {
-            if (!IsPortOpen("127.0.0.1", 5500))
-            {
-                StartHidden(
-                    PythonExe,
-                    "scripts\\run_local_sqlite.py",
-                    ImportErpDir,
-                    "FN Import ERP"
-                );
-            }
-
             if (!IsPortOpen("127.0.0.1", 3000))
             {
                 StartHidden(
@@ -35,7 +23,6 @@ class FnOsStart
                 );
             }
 
-            WaitForPort(5500, 20000);
             WaitForPort(3000, 20000);
             OpenBrowser(FnOsUrl);
             return 0;

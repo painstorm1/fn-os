@@ -4,8 +4,8 @@ import * as XLSX from "xlsx";
 
 export const runtime = "nodejs";
 
-type SheetName = "송장출력용" | "이카운트_송장입력" | "이카운트_판매입력";
-type OrderSource = "ecount" | "todayhouse" | "toss" | "ezwell" | "unknown";
+type SheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
+type OrderSource = "legacy" | "todayhouse" | "toss" | "ezwell" | "unknown";
 type ParsedInvoiceRow = {
   trackingNo: string;
   recipient: string;
@@ -20,8 +20,8 @@ const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  이카운트_송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  이카운트_판매입력: ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  FN판매입력: ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
 };
 
 function clean(value: unknown) {
@@ -192,7 +192,7 @@ function normalizeOrderOptionText(value: string) {
 
 function classifyOrderFileName(fileName: string): OrderSource {
   const name = fileName.toLowerCase();
-  if (/esk\d*m/i.test(fileName) || name.includes("ecount") || name.includes("이카운트")) return "ecount";
+  if (/esk\d*m/i.test(fileName) || name.includes("legacy-order")) return "legacy";
   if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "todayhouse";
   if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "toss";
   if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "ezwell";
@@ -350,7 +350,7 @@ function joinText(...values: unknown[]) {
 }
 
 function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
-  if (source === "ecount" || source === "unknown") return rows;
+  if (source === "legacy" || source === "unknown") return rows;
 
   return rows.map((row) => {
     if (source === "todayhouse") {
@@ -421,8 +421,8 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
 
 const knownHeaderNames = [
   ...headers.송장출력용,
-  ...headers.이카운트_송장입력,
-  ...headers.이카운트_판매입력,
+  ...headers.FN송장입력,
+  ...headers.FN판매입력,
   "수집처",
   "수집일자",
   "품목코드(ERP)",
@@ -551,8 +551,8 @@ export async function POST(request: Request) {
 
     const result: Record<SheetName, string[][]> = {
       송장출력용: [],
-      이카운트_송장입력: [],
-      이카운트_판매입력: [],
+      FN송장입력: [],
+      FN판매입력: [],
     };
     const downRows: Record<string, unknown>[] = [];
     const parsedFiles: string[] = [];
@@ -568,7 +568,7 @@ export async function POST(request: Request) {
         const rows = rowsFromWorksheet(worksheet).filter((row) => Object.values(row).some((value) => clean(value)));
         if (!rows.length) continue;
 
-        if (source !== "unknown" && source !== "ecount") {
+        if (source !== "unknown" && source !== "legacy") {
           downRows.push(...toCanonicalRows(rows, source));
           continue;
         }
@@ -582,11 +582,11 @@ export async function POST(request: Request) {
         if (sheetName === "송장출력용" || rows.some((row) => hasKeys(row, headers.송장출력용))) {
           result.송장출력용.push(...rows.map((row) => asRow(row, "송장출력용")).filter((row) => row.some(Boolean)));
         }
-        if (sheetName === "이카운트_송장입력" || rows.some((row) => hasKeys(row, headers.이카운트_송장입력))) {
-          result.이카운트_송장입력.push(...rows.map((row) => asRow(row, "이카운트_송장입력")).filter((row) => row.some(Boolean)));
+        if (sheetName === "FN송장입력" || rows.some((row) => hasKeys(row, headers.FN송장입력))) {
+          result.FN송장입력.push(...rows.map((row) => asRow(row, "FN송장입력")).filter((row) => row.some(Boolean)));
         }
-        if (sheetName === "1_판매입력" || sheetName === "이카운트_판매입력" || sheetName === "이카운트 판매입력" || rows.some((row) => hasKeys(row, headers.이카운트_판매입력))) {
-          result.이카운트_판매입력.push(...rows.map((row) => asRow(row, "이카운트_판매입력")).filter((row) => row.some(Boolean)));
+        if (sheetName === "1_판매입력" || sheetName === "FN판매입력" || rows.some((row) => hasKeys(row, headers.FN판매입력))) {
+          result.FN판매입력.push(...rows.map((row) => asRow(row, "FN판매입력")).filter((row) => row.some(Boolean)));
         }
       }
     }
@@ -594,8 +594,8 @@ export async function POST(request: Request) {
     if (downRows.length) {
       const converted = buildFromDownRows(downRows);
       result.송장출력용.push(...converted.shipping);
-      result.이카운트_송장입력.push(...converted.invoice);
-      result.이카운트_판매입력.push(...converted.sale);
+      result.FN송장입력.push(...converted.invoice);
+      result.FN판매입력.push(...converted.sale);
     }
 
     return NextResponse.json({ ok: true, files: parsedFiles, sheets: result });

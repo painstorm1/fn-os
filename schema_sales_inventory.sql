@@ -243,6 +243,7 @@ create table if not exists sales (
   updated_at timestamptz not null default now(),
   -- online order/import compatibility
   source_type text default 'fn_os',
+  source_ref_id text,
   source_file_name text,
   upload_batch_id uuid references upload_batches(id) on delete set null,
   io_date text,
@@ -277,6 +278,7 @@ alter table sales add column if not exists supply_amount double precision defaul
 alter table sales add column if not exists vat_amount double precision default 0;
 alter table sales add column if not exists total_amount double precision default 0;
 alter table sales add column if not exists sale_status text default 'SAVED';
+alter table sales add column if not exists source_ref_id text;
 alter table sales add column if not exists sync_status text default 'SAVED';
 alter table sales add column if not exists sync_message text;
 
@@ -642,6 +644,53 @@ create table if not exists import_purchase_orders (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists import_product_sku_links (
+  id uuid primary key default gen_random_uuid(),
+  import_product_id bigint not null,
+  product_id uuid references products(id) on delete cascade,
+  sku text,
+  default_ratio double precision default 1,
+  default_qty double precision default 0,
+  is_primary boolean default false,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (import_product_id, product_id)
+);
+
+alter table import_product_sku_links add column if not exists import_product_id bigint;
+alter table import_product_sku_links add column if not exists product_id uuid;
+alter table import_product_sku_links add column if not exists sku text;
+alter table import_product_sku_links add column if not exists default_ratio double precision default 1;
+alter table import_product_sku_links add column if not exists default_qty double precision default 0;
+alter table import_product_sku_links add column if not exists is_primary boolean default false;
+alter table import_product_sku_links add column if not exists memo text;
+alter table import_product_sku_links add column if not exists updated_at timestamptz default now();
+
+create table if not exists import_purchase_sku_allocations (
+  id uuid primary key default gen_random_uuid(),
+  import_order_id bigint not null,
+  import_product_id bigint not null,
+  product_id uuid references products(id) on delete set null,
+  sku text,
+  allocated_qty double precision default 0,
+  unit_cost double precision default 0,
+  warehouse_id uuid references warehouses(id) on delete set null,
+  purchase_id uuid references purchases(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table import_purchase_sku_allocations add column if not exists import_order_id bigint;
+alter table import_purchase_sku_allocations add column if not exists import_product_id bigint;
+alter table import_purchase_sku_allocations add column if not exists product_id uuid;
+alter table import_purchase_sku_allocations add column if not exists sku text;
+alter table import_purchase_sku_allocations add column if not exists allocated_qty double precision default 0;
+alter table import_purchase_sku_allocations add column if not exists unit_cost double precision default 0;
+alter table import_purchase_sku_allocations add column if not exists warehouse_id uuid;
+alter table import_purchase_sku_allocations add column if not exists purchase_id uuid;
+alter table import_purchase_sku_allocations add column if not exists updated_at timestamptz default now();
+
 create table if not exists archive_items (
   id uuid primary key default gen_random_uuid(),
   archive_type text,
@@ -743,8 +792,10 @@ create index if not exists idx_sales_io_date on sales(io_date);
 create index if not exists idx_sales_prod_cd on sales(prod_cd);
 create index if not exists idx_sales_sku on sales(sku);
 create index if not exists idx_sales_batch on sales(upload_batch_id);
+create unique index if not exists idx_sales_source_ref_unique on sales(source_ref_id) where source_ref_id is not null and source_ref_id <> '';
 create index if not exists idx_purchases_io_date on purchases(io_date);
 create index if not exists idx_purchases_prod_cd on purchases(prod_cd);
+create unique index if not exists idx_purchases_source_ref_unique on purchases(source_ref_id) where source_ref_id is not null and source_ref_id <> '';
 create index if not exists idx_products_code on products(product_code);
 create index if not exists idx_products_name on products(product_name);
 create index if not exists idx_products_legacy_code on products(prod_cd);
@@ -777,6 +828,10 @@ create index if not exists idx_expense_batches_uploaded on expense_upload_batche
 create index if not exists idx_payment_records_date on payment_records(payment_date desc);
 create index if not exists idx_customer_payables_month on customer_payables(base_month, status);
 create index if not exists idx_import_po_status on import_purchase_orders(status, expected_inbound_date);
+create index if not exists idx_import_product_sku_links_import on import_product_sku_links(import_product_id);
+create index if not exists idx_import_product_sku_links_product on import_product_sku_links(product_id);
+create index if not exists idx_import_purchase_alloc_order on import_purchase_sku_allocations(import_order_id);
+create index if not exists idx_import_purchase_alloc_product on import_purchase_sku_allocations(product_id);
 create index if not exists idx_archive_created on archive_items(created_at desc);
 create index if not exists idx_archive_category on archive_items(category_id);
 create index if not exists idx_archive_source on archive_items(source_type);

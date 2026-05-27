@@ -22,6 +22,13 @@ function rowsFromWorkbook(buffer: Buffer) {
 
 const adChannelOrder = ["메타GFA", "네이버쇼핑검색", "네이버Advoost", "네이버GFA", "쿠팡"];
 
+function reportDateFromFileName(fileName: string) {
+  const match = fileName.match(/20\d{6}/);
+  if (!match) return new Date().toISOString().slice(0, 10);
+  const raw = match[0];
+  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+}
+
 function inferAdChannel(fileName: string, index: number, total: number) {
   const name = fileName.toLowerCase();
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "쿠팡";
@@ -29,7 +36,7 @@ function inferAdChannel(fileName: string, index: number, total: number) {
   if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "네이버Advoost";
   if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형")) return "네이버GFA";
   if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("메타")) return "메타GFA";
-  if (name.includes("캠페인_")) return "네이버Advoost";
+  if (name.includes("캠페인")) return "네이버Advoost";
   if (total >= adChannelOrder.length && index < adChannelOrder.length) return adChannelOrder[index];
   return "네이버쇼핑검색";
 }
@@ -50,8 +57,13 @@ export async function POST(request: NextRequest) {
       const groupedFiles = new Map<string, string[]>();
       for (const [index, file] of files.entries()) {
         const channel = fileChannels[index] || clean(form.get("channel")) || inferAdChannel(file.name, index, files.length);
+        const reportDate = reportDateFromFileName(file.name);
         const buffer = Buffer.from(await file.arrayBuffer());
-        const fileRows = rowsFromWorkbook(buffer).map((row) => ({ ...row, __source_file_name: file.name }));
+        const fileRows = rowsFromWorkbook(buffer).map((row) => ({
+          ...row,
+          __source_file_name: file.name,
+          __report_date: reportDate,
+        }));
         groupedRows.set(channel, [...(groupedRows.get(channel) || []), ...fileRows]);
         groupedFiles.set(channel, [...(groupedFiles.get(channel) || []), file.name]);
         fileNames.push(file.name);
@@ -68,19 +80,22 @@ export async function POST(request: NextRequest) {
       }
       const successCount = results.reduce((sum, result) => sum + result.success_count, 0);
       const failCount = results.reduce((sum, result) => sum + result.fail_count, 0);
-      const hasFailure = results.some((result) => !result.ok);
+      const hardFailures = results.filter((result) => !result.ok && !result.duplicate);
+      const duplicateCount = results.filter((result) => result.duplicate).length;
 
       return NextResponse.json({
-        ok: !hasFailure,
-        message: hasFailure
+        ok: hardFailures.length === 0,
+        message: hardFailures.length
           ? "일부 광고 파일을 저장하지 못했습니다."
-          : `광고 파일 ${fileNames.length}개에서 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`,
+          : duplicateCount
+            ? `이미 업로드된 파일 ${duplicateCount}개를 제외하고 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`
+            : `광고 파일 ${fileNames.length}개에서 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`,
         files: fileNames,
         parsed_count: parsedCount,
         success_count: successCount,
         fail_count: failCount,
         results,
-      }, { status: hasFailure ? 400 : 200 });
+      }, { status: hardFailures.length ? 400 : 200 });
     }
 
     const body = await request.json();

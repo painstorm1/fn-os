@@ -11,6 +11,13 @@ export type AdImportResult = {
   duplicate?: boolean;
 };
 
+type SummaryRange = {
+  from?: string;
+  to?: string;
+};
+
+const USD_KRW_RATE = Number(process.env.AD_USD_KRW_RATE || 1380);
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -32,8 +39,18 @@ function first(row: AnyRecord, keys: string[]) {
 }
 
 function numberValue(value: unknown) {
-  const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = text(value).replace(/,/g, "");
+  if (!raw) return 0;
+  const parsed = Number(raw.replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function percentValue(value: unknown) {
+  const raw = text(value);
+  const parsed = numberValue(raw);
+  if (!parsed) return 0;
+  return raw.includes("%") || parsed > 1 ? parsed : parsed * 100;
 }
 
 function dateValue(value: unknown) {
@@ -41,10 +58,10 @@ function dateValue(value: unknown) {
   if (!raw) return new Date().toISOString().slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   if (/^\d{8}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
-  const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   const compact = raw.replace(/\D/g, "");
   if (compact.length >= 8) return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -52,30 +69,73 @@ function pct(numerator: number, denominator: number) {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
 }
 
+function inRange(date: string, range?: SummaryRange) {
+  const value = dateValue(date);
+  if (range?.from && value < range.from) return false;
+  if (range?.to && value > range.to) return false;
+  return true;
+}
+
 async function optionalRows(table: string, query?: Record<string, string | number | boolean | null | undefined>) {
   return selectRows<AnyRecord>(table, query).catch(() => []);
 }
 
+function isAggregateRow(row: AnyRecord) {
+  const campaignId = text(first(row, ["캠페인 ID", "campaign_id"]));
+  const campaignName = text(first(row, ["캠페인명", "캠페인 이름", "campaign_name"]));
+  return !campaignId && /결과|합계|total/i.test(campaignName);
+}
+
+function hasAdSignal(row: AnyRecord) {
+  return ["impressions", "clicks", "cost", "conversions", "conversion_value"].some((key) => numberValue(row[key]) > 0);
+}
+
 function normalizeReport(row: AnyRecord, batchId: string, channel: string) {
-  const impressions = numberValue(first(row, ["impressions", "노출", "노출수", "imp", "impCnt"]));
-  const clicks = numberValue(first(row, ["clicks", "클릭", "클릭수", "clk", "clkCnt"]));
-  const cost = numberValue(first(row, ["cost", "광고비", "비용", "spend", "spend_amount"]));
-  const conversions = numberValue(first(row, ["conversions", "전환", "전환수", "구매", "ccnt"]));
-  const conversionValue = numberValue(first(row, ["conversion_value", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
-  const ctr = numberValue(first(row, ["ctr", "CTR"])) || pct(clicks, impressions);
-  const cpc = numberValue(first(row, ["cpc", "CPC"])) || (clicks > 0 ? cost / clicks : 0);
-  const cvr = numberValue(first(row, ["cvr", "CVR"])) || pct(conversions, clicks);
-  const roas = numberValue(first(row, ["roas", "ROAS"])) || pct(conversionValue, cost);
-  const productCode = text(first(row, ["product_code", "상품코드", "상품 ID", "품목코드", "prod_cd"]));
+  const isCoupang = channel.includes("쿠팡");
+  const isMeta = channel.includes("메타");
+  const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
+  const clicks = numberValue(first(row, ["clicks", "클릭수", "클릭", "clk", "clkCnt"]));
+  const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
+  const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
+  const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * USD_KRW_RATE) : 0);
+  const conversions = isCoupang
+    ? numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]))
+    : numberValue(first(row, ["conversions", "총 전환수", "구매완료 전환수", "전환수", "전환", "결과", "ccnt"]));
+  const conversionValue = isCoupang
+    ? numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]))
+    : numberValue(first(row, ["conversion_value", "총 전환매출액", "구매완료 전환매출액", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
+  const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "클릭률"])) || pct(clicks, impressions);
+  const cpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"])) || (clicks > 0 ? cost / clicks : 0);
+  const cvr = percentValue(first(row, ["cvr", "CVR", "총 전환율(%)", "전환율"])) || pct(conversions, clicks);
+  const roas = percentValue(first(row, [
+    "roas",
+    "ROAS",
+    "총 광고수익률(%)",
+    "구매완료 광고수익률(%)",
+    "총광고수익률(14일)",
+    "총광고수익률(1일)",
+  ])) || pct(conversionValue, cost);
+  const productCode = text(first(row, [
+    "product_code",
+    "상품코드",
+    "상품 ID",
+    "품목코드",
+    "prod_cd",
+    "광고집행 옵션ID",
+    "광고전환매출발생 옵션ID",
+  ]));
   const sku = text(first(row, ["sku", "SKU", "옵션코드", "판매자상품코드"])) || productCode;
+  const campaignName = text(first(row, ["campaign_name", "캠페인명", "캠페인 이름", "광고 세트 이름", "campaign"]));
+  const adGroupName = text(first(row, ["ad_group_name", "광고그룹", "광고 그룹 이름", "ad_group"]));
+  const adName = text(first(row, ["ad_name", "소재", "소재명", "광고명", "광고집행 상품명", "광고전환매출발생 상품명", "ad"]));
 
   return {
     batch_id: batchId,
     channel,
-    report_date: dateValue(first(row, ["report_date", "date", "일자", "날짜", "기간"])),
-    campaign_name: text(first(row, ["campaign_name", "캠페인", "캠페인명", "campaign"])),
-    ad_group_name: text(first(row, ["ad_group_name", "광고그룹", "광고그룹명", "ad_group"])),
-    ad_name: text(first(row, ["ad_name", "소재", "소재명", "광고명", "ad"])),
+    report_date: dateValue(first(row, ["보고 시작", "report_date", "date", "일자", "날짜", "기간", "__report_date"])),
+    campaign_name: campaignName || adGroupName || adName || "-",
+    ad_group_name: adGroupName,
+    ad_name: adName || campaignName,
     product_code: productCode,
     sku,
     impressions,
@@ -93,7 +153,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string) {
 
 export async function importAdRows(rows: AnyRecord[], channel: string, sourceFileName?: string): Promise<AdImportResult> {
   if (!hasDbConfig()) {
-    return { ok: false, message: "Supabase environment variables are not configured.", success_count: 0, fail_count: rows.length };
+    return { ok: false, message: "Supabase 환경변수가 설정되지 않았습니다.", success_count: 0, fail_count: rows.length };
   }
 
   const normalizedChannel = text(channel) || "기타";
@@ -126,7 +186,10 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     status: "SAVED",
   });
 
-  const reports = rows.map((row) => normalizeReport(row, batch.id, normalizedChannel));
+  const reports = rows
+    .filter((row) => !isAggregateRow(row))
+    .map((row) => normalizeReport(row, batch.id, normalizedChannel))
+    .filter(hasAdSignal);
   const saved = reports.length ? await insertRows("ad_reports", reports) : [];
   await patchRows("ad_upload_batches", { id: `eq.${batch.id}` }, {
     success_count: saved.length,
@@ -190,22 +253,24 @@ function adviceFrom(row: AnyRecord) {
   if (roas < 120 && stock <= 5) return "ROAS가 낮고 재고도 적어 광고 중단 또는 예산 축소를 우선 검토하세요.";
   if (roas < 120 && stock > 30) return "재고는 충분하지만 ROAS가 낮습니다. 상세페이지, 가격, 소재를 먼저 개선하세요.";
   if (roas >= 300 && stock <= 10) return "광고 효율은 좋지만 재고가 부족합니다. 발주/입고를 먼저 잡아야 합니다.";
-  if (cost > 0 && sales <= 0) return "광고비가 집행됐지만 매출 연결이 없습니다. 캠페인 추적과 SKU 매핑을 점검하세요.";
+  if (cost > 0 && sales <= 0) return "광고비가 집행됐지만 매출 연결이 없습니다. 캠페인 추적과 SKU 매핑을 확인하세요.";
   if (ctr > 0 && ctr < 1) return "CTR이 낮습니다. 썸네일, 첫 문구, 후킹 소재를 교체해 보세요.";
   if (cvr > 0 && cvr < 1) return "CVR이 낮습니다. 상세페이지, 가격, 리뷰/배송 조건을 확인하세요.";
-  return "현재 지표는 유지 관찰 구간입니다. 예산 증액 전 재고와 순이익을 같이 확인하세요.";
+  return "현재 지표는 유지 가능한 구간입니다. 예산 증액 전 재고와 순이익을 같이 확인하세요.";
 }
 
-export async function adsSummary() {
-  const [reports, batches, mappings, products, sales, inventory] = await Promise.all([
-    optionalRows("ad_reports", { order: "report_date.desc", limit: 2000 }),
+export async function adsSummary(range?: SummaryRange) {
+  const [reportsRaw, batches, mappings, products, salesRaw, inventory] = await Promise.all([
+    optionalRows("ad_reports", { order: "report_date.desc", limit: 5000 }),
     optionalRows("ad_upload_batches", { order: "uploaded_at.desc", limit: 30 }),
     optionalRows("ad_product_mappings", { order: "updated_at.desc", limit: 1000 }),
     optionalRows("products", { order: "product_name.asc", limit: 2000 }),
-    optionalRows("sales", { order: "created_at.desc", limit: 2000 }),
+    optionalRows("sales", { order: "created_at.desc", limit: 5000 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 2000 }),
   ]);
 
+  const reports = reportsRaw.filter((row) => inRange(rowDate(row), range));
+  const sales = salesRaw.filter((row) => inRange(rowDate(row), range));
   const mappingByExternal = mapBy(mappings, (row) => `${text(row.channel)}|${text(row.external_product_code || row.external_product_name)}`);
   const productBySku = mapBy(products, (row) => rowSku(row));
   const salesBySku = new Map<string, AnyRecord>();
@@ -305,6 +370,7 @@ export async function adsSummary() {
 
   return {
     ok: true,
+    range: range || {},
     total,
     batches,
     daily: Array.from(daily.values()).sort((a, b) => text(a.date).localeCompare(text(b.date))),

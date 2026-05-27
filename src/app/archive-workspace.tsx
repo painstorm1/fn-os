@@ -144,14 +144,19 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
 }
 
 function extractArchiveDrafts(rawText: string) {
-  let compactText = rawText.replace(/\u200B/g, "");
+  let compactText = rawText
+    .replace(/\u200B/g, "")
+    .replace(/(^|[\s([{<])ttps:\/\//gi, "$1https://")
+    .replace(/(^|[\s([{<])h\s+ttps:\/\//gi, "$1https://");
   for (let index = 0; index < 3; index += 1) {
     compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{3,})/g, "$1$2");
   }
   const matches = Array.from(compactText.matchAll(/https?:\/\/[^\s"'<>]+/g));
   const seen = new Set<string>();
   return matches.flatMap((match) => {
-    const url = match[0].replace(/[)\],.]+$/g, "");
+    const url = match[0]
+      .replace(/[)\],.]+$/g, "")
+      .replace(/^https?:\/\/(?:wany|wwv|wvw)\.instagram/i, "https://www.instagram");
     if (seen.has(url)) return [];
     seen.add(url);
     const start = Math.max(0, match.index - 100);
@@ -189,6 +194,7 @@ export default function ArchiveWorkspace() {
   const [message, setMessage] = useState("");
   const [autoText, setAutoText] = useState("");
   const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
+  const [autoImagePreview, setAutoImagePreview] = useState("");
   const [autoWorking, setAutoWorking] = useState(false);
   const [filters, setFilters] = useState({ q: "", category: "", source: "", date: "" });
   const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
@@ -237,6 +243,12 @@ export default function ArchiveWorkspace() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (autoImagePreview) URL.revokeObjectURL(autoImagePreview);
+    };
+  }, [autoImagePreview]);
+
   async function postJson(url: string, body: Record<string, unknown>) {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const result = await res.json();
@@ -271,6 +283,10 @@ export default function ArchiveWorkspace() {
 
   async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
+    setAutoImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
     setAutoWorking(true);
     setMessage("이미지에서 링크를 읽는 중입니다.");
     try {
@@ -443,6 +459,12 @@ export default function ArchiveWorkspace() {
                   <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0])} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
                   <button type="button" onClick={() => extractFromText()} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">텍스트 정리</button>
                 </div>
+                {autoImagePreview && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="mb-2 text-xs font-black text-slate-500">붙여넣은 이미지 미리보기</div>
+                    <img src={autoImagePreview} alt="붙여넣은 이미지 미리보기" className="max-h-48 w-full rounded border border-slate-200 bg-white object-contain" />
+                  </div>
+                )}
               </>
             ) : (
               <div className="space-y-4">
