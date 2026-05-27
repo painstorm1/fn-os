@@ -5896,7 +5896,7 @@ function SalesSyncTools() {
     message?: string;
     error?: string;
   } | null>(null);
-  const [expandedLookupCode, setExpandedLookupCode] = useState<string | null>(null);
+  const [expandedLookupCodes, setExpandedLookupCodes] = useState<Record<string, boolean>>({});
 
   async function quickLookup() {
     const query = lookupQuery.trim();
@@ -5906,7 +5906,7 @@ function SalesSyncTools() {
     }
     setLookupLoading(true);
     setLookupResult(null);
-    setExpandedLookupCode(null);
+    setExpandedLookupCodes({});
     try {
       const res = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
@@ -5958,12 +5958,12 @@ function SalesSyncTools() {
             <div className="divide-y divide-slate-100">
               {lookupProducts.map((item, index) => {
                 const itemKey = item.code || item.name || String(index);
-                const isOpen = expandedLookupCode === itemKey;
+                const isOpen = Boolean(expandedLookupCodes[itemKey]);
                 return (
                   <div key={`${itemKey}-${index}`} className="bg-white">
                     <button
                       type="button"
-                      onClick={() => setExpandedLookupCode(isOpen ? null : itemKey)}
+                      onClick={() => setExpandedLookupCodes((prev) => ({ ...prev, [itemKey]: !prev[itemKey] }))}
                       className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-xs transition ${isOpen ? "bg-orange-50" : "hover:bg-slate-50"}`}
                     >
                       <span className="min-w-0">
