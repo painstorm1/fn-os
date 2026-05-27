@@ -7634,6 +7634,73 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
   );
 }
 
+function AccountingRightPanel() {
+  const [summary, setSummary] = useState<AccountingSummary | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/accounting/summary", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setSummary(data);
+      })
+      .catch((error) => {
+        if (alive) setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const totals = summary?.totals || {};
+  const expenses = summary?.expenses || [];
+  const bankCardExpense = expenses.filter((row) => ["국민카드", "국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
+  const bankCardTotal = bankCardExpense.reduce((total, row) => total + asNumber(row.total_amount || row.amount), 0);
+  const categoryRows = summary?.by_category || [];
+  const recentBatches = summary?.batches || [];
+
+  return (
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <div className="mb-4">
+        <h2 className="text-base font-black text-slate-950">회계 대시보드</h2>
+        <p className="mt-1 text-xs font-bold text-slate-500">비용, 결제, 손익 핵심만 모아봅니다.</p>
+      </div>
+      <div className="space-y-3">
+        <AccountingMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" tone="orange" />
+        <AccountingMetric label="카드/은행" value={krw(bankCardTotal)} note="국민카드/국민은행/기업은행" />
+        <AccountingMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 DB 연결" />
+        <AccountingMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 연결" />
+        <AccountingMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} tone="green" />
+        <AccountingMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 확인" tone="rose" />
+      </div>
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <h3 className="text-xs font-black text-slate-500">큰 비용 TOP</h3>
+        <div className="mt-2 space-y-2">
+          {categoryRows.slice(0, 4).map((row, index) => (
+            <div key={`${String(row.label)}-${index}`} className="flex items-center justify-between gap-2 text-xs">
+              <span className="truncate font-bold text-slate-600">{String(row.label || "-")}</span>
+              <span className="font-black text-slate-950">{krw(asNumber(row.amount))}</span>
+            </div>
+          ))}
+          {!categoryRows.length && <p className="rounded bg-white px-2 py-4 text-center text-xs font-bold text-slate-400">데이터 없음</p>}
+        </div>
+      </div>
+      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <h3 className="text-xs font-black text-slate-500">최근 업로드</h3>
+        <div className="mt-2 space-y-2">
+          {recentBatches.slice(0, 4).map((row, index) => (
+            <div key={`${String(row.id || row.source_file_name)}-${index}`} className="text-xs">
+              <p className="truncate font-black text-slate-700">{String(row.source_file_name || row.source_type || "-")}</p>
+              <p className="mt-0.5 text-slate-400">{asNumber(row.success_count).toLocaleString("ko-KR")}건 저장</p>
+            </div>
+          ))}
+          {!recentBatches.length && <p className="rounded bg-white px-2 py-4 text-center text-xs font-bold text-slate-400">업로드 없음</p>}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function DashboardNew() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -7743,6 +7810,7 @@ function HomeContent() {
         </section>
         {activeSlug === "import" && <RightTools />}
         {activeSlug === "sales" && <SalesSyncTools />}
+        {activeSlug === "accounting" && <AccountingRightPanel />}
         {activeSlug === "ads" && <AdsRightPanel />}
       </div>
     </main>
