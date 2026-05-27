@@ -5449,6 +5449,12 @@ function SalesSyncTools() {
     }
   }
 
+  const lookupProducts = lookupResult?.products?.length
+    ? lookupResult.products
+    : lookupResult?.product
+      ? [lookupResult.product]
+      : [];
+
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
@@ -5465,40 +5471,39 @@ function SalesSyncTools() {
           {lookupLoading ? "조회 중" : "조회"}
         </button>
         {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
-        {lookupResult?.message && !lookupResult.product && <div className="mt-2 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{lookupResult.message}</div>}
-        {lookupResult?.product && (
-          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
-            <div className="mb-2 font-black text-slate-950">{lookupResult.product.name || "-"}</div>
-            <div className="grid grid-cols-[76px_1fr] gap-y-1 text-slate-600">
-              <span>품목코드</span><b className="text-slate-950">{lookupResult.product.code || "-"}</b>
-              <span>품목명</span><b className="text-slate-950">{lookupResult.product.name || "-"}</b>
-              <span>입고단가</span><b className="text-slate-950">{lookupResult.product.inPrice || "-"}</b>
-              <span>출고단가</span><b className="text-slate-950">{lookupResult.product.outPrice || "-"}</b>
+        {lookupResult?.message && !lookupProducts.length && <div className="mt-2 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{lookupResult.message}</div>}
+        {lookupProducts.length > 0 && (
+          <div className="mt-2 overflow-hidden rounded-md border border-slate-200">
+            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">
+              검색 결과 {lookupProducts.length}건
             </div>
-          </div>
-        )}
-        {lookupResult?.products && lookupResult.products.length > 1 && (
-          <div className="mt-2 rounded-md border border-slate-200 p-2">
-            <div className="mb-1 text-xs font-black text-slate-500">포함 상품 {lookupResult.products.length}건</div>
-            <div className="grid gap-1">
-              {lookupResult.products.slice(1, 6).map((item, index) => (
-                <div key={`${item.code}-${index}`} className="truncate text-xs font-bold text-slate-600">
-                  {item.code || "-"} · {item.name || "-"}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {lookupResult?.product && (
-          <div className="mt-2 rounded-md border border-slate-200">
-            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black">창고별 재고현황</div>
-            <div className="grid gap-1 p-2">
-              {lookupResult.inventory?.length ? lookupResult.inventory.map((item, index) => (
-                <div key={`${item.whCode}-${index}`} className="flex items-center justify-between rounded bg-white px-2 py-1 text-xs font-bold">
-                  <span className="truncate">{item.whName || item.whCode || "창고"}</span>
-                  <span className="text-slate-950">{item.qty || "0"}</span>
-                </div>
-              )) : <div className="px-2 py-2 text-xs font-bold text-slate-500">동기화된 창고별 재고가 없습니다.</div>}
+            <div className="divide-y divide-slate-100">
+              {lookupProducts.map((item, index) => {
+                const itemKey = item.code || item.name || String(index);
+                const isOpen = expandedLookupCode === itemKey;
+                return (
+                  <div key={`${itemKey}-${index}`} className="bg-white">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedLookupCode(isOpen ? null : itemKey)}
+                      className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-xs transition ${isOpen ? "bg-orange-50" : "hover:bg-slate-50"}`}
+                    >
+                      <span className="min-w-0">
+                        <b className="block truncate text-slate-950">{item.name || "-"}</b>
+                        <span className="mt-0.5 block truncate font-bold text-slate-500">{item.code || "-"}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-black text-orange-500">{isOpen ? "−" : "+"}</span>
+                    </button>
+                    {isOpen && (
+                      <div className="grid grid-cols-[76px_1fr] gap-y-1 border-t border-orange-100 bg-orange-50 px-3 py-2 text-xs text-slate-600">
+                        <span>품목코드</span><b className="text-slate-950">{item.code || "-"}</b>
+                        <span>입고단가</span><b className="text-slate-950">{item.inPrice || "-"}</b>
+                        <span>출고단가</span><b className="text-slate-950">{item.outPrice || "-"}</b>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -6857,13 +6862,6 @@ function AdsAnalysisWorkspace() {
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
-      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="전체 파일 합산" />
-        <AdsMetricCard label="전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
-        <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
-        <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
-      </section>
-
       <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
         <AdsLineChart rows={daily} />
         <AdsBarList title="파일별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
@@ -6939,6 +6937,41 @@ function AdsAnalysisWorkspace() {
         </div>
       </section>
     </div>
+  );
+}
+
+function AdsRightPanel() {
+  const [summary, setSummary] = useState<AdsSummary | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/fnos/ads/summary", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setSummary(data);
+      })
+      .catch((error) => {
+        if (alive) setSummary({ ok: false, error: error instanceof Error ? error.message : "광고 요약 조회 실패" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const total = summary?.total || {};
+
+  return (
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <ToolSection title="광고 핵심 지표" defaultOpen showChevron={false}>
+        <div className="space-y-2">
+          <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="전체 파일 합산" />
+          <AdsMetricCard label="전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
+          <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
+          <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
+        </div>
+        {summary?.ok === false && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{summary.error}</div>}
+      </ToolSection>
+    </aside>
   );
 }
 
@@ -7313,8 +7346,6 @@ function AccountingWorkspace() {
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
-  const bankCardExpense = expenses.filter((row) => ["국민카드", "국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
-  const bankCardTotal = bankCardExpense.reduce((total, row) => total + asNumber(row.total_amount || row.amount), 0);
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
 
@@ -7326,24 +7357,6 @@ function AccountingWorkspace() {
           <p className="mt-1 text-sm font-bold text-slate-500">국민카드, 은행 입출금, 세금계산서, 물류/광고 비용을 파일 기반으로 모아 손익까지 봅니다.</p>
         </div>
       </div>
-
-      <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-6">
-        <AccountingMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" tone="orange" />
-        <AccountingMetric label="카드/은행" value={krw(bankCardTotal)} note="국민카드/국민은행/기업은행" />
-        <AccountingMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 DB 연결" />
-        <AccountingMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 연결" />
-        <AccountingMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} tone="green" />
-        <AccountingMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 확인" tone="rose" />
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <AccountingLineChart rows={monthRows} />
-        <AccountingCategoryChart rows={categoryRows} />
-      </section>
-
-      {loading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">회계 데이터를 불러오는 중입니다.</div>}
-      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">{summary.error}</div>}
-      {message && <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</div>}
 
       <div className="flex gap-2 overflow-x-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
         {accountingTabs.map((tab) => (
@@ -7357,6 +7370,15 @@ function AccountingWorkspace() {
           </button>
         ))}
       </div>
+
+      {loading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">회계 데이터를 불러오는 중입니다.</div>}
+      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">{summary.error}</div>}
+      {message && <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</div>}
+
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <AccountingLineChart rows={monthRows} />
+        <AccountingCategoryChart rows={categoryRows} />
+      </section>
 
       {activeTab === "작업실" && (
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -7721,6 +7743,7 @@ function HomeContent() {
         </section>
         {activeSlug === "import" && <RightTools />}
         {activeSlug === "sales" && <SalesSyncTools />}
+        {activeSlug === "ads" && <AdsRightPanel />}
       </div>
     </main>
   );
