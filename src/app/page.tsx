@@ -6569,7 +6569,7 @@ function Dashboard() {
 }
 
 type AdsMetricRow = Record<string, unknown>;
-type AdSourceKey = "meta" | "naver-search" | "naver-gfa" | "naver-adboost" | "coupang";
+type AdSourceKey = "meta-gfa" | "naver-shopping" | "naver-adboost" | "naver-gfa" | "coupang";
 type UploadedAdFile = {
   id: string;
   sourceKey: AdSourceKey;
@@ -6590,12 +6590,14 @@ type AdsSummary = {
 };
 
 const adSources: Array<{ key: AdSourceKey; label: string; shortLabel: string; hint: string }> = [
-  { key: "meta", label: "메타", shortLabel: "META", hint: "Meta Ads 엑셀/CSV" },
-  { key: "naver-search", label: "네이버검색", shortLabel: "NS", hint: "네이버 검색광고 리포트" },
-  { key: "naver-gfa", label: "네이버GTA", shortLabel: "GTA", hint: "네이버 GTA/GFA 리포트" },
-  { key: "naver-adboost", label: "네이버Advoost", shortLabel: "ADV", hint: "Advoost 리포트" },
-  { key: "coupang", label: "쿠팡", shortLabel: "CP", hint: "쿠팡 광고 리포트" },
+  { key: "meta-gfa", label: "메타GFA", shortLabel: "META", hint: "광고 세트/소재 단위 리포트" },
+  { key: "naver-shopping", label: "네이버쇼핑검색", shortLabel: "NS", hint: "쇼핑검색 캠페인 리포트" },
+  { key: "naver-adboost", label: "네이버Advoost", shortLabel: "ADV", hint: "캠페인 단위 리포트" },
+  { key: "naver-gfa", label: "네이버GFA", shortLabel: "GFA", hint: "광고그룹 단위 리포트" },
+  { key: "coupang", label: "쿠팡", shortLabel: "CP", hint: "pa_total_campaign 리포트" },
 ];
+
+const adSourceOrder: AdSourceKey[] = ["meta-gfa", "naver-shopping", "naver-adboost", "naver-gfa", "coupang"];
 
 const adSourceLabels = Object.fromEntries(adSources.map((source) => [source.key, source.label])) as Record<AdSourceKey, string>;
 
@@ -6609,12 +6611,20 @@ function uploadedAdFileKey(item: UploadedAdFile) {
 
 function inferAdSourceKey(fileName: string): AdSourceKey {
   const name = fileName.toLowerCase();
-  if (name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("페이스북") || name.includes("메타")) return "meta";
+  if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "coupang";
+  if (name.includes("쇼핑검색") || name.includes("shopping")) return "naver-shopping";
   if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "naver-adboost";
-  if (name.includes("gfa") || name.includes("gta") || name.includes("성과형") || name.includes("네이버g")) return "naver-gfa";
-  if (name.includes("coupang") || name.includes("쿠팡")) return "coupang";
-  if (name.includes("naver") || name.includes("search") || name.includes("검색") || name.includes("네이버")) return "naver-search";
-  return "naver-search";
+  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형") || name.includes("네이버g")) return "naver-gfa";
+  if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("페이스북") || name.includes("메타")) return "meta-gfa";
+  if (name.includes("캠페인_")) return "naver-adboost";
+  if (name.includes("naver") || name.includes("검색") || name.includes("네이버")) return "naver-shopping";
+  return "naver-shopping";
+}
+
+function adSourceForFile(file: File, index: number, total: number, forcedSource?: AdSourceKey) {
+  if (forcedSource) return forcedSource;
+  if (total >= adSourceOrder.length && index < adSourceOrder.length) return adSourceOrder[index];
+  return inferAdSourceKey(file.name);
 }
 
 function adNumber(value: unknown) {
@@ -6704,6 +6714,26 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
   );
 }
 
+function AdsWorkflowSummary() {
+  const items = [
+    { title: "1. 파일 생성", body: "5개 리포트를 한 번에 업로드" },
+    { title: "2. 채널 분류", body: "순서와 파일명으로 자동 반영" },
+    { title: "3. 성과 확인", body: "광고비, ROAS, CTR, CVR" },
+    { title: "4. 상품 연결", body: "SKU, 매출, 재고, 순이익" },
+    { title: "5. 실행 판단", body: "증액, 개선, 중단 추천" },
+  ];
+  return (
+    <section className="grid gap-2 md:grid-cols-5">
+      {items.map((item) => (
+        <div key={item.title} className="rounded-md border border-slate-200 bg-white px-3 py-3 shadow-sm">
+          <p className="text-xs font-black text-orange-600">{item.title}</p>
+          <p className="mt-1 text-xs font-bold text-slate-600">{item.body}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function AdsAnalysisWorkspace() {
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -6733,9 +6763,9 @@ function AdsAnalysisWorkspace() {
       setMessage("엑셀 또는 CSV 광고 파일을 선택해 주세요.");
       return;
     }
-    const incoming = next.map((file) => ({
+    const incoming = next.map((file, index) => ({
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      sourceKey: forcedSource || inferAdSourceKey(file.name),
+      sourceKey: adSourceForFile(file, index, next.length, forcedSource),
       file,
     }));
     const existing = new Set(uploadedAdFiles.map(uploadedAdFileKey));
@@ -6814,7 +6844,7 @@ function AdsAnalysisWorkspace() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black">광고분석</h1>
-        <p className="mt-1 text-sm font-bold text-slate-500">메타, 네이버검색, 네이버GTA, 네이버Advoost, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
+        <p className="mt-1 text-sm font-bold text-slate-500">메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
       </div>
 
       <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
@@ -6829,7 +6859,7 @@ function AdsAnalysisWorkspace() {
           >
             <span className="min-w-0">
               <span className="block text-sm font-black text-slate-800">광고 파일 5개를 한 번에 업로드</span>
-              <span className="mt-1 block truncate text-xs font-bold text-slate-500">메타 / 네이버검색 / 네이버GTA / 네이버Advoost / 쿠팡 파일을 끌어다 놓거나 클릭해 선택</span>
+              <span className="mt-1 block truncate text-xs font-bold text-slate-500">위에서부터 메타GFA / 네이버쇼핑검색 / 네이버Advoost / 네이버GFA / 쿠팡 순서로 자동 반영</span>
             </span>
             <span className="shrink-0 rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-black text-orange-600">파일 선택</span>
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
@@ -6861,6 +6891,8 @@ function AdsAnalysisWorkspace() {
 
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
+
+      <AdsWorkflowSummary />
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
         <AdsLineChart rows={daily} />
@@ -6970,6 +7002,13 @@ function AdsRightPanel() {
           <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
         </div>
         {summary?.ok === false && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{summary.error}</div>}
+      </ToolSection>
+      <ToolSection title="분석 기준" showChevron={false}>
+        <div className="space-y-2 text-xs font-bold text-slate-600">
+          <p className="rounded-md bg-slate-50 p-3">파일 순서: 메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡</p>
+          <p className="rounded-md bg-slate-50 p-3">먼저 ROAS와 광고비 급증을 보고, 그 다음 SKU별 재고/순이익을 확인합니다.</p>
+          <p className="rounded-md bg-orange-50 p-3 text-orange-700">ROAS 높음 + 재고 부족은 발주 우선, ROAS 낮음 + 재고 적음은 광고 중단 후보입니다.</p>
+        </div>
       </ToolSection>
     </aside>
   );

@@ -20,6 +20,20 @@ function rowsFromWorkbook(buffer: Buffer) {
   return rows;
 }
 
+const adChannelOrder = ["메타GFA", "네이버쇼핑검색", "네이버Advoost", "네이버GFA", "쿠팡"];
+
+function inferAdChannel(fileName: string, index: number, total: number) {
+  const name = fileName.toLowerCase();
+  if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "쿠팡";
+  if (name.includes("쇼핑검색") || name.includes("shopping")) return "네이버쇼핑검색";
+  if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "네이버Advoost";
+  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형")) return "네이버GFA";
+  if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("메타")) return "메타GFA";
+  if (name.includes("캠페인_")) return "네이버Advoost";
+  if (total >= adChannelOrder.length && index < adChannelOrder.length) return adChannelOrder[index];
+  return "네이버쇼핑검색";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get("content-type") || "";
@@ -35,7 +49,7 @@ export async function POST(request: NextRequest) {
       const groupedRows = new Map<string, Record<string, unknown>[]>();
       const groupedFiles = new Map<string, string[]>();
       for (const [index, file] of files.entries()) {
-        const channel = fileChannels[index] || clean(form.get("channel")) || "기타";
+        const channel = fileChannels[index] || clean(form.get("channel")) || inferAdChannel(file.name, index, files.length);
         const buffer = Buffer.from(await file.arrayBuffer());
         const fileRows = rowsFromWorkbook(buffer).map((row) => ({ ...row, __source_file_name: file.name }));
         groupedRows.set(channel, [...(groupedRows.get(channel) || []), ...fileRows]);
