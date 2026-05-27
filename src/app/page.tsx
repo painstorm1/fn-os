@@ -71,6 +71,11 @@ const salesSubMenus = [
   { label: "기초관리", section: "master" },
 ];
 
+const adsSubMenus = [
+  { label: "일일 광고현황", section: "daily" },
+  { label: "광고DB", section: "db" },
+];
+
 const menuSlugs: Record<string, string> = {
   대시보드: "dashboard",
   "매출/재고": "sales",
@@ -275,9 +280,10 @@ function CalendarMemo() {
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection, adsSection }: { activeMenu: string; importPath: string; salesSection: string; adsSection: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
+  const [adsOpen, setAdsOpen] = useState(activeMenu === "광고분석");
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -288,6 +294,12 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
   useEffect(() => {
     if (activeMenu !== "매출/재고") return;
     const timer = window.setTimeout(() => setSalesOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== "광고분석") return;
+    const timer = window.setTimeout(() => setAdsOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
@@ -346,6 +358,24 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
               >
                 {item}
               </Link>
+            ) : item === "광고분석" ? (
+              <Link
+                href="/?menu=ads&adsSection=daily"
+                onClick={(event) => {
+                  if (activeMenu === "광고분석") {
+                    event.preventDefault();
+                    setAdsOpen((open) => !open);
+                    return;
+                  }
+                  event.preventDefault();
+                  goToInternal("/?menu=ads&adsSection=daily");
+                }}
+                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item}
+              </Link>
             ) : (
               <Link
                 href={`/?menu=${menuSlugs[item]}`}
@@ -393,6 +423,25 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                     }}
                     className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs font-black ${
                       importPath === sub.path ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+            {item === "광고분석" && activeMenu === "광고분석" && adsOpen && (
+              <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                {adsSubMenus.map((sub) => (
+                  <Link
+                    key={sub.section}
+                    href={`/?menu=ads&adsSection=${sub.section}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToInternal(`/?menu=ads&adsSection=${sub.section}`);
+                    }}
+                    className={`block rounded-md px-3 py-2 text-xs font-black ${
+                      adsSection === sub.section ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
                     }`}
                   >
                     {sub.label}
@@ -6115,8 +6164,6 @@ function SalesSyncTools() {
 }
 
 function SalesInventoryWorkspace({ section }: { section: string }) {
-  const defaultTab = section === "history" ? "판매내역" : section === "inventory" ? "재고현황" : section === "master" ? "품목관리" : "온라인 발주";
-  const [activeTab, setActiveTab] = useState(defaultTab);
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
@@ -6172,18 +6219,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     loadSummary();
   }, []);
 
-  const salesTabs = [
-    "온라인 발주",
-    "주문확인",
-    "송장/출고",
-    "판매내역",
-    "구매내역",
-    "기간별 현황",
-    "재고현황",
-    "재고수정",
-    "채널관리",
-    "품목관리",
-  ];
+  const isOnlineSection = section === "online";
+  const isHistorySection = section === "history";
+  const isInventorySection = section === "inventory";
+  const isMasterSection = section === "master";
 
   useEffect(() => {
     let cancelled = false;
@@ -6752,28 +6791,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   });
 
-  const recentRows = activeTab.includes("구매") ? summary?.recent_purchases || [] : summary?.recent_sales || [];
-
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-20 -mx-1 overflow-x-auto bg-[#f6f7f9]/95 px-1 py-2 backdrop-blur">
-        <div className="flex min-w-max gap-2">
-          {salesTabs.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={`h-10 rounded-md px-4 text-sm font-black ${
-                activeTab === tab ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {activeTab === "온라인 발주" && (
+      {isOnlineSection && (
         <Panel
           title="온라인 발주"
           subtitle="기존 발주통합매크로 흐름을 FN OS 화면에서 실행합니다. 업로드 파일은 작업 대기 상태로 보관하고, 결과 시트는 아래 그리드에서 편집합니다."
@@ -6929,59 +6949,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {(activeTab === "판매입력" || activeTab === "구매입력") && (
-        <Panel
-          title={activeTab}
-          subtitle={activeTab === "판매입력" ? "엑셀 1_판매입력 시트 rows를 FN OS DB에 저장합니다." : "구매입력 rows를 FN OS DB에 저장합니다."}
-          action={
-            <button
-              type="button"
-              className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white"
-              onClick={() => postRows(activeTab === "판매입력" ? "sales" : "purchases")}
-            >
-              FN OS 저장
-            </button>
-          }
-        >
-          <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-black">엑셀/VBA 전송 대기</h3>
-              <p className="mt-2 text-sm font-bold text-slate-600">
-                엑셀 매크로에서 아래 엔드포인트로 rows 배열을 보내면 FN OS 판매 DB에 저장됩니다.
-              </p>
-              <div className="mt-4 rounded-md bg-white p-3 text-xs font-bold text-slate-600">
-                <p>엔드포인트: <code>{activeTab === "판매입력" ? "POST /api/sales/import" : "POST /api/purchases/import"}</code></p>
-                <p className="mt-1">인증: <code>x-fnos-api-key: FN_OS_API_KEY</code></p>
-                <p className="mt-1">요청 예: <code>{`{ "rows": [...] }`}</code></p>
-              </div>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <h3 className="font-black">현재 우선순위</h3>
-              <p className="mt-2 text-sm font-bold text-slate-600">
-                웹에서 직접 입력하는 화면보다, 기존 엑셀 흐름을 API로 연결하는 것이 먼저입니다.
-              </p>
-              <button
-                type="button"
-                className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
-                onClick={() => setShowJsonTool((value) => !value)}
-              >
-                {showJsonTool ? "테스트 JSON 닫기" : "테스트 JSON 열기"}
-              </button>
-            </div>
-          </div>
-          {showJsonTool && (
-            <textarea
-              className="mt-3 h-56 w-full rounded-md border border-slate-200 p-3 font-mono text-xs outline-orange-400"
-              value={jsonText}
-              onChange={(event) => setJsonText(event.target.value)}
-            />
-          )}
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
-      )}
-
-      {(activeTab === "판매내역" || activeTab === "구매내역") && (
-        <Panel title={activeTab} subtitle="FN OS 자체 판매/구매 DB 기준으로 조회합니다.">
+      {isHistorySection && (
+        <Panel title="판매내역" subtitle="FN OS 자체 판매 DB 기준으로 조회합니다.">
           <div className="mb-3 grid gap-2 md:grid-cols-4">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 거래처명 검색" />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
@@ -6993,18 +6962,34 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option>FAIL</option>
             </select>
           </div>
-          {activeTab === "판매내역" && <SalesSummaryGroups summary={summary} />}
-          <SalesInventoryTable rows={recentRows} />
+          <SalesSummaryGroups summary={summary} />
+          <SalesInventoryTable rows={summary?.recent_sales || []} />
         </Panel>
       )}
 
-      {activeTab === "품목관리" && (
+      {isHistorySection && (
+        <Panel title="구매내역" subtitle="FN OS 자체 구매 DB 기준으로 조회합니다.">
+          <div className="mb-3 grid gap-2 md:grid-cols-4">
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 공급처명 검색" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
+            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
+              <option>전체 상태</option>
+              <option>SAVED</option>
+              <option>FAIL</option>
+            </select>
+          </div>
+          <SalesInventoryTable rows={summary?.recent_purchases || []} />
+        </Panel>
+      )}
+
+      {isMasterSection && (
         <SalesProductMasterPanel message={message} setMessage={setMessage} sync={sync} />
       )}
 
-      {(activeTab === "재고현황" || activeTab === "품절예측") && (
+      {isInventorySection && (
         <Panel
-          title={activeTab}
+          title="재고현황"
           subtitle="FN OS 재고 DB를 판매 DB와 결합해 품절 위험을 계산합니다."
           action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
         >
@@ -7041,7 +7026,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {activeTab === "주문확인" && (
+      {isOnlineSection && (
         <Panel title="주문확인" subtitle="수집된 주문을 출고 가능 상태로 정리합니다. 미매칭, 재고부족, 중복, 보류/제외 상태를 확인하는 작업대입니다.">
           <div className="mb-3 grid gap-2 md:grid-cols-5">
             <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
@@ -7061,7 +7046,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {activeTab === "기간별 현황" && (
+      {isHistorySection && (
         <Panel title="기간별 판매/구매 현황" subtitle="FN OS DB 기준 거래처별, 품목별, 기간별 금액을 집계합니다.">
           <div className="grid gap-4 lg:grid-cols-2">
             <SummaryGroupCard title="거래처별 판매" rows={summary?.sales_by_customer || []} />
@@ -7072,7 +7057,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {activeTab === "재고수정" && (
+      {isInventorySection && (
         <Panel title="재고수정" subtitle="수동 조정은 inventory_movements에 adjustment_plus / adjustment_minus로 기록하고 현재고를 갱신하는 구조입니다.">
           <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
             <div className="overflow-x-auto">
@@ -7101,7 +7086,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {activeTab === "채널관리" && (
+      {isMasterSection && (
         <Panel
           title="쇼핑몰 채널 관리"
           subtitle="주문수집 대상 쇼핑몰과 API/엑셀 수집 방식을 관리합니다."
@@ -7117,7 +7102,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {activeTab === "송장/출고" && (
+      {isOnlineSection && (
         <Panel title="송장/출고" subtitle="송장출력용, FN송장입력 시트 구조를 웹 DB로 옮기는 영역입니다.">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -7700,10 +7685,11 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   );
 }
 
-function AdsAnalysisWorkspace() {
+function AdsAnalysisWorkspace({ section }: { section: string }) {
   const defaultRange = adRangeForPreset("30d");
   const yesterdayRange = adRangeForPreset("yesterday");
-  const [activeAdsTab, setActiveAdsTab] = useState<"daily" | "db">("daily");
+  const normalizedAdsSection = section === "db" ? "db" : "daily";
+  const [activeAdsTab, setActiveAdsTab] = useState<"daily" | "db">(normalizedAdsSection);
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
@@ -7731,6 +7717,10 @@ function AdsAnalysisWorkspace() {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
   }, [activeAdsTab, dailyDate, dateFrom, dateTo]);
+
+  useEffect(() => {
+    setActiveAdsTab(normalizedAdsSection);
+  }, [normalizedAdsSection]);
 
   function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
     const range = adRangeForPreset(preset);
@@ -7850,22 +7840,6 @@ function AdsAnalysisWorkspace() {
       <div>
         <h1 className="text-2xl font-black">광고분석</h1>
         <p className="mt-1 text-sm font-bold text-slate-500">메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {[
-          ["daily", "일일 광고현황"],
-          ["db", "광고DB"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveAdsTab(key as "daily" | "db")}
-            className={`h-10 rounded-md px-4 text-sm font-black ${activeAdsTab === key ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
-          >
-            {label}
-          </button>
-        ))}
       </div>
 
       <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
@@ -8010,7 +7984,7 @@ function AdsAnalysisWorkspace() {
           <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-black">오늘 확인할 업로드 내역</h2>
-              <button type="button" onClick={() => setActiveAdsTab("db")} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">광고DB에서 자세히 보기</button>
+              <button type="button" onClick={() => goToInternal("/?menu=ads&adsSection=db")} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">광고DB에서 자세히 보기</button>
             </div>
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               {batches.slice(0, 6).map((row, index) => (
@@ -8948,6 +8922,7 @@ function HomeContent() {
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
+  const adsSection = searchParams.get("adsSection") || "daily";
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
@@ -8967,7 +8942,7 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} adsSection={adsSection} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
@@ -8978,7 +8953,7 @@ function HomeContent() {
           ) : activeSlug === "accounting" ? (
             <AccountingWorkspace />
           ) : activeSlug === "ads" ? (
-            <AdsAnalysisWorkspace />
+            <AdsAnalysisWorkspace section={adsSection} />
           ) : activeSlug === "archive" ? (
             <ArchiveWorkspace />
           ) : (
@@ -9004,4 +8979,3 @@ export default function Home() {
     </Suspense>
   );
 }
-
