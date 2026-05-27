@@ -70,11 +70,6 @@ const salesSubMenus = [
   { label: "기초관리", section: "master" },
 ];
 
-const adsSubMenus = [
-  { label: "일일 광고현황", section: "daily" },
-  { label: "광고DB", section: "db" },
-];
-
 const menuSlugs: Record<string, string> = {
   대시보드: "dashboard",
   "매출/재고": "sales",
@@ -279,10 +274,9 @@ function CalendarMemo() {
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection, adsSection }: { activeMenu: string; importPath: string; salesSection: string; adsSection: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
-  const [adsOpen, setAdsOpen] = useState(activeMenu === "광고분석");
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -293,12 +287,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection, adsSection }: { act
   useEffect(() => {
     if (activeMenu !== "매출/재고") return;
     const timer = window.setTimeout(() => setSalesOpen(true), 0);
-    return () => window.clearTimeout(timer);
-  }, [activeMenu]);
-
-  useEffect(() => {
-    if (activeMenu !== "광고분석") return;
-    const timer = window.setTimeout(() => setAdsOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
@@ -359,15 +347,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection, adsSection }: { act
               </Link>
             ) : item === "광고분석" ? (
               <Link
-                href="/?menu=ads&adsSection=daily"
+                href="/?menu=ads"
                 onClick={(event) => {
-                  if (activeMenu === "광고분석") {
-                    event.preventDefault();
-                    setAdsOpen((open) => !open);
-                    return;
-                  }
                   event.preventDefault();
-                  goToInternal("/?menu=ads&adsSection=daily");
+                  goToInternal("/?menu=ads");
                 }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -422,25 +405,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection, adsSection }: { act
                     }}
                     className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs font-black ${
                       importPath === sub.path ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
-                    }`}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
-              </div>
-            )}
-            {item === "광고분석" && activeMenu === "광고분석" && adsOpen && (
-              <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
-                {adsSubMenus.map((sub) => (
-                  <Link
-                    key={sub.section}
-                    href={`/?menu=ads&adsSection=${sub.section}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      goToInternal(`/?menu=ads&adsSection=${sub.section}`);
-                    }}
-                    className={`block rounded-md px-3 py-2 text-xs font-black ${
-                      adsSection === sub.section ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
                     }`}
                   >
                     {sub.label}
@@ -7883,17 +7847,13 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   );
 }
 
-function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
+function AdsAnalysisWorkspace() {
+  const searchParams = useSearchParams();
   const defaultRange = adRangeForPreset("yesterday");
+  const dateFrom = searchParams.get("adsFrom") || defaultRange.from;
+  const dateTo = searchParams.get("adsTo") || defaultRange.to;
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [isAdDragOver, setIsAdDragOver] = useState(false);
-  const [message, setMessage] = useState("");
-  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("yesterday");
-  const [dateFrom, setDateFrom] = useState(defaultRange.from);
-  const [dateTo, setDateTo] = useState(defaultRange.to);
   const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
   const loadSummary = () => {
@@ -7910,101 +7870,6 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
   }, [dateFrom, dateTo]);
-
-  function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
-    const range = adRangeForPreset(preset);
-    setRangePreset(preset);
-    setDateFrom(range.from);
-    setDateTo(range.to);
-  }
-
-  function moveRange(direction: -1 | 1) {
-    const next = shiftAdDateRange(dateFrom, dateTo, direction);
-    setRangePreset("custom");
-    setDateFrom(next.from);
-    setDateTo(next.to);
-  }
-
-  function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
-    const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
-    if (!next.length) {
-      setMessage("엑셀 또는 CSV 광고 파일을 선택해 주세요.");
-      return;
-    }
-    const incoming = next.map((file, index) => ({
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      sourceKey: adSourceForFile(file, index, next.length, forcedSource),
-      file,
-    }));
-    const existing = new Set(uploadedAdFiles.map(uploadedAdFileKey));
-    const fresh = incoming.filter((item) => !existing.has(uploadedAdFileKey(item)));
-    if (!fresh.length) {
-      setMessage("이미 대기 목록에 있는 파일입니다.");
-      return;
-    }
-    setUploadedAdFiles((prev) => [...prev, ...fresh]);
-    setMessage(`광고 파일 ${fresh.length}개를 대기 목록에 올렸습니다. 데이터 생성 버튼을 누르면 저장됩니다.`);
-  }
-
-  function onFileChange(event: ChangeEvent<HTMLInputElement>, sourceKey?: AdSourceKey) {
-    pickAdFiles(event.target.files, sourceKey);
-    event.target.value = "";
-  }
-
-  function onAdDragEnter(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    setIsAdDragOver(true);
-  }
-
-  function onAdDragOver(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    setIsAdDragOver(true);
-  }
-
-  function onAdDragLeave(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsAdDragOver(false);
-  }
-
-  function onAdDrop(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    setIsAdDragOver(false);
-    pickAdFiles(event.dataTransfer.files);
-  }
-
-  function removeAdFile(target: UploadedAdFile) {
-    const key = uploadedAdFileKey(target);
-    setUploadedAdFiles((prev) => prev.filter((item) => uploadedAdFileKey(item) !== key));
-    setMessage(`${target.file.name} 파일을 대기 목록에서 제외했습니다.`);
-  }
-
-  async function uploadRows(forceReplace = false) {
-    if (!uploadedAdFiles.length) {
-      setMessage("먼저 광고 파일을 업로드해 주세요.");
-      return;
-    }
-    setUploading(true);
-    setMessage("");
-    const form = new FormData();
-    uploadedAdFiles.forEach((item) => {
-      form.append("files", item.file);
-      form.append("file_channels", adSourceLabels[item.sourceKey]);
-    });
-    if (forceReplace) form.append("force", "true");
-    const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
-    const data = await res.json();
-    setUploading(false);
-    if (data.needs_confirmation) {
-      const ok = window.confirm(`${data.message || "해당일에 입력된 자료가 있습니다."}\n\n기존 광고 DB 자료를 대체 저장할까요?`);
-      if (ok) return uploadRows(true);
-    }
-    setMessage(data.message || data.error || "업로드 처리 완료");
-    if (res.ok) {
-      setUploadedAdFiles([]);
-      loadSummary();
-    }
-  }
 
   function exportAdReportCsv() {
     const rows = [
@@ -8033,98 +7898,6 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
         <h1 className="text-2xl font-black">광고분석</h1>
         <p className="mt-1 text-sm font-bold text-slate-500">광고 파일을 업로드하고 선택 기간 기준으로 비용, 구매완료 매출, ROAS, CTR, 구매완료 전환율을 봅니다.</p>
       </div>
-
-      <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-            <label
-              className={`flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3 transition ${
-                isAdDragOver
-                  ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
-                  : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
-              }`}
-              onDragEnter={onAdDragEnter}
-              onDragOver={onAdDragOver}
-              onDragLeave={onAdDragLeave}
-              onDrop={onAdDrop}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-black text-slate-800">광고 파일 업로드</span>
-                <span className="mt-1 block truncate text-xs font-bold text-slate-500">엑셀/CSV 파일을 클릭 또는 드래그앤드랍으로 추가</span>
-              </span>
-              <span className={`shrink-0 rounded-md border px-3 py-2 text-xs font-black transition ${
-                isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
-              }`}>파일 선택</span>
-              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
-            </label>
-            <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
-              {uploading ? "생성 중" : "데이터 생성"}
-            </button>
-          </div>
-          {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
-          {!!uploadedAdFiles.length && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="mr-2 text-xs font-black text-slate-600">대기 {uploadedAdFiles.length}개</p>
-              {uploadedAdFiles.map((item) => (
-                <span key={uploadedAdFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700">
-                  <span className="truncate">{item.file.name}</span>
-                  <button type="button" onClick={() => removeAdFile(item)} className="font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
-                </span>
-              ))}
-              <button type="button" onClick={() => setUploadedAdFiles([])} className="ml-auto rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">비우기</button>
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-black text-slate-800">기간 선택</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">{rangeNote}</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <button type="button" onClick={() => moveRange(-1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="이전 기간">‹</button>
-              <button type="button" onClick={() => moveRange(1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="다음 기간">›</button>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {[
-              ["yesterday", "어제"],
-              ["7d", "최근 1주일"],
-              ["14d", "최근 2주"],
-              ["30d", "최근 30일"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => applyRangePreset(key as "yesterday" | "7d" | "14d" | "30d")}
-                className={`h-9 rounded-md border px-3 text-xs font-black ${rangePreset === key ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
-              >
-                {label}
-              </button>
-            ))}
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => {
-                setRangePreset("custom");
-                setDateFrom(event.target.value);
-              }}
-              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
-            />
-            <span className="text-xs font-black text-slate-400">~</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => {
-                setRangePreset("custom");
-                setDateTo(event.target.value);
-              }}
-              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
-            />
-          </div>
-        </div>
-      </section>
 
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
@@ -8170,7 +7943,119 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
 }
 
 function AdsRightPanel() {
+  const searchParams = useSearchParams();
+  const defaultRange = adRangeForPreset("yesterday");
+  const initialFrom = searchParams.get("adsFrom") || defaultRange.from;
+  const initialTo = searchParams.get("adsTo") || defaultRange.to;
   const [summaries, setSummaries] = useState<Record<string, AdsSummary>>({});
+  const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [isAdDragOver, setIsAdDragOver] = useState(false);
+  const [message, setMessage] = useState("");
+  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("yesterday");
+  const [dateFrom, setDateFrom] = useState(initialFrom);
+  const [dateTo, setDateTo] = useState(initialTo);
+
+  function openAdRange(from: string, to: string) {
+    const params = new URLSearchParams({ menu: "ads", adsFrom: from, adsTo: to });
+    goToInternal(`/?${params.toString()}`);
+  }
+
+  function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
+    const range = adRangeForPreset(preset);
+    setRangePreset(preset);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    openAdRange(range.from, range.to);
+  }
+
+  function moveRange(direction: -1 | 1) {
+    const next = shiftAdDateRange(dateFrom, dateTo, direction);
+    setRangePreset("custom");
+    setDateFrom(next.from);
+    setDateTo(next.to);
+    openAdRange(next.from, next.to);
+  }
+
+  function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
+    const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
+    if (!next.length) {
+      setMessage("엑셀 또는 CSV 광고 파일을 선택해 주세요.");
+      return;
+    }
+    const incoming = next.map((file, index) => ({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      sourceKey: adSourceForFile(file, index, next.length, forcedSource),
+      file,
+    }));
+    const existing = new Set(uploadedAdFiles.map(uploadedAdFileKey));
+    const fresh = incoming.filter((item) => !existing.has(uploadedAdFileKey(item)));
+    if (!fresh.length) {
+      setMessage("이미 대기 목록에 있는 파일입니다.");
+      return;
+    }
+    setUploadedAdFiles((prev) => [...prev, ...fresh]);
+    setMessage(`${fresh.length}개 파일 대기 중. 데이터 생성을 누르면 저장됩니다.`);
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>, sourceKey?: AdSourceKey) {
+    pickAdFiles(event.target.files, sourceKey);
+    event.target.value = "";
+  }
+
+  function onAdDragEnter(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsAdDragOver(true);
+  }
+
+  function onAdDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsAdDragOver(true);
+  }
+
+  function onAdDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsAdDragOver(false);
+  }
+
+  function onAdDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsAdDragOver(false);
+    pickAdFiles(event.dataTransfer.files);
+  }
+
+  function removeAdFile(target: UploadedAdFile) {
+    const key = uploadedAdFileKey(target);
+    setUploadedAdFiles((prev) => prev.filter((item) => uploadedAdFileKey(item) !== key));
+  }
+
+  async function uploadRows(forceReplace = false) {
+    if (!uploadedAdFiles.length) {
+      setMessage("먼저 광고 파일을 올려 주세요.");
+      return;
+    }
+    setUploading(true);
+    setMessage("");
+    const form = new FormData();
+    uploadedAdFiles.forEach((item) => {
+      form.append("files", item.file);
+      form.append("file_channels", adSourceLabels[item.sourceKey]);
+    });
+    if (forceReplace) form.append("force", "true");
+    const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
+    const data = await res.json();
+    setUploading(false);
+    if (data.needs_confirmation) {
+      const ok = window.confirm(`${data.message || "해당일에 입력된 자료가 있습니다."}\n\n기존 광고 DB 자료를 대체 저장할까요?`);
+      if (ok) return uploadRows(true);
+    }
+    setMessage(data.message || data.error || "업로드 처리 완료");
+    if (res.ok) {
+      setUploadedAdFiles([]);
+      openAdRange(dateFrom, dateTo);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -8200,6 +8085,90 @@ function AdsRightPanel() {
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
+        <div className="space-y-3">
+          <label
+            className={`flex min-h-20 cursor-pointer flex-col justify-center rounded-md border border-dashed px-3 py-3 transition ${
+              isAdDragOver
+                ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
+                : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
+            }`}
+            onDragEnter={onAdDragEnter}
+            onDragOver={onAdDragOver}
+            onDragLeave={onAdDragLeave}
+            onDrop={onAdDrop}
+          >
+            <span className="text-sm font-black text-slate-800">파일 업로드</span>
+            <span className="mt-1 text-xs font-bold text-slate-500">5개 광고 엑셀/CSV를 한번에 드래그</span>
+            <span className={`mt-3 inline-flex h-8 w-fit items-center rounded-md border px-3 text-xs font-black transition ${
+              isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
+            }`}>파일 선택</span>
+            <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
+          </label>
+          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-10 w-full rounded-md bg-orange-500 text-sm font-black text-white disabled:bg-slate-300">
+            {uploading ? "생성 중" : `데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
+          </button>
+          {message && <p className="rounded-md bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">{message}</p>}
+          {!!uploadedAdFiles.length && (
+            <div className="max-h-32 space-y-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
+              {uploadedAdFiles.map((item) => (
+                <div key={uploadedAdFileKey(item)} className="flex items-center gap-2 rounded bg-white px-2 py-1 text-xs font-bold text-slate-600">
+                  <span className="min-w-0 flex-1 truncate">{item.file.name}</span>
+                  <button type="button" onClick={() => removeAdFile(item)} className="shrink-0 font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </ToolSection>
+      <ToolSection title="기간 선택" defaultOpen showChevron={false}>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" onClick={() => moveRange(-1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="이전 기간">‹</button>
+            <p className="min-w-0 flex-1 text-center text-xs font-black text-slate-600">{dateFrom === dateTo ? dateTo : `${dateFrom} ~ ${dateTo}`}</p>
+            <button type="button" onClick={() => moveRange(1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="다음 기간">›</button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ["yesterday", "어제"],
+              ["7d", "최근 1주"],
+              ["14d", "최근 2주"],
+              ["30d", "최근 30일"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => applyRangePreset(key as "yesterday" | "7d" | "14d" | "30d")}
+                className={`h-9 rounded-md border px-2 text-xs font-black ${rangePreset === key ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => {
+                setRangePreset("custom");
+                setDateFrom(event.target.value);
+              }}
+              className="field-input h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold"
+            />
+            <span className="text-xs font-black text-slate-400">~</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => {
+                setRangePreset("custom");
+                setDateTo(event.target.value);
+              }}
+              className="field-input h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold"
+            />
+          </div>
+          <button type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full rounded-md bg-slate-950 text-xs font-black text-white">조회</button>
+        </div>
+      </ToolSection>
       <ToolSection title="광고 핵심 지표" defaultOpen showChevron={false}>
         <div className="space-y-3">
           {["어제", "최근 1주일", "최근 30일"].map((label) => {
@@ -9036,7 +9005,6 @@ function HomeContent() {
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
-  const adsSection = searchParams.get("adsSection") || "daily";
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
@@ -9056,7 +9024,7 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} adsSection={adsSection} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
@@ -9067,7 +9035,7 @@ function HomeContent() {
           ) : activeSlug === "accounting" ? (
             <AccountingWorkspace />
           ) : activeSlug === "ads" ? (
-            <AdsAnalysisWorkspace section={adsSection} />
+            <AdsAnalysisWorkspace />
           ) : activeSlug === "archive" ? (
             <ArchiveWorkspace />
           ) : (
