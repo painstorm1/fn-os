@@ -6008,6 +6008,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
+  const [historyMode, setHistoryMode] = useState<"sales" | "purchases">("sales");
+  const [entryModalMode, setEntryModalMode] = useState<"sales" | "purchases" | null>(null);
+  const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
+  const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
+  const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
   const [activeSheet, setActiveSheet] = useState<SalesSheetName>("송장출력용");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -6026,6 +6031,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
+  useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
@@ -6064,6 +6070,118 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const isHistorySection = section === "history";
   const isInventorySection = section === "inventory";
   const isMasterSection = section === "master";
+
+  function makeEntryDraft(mode: "sales" | "purchases", sequence = entryRows.length + 1) {
+    const date = new Date().toISOString().slice(0, 10);
+    return {
+      io_date: date,
+      upload_ser_no: String(sequence),
+      cust_name: "",
+      wh_cd: "100",
+      prod_cd: "",
+      prod_name: "",
+      qty: "1",
+      price: "0",
+      supply_amt: "0",
+      remarks: mode === "sales" ? "웹 판매입력" : "웹 구매입력",
+    };
+  }
+
+  function openEntryModal(mode: "sales" | "purchases") {
+    setEntryModalMode(mode);
+    setEntryRows([]);
+    setEditingEntryIndex(null);
+    setEntryDraft(makeEntryDraft(mode, 1));
+  }
+
+  function updateEntryDraft(key: string, value: string) {
+    setEntryDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "qty" || key === "price") {
+        const qty = Number(String(key === "qty" ? value : next.qty).replace(/[^\d.-]/g, ""));
+        const price = Number(String(key === "price" ? value : next.price).replace(/[^\d.-]/g, ""));
+        if (Number.isFinite(qty) && Number.isFinite(price)) next.supply_amt = String(qty * price);
+      }
+      return next;
+    });
+  }
+
+  function addOrUpdateEntryRow() {
+    if (!entryModalMode) return;
+    const qty = Number(String(entryDraft.qty || 0).replace(/[^\d.-]/g, ""));
+    if (!String(entryDraft.prod_cd || entryDraft.prod_name || "").trim()) {
+      setMessage("품목코드 또는 품목명을 입력해 주세요.");
+      return;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setMessage("수량은 1 이상으로 입력해 주세요.");
+      return;
+    }
+    const row = {
+      ...entryDraft,
+      sale_date: entryModalMode === "sales" ? entryDraft.io_date : "",
+      purchase_date: entryModalMode === "purchases" ? entryDraft.io_date : "",
+    };
+    if (editingEntryIndex === null) {
+      setEntryRows((prev) => [...prev, row]);
+      setEntryDraft(makeEntryDraft(entryModalMode, entryRows.length + 2));
+    } else {
+      setEntryRows((prev) => prev.map((item, index) => (index === editingEntryIndex ? row : item)));
+      setEditingEntryIndex(null);
+      setEntryDraft(makeEntryDraft(entryModalMode, entryRows.length + 1));
+    }
+    setMessage("");
+  }
+
+  function editEntryRow(index: number) {
+    setEditingEntryIndex(index);
+    setEntryDraft(entryRows[index] || {});
+  }
+
+  function deleteEntryRow(index: number) {
+    setEntryRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
+    if (editingEntryIndex === index) {
+      setEditingEntryIndex(null);
+      if (entryModalMode) setEntryDraft(makeEntryDraft(entryModalMode, Math.max(1, entryRows.length)));
+    }
+  }
+
+  async function saveEntryRows() {
+    if (!entryModalMode) return;
+    const rows = entryRows.length ? entryRows : [entryDraft];
+    if (!rows.some((row) => String(row.prod_cd || row.prod_name || "").trim())) {
+      setMessage("저장할 판매/구매 입력 행이 없습니다.");
+      return;
+    }
+    const endpoint = entryModalMode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ rows, source_file_name: entryModalMode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "저장에 실패했습니다.");
+      return;
+    }
+    setMessage(`${entryModalMode === "sales" ? "판매" : "구매"} 입력 저장 완료: ${data.total_count || data.success_count || rows.length}건`);
+    setEntryModalMode(null);
+    setEntryRows([]);
+    setEditingEntryIndex(null);
+    loadSummary();
+  }
+
+  useEffect(() => {
+    if (!isHistorySection) return undefined;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2") return;
+      event.preventDefault();
+      openEntryModal(historyMode);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isHistorySection, historyMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6791,27 +6909,39 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
 
       {isHistorySection && (
-        <Panel title="판매내역" subtitle="FN OS 자체 판매 DB 기준으로 조회합니다.">
-          <div className="mb-3 grid gap-2 md:grid-cols-4">
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 거래처명 검색" />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
-            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
-              <option>전체 상태</option>
-              <option>PENDING</option>
-              <option>SUCCESS</option>
-              <option>FAIL</option>
-            </select>
+        <Panel
+          title="판매/구매"
+          subtitle={historyMode === "sales" ? "최근 입력한 판매내역을 기본으로 보여줍니다." : "최근 입력한 구매내역을 기본으로 보여줍니다."}
+          action={
+            <button
+              type="button"
+              onClick={() => openEntryModal(historyMode)}
+              className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
+            >
+              {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
+            </button>
+          }
+        >
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
+              {[
+                ["sales", "판매"],
+                ["purchases", "구매"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setHistoryMode(mode as "sales" | "purchases")}
+                  className={`rounded px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs font-black text-slate-500">단축키 F2</div>
           </div>
-          <SalesSummaryGroups summary={summary} />
-          <SalesInventoryTable rows={summary?.recent_sales || []} />
-        </Panel>
-      )}
-
-      {isHistorySection && (
-        <Panel title="구매내역" subtitle="FN OS 자체 구매 DB 기준으로 조회합니다.">
           <div className="mb-3 grid gap-2 md:grid-cols-4">
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="품목명 / 공급처명 검색" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder={historyMode === "sales" ? "품목명 / 거래처명 검색" : "품목명 / 공급처명 검색"} />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
             <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
@@ -6820,7 +6950,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option>FAIL</option>
             </select>
           </div>
-          <SalesInventoryTable rows={summary?.recent_purchases || []} />
+          {historyMode === "sales" && <SalesSummaryGroups summary={summary} />}
+          <SalesInventoryTable rows={historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []} />
         </Panel>
       )}
 
@@ -6946,6 +7077,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </div>
         </Panel>
       )}
+
+      {entryModalMode && (
+        <SalesPurchaseEntryModal
+          mode={entryModalMode}
+          draft={entryDraft}
+          rows={entryRows}
+          editingIndex={editingEntryIndex}
+          onClose={() => setEntryModalMode(null)}
+          onDraftChange={updateEntryDraft}
+          onAddOrUpdate={addOrUpdateEntryRow}
+          onEdit={editEntryRow}
+          onDelete={deleteEntryRow}
+          onNew={() => setEntryDraft(makeEntryDraft(entryModalMode, entryRows.length + 1))}
+          onSave={() => void saveEntryRows()}
+        />
+      )}
     </div>
   );
 }
@@ -6980,6 +7127,96 @@ function OrderCheckTable({ orders, items }: { orders: Array<Record<string, unkno
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SalesPurchaseEntryModal({
+  mode,
+  draft,
+  rows,
+  editingIndex,
+  onClose,
+  onDraftChange,
+  onAddOrUpdate,
+  onEdit,
+  onDelete,
+  onNew,
+  onSave,
+}: {
+  mode: "sales" | "purchases";
+  draft: Record<string, string>;
+  rows: Array<Record<string, string>>;
+  editingIndex: number | null;
+  onClose: () => void;
+  onDraftChange: (key: string, value: string) => void;
+  onAddOrUpdate: () => void;
+  onEdit: (index: number) => void;
+  onDelete: (index: number) => void;
+  onNew: () => void;
+  onSave: () => void;
+}) {
+  const partnerLabel = mode === "sales" ? "거래처" : "공급처";
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
+      <div className="w-full max-w-5xl rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+          <div>
+            <h3 className="text-xl font-black">{mode === "sales" ? "판매입력" : "구매입력"}</h3>
+            <p className="mt-1 text-sm font-bold text-slate-500">행 추가 후 수정/삭제하고 저장하면 FN OS DB에 반영됩니다.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <label className="text-xs font-black text-slate-500">일자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="date" value={draft.io_date || ""} onChange={(event) => onDraftChange("io_date", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">{partnerLabel}<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.cust_name || ""} onChange={(event) => onDraftChange("cust_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">창고<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.wh_cd || ""} onChange={(event) => onDraftChange("wh_cd", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">순번<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.upload_ser_no || ""} onChange={(event) => onDraftChange("upload_ser_no", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.prod_cd || ""} onChange={(event) => onDraftChange("prod_cd", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.prod_name || ""} onChange={(event) => onDraftChange("prod_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">수량<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.qty || ""} onChange={(event) => onDraftChange("qty", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">단가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.price || ""} onChange={(event) => onDraftChange("price", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">공급가액<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.supply_amt || ""} onChange={(event) => onDraftChange("supply_amt", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500 md:col-span-3">메모<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.remarks || ""} onChange={(event) => onDraftChange("remarks", event.target.value)} /></label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap justify-between gap-2">
+          <button type="button" onClick={onAddOrUpdate} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
+            {editingIndex === null ? "행 추가" : "수정 반영"}
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onNew} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-500 hover:bg-slate-50">새 입력</button>
+            <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white hover:bg-slate-800">저장</button>
+          </div>
+        </div>
+
+        <div className="mt-5 overflow-x-auto rounded-md border border-slate-200">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="bg-slate-50 text-xs font-black text-slate-500">
+              <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">{partnerLabel}</th><th className="px-3 py-2 text-left">품목</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2 text-right">공급가액</th><th className="px-3 py-2 text-center">관리</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`${row.upload_ser_no}-${index}`} className="border-t border-slate-100">
+                  <td className="px-3 py-2 font-bold">{row.io_date || "-"}</td>
+                  <td className="px-3 py-2">{row.cust_name || "-"}</td>
+                  <td className="px-3 py-2 font-bold">{row.prod_name || row.prod_cd || "-"}</td>
+                  <td className="px-3 py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
+                  <td className="px-3 py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button type="button" onClick={() => onEdit(index)} className="mr-2 rounded border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">수정</button>
+                    <button type="button" onClick={() => onDelete(index)} className="rounded border border-rose-200 px-3 py-1 text-xs font-black text-rose-600">삭제</button>
+                  </td>
+                </tr>
+              ))}
+              {!rows.length && (
+                <tr><td colSpan={6} className="px-3 py-8 text-center text-sm font-bold text-slate-400">추가된 행이 없으면 현재 입력값 1건을 바로 저장합니다.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
