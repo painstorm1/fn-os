@@ -1,4 +1,4 @@
-import { hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
+import { deleteRows, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -9,6 +9,8 @@ export type AdImportResult = {
   success_count: number;
   fail_count: number;
   duplicate?: boolean;
+  replaced_count?: number;
+  replaced_dates?: string[];
 };
 
 type SummaryRange = {
@@ -76,6 +78,12 @@ function inRange(date: string, range?: SummaryRange) {
   if (range?.from && value < range.from) return false;
   if (range?.to && value > range.to) return false;
   return true;
+}
+
+function todayKstStartIso() {
+  const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const ymd = kstNow.toISOString().slice(0, 10);
+  return new Date(`${ymd}T00:00:00+09:00`).toISOString();
 }
 
 async function optionalRows(table: string, query?: Record<string, string | number | boolean | null | undefined>) {
@@ -182,24 +190,12 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
 
   const normalizedChannel = text(channel) || "기타";
   const fileName = text(sourceFileName) || null;
-  if (fileName) {
-    const existing = await optionalRows("ad_upload_batches", {
-      channel: `eq.${normalizedChannel}`,
-      source_file_name: `eq.${fileName}`,
-      status: "eq.SAVED",
-      limit: 1,
-    });
-    if (existing.length) {
-      return {
-        ok: false,
-        duplicate: true,
-        message: "이미 업로드된 광고 파일입니다.",
-        batch_id: text(existing[0].id),
-        success_count: 0,
-        fail_count: rows.length,
-      };
-    }
-  }
+  const recentBatches = await optionalRows("ad_upload_batches", {
+    channel: `eq.${normalizedChannel}`,
+    status: "eq.SAVED",
+    uploaded_at: `gte.${todayKstStartIso()}`,
+    limit: 30,
+  });
 
   const [batch] = await insertRows<{ id: string }>("ad_upload_batches", {
     channel: normalizedChannel,
@@ -215,10 +211,41 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     .filter((row) => !isAggregateRow(row))
     .map((row) => normalizeReport(row, batch.id, normalizedChannel, usdKrwRate))
     .filter(hasAdSignal);
+  const reportDates = Array.from(new Set(reports.map((row) => text(row.report_date)).filter(Boolean))).sort();
+  let replacedCount = 0;
+  const replacedReportIds = new Set<string>();
+  if (reportDates.length) {
+    const existingReports = await optionalRows("ad_reports", {
+      channel: `eq.${normalizedChannel}`,
+      report_date: `in.(${reportDates.join(",")})`,
+      limit: 5000,
+    });
+    existingReports.forEach((row) => {
+      if (row.id) replacedReportIds.add(text(row.id));
+    });
+    await deleteRows("ad_reports", {
+      channel: `eq.${normalizedChannel}`,
+      report_date: `in.(${reportDates.join(",")})`,
+    }).catch(() => []);
+  }
+  for (const recentBatch of recentBatches) {
+    const batchId = text(recentBatch.id);
+    if (!batchId) continue;
+    const existingReports = await optionalRows("ad_reports", { batch_id: `eq.${batchId}`, limit: 5000 });
+    existingReports.forEach((row) => {
+      if (row.id) replacedReportIds.add(text(row.id));
+    });
+    await deleteRows("ad_reports", { batch_id: `eq.${batchId}` }).catch(() => []);
+    await patchRows("ad_upload_batches", { id: `eq.${batchId}` }, { status: "REPLACED", memo: `새 ${normalizedChannel} 업로드로 교체됨` }).catch(() => []);
+  }
+  replacedCount = replacedReportIds.size;
   const saved = reports.length ? await insertRows("ad_reports", reports) : [];
   await patchRows("ad_upload_batches", { id: `eq.${batch.id}` }, {
     success_count: saved.length,
     fail_count: Math.max(0, rows.length - saved.length),
+    memo: reportDates.length
+      ? `${reportDates.join(", ")} 기존 ${replacedCount.toLocaleString("ko-KR")}건 교체`
+      : null,
   });
 
   const campaigns = Array.from(new Set(reports.map((row) => row.campaign_name).filter(Boolean))).map((campaignName) => ({
@@ -232,10 +259,14 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
 
   return {
     ok: true,
-    message: `광고 데이터 ${saved.length.toLocaleString("ko-KR")}건을 저장했습니다.`,
+    message: replacedCount
+      ? `${reportDates.join(", ")} ${normalizedChannel} 기존 ${replacedCount.toLocaleString("ko-KR")}건을 새 데이터 ${saved.length.toLocaleString("ko-KR")}건으로 교체했습니다.`
+      : `광고 데이터 ${saved.length.toLocaleString("ko-KR")}건을 저장했습니다.`,
     batch_id: batch.id,
     success_count: saved.length,
     fail_count: Math.max(0, rows.length - saved.length),
+    replaced_count: replacedCount,
+    replaced_dates: reportDates,
   };
 }
 

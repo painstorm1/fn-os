@@ -23,9 +23,9 @@ function rowsFromWorkbook(buffer: Buffer) {
 const adChannelOrder = ["메타GFA", "네이버쇼핑검색", "네이버Advoost", "네이버GFA", "쿠팡"];
 
 function reportDateFromFileName(fileName: string) {
-  const match = fileName.match(/20\d{6}/);
-  if (!match) return new Date().toISOString().slice(0, 10);
-  const raw = match[0];
+  const matches = fileName.match(/20\d{6}/g);
+  if (!matches?.length) return new Date().toISOString().slice(0, 10);
+  const raw = matches[matches.length - 1];
   return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
 }
 
@@ -82,11 +82,14 @@ export async function POST(request: NextRequest) {
       const failCount = results.reduce((sum, result) => sum + result.fail_count, 0);
       const hardFailures = results.filter((result) => !result.ok && !result.duplicate);
       const duplicateCount = results.filter((result) => result.duplicate).length;
+      const replacedCount = results.reduce((sum, result) => sum + (result.replaced_count || 0), 0);
 
       return NextResponse.json({
         ok: hardFailures.length === 0,
         message: hardFailures.length
           ? "일부 광고 파일을 저장하지 못했습니다."
+          : replacedCount
+            ? `기존 광고 데이터 ${replacedCount.toLocaleString("ko-KR")}건을 지우고 ${successCount.toLocaleString("ko-KR")}건으로 교체했습니다.`
           : duplicateCount
             ? `이미 업로드된 파일 ${duplicateCount}개를 제외하고 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`
             : `광고 파일 ${fileNames.length}개에서 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`,
@@ -94,6 +97,7 @@ export async function POST(request: NextRequest) {
         parsed_count: parsedCount,
         success_count: successCount,
         fail_count: failCount,
+        replaced_count: replacedCount,
         results,
       }, { status: hardFailures.length ? 400 : 200 });
     }
