@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { handleLocalImportErp } from "@/lib/import-erp-local";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,9 +29,14 @@ async function ensureImportErp(origin: string) {
 }
 
 async function proxyImportErp(request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  if (process.env.IMPORT_ERP_SOURCE !== "external") {
+    const localResponse = await handleLocalImportErp(request, params.path || []);
+    if (localResponse) return localResponse;
+  }
+
   await ensureImportErp(request.nextUrl.origin);
 
-  const params = await context.params;
   const path = (params.path || []).map(encodeURIComponent).join("/");
   const url = new URL(request.url);
   const target = `${IMPORT_API_URL.replace(/\/$/, "")}/${path}${url.search}`;

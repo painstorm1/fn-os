@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import pg, { type QueryResultRow } from "pg";
 import { uploadStorageFile } from "./fnos-db";
 
-type AnyRecord = Record<string, any>;
+type AnyRecord = QueryResultRow & Record<string, unknown>;
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
@@ -461,7 +461,7 @@ async function saveOrder(request: NextRequest, id?: number) {
 async function saveFactory(request: NextRequest, id?: number) {
   const body = await request.json().catch(() => ({}));
   const fields = ["name", "name_local", "country", "platform", "contact", "wechat", "email", "bank_account", "address", "first_order", "rating", "note"];
-  const values = Object.fromEntries(fields.filter((field) => body[field] !== undefined).map((field) => [field, body[field]]));
+  const values: AnyRecord = Object.fromEntries(fields.filter((field) => body[field] !== undefined).map((field) => [field, body[field]]));
   values.updated_at = nowIso();
   if (id) {
     const keys = Object.keys(values);
@@ -487,10 +487,19 @@ async function handleGet(path: string, request: NextRequest) {
     return json({ orders, factories: await factories(), q: text(url.searchParams.get("q")), date_from: text(url.searchParams.get("date_from")), date_to: text(url.searchParams.get("date_to")) });
   }
   const orderMatch = path.match(/^api\/fnos\/orders\/(\d+)$/);
-  if (orderMatch) return json(await orderDetail(Number(orderMatch[1])) || { ok: false, error: "발주를 찾을 수 없습니다." }, orderMatch ? 200 : 404);
-  if (path === "api/fnos/products") return json({ products: await productsList(), materials: (await productsList()).filter((item) => text(item.item_type).toUpperCase() === "MATERIAL"), categories: await categories(), q: "", cat: "", status: "" });
+  if (orderMatch) {
+    const detail = await orderDetail(Number(orderMatch[1]));
+    return json(detail || { ok: false, error: "발주를 찾을 수 없습니다." }, detail ? 200 : 404);
+  }
+  if (path === "api/fnos/products") {
+    const products = await productsList();
+    return json({ products, materials: products.filter((item) => text(item.item_type).toUpperCase() === "MATERIAL"), categories: await categories(), q: "", cat: "", status: "" });
+  }
   const productMatch = path.match(/^api\/fnos\/products\/(\d+)$/);
-  if (productMatch) return json({ ok: true, ...(await productDetail(Number(productMatch[1]))) });
+  if (productMatch) {
+    const detail = await productDetail(Number(productMatch[1]));
+    return json(detail ? { ok: true, ...detail } : { ok: false, error: "제품을 찾을 수 없습니다." }, detail ? 200 : 404);
+  }
   if (path === "api/fnos/form-data") {
     const products = await productsList();
     return json({ rates: await ratesMap(), categories: await categories(), factories: await factories(), products, materials: products.filter((item) => text(item.item_type).toUpperCase() === "MATERIAL") });
@@ -502,12 +511,21 @@ async function handleGet(path: string, request: NextRequest) {
     return json({ orders, products, totals: { orders: orders.length, products: products.length } });
   }
   if (path === "api/fnos/calendar-production-memos") {
-    const orders = await db(`select id, production_memo, production_due_date, order_code from ${q(TABLES.orders)} where production_due_date is not null or factory_ship_date is not null`);
+    const orders = await db(
+      `select id, order_code, order_date, factory_ship_date, production_days
+         from ${q(TABLES.orders)}
+        where factory_ship_date is not null or order_date is not null`,
+    );
     const grouped: Record<string, AnyRecord[]> = {};
     for (const order of orders) {
-      const key = dateKey(order.production_due_date || order.factory_ship_date);
+      let key = dateKey(order.factory_ship_date);
+      if (!key && order.order_date) {
+        const dueDate = new Date(order.order_date);
+        dueDate.setDate(dueDate.getDate() + numberValue(order.production_days));
+        key = dueDate.toISOString().slice(0, 10);
+      }
       if (!key) continue;
-      grouped[key] = [...(grouped[key] || []), { memo: text(order.production_memo || order.order_code), order_id: Number(order.id) }];
+      grouped[key] = [...(grouped[key] || []), { memo: text(order.order_code), order_id: Number(order.id) }];
     }
     return json(grouped);
   }

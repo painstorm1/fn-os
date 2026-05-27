@@ -7783,6 +7783,22 @@ function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
   return { from: adDateInput(start), to: adDateInput(end) };
 }
 
+function adRangeDays(from: string, to: string) {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  const diff = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  return Math.max(1, diff || 1);
+}
+
+function shiftAdDateRange(from: string, to: string, direction: -1 | 1) {
+  const days = adRangeDays(from, to);
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  start.setDate(start.getDate() + direction * days);
+  end.setDate(end.getDate() + direction * days);
+  return { from: adDateInput(start), to: adDateInput(end) };
+}
+
 function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
   const toneClass = tone === "rose" ? "text-rose-600" : tone === "slate" ? "text-slate-600" : "text-orange-600";
   return (
@@ -7997,8 +8013,6 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
   const [uploading, setUploading] = useState(false);
   const [isAdDragOver, setIsAdDragOver] = useState(false);
   const [message, setMessage] = useState("");
-  const [mappingSku, setMappingSku] = useState("");
-  const [mappingProduct, setMappingProduct] = useState<AdsMetricRow | null>(null);
   const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("yesterday");
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo, setDateTo] = useState(defaultRange.to);
@@ -8072,9 +8086,7 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
 
   function onAdDragLeave(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setIsAdDragOver(false);
-    }
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsAdDragOver(false);
   }
 
   function onAdDrop(event: DragEvent<HTMLLabelElement>) {
@@ -8116,28 +8128,6 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
     }
   }
 
-  async function saveMapping(row: AdsMetricRow) {
-    const sku = mappingSku.trim();
-    if (!sku) return;
-    const res = await fetch("/api/fnos/ads/mappings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        channel: row.channel,
-        external_product_name: row.external_product_name || row.campaign_name,
-        external_product_code: row.external_product_code,
-        sku,
-      }),
-    });
-    const data = await res.json();
-    setMessage(data.ok ? "광고 상품 매핑을 저장했습니다." : data.error || "매핑 저장 실패");
-    if (data.ok) {
-      setMappingSku("");
-      setMappingProduct(null);
-      loadSummary();
-    }
-  }
-
   function exportAdReportCsv() {
     const rows = [
       ["광고", "총비용", "구매완료 전환매출액", "ROAS(광고 수익률)", "구매완료 건수", "구매당 광고비", "노출수", "클릭수", "CTR(클릭률)", "CPM(1000회당 노출)", "CPC(클릭당 비용)", "구매완료 전환율"],
@@ -8153,94 +8143,73 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
     URL.revokeObjectURL(url);
   }
 
-  const total = summary?.total || {};
-  const products = summary?.products || [];
-  const campaigns = summary?.campaigns || [];
   const channels = summary?.channels || [];
   const daily = summary?.daily || [];
-  const unmapped = summary?.unmapped || [];
-  const batches = summary?.batches || [];
   const reportRows = adMetricReportRows(channels, selectedAdChannels);
   const mainReport = reportRows[0] || adMetricReportRows([], [])[0];
+  const rangeNote = dateFrom === dateTo ? `${dateTo} 기준` : `${dateFrom} ~ ${dateTo}`;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black">광고분석</h1>
-        <p className="mt-1 text-sm font-bold text-slate-500">메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
+        <p className="mt-1 text-sm font-bold text-slate-500">광고 파일을 업로드하고 선택 기간 기준으로 비용, 구매완료 매출, ROAS, CTR, 구매완료 전환율을 봅니다.</p>
       </div>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
-          <label
-            className={`flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3 transition ${
-              isAdDragOver
-                ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
-                : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
-            }`}
-            onDragEnter={onAdDragEnter}
-            onDragOver={onAdDragOver}
-            onDragLeave={onAdDragLeave}
-            onDrop={onAdDrop}
-          >
-            <span className="min-w-0">
-              <span className="block text-sm font-black text-slate-800">광고 파일 5개를 한 번에 업로드</span>
-              <span className="mt-1 block truncate text-xs font-bold text-slate-500">위에서부터 메타GFA / 네이버쇼핑검색 / 네이버Advoost / 네이버GFA / 쿠팡 순서로 자동 반영</span>
-            </span>
-            <span className={`shrink-0 rounded-md border px-3 py-2 text-xs font-black transition ${
-              isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
-            }`}>파일 선택</span>
-            <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
-          </label>
-          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
-            {uploading ? "생성 중" : "데이터 생성"}
-          </button>
-        </div>
-        {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
-        {!!uploadedAdFiles.length && (
-          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-black text-slate-700">대기 중인 광고 파일 {uploadedAdFiles.length}개</p>
-              <button type="button" onClick={() => setUploadedAdFiles([])} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
+      <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+            <label
+              className={`flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3 transition ${
+                isAdDragOver
+                  ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
+                  : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
+              }`}
+              onDragEnter={onAdDragEnter}
+              onDragOver={onAdDragOver}
+              onDragLeave={onAdDragLeave}
+              onDrop={onAdDrop}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-slate-800">광고 파일 업로드</span>
+                <span className="mt-1 block truncate text-xs font-bold text-slate-500">엑셀/CSV 파일을 클릭 또는 드래그앤드랍으로 추가</span>
+              </span>
+              <span className={`shrink-0 rounded-md border px-3 py-2 text-xs font-black transition ${
+                isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
+              }`}>파일 선택</span>
+              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
+            </label>
+            <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
+              {uploading ? "생성 중" : "데이터 생성"}
+            </button>
+          </div>
+          {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
+          {!!uploadedAdFiles.length && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="mr-2 text-xs font-black text-slate-600">대기 {uploadedAdFiles.length}개</p>
               {uploadedAdFiles.map((item) => (
-                <span key={uploadedAdFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-600">{adSourceLabels[item.sourceKey]}</span>
+                <span key={uploadedAdFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700">
                   <span className="truncate">{item.file.name}</span>
-                  <span className="text-slate-400">{fileSize(item.file.size)}</span>
                   <button type="button" onClick={() => removeAdFile(item)} className="font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
                 </span>
               ))}
+              <button type="button" onClick={() => setUploadedAdFiles([])} className="ml-auto rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">비우기</button>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </div>
 
-      {activeAdsTab === "daily" && (
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-black text-slate-800">일일 광고 기준일</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">평일은 전날, 월요일은 금/토/일 파일을 올려서 하루씩 확인합니다.</p>
+              <p className="text-sm font-black text-slate-800">기간 선택</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">{rangeNote}</p>
             </div>
-            <input
-              type="date"
-              value={dailyDate}
-              onChange={(event) => setDailyDate(event.target.value)}
-              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
-            />
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => moveRange(-1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="이전 기간">‹</button>
+              <button type="button" onClick={() => moveRange(1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="다음 기간">›</button>
+            </div>
           </div>
-        </section>
-      )}
-
-      {activeAdsTab === "db" && <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-black text-slate-800">분석 기간</p>
-            <p className="mt-1 text-xs font-bold text-slate-500">업로드된 광고 DB에서 선택 기간만 다시 집계합니다.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {[
               ["yesterday", "어제"],
               ["7d", "최근 1주일"],
@@ -8277,69 +8246,29 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
             />
           </div>
         </div>
-      </section>}
+      </section>
 
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
-      {activeAdsTab === "daily" && (
-        <>
-          <section className="grid gap-3 md:grid-cols-4">
-            <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={`${dailyDate} 기준`} />
-            <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
-            <AdsMetricCard label="CTR" value={adPercent2(mainReport.ctr)} note={`${mainReport.clicks.toLocaleString("ko-KR")} 클릭`} tone="slate" />
-            <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note={`${mainReport.purchases.toLocaleString("ko-KR")}건`} tone="rose" />
-          </section>
-          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-base font-black">일일 광고 리포트</h2>
-              <div className="flex flex-wrap gap-2">
-                {adReportChannelOrder.map((channel) => (
-                  <label key={channel} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={selectedAdChannels.includes(channel)}
-                      onChange={(event) => setSelectedAdChannels((prev) => event.target.checked ? [...prev, channel] : prev.filter((item) => item !== channel))}
-                    />
-                    {adReportChannelNames[channel]}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="mt-4">
-              <AdsReportTable rows={reportRows} />
-            </div>
-          </section>
-          <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-            <AdsLineChart rows={daily} />
-            <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
-          </section>
-          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-base font-black">오늘 확인할 업로드 내역</h2>
-              <button type="button" onClick={() => goToInternal("/?menu=ads&adsSection=db")} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">광고DB에서 자세히 보기</button>
-            </div>
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              {batches.slice(0, 6).map((row, index) => (
-                <div key={String(row.id || index)} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-black text-slate-800">{String(row.channel || "-")} · {String(row.status || "-")}</p>
-                  <p className="mt-1 truncate text-xs font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
-                  <p className="mt-2 text-xs font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")}건 / 실패 {adNumber(row.fail_count).toLocaleString("ko-KR")}건</p>
-                </div>
-              ))}
-              {!batches.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400 md:col-span-2">업로드 내역이 없습니다.</p>}
-            </div>
-          </section>
-        </>
-      )}
+      <section className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+        <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
+        <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
+        <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
+        <AdsMetricCard label="구매완료 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
+        <AdsMetricCard label="구매당 광고비" value={krw(mainReport.costPerPurchase)} note="CPA" />
+        <AdsMetricCard label="CTR" value={adPercent2(mainReport.ctr)} note={`${mainReport.clicks.toLocaleString("ko-KR")} 클릭`} tone="slate" />
+        <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
+      </section>
 
-      {activeAdsTab === "db" && (
-        <>
-      <AdsWorkflowSummary />
+      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+        <AdsLineChart rows={daily} />
+        <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
+      </section>
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-black">광고DB 리포트</h2>
+          <h2 className="text-base font-black">광고 리포트</h2>
           <div className="flex flex-wrap items-center gap-2">
             {adReportChannelOrder.map((channel) => (
               <label key={channel} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">
@@ -8358,52 +8287,6 @@ function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
           <AdsReportTable rows={reportRows} />
         </div>
       </section>
-
-      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-black">업로드 내역</h2>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500">
-              <tr>
-                {["업로드일", "채널", "파일", "성공", "실패", "상태", "메모"].map((head) => <th key={head} className="whitespace-nowrap px-3 py-2 font-black">{head}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {batches.map((row, index) => (
-                <tr key={String(row.id || index)} className="border-t border-slate-100">
-                  <td className="whitespace-nowrap px-3 py-2 font-bold">{String(row.uploaded_at || row.created_at || "-").slice(0, 16)}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{String(row.channel || "-")}</td>
-                  <td className="min-w-72 px-3 py-2">{String(row.source_file_name || "-")}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right">{adNumber(row.success_count).toLocaleString("ko-KR")}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right">{adNumber(row.fail_count).toLocaleString("ko-KR")}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-black text-orange-600">{String(row.status || "-")}</td>
-                  <td className="min-w-48 px-3 py-2">{String(row.memo || "-")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-        <AdsLineChart rows={daily} />
-        <AdsBarList title="파일별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
-      </section>
-
-      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-black">캠페인/소재 분석</h2>
-          <div className="mt-4 space-y-2">
-            {campaigns.slice(0, 10).map((row, index) => (
-              <div key={index} className="grid grid-cols-[1fr_auto_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
-                <span className="truncate font-bold text-slate-700">{String(row.campaign_name || "-")} / {String(row.ad_name || "-")}</span>
-                <span className="font-black">{adPercent(row.roas)}</span>
-                <span className="rounded bg-white px-2 py-0.5 text-xs font-black text-orange-600">{String(row.grade || "-")}</span>
-              </div>
-            ))}
-          </div>
-      </section>
-        </>
-      )}
     </div>
   );
 }
@@ -8434,6 +8317,9 @@ function AdsRightPanel() {
     };
   }, []);
 
+  const uploadSource = summaries["어제"] || summaries["최근 1주일"] || summaries["최근 30일"] || {};
+  const recentBatches = uploadSource.batches || [];
+
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="광고 핵심 지표" defaultOpen showChevron={false}>
@@ -8453,9 +8339,26 @@ function AdsRightPanel() {
       </ToolSection>
       <ToolSection title="분석 기준" showChevron={false}>
         <div className="space-y-2 text-xs font-bold text-slate-600">
-          <p className="rounded-md bg-slate-50 p-3">파일 순서: 메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡</p>
           <p className="rounded-md bg-slate-50 p-3">먼저 ROAS와 광고비 급증을 보고, 그 다음 SKU별 재고/순이익을 확인합니다.</p>
           <p className="rounded-md bg-orange-50 p-3 text-orange-700">ROAS 높음 + 재고 부족은 발주 우선, ROAS 낮음 + 재고 적음은 광고 중단 후보입니다.</p>
+        </div>
+      </ToolSection>
+      <ToolSection title="최근 업로드" showChevron>
+        <div className="space-y-2">
+          <p className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-500">
+            실패는 오류가 아니라 저장 대상에서 제외된 행입니다. 빈 행, 합계 행, 또는 광고비/노출/클릭/구매완료 값이 모두 없는 행이 여기에 잡힙니다.
+          </p>
+          {recentBatches.slice(0, 8).map((row, index) => (
+            <div key={String(row.id || index)} className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-black text-slate-700">{String(row.channel || "-")}</span>
+                <span className="font-black text-orange-600">{String(row.status || "-")}</span>
+              </div>
+              <p className="mt-1 truncate font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
+              <p className="mt-1 font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(row.fail_count).toLocaleString("ko-KR")}</p>
+            </div>
+          ))}
+          {!recentBatches.length && <p className="rounded-md bg-slate-50 px-3 py-5 text-center text-xs font-bold text-slate-400">업로드 내역 없음</p>}
         </div>
       </ToolSection>
     </aside>
