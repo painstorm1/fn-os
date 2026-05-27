@@ -7615,6 +7615,16 @@ function adDateInput(date: Date) {
   ].join("-");
 }
 
+function adUploadDateLabel(value: unknown) {
+  if (!value) return "-";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return [
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-") + ` ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
   const today = new Date();
   const end = new Date(today);
@@ -8201,6 +8211,7 @@ function AdsRightPanel() {
                 <span className="truncate font-black text-slate-700">{String(row.channel || "-")}</span>
                 <span className="font-black text-orange-600">{String(row.status || "-")}</span>
               </div>
+              <p className="mt-1 font-bold text-slate-400">업로드 {adUploadDateLabel(row.uploaded_at)}</p>
               <p className="mt-1 truncate font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
               <p className="mt-1 font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(row.fail_count).toLocaleString("ko-KR")}</p>
             </div>
