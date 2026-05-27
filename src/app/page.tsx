@@ -7398,8 +7398,35 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       return;
     }
 
+    if (config.key === "warehouses") {
+      let success = 0;
+      for (const row of rows) {
+        const res = await fetch("/api/fnos/quick-register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            mode: "warehouse",
+            form: {
+              wh_cd: row["창고코드"],
+              warehouse_code: row["창고코드"],
+              wh_name: row["창고명"],
+              warehouse_name: row["창고명"],
+              warehouse_type: row["창고구분"],
+              memo: row["메모"],
+            },
+          }),
+        });
+        if (res.ok) success += 1;
+      }
+      setMessage(`창고 ${success}건을 저장했습니다.`);
+      return;
+    }
+
     if (config.key === "attendance") {
-      setMessage("근태 입력 화면을 준비했습니다. DB 저장은 근태 테이블 생성 후 연결합니다.");
+      const saved = JSON.parse(localStorage.getItem("fnos-attendance-draft-rows") || "[]") as Record<string, unknown>[];
+      localStorage.setItem("fnos-attendance-draft-rows", JSON.stringify([...saved, ...rows]));
+      setMessage(`근태 ${rows.length}건을 임시 저장했습니다. DB 저장은 근태 테이블 생성 후 연결합니다.`);
       return;
     }
   }

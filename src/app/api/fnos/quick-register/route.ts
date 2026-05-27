@@ -2,7 +2,7 @@
 import { FnosDbError, insertRows } from "@/lib/fnos-db";
 
 type QuickRegisterBody = {
-  mode?: "product" | "customer";
+  mode?: "product" | "customer" | "warehouse";
   form?: Record<string, unknown>;
 };
 
@@ -62,6 +62,27 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString(),
       });
       return NextResponse.json({ ok: true, mode: "customer", result: saved, message: "FN OS 거래처정보에 저장했습니다." });
+    }
+
+    if (body.mode === "warehouse") {
+      const warehouseCode = text(form.wh_cd || form.warehouse_code);
+      const warehouseName = text(form.wh_name || form.warehouse_name);
+      if (!warehouseCode || !warehouseName) {
+        return NextResponse.json({ ok: false, error: "창고코드와 창고명은 필수입니다." }, { status: 400 });
+      }
+      const [saved] = await insertRows<Record<string, unknown>>("warehouses", {
+        warehouse_code: warehouseCode,
+        wh_cd: warehouseCode,
+        warehouse_name: warehouseName,
+        wh_name: warehouseName,
+        warehouse_type: text(form.warehouse_type || form.wh_type),
+        wh_type: text(form.warehouse_type || form.wh_type),
+        memo: text(form.memo || form.remarks),
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      return NextResponse.json({ ok: true, mode: "warehouse", result: saved, message: "FN OS 창고정보에 저장했습니다." });
     }
 
     return NextResponse.json({ ok: false, error: "등록 유형을 선택해 주세요." }, { status: 400 });
