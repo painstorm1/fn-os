@@ -148,8 +148,8 @@ function extractArchiveDrafts(rawText: string) {
     .replace(/\u200B/g, "")
     .replace(/(^|[\s([{<])ttps:\/\//gi, "$1https://")
     .replace(/(^|[\s([{<])h\s+ttps:\/\//gi, "$1https://")
-    .replace(/h\s*t\s*t\s*p\s*s?\s*:?\s*(?:\/\s*\/)?\s*(?:www|w{2,3}|wany|suns|sun|sns)?\.?\s*(?:i\s*)?nstagram\s*\.?\s*com/gi, "https://www.instagram.com")
-    .replace(/instagram\s+com/gi, "instagram.com");
+    .replace(/h\s*t\s*t\s*p\s*s?\s*:?\s*(?:\/\s*\/)?\s*(?:www|w{2,3}|wany|suns|sun|sns)?[\s.,]*(?:i|l|1)?\s*n\s*s?\s*t\s*a\s*g\s*r\s*a\s*m[\s.,]*com/gi, "https://www.instagram.com")
+    .replace(/(?:i|l|1)?\s*n\s*s?\s*t\s*a\s*g\s*r\s*a\s*m[\s.,]+com/gi, "instagram.com");
   for (let index = 0; index < 3; index += 1) {
     compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{2,})/g, "$1$2");
   }
@@ -203,6 +203,7 @@ export default function ArchiveWorkspace() {
   const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
   const fileRef = useRef<HTMLInputElement | null>(null);
   const autoImageRef = useRef<HTMLInputElement | null>(null);
+  const autoImageFileRef = useRef<File | null>(null);
 
   const categoryById = useMemo(() => new Map(data.categories.map((category) => [category.id, category])), [data.categories]);
   const categoryIdByName = useMemo(() => new Map(data.categories.map((category) => [category.category_name, category.id])), [data.categories]);
@@ -285,6 +286,7 @@ export default function ArchiveWorkspace() {
 
   async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
+    autoImageFileRef.current = file;
     setAutoImagePreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(file);
@@ -472,7 +474,7 @@ export default function ArchiveWorkspace() {
                     이미지 선택
                     <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => void processImageFile(event.target.files?.[0])} />
                   </label>
-                  <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0])} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
+                  <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0] || autoImageFileRef.current || undefined)} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
                   <button type="button" onClick={() => extractFromText()} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">텍스트 정리</button>
                 </div>
               </>
