@@ -916,6 +916,25 @@ type CacheEntry<T> = {
 
 const apiCache = new Map<string, CacheEntry<unknown>>();
 const DEFAULT_CACHE_TTL = 45_000;
+let importErpEnsurePromise: Promise<unknown> | null = null;
+let importErpLastEnsuredAt = 0;
+
+function ensureImportErpServer(force = false) {
+  const now = Date.now();
+  if (!force && now - importErpLastEnsuredAt < 20_000) return Promise.resolve();
+  if (importErpEnsurePromise) return importErpEnsurePromise;
+  importErpEnsurePromise = fetch("/api/fnos/import-erp/ensure", { method: "POST", cache: "no-store" })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && res.status !== 202) throw new Error(data.error || `HTTP ${res.status}`);
+      importErpLastEnsuredAt = Date.now();
+      return data;
+    })
+    .finally(() => {
+      importErpEnsurePromise = null;
+    });
+  return importErpEnsurePromise;
+}
 
 function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   const key = apiUrl(path);
@@ -923,7 +942,9 @@ function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   const cached = apiCache.get(key) as CacheEntry<T> | undefined;
   if (cached?.data !== undefined && now - cached.at < ttl) return Promise.resolve(cached.data);
   if (cached?.promise) return cached.promise;
-  const promise = fetch(key, { credentials: "include" })
+  const promise = ensureImportErpServer()
+    .catch(() => undefined)
+    .then(() => fetch(key, { credentials: "include" }))
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json() as Promise<T>;
@@ -952,6 +973,7 @@ function invalidateApiCache(match?: string) {
 }
 
 function warmImportCache(section?: string) {
+  void ensureImportErpServer().catch(() => undefined);
   void cachedJson("/api/fnos/form-data", 60_000).catch(() => undefined);
   if (!section || section === "/orders") {
     void cachedJson("/api/fnos/orders", 30_000).catch(() => undefined);
@@ -1409,6 +1431,9 @@ function NativeImportWorkspace({ path }: { path: string }) {
   const orderMatch = basePath.match(/^\/orders\/(\d+)/);
   const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
   const productMatch = basePath.match(/^\/products\/(\d+)/);
+  useEffect(() => {
+    void ensureImportErpServer().catch(() => undefined);
+  }, [basePath]);
   if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
   if (basePath.startsWith("/products/new")) return <NativeProductForm />;
   if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
@@ -7451,6 +7476,10 @@ function adPercent(value: unknown) {
   return `${adNumber(value).toFixed(1)}%`;
 }
 
+function adPercent2(value: unknown) {
+  return `${adNumber(value).toFixed(2)}%`;
+}
+
 function adDateInput(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -7563,6 +7592,114 @@ function AdsWorkflowSummary() {
   );
 }
 
+const adReportChannelOrder = ["메타GFA", "네이버GFA", "네이버쇼핑검색", "네이버Advoost", "쿠팡"];
+const adReportChannelNames: Record<string, string> = {
+  메타GFA: "메타 GFA",
+  네이버GFA: "네이버 GFA",
+  네이버쇼핑검색: "네이버 검색",
+  네이버Advoost: "네이버 Advoost",
+  쿠팡: "쿠팡",
+};
+
+function adMetricReportRows(channels: AdsMetricRow[], selectedChannels: string[]) {
+  const selected = new Set(selectedChannels);
+  const channelRows = adReportChannelOrder
+    .filter((channel) => selected.has(channel))
+    .map((channel) => {
+      const row = channels.find((item) => String(item.channel || "") === channel) || { channel };
+      const cost = adNumber(row.cost);
+      const purchaseValue = adNumber(row.conversion_value);
+      const purchases = adNumber(row.conversions);
+      const impressions = adNumber(row.impressions);
+      const clicks = adNumber(row.clicks);
+      return {
+        channel,
+        label: adReportChannelNames[channel] || channel,
+        cost,
+        purchaseValue,
+        roas: cost > 0 ? (purchaseValue / cost) * 100 : 0,
+        purchases,
+        costPerPurchase: purchases > 0 ? cost / purchases : 0,
+        impressions,
+        clicks,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cpm: impressions > 0 ? (cost / impressions) * 1000 : 0,
+        cpc: clicks > 0 ? cost / clicks : 0,
+        purchaseCvr: clicks > 0 ? (purchases / clicks) * 100 : 0,
+      };
+    });
+  const total = channelRows.reduce((acc, row) => ({
+    channel: "total",
+    label: "합계 평균",
+    cost: acc.cost + row.cost,
+    purchaseValue: acc.purchaseValue + row.purchaseValue,
+    purchases: acc.purchases + row.purchases,
+    impressions: acc.impressions + row.impressions,
+    clicks: acc.clicks + row.clicks,
+    roas: 0,
+    costPerPurchase: 0,
+    ctr: 0,
+    cpm: 0,
+    cpc: 0,
+    purchaseCvr: 0,
+  }), { channel: "total", label: "합계 평균", cost: 0, purchaseValue: 0, purchases: 0, impressions: 0, clicks: 0, roas: 0, costPerPurchase: 0, ctr: 0, cpm: 0, cpc: 0, purchaseCvr: 0 });
+  total.roas = total.cost > 0 ? (total.purchaseValue / total.cost) * 100 : 0;
+  total.costPerPurchase = total.purchases > 0 ? total.cost / total.purchases : 0;
+  total.ctr = total.impressions > 0 ? (total.clicks / total.impressions) * 100 : 0;
+  total.cpm = total.impressions > 0 ? (total.cost / total.impressions) * 1000 : 0;
+  total.cpc = total.clicks > 0 ? total.cost / total.clicks : 0;
+  total.purchaseCvr = total.clicks > 0 ? (total.purchases / total.clicks) * 100 : 0;
+  return [total, ...channelRows];
+}
+
+function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> }) {
+  const header = [
+    ["총비용", true],
+    ["구매완료\n전환매출액", true],
+    ["ROAS\n(광고 수익률)", true],
+    ["구매완료 건수", true],
+    ["구매당 광고비", true],
+    ["노출수", false],
+    ["클릭수", false],
+    ["CTR\n(클릭률)", true],
+    ["CPM\n(1000회당 노출)", false],
+    ["CPC\n(클릭당 비용)", false],
+    ["구매완료\n전환율", true],
+  ] as const;
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[1180px] w-full border-collapse text-center text-xs">
+        <thead>
+          <tr>
+            <th className="sticky left-0 z-10 border border-slate-200 bg-white px-3 py-3 text-left font-black">광고</th>
+            {header.map(([label, main]) => (
+              <th key={label} className={`whitespace-pre-line border border-slate-200 px-3 py-3 font-black text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 font-black" : "bg-white"}>
+              <td className="sticky left-0 z-10 border border-slate-200 bg-inherit px-3 py-2 text-left font-black">{row.label}</td>
+              <td className="border border-slate-200 px-3 py-2">{krw(row.cost)}</td>
+              <td className="border border-slate-200 px-3 py-2">{krw(row.purchaseValue)}</td>
+              <td className="border border-slate-200 px-3 py-2">{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 px-3 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-3 py-2">{krw(row.costPerPurchase)}</td>
+              <td className="border border-slate-200 px-3 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-3 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-3 py-2">{adPercent2(row.ctr)}</td>
+              <td className="border border-slate-200 px-3 py-2">{krw(row.cpm)}</td>
+              <td className="border border-slate-200 px-3 py-2">{krw(row.cpc)}</td>
+              <td className="border border-slate-200 px-3 py-2">{adPercent2(row.purchaseCvr)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function AdsAnalysisWorkspace() {
   const defaultRange = adRangeForPreset("30d");
   const yesterdayRange = adRangeForPreset("yesterday");
@@ -7578,6 +7715,7 @@ function AdsAnalysisWorkspace() {
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo, setDateTo] = useState(defaultRange.to);
   const [dailyDate, setDailyDate] = useState(yesterdayRange.to);
+  const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
   const loadSummary = () => {
     setLoading(true);
@@ -7684,10 +7822,8 @@ function AdsAnalysisWorkspace() {
 
   function exportAdReportCsv() {
     const rows = [
-      ["구분", "채널", "날짜", "캠페인", "광고그룹", "소재/상품", "광고비", "클릭", "구매전환", "전환금액", "ROAS", "CTR", "CVR"],
-      ...daily.map((row) => ["일별", "", String(row.date || ""), "", "", "", adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
-      ...campaigns.map((row) => ["캠페인", String(row.channel || ""), "", String(row.campaign_name || ""), String(row.ad_group_name || ""), String(row.ad_name || ""), adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
-      ...products.map((row) => ["상품", String(row.channel || ""), "", String(row.campaign_name || ""), "", String(row.product_name || row.sku || ""), adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
+      ["광고", "총비용", "구매완료 전환매출액", "ROAS(광고 수익률)", "구매완료 건수", "구매당 광고비", "노출수", "클릭수", "CTR(클릭률)", "CPM(1000회당 노출)", "CPC(클릭당 비용)", "구매완료 전환율"],
+      ...reportRows.map((row) => [row.label, Math.round(row.cost), Math.round(row.purchaseValue), `${row.roas.toFixed(1)}%`, row.purchases, Math.round(row.costPerPurchase), row.impressions, row.clicks, `${row.ctr.toFixed(2)}%`, Math.round(row.cpm), Math.round(row.cpc), `${row.purchaseCvr.toFixed(2)}%`]),
     ];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
@@ -7706,6 +7842,8 @@ function AdsAnalysisWorkspace() {
   const daily = summary?.daily || [];
   const unmapped = summary?.unmapped || [];
   const batches = summary?.batches || [];
+  const reportRows = adMetricReportRows(channels, selectedAdChannels);
+  const mainReport = reportRows[0] || adMetricReportRows([], [])[0];
 
   return (
     <div className="space-y-6">
@@ -7840,10 +7978,30 @@ function AdsAnalysisWorkspace() {
       {activeAdsTab === "daily" && (
         <>
           <section className="grid gap-3 md:grid-cols-4">
-            <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note={`${dailyDate} 기준`} />
-            <AdsMetricCard label="구매전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
-            <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
-            <AdsMetricCard label="구매전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
+            <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={`${dailyDate} 기준`} />
+            <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
+            <AdsMetricCard label="CTR" value={adPercent2(mainReport.ctr)} note={`${mainReport.clicks.toLocaleString("ko-KR")} 클릭`} tone="slate" />
+            <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note={`${mainReport.purchases.toLocaleString("ko-KR")}건`} tone="rose" />
+          </section>
+          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-black">일일 광고 리포트</h2>
+              <div className="flex flex-wrap gap-2">
+                {adReportChannelOrder.map((channel) => (
+                  <label key={channel} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={selectedAdChannels.includes(channel)}
+                      onChange={(event) => setSelectedAdChannels((prev) => event.target.checked ? [...prev, channel] : prev.filter((item) => item !== channel))}
+                    />
+                    {adReportChannelNames[channel]}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4">
+              <AdsReportTable rows={reportRows} />
+            </div>
           </section>
           <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
             <AdsLineChart rows={daily} />
@@ -7874,9 +8032,28 @@ function AdsAnalysisWorkspace() {
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-black">업로드 내역</h2>
-          <button type="button" onClick={exportAdReportCsv} className="rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white">엑셀용 CSV 다운로드</button>
+          <h2 className="text-base font-black">광고DB 리포트</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            {adReportChannelOrder.map((channel) => (
+              <label key={channel} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={selectedAdChannels.includes(channel)}
+                  onChange={(event) => setSelectedAdChannels((prev) => event.target.checked ? [...prev, channel] : prev.filter((item) => item !== channel))}
+                />
+                {adReportChannelNames[channel]}
+              </label>
+            ))}
+            <button type="button" onClick={exportAdReportCsv} className="rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white">엑셀용 CSV 다운로드</button>
+          </div>
         </div>
+        <div className="mt-4">
+          <AdsReportTable rows={reportRows} />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-base font-black">업로드 내역</h2>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500">
@@ -7907,34 +8084,6 @@ function AdsAnalysisWorkspace() {
       </section>
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-black">상품별 광고 분석</h2>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500">
-              <tr>
-                {["SKU", "상품명", "광고비", "매출", "ROAS", "예상 순이익", "재고", "지속 여부"].map((head) => <th key={head} className="whitespace-nowrap px-3 py-2 font-black">{head}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {products.slice(0, 15).map((row, index) => (
-                <tr key={index} className="border-t border-slate-100">
-                  <td className="whitespace-nowrap px-3 py-2 font-bold">{String(row.sku || "-")}</td>
-                  <td className="min-w-56 px-3 py-2 font-bold text-slate-700">{String(row.product_name || "-")}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.cost))}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.sales_amount || row.conversion_value))}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-black">{adPercent(row.roas)}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.estimated_profit))}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{adNumber(row.current_stock).toLocaleString("ko-KR")}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-black text-orange-600">{String(row.keep_ad || "점검")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-base font-black">캠페인/소재 분석</h2>
           <div className="mt-4 space-y-2">
             {campaigns.slice(0, 10).map((row, index) => (
@@ -7945,35 +8094,6 @@ function AdsAnalysisWorkspace() {
               </div>
             ))}
           </div>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-black">광고 조언</h2>
-          <div className="mt-4 space-y-2">
-            {(summary?.advice || []).slice(0, 8).map((item, index) => (
-              <p key={index} className={`rounded-md px-3 py-2 text-sm font-bold ${item.tone === "danger" ? "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"}`}>
-                {item.title ? `${item.title}: ` : ""}{item.message}
-              </p>
-            ))}
-            {!summary?.advice?.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">조언을 만들 광고 데이터가 없습니다.</p>}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-black">광고 데이터 매핑 관리</h2>
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {unmapped.slice(0, 8).map((row, index) => (
-            <div key={index} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-sm font-black text-slate-800">{String(row.external_product_name || row.campaign_name || "-")}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">{String(row.channel || "-")} / {String(row.external_product_code || "상품코드 없음")}</p>
-              <div className="mt-3 flex gap-2">
-                <input value={mappingProduct === row ? mappingSku : ""} onFocus={() => setMappingProduct(row)} onChange={(event) => setMappingSku(event.target.value)} placeholder="FN OS SKU 입력" className="field-input h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" />
-                <button type="button" onClick={() => saveMapping(row)} className="h-9 rounded-md bg-slate-950 px-3 text-xs font-black text-white">저장</button>
-              </div>
-            </div>
-          ))}
-          {!unmapped.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400 lg:col-span-2">미매칭 광고 데이터가 없습니다.</p>}
-        </div>
       </section>
         </>
       )}
