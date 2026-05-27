@@ -1159,8 +1159,9 @@ function rateNoteText(rates?: Record<string, number>, currencies: string[] = [])
 }
 
 function productionDueText(order: ImportOrder) {
+  if (order.fn_arrived) return "-";
   const days = Number(order.production_days || 0);
-  const paidOrOrder = order.paid_date || order.order_date;
+  const paidOrOrder = order.order_date;
   if (!days || !paidOrOrder) return "-";
   const base = new Date(`${paidOrOrder}T00:00:00`);
   if (Number.isNaN(base.getTime())) return "-";
@@ -1171,7 +1172,7 @@ function productionDueText(order: ImportOrder) {
   const diff = Math.ceil((due.getTime() - today.getTime()) / 86400000);
   if (diff > 0) return `D-${diff}`;
   if (diff === 0) return "D-Day";
-  return `D+${Math.abs(diff)}`;
+  return "-";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1230,7 +1231,7 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
               </button>
               {openStage === stage.name && (
                 <input
-                  className="field-input max-w-[140px]"
+                  className="field-input h-9 w-[118px] max-w-full px-2 text-xs"
                   type="date"
                   value={value}
                   onChange={(event) => onChange(stage.name, event.target.value)}
