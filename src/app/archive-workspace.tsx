@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { ClipboardEvent } from "react";
 
 type ArchiveItem = {
   id: string;
@@ -29,24 +30,24 @@ type AutoArchiveDraft = {
   memo: string;
   source_type: string;
   content_type: string;
+  category_group: CategoryGroup;
   category_name: string;
   tags: string;
   reference_type: string;
 };
 
+type CategoryGroup = "교육" | "업무" | "개인";
+type ActiveMenu = "save" | "all" | CategoryGroup | "connect" | "reference" | "taxo";
+
+const categoryTree: Record<CategoryGroup, string[]> = {
+  교육: ["영어", "포토샵", "일러스트", "AI"],
+  업무: ["소싱", "광고소재", "상세페이지", "업무방법", "경쟁사", "디자인참고"],
+  개인: ["캠핑", "요리", "살림", "육아", "여행", "동기부여", "유머", "기타"],
+};
+
 const sources = ["instagram", "youtube", "naver", "coupang", "smartstore", "taobao", "1688", "amazon", "rakuten", "web", "manual", "file"];
 const contentTypes = ["link", "image", "video", "file", "memo", "product", "ad_reference", "detail_page", "supplier"];
-const referenceTypes = ["후킹 문구", "썸네일", "모델컷", "상세페이지 구조", "리뷰 강조", "가격 소구", "비교 광고", "육아 타겟", "남성 타겟", "여성 타겟"];
-
-function Metric({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <article className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-bold text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
-      <p className="mt-2 text-sm font-bold text-orange-600">{note}</p>
-    </article>
-  );
-}
+const referenceTypes = ["콘텐츠 참고", "후킹 문구", "썸네일", "모델컷", "상세페이지 구조", "리뷰 강조", "가격 소구", "비교 광고", "타겟 참고"];
 
 function dateText(value?: string) {
   if (!value) return "-";
@@ -65,6 +66,20 @@ function tagMap(data: ArchiveData) {
   return map;
 }
 
+function cleanTitle(value: string) {
+  return value
+    .replace(/^www\./, "")
+    .replace(/\.(com|co\.kr|net|jp)$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+}
+
+function shortenTitle(value: string, fallback: string) {
+  const base = cleanTitle(decodeURIComponent(value || fallback)).replace(/\s+/g, " ");
+  const chars = Array.from(base || fallback);
+  return chars.slice(0, 10).join("");
+}
+
 function sourceFromUrl(url: string) {
   const lower = url.toLowerCase();
   if (lower.includes("instagram.com")) return "instagram";
@@ -79,20 +94,29 @@ function sourceFromUrl(url: string) {
   return "web";
 }
 
+function urlSlug(url: string) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts.at(-1) || parsed.hostname;
+  } catch {
+    return url.split("?")[0].split("/").filter(Boolean).at(-1) || url;
+  }
+}
+
 function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
   const sourceType = sourceFromUrl(url);
   const lower = `${url} ${context}`.toLowerCase();
-  let categoryName = "기타";
+  let categoryGroup: CategoryGroup = "업무";
+  let categoryName = "업무방법";
   let contentType = "link";
-  let referenceType = "";
+  let referenceType = "콘텐츠 참고";
   const tags = new Set<string>(["자동정리"]);
 
-  if (sourceType === "instagram") {
-    categoryName = "SNS콘텐츠";
+  if (sourceType === "instagram" || sourceType === "youtube") {
+    categoryName = "광고소재";
     contentType = "ad_reference";
-    referenceType = "후킹 문구";
-    tags.add("인스타");
-    tags.add("릴스");
+    tags.add(sourceType === "instagram" ? "인스타" : "유튜브");
     tags.add("콘텐츠참고");
   } else if (["taobao", "1688", "amazon", "rakuten"].includes(sourceType)) {
     categoryName = "소싱";
@@ -105,26 +129,47 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
     tags.add("경쟁사");
     tags.add(sourceType);
   }
+  if (lower.includes("photoshop") || context.includes("포토샵")) {
+    categoryGroup = "교육";
+    categoryName = "포토샵";
+  } else if (lower.includes("illustrator") || context.includes("일러스트")) {
+    categoryGroup = "교육";
+    categoryName = "일러스트";
+  } else if (lower.includes("english") || context.includes("영어")) {
+    categoryGroup = "교육";
+    categoryName = "영어";
+  } else if (lower.includes("ai") || context.includes("AI")) {
+    categoryGroup = "교육";
+    categoryName = "AI";
+  }
   if (lower.includes("detail") || context.includes("상세")) {
     categoryName = "상세페이지";
     contentType = "detail_page";
     tags.add("상세페이지");
   }
-  if (lower.includes("ad") || context.includes("광고")) {
-    categoryName = "광고소재";
-    contentType = "ad_reference";
-    referenceType = referenceType || "후킹 문구";
-    tags.add("광고참고");
+  if (lower.includes("camp") || context.includes("캠핑")) {
+    categoryGroup = "개인";
+    categoryName = "캠핑";
+  } else if (context.includes("요리")) {
+    categoryGroup = "개인";
+    categoryName = "요리";
+  } else if (context.includes("육아")) {
+    categoryGroup = "개인";
+    categoryName = "육아";
+  } else if (context.includes("여행")) {
+    categoryGroup = "개인";
+    categoryName = "여행";
   }
 
-  const slug = url.split("?")[0].split("/").filter(Boolean).at(-1) || sourceType;
+  const titleSeed = sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url);
   const dateMatch = context.match(/20\d{2}[년.-]\s*\d{1,2}[월.-]\s*\d{1,2}일?/);
   return {
     url,
-    title: `${sourceType === "instagram" ? "인스타 릴스" : sourceType} - ${slug}`,
+    title: shortenTitle(titleSeed, sourceType),
     memo: [dateMatch?.[0], context.replace(url, "").trim()].filter(Boolean).join(" / "),
     source_type: sourceType,
     content_type: contentType,
+    category_group: categoryGroup,
     category_name: categoryName,
     tags: Array.from(tags).join(", "),
     reference_type: referenceType,
@@ -142,14 +187,22 @@ function extractArchiveDrafts(rawText: string) {
     const url = match[0].replace(/[)\],.]+$/g, "");
     if (seen.has(url)) return [];
     seen.add(url);
-    const start = Math.max(0, match.index - 120);
-    const end = Math.min(compactText.length, match.index + url.length + 120);
+    const start = Math.max(0, match.index - 100);
+    const end = Math.min(compactText.length, match.index + url.length + 100);
     return [classifyAutoDraft(url, compactText.slice(start, end))];
   });
 }
 
+function categoryNamesForGroup(group: CategoryGroup | "all") {
+  if (group === "all") return Object.values(categoryTree).flat();
+  return categoryTree[group];
+}
+
 export default function ArchiveWorkspace() {
-  const [activeTab, setActiveTab] = useState<"auto" | "all" | "link" | "file" | "taxo" | "connect" | "reference">("auto");
+  const [activeMenu, setActiveMenu] = useState<ActiveMenu>("save");
+  const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
+  const [manualType, setManualType] = useState<"link" | "file">("link");
+  const [activeSubCategory, setActiveSubCategory] = useState("");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -157,8 +210,8 @@ export default function ArchiveWorkspace() {
   const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
   const [autoWorking, setAutoWorking] = useState(false);
   const [filters, setFilters] = useState({ q: "", category: "", tag: "", source: "", status: "", date: "", favorite: false });
-  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", tags: "", content_type: "link", source_type: "", reference_type: "" });
-  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", tags: "", content_type: "" });
+  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
+  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "" });
   const [categoryForm, setCategoryForm] = useState({ category_name: "", sort_order: "" });
   const [tagForm, setTagForm] = useState({ tag_name: "", from_tag_id: "", to_tag_id: "" });
   const [connectForm, setConnectForm] = useState({ archive_item_id: "", linked_type: "product", linked_id: "", query: "" });
@@ -167,6 +220,7 @@ export default function ArchiveWorkspace() {
   const autoImageRef = useRef<HTMLInputElement | null>(null);
 
   const categoryById = useMemo(() => new Map(data.categories.map((category) => [category.id, category])), [data.categories]);
+  const categoryIdByName = useMemo(() => new Map(data.categories.map((category) => [category.category_name, category.id])), [data.categories]);
   const tagsByItem = useMemo(() => tagMap(data), [data]);
   const linkCountByItem = useMemo(() => {
     const map = new Map<string, number>();
@@ -177,9 +231,17 @@ export default function ArchiveWorkspace() {
     return map;
   }, [data.links]);
 
-  const filteredItems = useMemo(() => data.items.filter((item) => {
+  const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
+    if (activeMenu === "all" || activeMenu === "save" || activeMenu === "connect" || activeMenu === "reference" || activeMenu === "taxo") return true;
+    const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
+    const allowed = activeSubCategory ? [activeSubCategory] : categoryNamesForGroup(activeMenu);
+    return allowed.includes(categoryName);
+  }), [activeMenu, activeSubCategory, categoryById, data.items]);
+
+  const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
     const tagNames = (tagsByItem.get(item.id) || []).map((tag) => tag.tag_name).join(" ");
-    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${tagNames}`.toLowerCase();
+    const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
+    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${tagNames} ${categoryName}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
     if (filters.category && item.category_id !== filters.category) return false;
     if (filters.tag && !(tagsByItem.get(item.id) || []).some((tag) => tag.id === filters.tag)) return false;
@@ -188,11 +250,11 @@ export default function ArchiveWorkspace() {
     if (filters.date && !(item.created_at || "").startsWith(filters.date)) return false;
     if (filters.favorite && !item.is_favorite) return false;
     return true;
-  }), [data.items, filters, tagsByItem]);
+  }), [categoryById, categoryFilteredItems, filters, tagsByItem]);
 
   const referenceItems = filteredItems.filter((item) => item.content_type === "ad_reference" || item.reference_type);
   const unclassifiedCount = data.items.filter((item) => !item.category_id).length;
-  const sourcingCount = data.items.filter((item) => categoryById.get(String(item.category_id || ""))?.category_name.includes("소싱")).length;
+  const todayCount = data.items.filter((item) => (item.created_at || "").startsWith(new Date().toISOString().slice(0, 10))).length;
 
   async function refresh() {
     setLoading(true);
@@ -222,27 +284,39 @@ export default function ArchiveWorkspace() {
     return result;
   }
 
-  function extractFromText() {
-    const drafts = extractArchiveDrafts(autoText);
+  async function runOcr(file: File) {
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker("eng");
+    try {
+      const result = await worker.recognize(file);
+      return result.data.text || "";
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  function setAutoDraftCategory(index: number, categoryName: string) {
+    setAutoDrafts((prev) => prev.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const group = (Object.keys(categoryTree) as CategoryGroup[]).find((key) => categoryTree[key].includes(categoryName)) || item.category_group;
+      return { ...item, category_group: group, category_name: categoryName };
+    }));
+  }
+
+  function extractFromText(nextText = autoText) {
+    const drafts = extractArchiveDrafts(nextText);
     setAutoDrafts(drafts);
     setMessage(drafts.length ? `${drafts.length.toLocaleString("ko-KR")}개 링크를 자동 정리했습니다.` : "추출된 링크가 없습니다.");
   }
 
-  async function extractFromImage() {
-    const file = autoImageRef.current?.files?.[0];
+  async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
     setAutoWorking(true);
-    setMessage("이미지에서 링크를 읽는 중입니다. URL이 작거나 흐리면 시간이 조금 걸릴 수 있습니다.");
+    setMessage("이미지에서 링크를 읽는 중입니다.");
     try {
-      const { createWorker } = await import("tesseract.js");
-      const worker = await createWorker("eng");
-      const result = await worker.recognize(file);
-      await worker.terminate();
-      const text = result.data.text || "";
+      const text = await runOcr(file);
       setAutoText((prev) => [prev, text].filter(Boolean).join("\n\n"));
-      const drafts = extractArchiveDrafts(text);
-      setAutoDrafts(drafts);
-      setMessage(drafts.length ? `이미지에서 ${drafts.length.toLocaleString("ko-KR")}개 링크를 찾았습니다.` : "이미지에서 링크를 찾지 못했습니다. 텍스트로 붙여넣어 다시 시도해 주세요.");
+      extractFromText(text);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "이미지 링크 추출 실패");
     } finally {
@@ -250,22 +324,31 @@ export default function ArchiveWorkspace() {
     }
   }
 
+  async function onPasteAuto(event: ClipboardEvent<HTMLTextAreaElement | HTMLDivElement>) {
+    const image = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
+    if (!image) return;
+    event.preventDefault();
+    await processImageFile(image);
+  }
+
   async function saveAutoDrafts() {
     if (!autoDrafts.length) return setMessage("저장할 자동 정리 항목이 없습니다.");
     setAutoWorking(true);
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
-      let savedCount = 0;
-      for (const draft of autoDrafts) {
-        await postJson("/api/fnos/archive", { ...draft, status: "active" });
-        savedCount += 1;
-      }
+      await Promise.all(autoDrafts.map((draft) => postJson("/api/fnos/archive", {
+        ...draft,
+        category_id: categoryIdByName.get(draft.category_name) || null,
+        tags: [draft.tags, draft.category_group].filter(Boolean).join(", "),
+        status: "active",
+      })));
+      const savedCount = autoDrafts.length;
       setAutoDrafts([]);
       setAutoText("");
       if (autoImageRef.current) autoImageRef.current.value = "";
       setMessage(`${savedCount.toLocaleString("ko-KR")}개 항목을 아카이브에 저장했습니다.`);
       await refresh();
-      setActiveTab("all");
+      setActiveMenu("all");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "자동 정리 저장 실패");
     } finally {
@@ -277,8 +360,9 @@ export default function ArchiveWorkspace() {
     event.preventDefault();
     setMessage("링크 저장 중...");
     try {
-      await postJson("/api/fnos/archive", { ...linkForm, status: "active" });
-      setLinkForm({ url: "", title: "", memo: "", category_id: "", tags: "", content_type: "link", source_type: "", reference_type: "" });
+      const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
+      await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
+      setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
       setMessage("링크를 저장했습니다.");
       await refresh();
     } catch (error) {
@@ -295,10 +379,11 @@ export default function ArchiveWorkspace() {
       const formData = new FormData();
       formData.set("file", file);
       Object.entries(fileForm).forEach(([key, value]) => formData.set(key, value));
+      if (!fileForm.title) formData.set("title", shortenTitle(file.name.replace(/\.[^.]+$/, ""), "파일"));
       const res = await fetch("/api/fnos/archive", { method: "POST", body: formData });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
-      setFileForm({ title: "", memo: "", category_id: "", tags: "", content_type: "" });
+      setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";
       setMessage("파일을 저장했습니다.");
       await refresh();
@@ -375,83 +460,159 @@ export default function ArchiveWorkspace() {
     await refresh();
   }
 
-  const tabs = [
-    ["auto", "자동 정리"],
-    ["all", "전체 아카이브"],
-    ["link", "링크 저장"],
-    ["file", "파일 저장"],
-    ["taxo", "카테고리/태그"],
-    ["connect", "상품/수입관리 연결"],
-    ["reference", "광고/콘텐츠 레퍼런스"],
-  ] as const;
+  function openMenu(menu: ActiveMenu) {
+    setActiveMenu(menu);
+    setActiveSubCategory("");
+    if (menu === "save") setSaveMode("auto");
+  }
+
+  const menuItems: Array<[ActiveMenu, string]> = [
+    ["save", "새로 저장"],
+    ["all", "전체"],
+    ["교육", "교육"],
+    ["업무", "업무"],
+    ["개인", "개인"],
+    ["reference", "레퍼런스"],
+    ["connect", "연결"],
+  ];
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-black">아카이브</h1>
-          <p className="mt-1 text-sm font-bold text-slate-500">소싱 링크, 광고 레퍼런스, 상세페이지 자료, 파일과 메모를 FN OS DB에 저장합니다.</p>
-        </div>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-black">아카이브</h1>
+        <p className="mt-1 text-sm font-bold text-slate-500">링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다.</p>
       </div>
 
-      <section className="grid gap-3 md:grid-cols-4">
-        <Metric label="전체 저장" value={`${data.items.length.toLocaleString("ko-KR")}건`} note={loading ? "불러오는 중" : "아카이브 아이템"} />
-        <Metric label="미분류" value={`${unclassifiedCount.toLocaleString("ko-KR")}건`} note="카테고리 지정 필요" />
-        <Metric label="최근 소싱 후보" value={`${sourcingCount.toLocaleString("ko-KR")}건`} note="소싱 카테고리 기준" />
-        <Metric label="광고 레퍼런스" value={`${referenceItems.length.toLocaleString("ko-KR")}건`} note="후킹/소재 분류" />
+      <section className="grid gap-3 xl:grid-cols-[360px_1fr]">
+        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid grid-cols-4 gap-2 text-center text-xs font-black">
+            <div><p className="text-lg text-slate-950">{data.items.length.toLocaleString("ko-KR")}</p><p className="text-slate-500">전체</p></div>
+            <div><p className="text-lg text-orange-600">{todayCount.toLocaleString("ko-KR")}</p><p className="text-slate-500">오늘</p></div>
+            <div><p className="text-lg text-rose-600">{unclassifiedCount.toLocaleString("ko-KR")}</p><p className="text-slate-500">미분류</p></div>
+            <div><p className="text-lg text-emerald-600">{referenceItems.length.toLocaleString("ko-KR")}</p><p className="text-slate-500">참고</p></div>
+          </div>
+          {loading && <p className="mt-2 text-xs font-bold text-orange-600">불러오는 중</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          {menuItems.map(([key, label]) => (
+            <button key={key} type="button" onClick={() => openMenu(key)} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+              {label}
+            </button>
+          ))}
+          <button type="button" onClick={() => openMenu("taxo")} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === "taxo" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+            카테고리/태그
+          </button>
+        </div>
       </section>
 
       {message && <div className="rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-black text-orange-700">{message}</div>}
 
-      <div className="flex flex-wrap gap-2">
-        {tabs.map(([key, label]) => (
-          <button key={key} type="button" onClick={() => setActiveTab(key)} className={`h-10 rounded-md border px-3 text-sm font-black ${activeTab === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {(activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
+        <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <button type="button" onClick={() => setActiveSubCategory("")} className={`h-8 rounded-md px-3 text-xs font-black ${!activeSubCategory ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>전체</button>
+          {categoryTree[activeMenu].map((category) => (
+            <button key={category} type="button" onClick={() => setActiveSubCategory(category)} className={`h-8 rounded-md px-3 text-xs font-black ${activeSubCategory === category ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}>
+              {category}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {activeTab === "auto" && (
+      {activeMenu === "save" && (
         <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-          <div className="space-y-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <div>
-              <h2 className="text-base font-black">링크/이미지 자동 정리</h2>
-              <p className="mt-1 text-sm font-bold text-slate-500">카톡 대화처럼 복사한 텍스트나 링크가 보이는 스크린샷을 넣으면 URL을 뽑아 분류합니다.</p>
+          <div className="space-y-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm" onPaste={onPasteAuto}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black">새로 저장</h2>
+                <p className="mt-1 text-sm font-bold text-slate-500">이미지는 붙여넣기, 링크는 텍스트 붙여넣기로 바로 정리합니다.</p>
+              </div>
+              <div className="flex rounded-md bg-slate-100 p-1">
+                <button type="button" onClick={() => setSaveMode("auto")} className={`h-8 rounded px-3 text-xs font-black ${saveMode === "auto" ? "bg-white text-orange-600 shadow-sm" : "text-slate-500"}`}>자동정리</button>
+                <button type="button" onClick={() => setSaveMode("manual")} className={`h-8 rounded px-3 text-xs font-black ${saveMode === "manual" ? "bg-white text-orange-600 shadow-sm" : "text-slate-500"}`}>수동업로드</button>
+              </div>
             </div>
-            <textarea
-              className="field-input min-h-56 w-full rounded-md border border-slate-200 p-3 text-sm"
-              placeholder={"예: [이재민] [오후 9:39] https://www.instagram.com/reel/..."}
-              value={autoText}
-              onChange={(event) => setAutoText(event.target.value)}
-            />
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-              <input ref={autoImageRef} className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="file" accept="image/*" />
-              <button type="button" onClick={extractFromImage} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">
-                이미지에서 추출
-              </button>
-              <button type="button" onClick={extractFromText} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">
-                텍스트 정리
-              </button>
-            </div>
+
+            {saveMode === "auto" ? (
+              <>
+                <textarea
+                  className="field-input min-h-56 w-full rounded-md border border-slate-200 p-3 text-sm"
+                  placeholder={"카톡 텍스트를 붙여넣거나, 이 칸에 이미지 자체를 Ctrl+V로 붙여넣으세요."}
+                  value={autoText}
+                  onPaste={onPasteAuto}
+                  onChange={(event) => setAutoText(event.target.value)}
+                />
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                  <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600">
+                    이미지 선택
+                    <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => void processImageFile(event.target.files?.[0])} />
+                  </label>
+                  <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0])} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
+                  <button type="button" onClick={() => extractFromText()} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">텍스트 정리</button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setManualType("link")} className={`h-9 rounded-md px-3 text-sm font-black ${manualType === "link" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>링크</button>
+                  <button type="button" onClick={() => setManualType("file")} className={`h-9 rounded-md px-3 text-sm font-black ${manualType === "file" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>파일</button>
+                </div>
+                {manualType === "link" ? (
+                  <form onSubmit={saveLink} className="grid gap-3 lg:grid-cols-2">
+                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm lg:col-span-2" placeholder="URL" value={linkForm.url} onChange={(event) => setLinkForm({ ...linkForm, url: event.target.value })} required />
+                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="제목 자동 생성, 필요시 입력" value={linkForm.title} onChange={(event) => setLinkForm({ ...linkForm, title: event.target.value })} />
+                    <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.category_name} onChange={(event) => setLinkForm({ ...linkForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
+                      {Object.entries(categoryTree).map(([group, list]) => list.map((category) => <option key={`${group}-${category}`} value={category}>{group} / {category}</option>))}
+                    </select>
+                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그" value={linkForm.tags} onChange={(event) => setLinkForm({ ...linkForm, tags: event.target.value })} />
+                    <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.reference_type} onChange={(event) => setLinkForm({ ...linkForm, reference_type: event.target.value })}>{referenceTypes.map((type) => <option key={type}>{type}</option>)}</select>
+                    <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={linkForm.memo} onChange={(event) => setLinkForm({ ...linkForm, memo: event.target.value })} />
+                    <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">링크 저장</button>
+                  </form>
+                ) : (
+                  <form onSubmit={saveFile} className="grid gap-3 lg:grid-cols-2">
+                    <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600 lg:col-span-2">
+                      파일 선택
+                      <input ref={fileRef} className="hidden" type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx,.ppt,.pptx,.csv" required />
+                    </label>
+                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="제목 자동 생성, 필요시 입력" value={fileForm.title} onChange={(event) => setFileForm({ ...fileForm, title: event.target.value })} />
+                    <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={fileForm.category_name} onChange={(event) => setFileForm({ ...fileForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
+                      {Object.entries(categoryTree).map(([group, list]) => list.map((category) => <option key={`${group}-${category}`} value={category}>{group} / {category}</option>))}
+                    </select>
+                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그" value={fileForm.tags} onChange={(event) => setFileForm({ ...fileForm, tags: event.target.value })} />
+                    <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={fileForm.memo} onChange={(event) => setFileForm({ ...fileForm, memo: event.target.value })} />
+                    <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">파일 저장</button>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-black">저장 전 확인</h2>
-                <p className="mt-1 text-sm font-bold text-slate-500">필요하면 제목, 메모, 태그를 고친 뒤 한 번에 저장합니다.</p>
+                <p className="mt-1 text-sm font-bold text-slate-500">제목은 10자 내외로 자동 생성됩니다. 자료 포인트는 메모가 아니라 참고 유형입니다.</p>
               </div>
-              <button type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length} className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:bg-slate-300">
-                {autoWorking ? "처리 중" : "전체 저장"}
-              </button>
+              <button type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length} className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:bg-slate-300">{autoWorking ? "처리 중" : "전체 저장"}</button>
             </div>
             <div className="mt-4 space-y-3">
               {autoDrafts.map((draft, index) => (
                 <div key={`${draft.url}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="grid gap-2 md:grid-cols-[1fr_140px_140px]">
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.title} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_name} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, category_name: event.target.value } : item))} />
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.reference_type} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reference_type: event.target.value } : item))} />
+                  <div className="grid gap-2 md:grid-cols-[150px_160px_160px_1fr]">
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.title} maxLength={14} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
+                    <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_group} onChange={(event) => {
+                      const group = event.target.value as CategoryGroup;
+                      const firstCategory = categoryTree[group][0];
+                      setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, category_group: group, category_name: firstCategory } : item));
+                    }}>
+                      {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group}>{group}</option>)}
+                    </select>
+                    <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_name} onChange={(event) => setAutoDraftCategory(index, event.target.value)}>
+                      {categoryTree[draft.category_group].map((category) => <option key={category}>{category}</option>)}
+                    </select>
+                    <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.reference_type} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reference_type: event.target.value } : item))}>
+                      {referenceTypes.map((type) => <option key={type}>{type}</option>)}
+                    </select>
                   </div>
                   <a className="mt-2 block truncate text-sm font-black text-orange-600" href={draft.url} target="_blank" rel="noreferrer">{draft.url}</a>
                   <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr]">
@@ -466,143 +627,66 @@ export default function ArchiveWorkspace() {
         </section>
       )}
 
-      {activeTab === "all" && (
-        <div className="space-y-4">
-          <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-7">
-            <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm md:col-span-2" placeholder="검색" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-            <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>
-              <option value="">카테고리 전체</option>
-              {data.categories.map((category) => <option key={category.id} value={category.id}>{category.category_name}</option>)}
-            </select>
-            <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.tag} onChange={(e) => setFilters({ ...filters, tag: e.target.value })}>
-              <option value="">태그 전체</option>
-              {data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}
-            </select>
-            <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>
-              <option value="">소스 전체</option>
-              {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-            </select>
-            <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-              <option value="">상태 전체</option>
-              <option value="active">active</option>
-              <option value="review">review</option>
-              <option value="done">done</option>
-              <option value="archived">archived</option>
-            </select>
-            <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
-            <label className="flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-black text-slate-600">
-              <input type="checkbox" checked={filters.favorite} onChange={(e) => setFilters({ ...filters, favorite: e.target.checked })} />
-              즐겨찾기
-            </label>
-          </section>
-
-          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-            {filteredItems.map((item) => {
-              const tags = tagsByItem.get(item.id) || [];
-              const category = categoryById.get(String(item.category_id || ""));
-              return (
-                <article key={item.id} className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-                  <div className="flex h-36 items-center justify-center bg-slate-100">
-                    {item.thumbnail_url ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <span className="text-sm font-black text-slate-400">{item.content_type || "archive"}</span>}
-                  </div>
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className="min-w-0 text-base font-black text-slate-950">{item.title || "제목 없음"}</h2>
-                      <button type="button" onClick={() => toggleFavorite(item)} className={`h-8 w-8 rounded-md border text-sm font-black ${item.is_favorite ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200 text-slate-400"}`}>★</button>
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-xs font-black">
-                      <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
-                      <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{category?.category_name || "미분류"}</span>
-                      <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{dateText(item.created_at)}</span>
-                      {linkCountByItem.get(item.id) ? <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">연결됨</span> : null}
-                    </div>
-                    <p className="line-clamp-2 min-h-[40px] text-sm text-slate-600">{item.memo || item.summary || item.url || "메모 없음"}</p>
-                    <div className="flex flex-wrap gap-1">{tags.map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
-                    {(item.url || item.file_url) && <a className="inline-flex text-sm font-black text-orange-600" href={item.url || item.file_url} target="_blank" rel="noreferrer">열기</a>}
-                  </div>
-                </article>
-              );
-            })}
-            {!filteredItems.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
-          </section>
-        </div>
+      {(activeMenu === "all" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
+        <ArchiveList
+          items={filteredItems}
+          categoryById={categoryById}
+          tagsByItem={tagsByItem}
+          linkCountByItem={linkCountByItem}
+          filters={filters}
+          setFilters={setFilters}
+          data={data}
+          onFavorite={toggleFavorite}
+        />
       )}
 
-      {activeTab === "link" && (
-        <form onSubmit={saveLink} className="grid gap-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2">
-          <input className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm lg:col-span-2" placeholder="URL" value={linkForm.url} onChange={(e) => setLinkForm({ ...linkForm, url: e.target.value })} required />
-          <input className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" placeholder="제목" value={linkForm.title} onChange={(e) => setLinkForm({ ...linkForm, title: e.target.value })} />
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.content_type} onChange={(e) => setLinkForm({ ...linkForm, content_type: e.target.value })}>{contentTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select>
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.category_id} onChange={(e) => setLinkForm({ ...linkForm, category_id: e.target.value })}>
-            <option value="">카테고리 선택</option>
-            {data.categories.map((category) => <option key={category.id} value={category.id}>{category.category_name}</option>)}
-          </select>
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.source_type} onChange={(e) => setLinkForm({ ...linkForm, source_type: e.target.value })}>
-            <option value="">소스 자동/선택</option>
-            {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-          </select>
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.reference_type} onChange={(e) => setLinkForm({ ...linkForm, reference_type: e.target.value })}>
-            <option value="">광고/콘텐츠 분류 없음</option>
-            {referenceTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-          <input className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그, 쉼표로 구분" value={linkForm.tags} onChange={(e) => setLinkForm({ ...linkForm, tags: e.target.value })} />
-          <textarea className="field-input min-h-28 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={linkForm.memo} onChange={(e) => setLinkForm({ ...linkForm, memo: e.target.value })} />
-          <button className="h-11 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">링크 저장</button>
-        </form>
+      {activeMenu === "reference" && (
+        <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+          {referenceItems.map((item) => (
+            <article key={item.id} className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-black text-orange-600">{item.reference_type || item.content_type}</p>
+              <h2 className="mt-2 text-base font-black">{item.title}</h2>
+              <p className="mt-2 line-clamp-3 text-sm text-slate-600">{item.memo || item.summary || item.url}</p>
+              <div className="mt-3 flex flex-wrap gap-1">{(tagsByItem.get(item.id) || []).map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
+            </article>
+          ))}
+          {!referenceItems.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">레퍼런스가 없습니다.</div>}
+        </section>
       )}
 
-      {activeTab === "file" && (
-        <form onSubmit={saveFile} className="grid gap-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2">
-          <input ref={fileRef} className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm lg:col-span-2" type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx,.ppt,.pptx,.csv" required />
-          <input className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" placeholder="제목" value={fileForm.title} onChange={(e) => setFileForm({ ...fileForm, title: e.target.value })} />
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={fileForm.category_id} onChange={(e) => setFileForm({ ...fileForm, category_id: e.target.value })}>
-            <option value="">카테고리 선택</option>
-            {data.categories.map((category) => <option key={category.id} value={category.id}>{category.category_name}</option>)}
-          </select>
-          <select className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" value={fileForm.content_type} onChange={(e) => setFileForm({ ...fileForm, content_type: e.target.value })}>
-            <option value="">파일 유형 자동</option>
-            {contentTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-          <input className="field-input h-11 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그, 쉼표로 구분" value={fileForm.tags} onChange={(e) => setFileForm({ ...fileForm, tags: e.target.value })} />
-          <textarea className="field-input min-h-28 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={fileForm.memo} onChange={(e) => setFileForm({ ...fileForm, memo: e.target.value })} />
-          <button className="h-11 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">파일 저장</button>
-        </form>
-      )}
-
-      {activeTab === "taxo" && (
+      {activeMenu === "taxo" && (
         <section className="grid gap-4 lg:grid-cols-2">
           <form onSubmit={saveCategory} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-black">카테고리</h2>
             <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
-              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="카테고리명" value={categoryForm.category_name} onChange={(e) => setCategoryForm({ ...categoryForm, category_name: e.target.value })} />
-              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="정렬" value={categoryForm.sort_order} onChange={(e) => setCategoryForm({ ...categoryForm, sort_order: e.target.value })} />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="카테고리명" value={categoryForm.category_name} onChange={(event) => setCategoryForm({ ...categoryForm, category_name: event.target.value })} />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="정렬" value={categoryForm.sort_order} onChange={(event) => setCategoryForm({ ...categoryForm, sort_order: event.target.value })} />
               <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white">저장</button>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">{data.categories.map((category) => <span key={category.id} className="rounded bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{category.category_name}</span>)}</div>
+            <div className="mt-4 flex flex-wrap gap-2">{Object.entries(categoryTree).flatMap(([group, list]) => list.map((category) => <span key={`${group}-${category}`} className="rounded bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{group}/{category}</span>))}</div>
           </form>
           <form onSubmit={saveTag} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-black">태그</h2>
             <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그명" value={tagForm.tag_name} onChange={(e) => setTagForm({ ...tagForm, tag_name: e.target.value })} />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그명" value={tagForm.tag_name} onChange={(event) => setTagForm({ ...tagForm, tag_name: event.target.value })} />
               <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white">저장</button>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.from_tag_id} onChange={(e) => setTagForm({ ...tagForm, from_tag_id: e.target.value })}><option value="">합칠 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
-              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.to_tag_id} onChange={(e) => setTagForm({ ...tagForm, to_tag_id: e.target.value })}><option value="">남길 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
+              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.from_tag_id} onChange={(event) => setTagForm({ ...tagForm, from_tag_id: event.target.value })}><option value="">합칠 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
+              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.to_tag_id} onChange={(event) => setTagForm({ ...tagForm, to_tag_id: event.target.value })}><option value="">남길 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
               <button type="button" onClick={mergeTags} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">병합</button>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">{data.tags.map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">#{tag.tag_name}</span>)}</div>
           </form>
         </section>
       )}
 
-      {activeTab === "connect" && (
+      {activeMenu === "connect" && (
         <section className="grid gap-4 lg:grid-cols-2">
           <form onSubmit={saveConnection} className="space-y-3 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-black">상품/수입관리 연결</h2>
-            <select className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={connectForm.archive_item_id} onChange={(e) => setConnectForm({ ...connectForm, archive_item_id: e.target.value })}><option value="">아카이브 선택</option>{data.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
+            <select className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={connectForm.archive_item_id} onChange={(event) => setConnectForm({ ...connectForm, archive_item_id: event.target.value })}><option value="">아카이브 선택</option>{data.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="상품명 검색" value={connectForm.query} onChange={(e) => setConnectForm({ ...connectForm, query: e.target.value })} />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="상품명 검색" value={connectForm.query} onChange={(event) => setConnectForm({ ...connectForm, query: event.target.value })} />
               <button type="button" onClick={searchProductsForLink} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">검색</button>
             </div>
             <div className="max-h-52 space-y-2 overflow-auto">
@@ -612,14 +696,14 @@ export default function ArchiveWorkspace() {
                 return <button key={`${id}-${index}`} type="button" onClick={() => setConnectForm({ ...connectForm, linked_id: id })} className="block w-full rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:border-orange-300"><b>{product.name || "-"}</b><span className="ml-2 text-slate-500">{product.code || product.size || ""}</span></button>;
               })}
             </div>
-            <select className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={connectForm.linked_type} onChange={(e) => setConnectForm({ ...connectForm, linked_type: e.target.value })}>
+            <select className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={connectForm.linked_type} onChange={(event) => setConnectForm({ ...connectForm, linked_type: event.target.value })}>
               <option value="product">product</option>
               <option value="import_product">import_product</option>
               <option value="ad_campaign">ad_campaign</option>
               <option value="sales_channel">sales_channel</option>
               <option value="supplier">supplier</option>
             </select>
-            <input className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" placeholder="linked_id" value={connectForm.linked_id} onChange={(e) => setConnectForm({ ...connectForm, linked_id: e.target.value })} required />
+            <input className="field-input h-10 w-full rounded-md border border-slate-200 px-3 text-sm" placeholder="linked_id" value={connectForm.linked_id} onChange={(event) => setConnectForm({ ...connectForm, linked_id: event.target.value })} required />
             <button className="h-10 w-full rounded-md bg-orange-500 px-4 text-sm font-black text-white">연결 추가</button>
           </form>
           <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -634,20 +718,81 @@ export default function ArchiveWorkspace() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
 
-      {activeTab === "reference" && (
-        <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {referenceItems.map((item) => (
-            <article key={item.id} className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black text-orange-600">{item.reference_type || item.content_type}</p>
-              <h2 className="mt-2 text-base font-black">{item.title}</h2>
-              <p className="mt-2 line-clamp-3 text-sm text-slate-600">{item.memo || item.summary || item.url}</p>
-              <div className="mt-3 flex flex-wrap gap-1">{(tagsByItem.get(item.id) || []).map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
+function ArchiveList({
+  items,
+  categoryById,
+  tagsByItem,
+  linkCountByItem,
+  filters,
+  setFilters,
+  data,
+  onFavorite,
+}: {
+  items: ArchiveItem[];
+  categoryById: Map<string, ArchiveCategory>;
+  tagsByItem: Map<string, ArchiveTag[]>;
+  linkCountByItem: Map<string, number>;
+  filters: { q: string; category: string; tag: string; source: string; status: string; date: string; favorite: boolean };
+  setFilters: (filters: { q: string; category: string; tag: string; source: string; status: string; date: string; favorite: boolean }) => void;
+  data: ArchiveData;
+  onFavorite: (item: ArchiveItem) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-7">
+        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm md:col-span-2" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
+        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })}>
+          <option value="">카테고리 전체</option>
+          {data.categories.map((category) => <option key={category.id} value={category.id}>{category.category_name}</option>)}
+        </select>
+        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.tag} onChange={(event) => setFilters({ ...filters, tag: event.target.value })}>
+          <option value="">태그 전체</option>
+          {data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}
+        </select>
+        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
+          <option value="">소스 전체</option>
+          {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+        </select>
+        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} />
+        <label className="flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-black text-slate-600">
+          <input type="checkbox" checked={filters.favorite} onChange={(event) => setFilters({ ...filters, favorite: event.target.checked })} />
+          즐겨찾기
+        </label>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+        {items.map((item) => {
+          const tags = tagsByItem.get(item.id) || [];
+          const category = categoryById.get(String(item.category_id || ""));
+          return (
+            <article key={item.id} className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+              <div className="flex h-28 items-center justify-center bg-slate-100">
+                {item.thumbnail_url ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <span className="text-sm font-black text-slate-400">{item.content_type || "archive"}</span>}
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="min-w-0 text-base font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                  <button type="button" onClick={() => onFavorite(item)} className={`h-8 w-8 rounded-md border text-sm font-black ${item.is_favorite ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200 text-slate-400"}`}>★</button>
+                </div>
+                <div className="flex flex-wrap gap-1 text-xs font-black">
+                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
+                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{category?.category_name || "미분류"}</span>
+                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{dateText(item.created_at)}</span>
+                  {linkCountByItem.get(item.id) ? <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">연결됨</span> : null}
+                </div>
+                <p className="line-clamp-2 min-h-[40px] text-sm text-slate-600">{item.memo || item.summary || item.url || "메모 없음"}</p>
+                <div className="flex flex-wrap gap-1">{tags.map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
+                {(item.url || item.file_url) && <a className="inline-flex text-sm font-black text-orange-600" href={item.url || item.file_url} target="_blank" rel="noreferrer">열기</a>}
+              </div>
             </article>
-          ))}
-          {!referenceItems.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">광고/콘텐츠 레퍼런스가 없습니다.</div>}
-        </section>
-      )}
+          );
+        })}
+        {!items.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
+      </section>
     </div>
   );
 }

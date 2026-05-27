@@ -715,16 +715,28 @@ create table if not exists archive_links (
 );
 
 insert into archive_categories (category_name, sort_order) values
+  ('영어', 1),
+  ('포토샵', 2),
+  ('일러스트', 3),
+  ('AI', 4),
   ('소싱', 10),
   ('광고소재', 20),
   ('상세페이지', 30),
-  ('패키지', 40),
+  ('업무방법', 40),
   ('경쟁사', 50),
-  ('공급처', 60),
-  ('SNS콘텐츠', 70),
-  ('상품아이디어', 80),
-  ('디자인참고', 90),
-  ('기타', 100)
+  ('디자인참고', 60),
+  ('캠핑', 110),
+  ('요리', 120),
+  ('살림', 130),
+  ('육아', 140),
+  ('여행', 150),
+  ('동기부여', 160),
+  ('유머', 170),
+  ('기타', 180),
+  ('패키지', 190),
+  ('공급처', 200),
+  ('SNS콘텐츠', 210),
+  ('상품아이디어', 220)
 on conflict (category_name) do nothing;
 
 create index if not exists idx_sales_io_date on sales(io_date);
