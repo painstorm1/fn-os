@@ -7,6 +7,7 @@ import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, 
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx-js-style";
 import ArchiveWorkspace from "./archive-workspace";
+import MainDashboard from "./main-dashboard";
 
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
@@ -8982,7 +8983,7 @@ function HomeContent() {
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
           ) : activeSlug === "dashboard" ? (
-            <DashboardNew />
+            <MainDashboard />
           ) : activeSlug === "sales" ? (
             <SalesInventoryWorkspace section={salesSection} />
           ) : activeSlug === "accounting" ? (

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { FnosDbError } from "@/lib/fnos-db";
-import { dashboardSummary } from "@/lib/sales-inventory";
+import { mainDashboardSummary } from "@/lib/main-dashboard";
 
 export async function GET() {
   try {
-    return NextResponse.json({ ok: true, ...(await dashboardSummary()) });
+    return NextResponse.json({ ok: true, ...(await mainDashboardSummary()) });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json(

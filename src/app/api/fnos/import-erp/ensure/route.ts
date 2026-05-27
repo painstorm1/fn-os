@@ -10,7 +10,6 @@ const IMPORT_API_URL =
   process.env.IMPORT_API_URL ||
   process.env.IMPORT_ERP_URL ||
   process.env.NEXT_PUBLIC_IMPORT_API_URL ||
-  process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
   "http://localhost:5500";
 const IMPORT_API_BYPASS_SECRET = process.env.IMPORT_API_BYPASS_SECRET || "";
 const IMPORT_API_AUTH_TOKEN = process.env.IMPORT_API_AUTH_TOKEN || IMPORT_API_BYPASS_SECRET;
