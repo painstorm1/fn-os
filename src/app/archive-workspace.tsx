@@ -32,7 +32,6 @@ type AutoArchiveDraft = {
   content_type: string;
   category_group: CategoryGroup;
   category_name: string;
-  tags: string;
   reference_type: string;
 };
 
@@ -48,23 +47,6 @@ const categoryTree: Record<CategoryGroup, string[]> = {
 const sources = ["instagram", "youtube", "naver", "coupang", "smartstore", "taobao", "1688", "amazon", "rakuten", "web", "manual", "file"];
 const contentTypes = ["link", "image", "video", "file", "memo", "product", "ad_reference", "detail_page", "supplier"];
 const referenceTypes = ["콘텐츠 참고", "후킹 문구", "썸네일", "모델컷", "상세페이지 구조", "리뷰 강조", "가격 소구", "비교 광고", "타겟 참고"];
-
-function dateText(value?: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value.slice(0, 10) : date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
-}
-
-function tagMap(data: ArchiveData) {
-  const byId = new Map(data.tags.map((tag) => [tag.id, tag]));
-  const map = new Map<string, ArchiveTag[]>();
-  data.itemTags.forEach((link) => {
-    const itemId = String(link.archive_item_id || "");
-    const tag = byId.get(String(link.tag_id || ""));
-    if (itemId && tag) map.set(itemId, [...(map.get(itemId) || []), tag]);
-  });
-  return map;
-}
 
 function cleanTitle(value: string) {
   return value
@@ -111,23 +93,16 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
   let categoryName = "업무방법";
   let contentType = "link";
   let referenceType = "콘텐츠 참고";
-  const tags = new Set<string>(["자동정리"]);
 
   if (sourceType === "instagram" || sourceType === "youtube") {
     categoryName = "광고소재";
     contentType = "ad_reference";
-    tags.add(sourceType === "instagram" ? "인스타" : "유튜브");
-    tags.add("콘텐츠참고");
   } else if (["taobao", "1688", "amazon", "rakuten"].includes(sourceType)) {
     categoryName = "소싱";
     contentType = "product";
-    tags.add("소싱");
-    tags.add(sourceType);
   } else if (["coupang", "smartstore"].includes(sourceType)) {
     categoryName = "경쟁사";
     contentType = "product";
-    tags.add("경쟁사");
-    tags.add(sourceType);
   }
   if (lower.includes("photoshop") || context.includes("포토샵")) {
     categoryGroup = "교육";
@@ -145,7 +120,6 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
   if (lower.includes("detail") || context.includes("상세")) {
     categoryName = "상세페이지";
     contentType = "detail_page";
-    tags.add("상세페이지");
   }
   if (lower.includes("camp") || context.includes("캠핑")) {
     categoryGroup = "개인";
@@ -171,7 +145,6 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
     content_type: contentType,
     category_group: categoryGroup,
     category_name: categoryName,
-    tags: Array.from(tags).join(", "),
     reference_type: referenceType,
   };
 }
@@ -209,11 +182,10 @@ export default function ArchiveWorkspace() {
   const [autoText, setAutoText] = useState("");
   const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
   const [autoWorking, setAutoWorking] = useState(false);
-  const [filters, setFilters] = useState({ q: "", category: "", tag: "", source: "", status: "", date: "", favorite: false });
-  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
-  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "" });
+  const [filters, setFilters] = useState({ q: "", category: "", source: "", date: "", favorite: false });
+  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
+  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
   const [categoryForm, setCategoryForm] = useState({ category_name: "", sort_order: "" });
-  const [tagForm, setTagForm] = useState({ tag_name: "", from_tag_id: "", to_tag_id: "" });
   const [connectForm, setConnectForm] = useState({ archive_item_id: "", linked_type: "product", linked_id: "", query: "" });
   const [productResults, setProductResults] = useState<Array<{ code?: string; name?: string; size?: string; raw?: Record<string, unknown> }>>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -221,7 +193,6 @@ export default function ArchiveWorkspace() {
 
   const categoryById = useMemo(() => new Map(data.categories.map((category) => [category.id, category])), [data.categories]);
   const categoryIdByName = useMemo(() => new Map(data.categories.map((category) => [category.category_name, category.id])), [data.categories]);
-  const tagsByItem = useMemo(() => tagMap(data), [data]);
   const linkCountByItem = useMemo(() => {
     const map = new Map<string, number>();
     data.links.forEach((link) => {
@@ -239,22 +210,19 @@ export default function ArchiveWorkspace() {
   }), [activeMenu, activeSubCategory, categoryById, data.items]);
 
   const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
-    const tagNames = (tagsByItem.get(item.id) || []).map((tag) => tag.tag_name).join(" ");
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
-    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${tagNames} ${categoryName}`.toLowerCase();
+    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
     if (filters.category && item.category_id !== filters.category) return false;
-    if (filters.tag && !(tagsByItem.get(item.id) || []).some((tag) => tag.id === filters.tag)) return false;
     if (filters.source && item.source_type !== filters.source) return false;
-    if (filters.status && (item.status || "active") !== filters.status) return false;
     if (filters.date && !(item.created_at || "").startsWith(filters.date)) return false;
     if (filters.favorite && !item.is_favorite) return false;
     return true;
-  }), [categoryById, categoryFilteredItems, filters, tagsByItem]);
+  }), [categoryById, categoryFilteredItems, filters]);
 
   const referenceItems = filteredItems.filter((item) => item.content_type === "ad_reference" || item.reference_type);
   const unclassifiedCount = data.items.filter((item) => !item.category_id).length;
-  const todayCount = data.items.filter((item) => (item.created_at || "").startsWith(new Date().toISOString().slice(0, 10))).length;
+  const selectedCount = filteredItems.length;
 
   async function refresh() {
     setLoading(true);
@@ -339,7 +307,7 @@ export default function ArchiveWorkspace() {
       await Promise.all(autoDrafts.map((draft) => postJson("/api/fnos/archive", {
         ...draft,
         category_id: categoryIdByName.get(draft.category_name) || null,
-        tags: [draft.tags, draft.category_group].filter(Boolean).join(", "),
+        tags: "",
         status: "active",
       })));
       const savedCount = autoDrafts.length;
@@ -362,7 +330,7 @@ export default function ArchiveWorkspace() {
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
       await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
-      setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
+      setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "", reference_type: "콘텐츠 참고" });
       setMessage("링크를 저장했습니다.");
       await refresh();
     } catch (error) {
@@ -383,7 +351,7 @@ export default function ArchiveWorkspace() {
       const res = await fetch("/api/fnos/archive", { method: "POST", body: formData });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
-      setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", tags: "", content_type: "" });
+      setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";
       setMessage("파일을 저장했습니다.");
       await refresh();
@@ -401,28 +369,6 @@ export default function ArchiveWorkspace() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "카테고리 저장 실패");
-    }
-  }
-
-  async function saveTag(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      await postJson("/api/fnos/archive/tags", tagForm);
-      setTagForm({ tag_name: "", from_tag_id: "", to_tag_id: "" });
-      setMessage("태그를 저장했습니다.");
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "태그 저장 실패");
-    }
-  }
-
-  async function mergeTags() {
-    try {
-      await postJson("/api/fnos/archive/tags", { action: "merge", from_tag_id: tagForm.from_tag_id, to_tag_id: tagForm.to_tag_id });
-      setMessage("태그를 병합했습니다.");
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "태그 병합 실패");
     }
   }
 
@@ -476,6 +422,23 @@ export default function ArchiveWorkspace() {
     ["connect", "연결"],
   ];
 
+  function categoryCount(categoryName: string) {
+    return data.items.filter((item) => categoryById.get(String(item.category_id || ""))?.category_name === categoryName).length;
+  }
+
+  function groupCount(group: CategoryGroup) {
+    const names = categoryTree[group];
+    return data.items.filter((item) => names.includes(categoryById.get(String(item.category_id || ""))?.category_name || "")).length;
+  }
+
+  function menuCount(menu: ActiveMenu) {
+    if (menu === "all") return data.items.length;
+    if (menu === "reference") return data.items.filter((item) => item.content_type === "ad_reference" || item.reference_type).length;
+    if (menu === "connect") return data.links.length;
+    if (menu === "save" || menu === "taxo") return null;
+    return groupCount(menu);
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -483,24 +446,24 @@ export default function ArchiveWorkspace() {
         <p className="mt-1 text-sm font-bold text-slate-500">링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다.</p>
       </div>
 
-      <section className="grid gap-3 xl:grid-cols-[360px_1fr]">
-        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid grid-cols-4 gap-2 text-center text-xs font-black">
-            <div><p className="text-lg text-slate-950">{data.items.length.toLocaleString("ko-KR")}</p><p className="text-slate-500">전체</p></div>
-            <div><p className="text-lg text-orange-600">{todayCount.toLocaleString("ko-KR")}</p><p className="text-slate-500">오늘</p></div>
-            <div><p className="text-lg text-rose-600">{unclassifiedCount.toLocaleString("ko-KR")}</p><p className="text-slate-500">미분류</p></div>
-            <div><p className="text-lg text-emerald-600">{referenceItems.length.toLocaleString("ko-KR")}</p><p className="text-slate-500">참고</p></div>
+      <section className="grid gap-3 xl:grid-cols-[300px_1fr]">
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <p className="text-xs font-black text-slate-500">현재 표시</p>
+          <div className="mt-1 flex items-end gap-2">
+            <b className="text-2xl leading-none text-orange-600">{selectedCount.toLocaleString("ko-KR")}</b>
+            <span className="text-sm font-black text-slate-700">건</span>
+            {unclassifiedCount > 0 && <span className="ml-auto text-xs font-bold text-rose-600">미분류 {unclassifiedCount}</span>}
           </div>
           {loading && <p className="mt-2 text-xs font-bold text-orange-600">불러오는 중</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
           {menuItems.map(([key, label]) => (
             <button key={key} type="button" onClick={() => openMenu(key)} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-              {label}
+              {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
             </button>
           ))}
           <button type="button" onClick={() => openMenu("taxo")} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === "taxo" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-            카테고리/태그
+            카테고리
           </button>
         </div>
       </section>
@@ -512,7 +475,7 @@ export default function ArchiveWorkspace() {
           <button type="button" onClick={() => setActiveSubCategory("")} className={`h-8 rounded-md px-3 text-xs font-black ${!activeSubCategory ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>전체</button>
           {categoryTree[activeMenu].map((category) => (
             <button key={category} type="button" onClick={() => setActiveSubCategory(category)} className={`h-8 rounded-md px-3 text-xs font-black ${activeSubCategory === category ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}>
-              {category}
+              {category} {categoryCount(category)}
             </button>
           ))}
         </div>
@@ -563,7 +526,6 @@ export default function ArchiveWorkspace() {
                     <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.category_name} onChange={(event) => setLinkForm({ ...linkForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
                       {Object.entries(categoryTree).map(([group, list]) => list.map((category) => <option key={`${group}-${category}`} value={category}>{group} / {category}</option>))}
                     </select>
-                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그" value={linkForm.tags} onChange={(event) => setLinkForm({ ...linkForm, tags: event.target.value })} />
                     <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.reference_type} onChange={(event) => setLinkForm({ ...linkForm, reference_type: event.target.value })}>{referenceTypes.map((type) => <option key={type}>{type}</option>)}</select>
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={linkForm.memo} onChange={(event) => setLinkForm({ ...linkForm, memo: event.target.value })} />
                     <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">링크 저장</button>
@@ -578,7 +540,6 @@ export default function ArchiveWorkspace() {
                     <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={fileForm.category_name} onChange={(event) => setFileForm({ ...fileForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
                       {Object.entries(categoryTree).map(([group, list]) => list.map((category) => <option key={`${group}-${category}`} value={category}>{group} / {category}</option>))}
                     </select>
-                    <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그" value={fileForm.tags} onChange={(event) => setFileForm({ ...fileForm, tags: event.target.value })} />
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={fileForm.memo} onChange={(event) => setFileForm({ ...fileForm, memo: event.target.value })} />
                     <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">파일 저장</button>
                   </form>
@@ -615,10 +576,7 @@ export default function ArchiveWorkspace() {
                     </select>
                   </div>
                   <a className="mt-2 block truncate text-sm font-black text-orange-600" href={draft.url} target="_blank" rel="noreferrer">{draft.url}</a>
-                  <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr]">
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.tags} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, tags: event.target.value } : item))} />
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.memo} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, memo: event.target.value } : item))} />
-                  </div>
+                  <input className="field-input mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.memo} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, memo: event.target.value } : item))} />
                 </div>
               ))}
               {!autoDrafts.length && <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">아직 정리된 링크가 없습니다.</p>}
@@ -631,7 +589,6 @@ export default function ArchiveWorkspace() {
         <ArchiveList
           items={filteredItems}
           categoryById={categoryById}
-          tagsByItem={tagsByItem}
           linkCountByItem={linkCountByItem}
           filters={filters}
           setFilters={setFilters}
@@ -647,7 +604,6 @@ export default function ArchiveWorkspace() {
               <p className="text-xs font-black text-orange-600">{item.reference_type || item.content_type}</p>
               <h2 className="mt-2 text-base font-black">{item.title}</h2>
               <p className="mt-2 line-clamp-3 text-sm text-slate-600">{item.memo || item.summary || item.url}</p>
-              <div className="mt-3 flex flex-wrap gap-1">{(tagsByItem.get(item.id) || []).map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
             </article>
           ))}
           {!referenceItems.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">레퍼런스가 없습니다.</div>}
@@ -664,18 +620,6 @@ export default function ArchiveWorkspace() {
               <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white">저장</button>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">{Object.entries(categoryTree).flatMap(([group, list]) => list.map((category) => <span key={`${group}-${category}`} className="rounded bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{group}/{category}</span>))}</div>
-          </form>
-          <form onSubmit={saveTag} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">태그</h2>
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="태그명" value={tagForm.tag_name} onChange={(event) => setTagForm({ ...tagForm, tag_name: event.target.value })} />
-              <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white">저장</button>
-            </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.from_tag_id} onChange={(event) => setTagForm({ ...tagForm, from_tag_id: event.target.value })}><option value="">합칠 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
-              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={tagForm.to_tag_id} onChange={(event) => setTagForm({ ...tagForm, to_tag_id: event.target.value })}><option value="">남길 태그</option>{data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}</select>
-              <button type="button" onClick={mergeTags} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">병합</button>
-            </div>
           </form>
         </section>
       )}
@@ -725,7 +669,6 @@ export default function ArchiveWorkspace() {
 function ArchiveList({
   items,
   categoryById,
-  tagsByItem,
   linkCountByItem,
   filters,
   setFilters,
@@ -734,24 +677,19 @@ function ArchiveList({
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
-  tagsByItem: Map<string, ArchiveTag[]>;
   linkCountByItem: Map<string, number>;
-  filters: { q: string; category: string; tag: string; source: string; status: string; date: string; favorite: boolean };
-  setFilters: (filters: { q: string; category: string; tag: string; source: string; status: string; date: string; favorite: boolean }) => void;
+  filters: { q: string; category: string; source: string; date: string; favorite: boolean };
+  setFilters: (filters: { q: string; category: string; source: string; date: string; favorite: boolean }) => void;
   data: ArchiveData;
   onFavorite: (item: ArchiveItem) => void;
 }) {
   return (
     <div className="space-y-4">
-      <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-7">
-        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm md:col-span-2" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
+      <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-5">
+        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
         <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })}>
           <option value="">카테고리 전체</option>
           {data.categories.map((category) => <option key={category.id} value={category.id}>{category.category_name}</option>)}
-        </select>
-        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.tag} onChange={(event) => setFilters({ ...filters, tag: event.target.value })}>
-          <option value="">태그 전체</option>
-          {data.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.tag_name}</option>)}
         </select>
         <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
           <option value="">소스 전체</option>
@@ -764,29 +702,27 @@ function ArchiveList({
         </label>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(260px,300px))] gap-3">
         {items.map((item) => {
-          const tags = tagsByItem.get(item.id) || [];
           const category = categoryById.get(String(item.category_id || ""));
+          const href = item.url || item.file_url || "";
           return (
-            <article key={item.id} className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-              <div className="flex h-28 items-center justify-center bg-slate-100">
-                {item.thumbnail_url ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <span className="text-sm font-black text-slate-400">{item.content_type || "archive"}</span>}
-              </div>
-              <div className="space-y-3 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="min-w-0 text-base font-black text-slate-950">{item.title || "제목 없음"}</h2>
-                  <button type="button" onClick={() => onFavorite(item)} className={`h-8 w-8 rounded-md border text-sm font-black ${item.is_favorite ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200 text-slate-400"}`}>★</button>
+            <article key={item.id} className="w-full max-w-[300px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+              <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
+                <div className="flex h-24 items-center justify-center bg-slate-100">
+                  {item.thumbnail_url ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <span className="text-xs font-black text-slate-400">미리보기 없음</span>}
                 </div>
-                <div className="flex flex-wrap gap-1 text-xs font-black">
-                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
-                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{category?.category_name || "미분류"}</span>
-                  <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">{dateText(item.created_at)}</span>
-                  {linkCountByItem.get(item.id) ? <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">연결됨</span> : null}
+              </a>
+              <div className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <h2 className="min-w-0 truncate text-sm font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                  <button type="button" onClick={() => onFavorite(item)} className={`h-7 w-7 shrink-0 rounded-md border text-xs font-black ${item.is_favorite ? "border-orange-300 bg-orange-50 text-orange-600" : "border-slate-200 text-slate-400"}`}>★</button>
                 </div>
-                <p className="line-clamp-2 min-h-[40px] text-sm text-slate-600">{item.memo || item.summary || item.url || "메모 없음"}</p>
-                <div className="flex flex-wrap gap-1">{tags.map((tag) => <span key={tag.id} className="rounded bg-orange-50 px-2 py-1 text-xs font-black text-orange-700">#{tag.tag_name}</span>)}</div>
-                {(item.url || item.file_url) && <a className="inline-flex text-sm font-black text-orange-600" href={item.url || item.file_url} target="_blank" rel="noreferrer">열기</a>}
+                <div className="mt-2 grid grid-cols-2 gap-1 text-xs font-black">
+                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
+                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{category?.category_name || "미분류"}</span>
+                </div>
+                {linkCountByItem.get(item.id) ? <p className="mt-2 text-xs font-black text-emerald-700">연결됨</p> : null}
               </div>
             </article>
           );
