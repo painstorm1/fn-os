@@ -23,6 +23,16 @@ type ArchiveTag = { id: string; tag_name: string };
 type ArchiveItemTag = { archive_item_id?: string; tag_id?: string };
 type ArchiveLink = { id: string; archive_item_id?: string; linked_type?: string; linked_id?: string };
 type ArchiveData = { items: ArchiveItem[]; categories: ArchiveCategory[]; tags: ArchiveTag[]; itemTags: ArchiveItemTag[]; links: ArchiveLink[] };
+type AutoArchiveDraft = {
+  url: string;
+  title: string;
+  memo: string;
+  source_type: string;
+  content_type: string;
+  category_name: string;
+  tags: string;
+  reference_type: string;
+};
 
 const sources = ["instagram", "youtube", "naver", "coupang", "smartstore", "taobao", "1688", "amazon", "rakuten", "web", "manual", "file"];
 const contentTypes = ["link", "image", "video", "file", "memo", "product", "ad_reference", "detail_page", "supplier"];
@@ -55,11 +65,97 @@ function tagMap(data: ArchiveData) {
   return map;
 }
 
+function sourceFromUrl(url: string) {
+  const lower = url.toLowerCase();
+  if (lower.includes("instagram.com")) return "instagram";
+  if (lower.includes("youtube.com") || lower.includes("youtu.be")) return "youtube";
+  if (lower.includes("smartstore.naver.com")) return "smartstore";
+  if (lower.includes("naver.com")) return "naver";
+  if (lower.includes("coupang.com")) return "coupang";
+  if (lower.includes("taobao.com")) return "taobao";
+  if (lower.includes("1688.com")) return "1688";
+  if (lower.includes("amazon.")) return "amazon";
+  if (lower.includes("rakuten.")) return "rakuten";
+  return "web";
+}
+
+function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
+  const sourceType = sourceFromUrl(url);
+  const lower = `${url} ${context}`.toLowerCase();
+  let categoryName = "기타";
+  let contentType = "link";
+  let referenceType = "";
+  const tags = new Set<string>(["자동정리"]);
+
+  if (sourceType === "instagram") {
+    categoryName = "SNS콘텐츠";
+    contentType = "ad_reference";
+    referenceType = "후킹 문구";
+    tags.add("인스타");
+    tags.add("릴스");
+    tags.add("콘텐츠참고");
+  } else if (["taobao", "1688", "amazon", "rakuten"].includes(sourceType)) {
+    categoryName = "소싱";
+    contentType = "product";
+    tags.add("소싱");
+    tags.add(sourceType);
+  } else if (["coupang", "smartstore"].includes(sourceType)) {
+    categoryName = "경쟁사";
+    contentType = "product";
+    tags.add("경쟁사");
+    tags.add(sourceType);
+  }
+  if (lower.includes("detail") || context.includes("상세")) {
+    categoryName = "상세페이지";
+    contentType = "detail_page";
+    tags.add("상세페이지");
+  }
+  if (lower.includes("ad") || context.includes("광고")) {
+    categoryName = "광고소재";
+    contentType = "ad_reference";
+    referenceType = referenceType || "후킹 문구";
+    tags.add("광고참고");
+  }
+
+  const slug = url.split("?")[0].split("/").filter(Boolean).at(-1) || sourceType;
+  const dateMatch = context.match(/20\d{2}[년.-]\s*\d{1,2}[월.-]\s*\d{1,2}일?/);
+  return {
+    url,
+    title: `${sourceType === "instagram" ? "인스타 릴스" : sourceType} - ${slug}`,
+    memo: [dateMatch?.[0], context.replace(url, "").trim()].filter(Boolean).join(" / "),
+    source_type: sourceType,
+    content_type: contentType,
+    category_name: categoryName,
+    tags: Array.from(tags).join(", "),
+    reference_type: referenceType,
+  };
+}
+
+function extractArchiveDrafts(rawText: string) {
+  let compactText = rawText.replace(/\u200B/g, "");
+  for (let index = 0; index < 3; index += 1) {
+    compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{3,})/g, "$1$2");
+  }
+  const matches = Array.from(compactText.matchAll(/https?:\/\/[^\s"'<>]+/g));
+  const seen = new Set<string>();
+  return matches.flatMap((match) => {
+    const url = match[0].replace(/[)\],.]+$/g, "");
+    if (seen.has(url)) return [];
+    seen.add(url);
+    const start = Math.max(0, match.index - 120);
+    const end = Math.min(compactText.length, match.index + url.length + 120);
+    return [classifyAutoDraft(url, compactText.slice(start, end))];
+  });
+}
+
 export default function ArchiveWorkspace() {
-  const [activeTab, setActiveTab] = useState<"all" | "link" | "file" | "taxo" | "connect" | "reference">("all");
+  const [activeTab, setActiveTab] = useState<"auto" | "all" | "link" | "file" | "taxo" | "connect" | "reference">("auto");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [autoText, setAutoText] = useState("");
+  const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
+  const [autoWorking, setAutoWorking] = useState(false);
   const [filters, setFilters] = useState({ q: "", category: "", tag: "", source: "", status: "", date: "", favorite: false });
   const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", tags: "", content_type: "link", source_type: "", reference_type: "" });
   const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", tags: "", content_type: "" });
@@ -68,6 +164,7 @@ export default function ArchiveWorkspace() {
   const [connectForm, setConnectForm] = useState({ archive_item_id: "", linked_type: "product", linked_id: "", query: "" });
   const [productResults, setProductResults] = useState<Array<{ code?: string; name?: string; size?: string; raw?: Record<string, unknown> }>>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const autoImageRef = useRef<HTMLInputElement | null>(null);
 
   const categoryById = useMemo(() => new Map(data.categories.map((category) => [category.id, category])), [data.categories]);
   const tagsByItem = useMemo(() => tagMap(data), [data]);
@@ -123,6 +220,57 @@ export default function ArchiveWorkspace() {
     const result = await res.json();
     if (!res.ok || result.ok === false) throw new Error(result.error || "저장 실패");
     return result;
+  }
+
+  function extractFromText() {
+    const drafts = extractArchiveDrafts(autoText);
+    setAutoDrafts(drafts);
+    setMessage(drafts.length ? `${drafts.length.toLocaleString("ko-KR")}개 링크를 자동 정리했습니다.` : "추출된 링크가 없습니다.");
+  }
+
+  async function extractFromImage() {
+    const file = autoImageRef.current?.files?.[0];
+    if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
+    setAutoWorking(true);
+    setMessage("이미지에서 링크를 읽는 중입니다. URL이 작거나 흐리면 시간이 조금 걸릴 수 있습니다.");
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+      const result = await worker.recognize(file);
+      await worker.terminate();
+      const text = result.data.text || "";
+      setAutoText((prev) => [prev, text].filter(Boolean).join("\n\n"));
+      const drafts = extractArchiveDrafts(text);
+      setAutoDrafts(drafts);
+      setMessage(drafts.length ? `이미지에서 ${drafts.length.toLocaleString("ko-KR")}개 링크를 찾았습니다.` : "이미지에서 링크를 찾지 못했습니다. 텍스트로 붙여넣어 다시 시도해 주세요.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "이미지 링크 추출 실패");
+    } finally {
+      setAutoWorking(false);
+    }
+  }
+
+  async function saveAutoDrafts() {
+    if (!autoDrafts.length) return setMessage("저장할 자동 정리 항목이 없습니다.");
+    setAutoWorking(true);
+    setMessage("자동 정리 항목을 저장 중입니다.");
+    try {
+      let savedCount = 0;
+      for (const draft of autoDrafts) {
+        await postJson("/api/fnos/archive", { ...draft, status: "active" });
+        savedCount += 1;
+      }
+      setAutoDrafts([]);
+      setAutoText("");
+      if (autoImageRef.current) autoImageRef.current.value = "";
+      setMessage(`${savedCount.toLocaleString("ko-KR")}개 항목을 아카이브에 저장했습니다.`);
+      await refresh();
+      setActiveTab("all");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "자동 정리 저장 실패");
+    } finally {
+      setAutoWorking(false);
+    }
   }
 
   async function saveLink(event: FormEvent<HTMLFormElement>) {
@@ -228,6 +376,7 @@ export default function ArchiveWorkspace() {
   }
 
   const tabs = [
+    ["auto", "자동 정리"],
     ["all", "전체 아카이브"],
     ["link", "링크 저장"],
     ["file", "파일 저장"],
@@ -243,7 +392,6 @@ export default function ArchiveWorkspace() {
           <h1 className="text-2xl font-black">아카이브</h1>
           <p className="mt-1 text-sm font-bold text-slate-500">소싱 링크, 광고 레퍼런스, 상세페이지 자료, 파일과 메모를 FN OS DB에 저장합니다.</p>
         </div>
-        <button type="button" onClick={refresh} className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white">새로고침</button>
       </div>
 
       <section className="grid gap-3 md:grid-cols-4">
@@ -262,6 +410,61 @@ export default function ArchiveWorkspace() {
           </button>
         ))}
       </div>
+
+      {activeTab === "auto" && (
+        <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="space-y-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <div>
+              <h2 className="text-base font-black">링크/이미지 자동 정리</h2>
+              <p className="mt-1 text-sm font-bold text-slate-500">카톡 대화처럼 복사한 텍스트나 링크가 보이는 스크린샷을 넣으면 URL을 뽑아 분류합니다.</p>
+            </div>
+            <textarea
+              className="field-input min-h-56 w-full rounded-md border border-slate-200 p-3 text-sm"
+              placeholder={"예: [이재민] [오후 9:39] https://www.instagram.com/reel/..."}
+              value={autoText}
+              onChange={(event) => setAutoText(event.target.value)}
+            />
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+              <input ref={autoImageRef} className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="file" accept="image/*" />
+              <button type="button" onClick={extractFromImage} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">
+                이미지에서 추출
+              </button>
+              <button type="button" onClick={extractFromText} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">
+                텍스트 정리
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black">저장 전 확인</h2>
+                <p className="mt-1 text-sm font-bold text-slate-500">필요하면 제목, 메모, 태그를 고친 뒤 한 번에 저장합니다.</p>
+              </div>
+              <button type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length} className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:bg-slate-300">
+                {autoWorking ? "처리 중" : "전체 저장"}
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {autoDrafts.map((draft, index) => (
+                <div key={`${draft.url}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="grid gap-2 md:grid-cols-[1fr_140px_140px]">
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.title} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_name} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, category_name: event.target.value } : item))} />
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.reference_type} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reference_type: event.target.value } : item))} />
+                  </div>
+                  <a className="mt-2 block truncate text-sm font-black text-orange-600" href={draft.url} target="_blank" rel="noreferrer">{draft.url}</a>
+                  <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr]">
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.tags} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, tags: event.target.value } : item))} />
+                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.memo} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, memo: event.target.value } : item))} />
+                  </div>
+                </div>
+              ))}
+              {!autoDrafts.length && <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">아직 정리된 링크가 없습니다.</p>}
+            </div>
+          </div>
+        </section>
+      )}
 
       {activeTab === "all" && (
         <div className="space-y-4">
