@@ -64,16 +64,24 @@ function metricTitle(base: string, date: string, today: string, yesterday: strin
 }
 
 function rowTitle(row: Row) {
-  return (
-    row.order_no ??
-    row.order_code ??
-    row.memo ??
-    row.product_name ??
-    row.sku ??
-    row.customer_name ??
-    row.name ??
-    "-"
-  );
+  return row.order_no ?? row.order_code ?? row.memo ?? row.product_name ?? row.sku ?? row.customer_name ?? row.name ?? "-";
+}
+
+function compactRange(days: number) {
+  return Array.from({ length: days }, (_, index) => {
+    const key = kstDate(index - days + 1);
+    return { key, date: iso(key), label: `${Number(key.slice(4, 6))}/${Number(key.slice(6, 8))}` };
+  });
+}
+
+function dailySeries(rows: Row[], days: number, pickDate: (row: Row) => unknown, pickAmount: (row: Row) => unknown) {
+  return compactRange(days).map((day) => ({
+    ...day,
+    value: sum(
+      rows.filter((row) => dateKey(pickDate(row)) === day.key),
+      pickAmount,
+    ),
+  }));
 }
 
 export async function mainDashboardSummary() {
@@ -89,16 +97,16 @@ export async function mainDashboardSummary() {
     payables,
     importOrders,
   ] = await Promise.all([
-    optionalRows("sales", { order: "created_at.desc", limit: 1000 }),
-    optionalRows("orders", { order: "created_at.desc", limit: 500 }),
+    optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
+    optionalRows("orders", { order: "created_at.desc", limit: 700 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 500 }),
     optionalRows("sales_channels", { order: "channel_code.asc", limit: 100 }),
-    optionalRows("ad_reports", { order: "report_date.desc", limit: 1500 }),
-    optionalRows("ad_daily_metrics", { order: "metric_date.desc", limit: 300 }),
-    optionalRows("expenses", { order: "expense_date.desc", limit: 500 }),
-    optionalRows("expense_entries", { order: "expense_date.desc", limit: 300 }),
+    optionalRows("ad_reports", { order: "report_date.desc", limit: 2000 }),
+    optionalRows("ad_daily_metrics", { order: "metric_date.desc", limit: 500 }),
+    optionalRows("expenses", { order: "expense_date.desc", limit: 700 }),
+    optionalRows("expense_entries", { order: "expense_date.desc", limit: 500 }),
     optionalRows("customer_payables", { order: "due_date.asc", limit: 100 }),
-    optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 100 }),
+    optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
   ]);
 
   const today = kstDate();
@@ -111,6 +119,7 @@ export async function mainDashboardSummary() {
   const sixMonthStart = `${sixMonthsAgo.getFullYear()}${String(sixMonthsAgo.getMonth() + 1).padStart(2, "0")}01`;
 
   const salesDate = (row: Row) => row.io_date ?? row.sale_date ?? row.created_at;
+  const salesAmount = (row: Row) => row.total_amount ?? row.supply_amount ?? row.supply_amt;
   const orderDate = (row: Row) => row.order_date ?? row.created_at;
   const adRows = adReports.length ? adReports : adDailyMetrics;
   const adDate = (row: Row) => row.report_date ?? row.metric_date ?? row.created_at;
@@ -165,9 +174,10 @@ export async function mainDashboardSummary() {
     last_collected_items: collectedItems,
     sales_label: metricTitle("매출", latestSalesDate, today, yesterday),
     sales_latest_date: iso(latestSalesDate),
-    sales_latest_amount: sum(latestSalesRows, (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt),
-    seven_day_sales: sum(sevenDaySalesRows, (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt),
-    month_sales: sum(monthSalesRows, (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt),
+    sales_latest_amount: sum(latestSalesRows, salesAmount),
+    seven_day_sales: sum(sevenDaySalesRows, salesAmount),
+    month_sales: sum(monthSalesRows, salesAmount),
+    sales_daily: dailySeries(sales, 14, salesDate, salesAmount),
     order_count: latestOrderRows.length,
     order_latest_date: iso(latestOrderDate),
     inventory_risk_count: riskItems.length,
@@ -181,6 +191,7 @@ export async function mainDashboardSummary() {
     ad_month_spend: adMonthSpend,
     ad_conversion_sales: conversionSales,
     ad_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
+    ad_daily: dailySeries(adRows, 14, adDate, adSpend),
     card_expense_amount: cardRows.length
       ? sum(cardRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount)
       : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
