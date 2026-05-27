@@ -7565,6 +7565,8 @@ function AdsWorkflowSummary() {
 
 function AdsAnalysisWorkspace() {
   const defaultRange = adRangeForPreset("30d");
+  const yesterdayRange = adRangeForPreset("yesterday");
+  const [activeAdsTab, setActiveAdsTab] = useState<"daily" | "db">("daily");
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
@@ -7575,10 +7577,11 @@ function AdsAnalysisWorkspace() {
   const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("30d");
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo, setDateTo] = useState(defaultRange.to);
+  const [dailyDate, setDailyDate] = useState(yesterdayRange.to);
 
   const loadSummary = () => {
     setLoading(true);
-    const params = new URLSearchParams({ from: dateFrom, to: dateTo });
+    const params = new URLSearchParams(activeAdsTab === "daily" ? { from: dailyDate, to: dailyDate } : { from: dateFrom, to: dateTo });
     fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => setSummary(data))
@@ -7589,7 +7592,7 @@ function AdsAnalysisWorkspace() {
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
-  }, [dateFrom, dateTo]);
+  }, [activeAdsTab, dailyDate, dateFrom, dateTo]);
 
   function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
     const range = adRangeForPreset(preset);
@@ -7630,7 +7633,7 @@ function AdsAnalysisWorkspace() {
     setMessage(`${target.file.name} 파일을 대기 목록에서 제외했습니다.`);
   }
 
-  async function uploadRows() {
+  async function uploadRows(forceReplace = false) {
     if (!uploadedAdFiles.length) {
       setMessage("먼저 광고 파일을 업로드해 주세요.");
       return;
@@ -7642,9 +7645,14 @@ function AdsAnalysisWorkspace() {
       form.append("files", item.file);
       form.append("file_channels", adSourceLabels[item.sourceKey]);
     });
+    if (forceReplace) form.append("force", "true");
     const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
     const data = await res.json();
     setUploading(false);
+    if (data.needs_confirmation) {
+      const ok = window.confirm(`${data.message || "해당일에 입력된 자료가 있습니다."}\n\n기존 광고 DB 자료를 대체 저장할까요?`);
+      if (ok) return uploadRows(true);
+    }
     setMessage(data.message || data.error || "업로드 처리 완료");
     if (res.ok) {
       setUploadedAdFiles([]);
@@ -7674,18 +7682,52 @@ function AdsAnalysisWorkspace() {
     }
   }
 
+  function exportAdReportCsv() {
+    const rows = [
+      ["구분", "채널", "날짜", "캠페인", "광고그룹", "소재/상품", "광고비", "클릭", "구매전환", "전환금액", "ROAS", "CTR", "CVR"],
+      ...daily.map((row) => ["일별", "", String(row.date || ""), "", "", "", adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
+      ...campaigns.map((row) => ["캠페인", String(row.channel || ""), "", String(row.campaign_name || ""), String(row.ad_group_name || ""), String(row.ad_name || ""), adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
+      ...products.map((row) => ["상품", String(row.channel || ""), "", String(row.campaign_name || ""), "", String(row.product_name || row.sku || ""), adNumber(row.cost), adNumber(row.clicks), adNumber(row.conversions), adNumber(row.conversion_value), adNumber(row.roas), adNumber(row.ctr), adNumber(row.cvr)]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `fnos-ad-report-${activeAdsTab === "daily" ? dailyDate : `${dateFrom}_${dateTo}`}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   const total = summary?.total || {};
   const products = summary?.products || [];
   const campaigns = summary?.campaigns || [];
   const channels = summary?.channels || [];
   const daily = summary?.daily || [];
   const unmapped = summary?.unmapped || [];
+  const batches = summary?.batches || [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black">광고분석</h1>
         <p className="mt-1 text-sm font-bold text-slate-500">메타GFA, 네이버쇼핑검색, 네이버Advoost, 네이버GFA, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {[
+          ["daily", "일일 광고현황"],
+          ["db", "광고DB"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveAdsTab(key as "daily" | "db")}
+            className={`h-10 rounded-md px-4 text-sm font-black ${activeAdsTab === key ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
@@ -7705,7 +7747,7 @@ function AdsAnalysisWorkspace() {
             <span className="shrink-0 rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-black text-orange-600">파일 선택</span>
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
           </label>
-          <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
+          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
             {uploading ? "생성 중" : "데이터 생성"}
           </button>
         </div>
@@ -7730,7 +7772,24 @@ function AdsAnalysisWorkspace() {
         )}
       </section>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+      {activeAdsTab === "daily" && (
+        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-black text-slate-800">일일 광고 기준일</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">평일은 전날, 월요일은 금/토/일 파일을 올려서 하루씩 확인합니다.</p>
+            </div>
+            <input
+              type="date"
+              value={dailyDate}
+              onChange={(event) => setDailyDate(event.target.value)}
+              className="field-input h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold"
+            />
+          </div>
+        </section>
+      )}
+
+      {activeAdsTab === "db" && <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-black text-slate-800">분석 기간</p>
@@ -7773,12 +7832,74 @@ function AdsAnalysisWorkspace() {
             />
           </div>
         </div>
-      </section>
+      </section>}
 
       {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
+      {activeAdsTab === "daily" && (
+        <>
+          <section className="grid gap-3 md:grid-cols-4">
+            <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note={`${dailyDate} 기준`} />
+            <AdsMetricCard label="구매전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
+            <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
+            <AdsMetricCard label="구매전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
+          </section>
+          <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+            <AdsLineChart rows={daily} />
+            <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
+          </section>
+          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-black">오늘 확인할 업로드 내역</h2>
+              <button type="button" onClick={() => setActiveAdsTab("db")} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">광고DB에서 자세히 보기</button>
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              {batches.slice(0, 6).map((row, index) => (
+                <div key={String(row.id || index)} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm font-black text-slate-800">{String(row.channel || "-")} · {String(row.status || "-")}</p>
+                  <p className="mt-1 truncate text-xs font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
+                  <p className="mt-2 text-xs font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")}건 / 실패 {adNumber(row.fail_count).toLocaleString("ko-KR")}건</p>
+                </div>
+              ))}
+              {!batches.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400 md:col-span-2">업로드 내역이 없습니다.</p>}
+            </div>
+          </section>
+        </>
+      )}
+
+      {activeAdsTab === "db" && (
+        <>
       <AdsWorkflowSummary />
+
+      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-black">업로드 내역</h2>
+          <button type="button" onClick={exportAdReportCsv} className="rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white">엑셀용 CSV 다운로드</button>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                {["업로드일", "채널", "파일", "성공", "실패", "상태", "메모"].map((head) => <th key={head} className="whitespace-nowrap px-3 py-2 font-black">{head}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {batches.map((row, index) => (
+                <tr key={String(row.id || index)} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 font-bold">{String(row.uploaded_at || row.created_at || "-").slice(0, 16)}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{String(row.channel || "-")}</td>
+                  <td className="min-w-72 px-3 py-2">{String(row.source_file_name || "-")}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right">{adNumber(row.success_count).toLocaleString("ko-KR")}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right">{adNumber(row.fail_count).toLocaleString("ko-KR")}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-black text-orange-600">{String(row.status || "-")}</td>
+                  <td className="min-w-48 px-3 py-2">{String(row.memo || "-")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
         <AdsLineChart rows={daily} />
@@ -7854,42 +7975,54 @@ function AdsAnalysisWorkspace() {
           {!unmapped.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400 lg:col-span-2">미매칭 광고 데이터가 없습니다.</p>}
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }
 
 function AdsRightPanel() {
-  const [summary, setSummary] = useState<AdsSummary | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, AdsSummary>>({});
 
   useEffect(() => {
     let alive = true;
-    const range = adRangeForPreset("30d");
-    const params = new URLSearchParams(range);
-    fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (alive) setSummary(data);
+    Promise.all([
+      ["어제", adRangeForPreset("yesterday")],
+      ["최근 1주일", adRangeForPreset("7d")],
+      ["최근 30일", adRangeForPreset("30d")],
+    ].map(([label, range]) => {
+      const params = new URLSearchParams(range as { from: string; to: string });
+      return fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => [label, data] as const);
+    }))
+      .then((entries) => {
+        if (alive) setSummaries(Object.fromEntries(entries));
       })
       .catch((error) => {
-        if (alive) setSummary({ ok: false, error: error instanceof Error ? error.message : "광고 요약 조회 실패" });
+        if (alive) setSummaries({ "최근 30일": { ok: false, error: error instanceof Error ? error.message : "광고 요약 조회 실패" } });
       });
     return () => {
       alive = false;
     };
   }, []);
 
-  const total = summary?.total || {};
-
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="광고 핵심 지표" defaultOpen showChevron={false}>
-        <div className="space-y-2">
-          <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="전체 파일 합산" />
-          <AdsMetricCard label="전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
-          <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
-          <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
+        <div className="space-y-3">
+          {["어제", "최근 1주일", "최근 30일"].map((label) => {
+            const total = summaries[label]?.total || {};
+            return (
+              <div key={label} className="rounded-md border border-slate-200 bg-white p-3">
+                <p className="text-xs font-black text-slate-500">{label}</p>
+                <p className="mt-2 text-lg font-black text-slate-950">{krw(adNumber(total.cost))}</p>
+                <p className="mt-1 text-xs font-bold text-orange-600">ROAS {adPercent(total.roas)} · 구매 {adNumber(total.conversions).toLocaleString("ko-KR")}건</p>
+              </div>
+            );
+          })}
         </div>
-        {summary?.ok === false && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{summary.error}</div>}
+        {Object.values(summaries).some((item) => item.ok === false) && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">광고 요약 조회 실패</div>}
       </ToolSection>
       <ToolSection title="분석 기준" showChevron={false}>
         <div className="space-y-2 text-xs font-bold text-slate-600">

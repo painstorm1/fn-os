@@ -9,6 +9,7 @@ export type AdImportResult = {
   success_count: number;
   fail_count: number;
   duplicate?: boolean;
+  needs_confirmation?: boolean;
   replaced_count?: number;
   replaced_dates?: string[];
 };
@@ -183,7 +184,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   };
 }
 
-export async function importAdRows(rows: AnyRecord[], channel: string, sourceFileName?: string): Promise<AdImportResult> {
+export async function importAdRows(rows: AnyRecord[], channel: string, sourceFileName?: string, options?: { forceReplace?: boolean }): Promise<AdImportResult> {
   if (!hasDbConfig()) {
     return { ok: false, message: "Supabase 환경변수가 설정되지 않았습니다.", success_count: 0, fail_count: rows.length };
   }
@@ -197,21 +198,12 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     limit: 30,
   });
 
-  const [batch] = await insertRows<{ id: string }>("ad_upload_batches", {
-    channel: normalizedChannel,
-    source_file_name: fileName,
-    total_count: rows.length,
-    success_count: 0,
-    fail_count: 0,
-    status: "SAVED",
-  });
-
   const usdKrwRate = await getUsdKrwRate();
-  const reports = rows
+  const previewReports = rows
     .filter((row) => !isAggregateRow(row))
-    .map((row) => normalizeReport(row, batch.id, normalizedChannel, usdKrwRate))
+    .map((row) => normalizeReport(row, "__preview__", normalizedChannel, usdKrwRate))
     .filter(hasAdSignal);
-  const reportDates = Array.from(new Set(reports.map((row) => text(row.report_date)).filter(Boolean))).sort();
+  const reportDates = Array.from(new Set(previewReports.map((row) => text(row.report_date)).filter(Boolean))).sort();
   let replacedCount = 0;
   const replacedReportIds = new Set<string>();
   if (reportDates.length) {
@@ -223,10 +215,6 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     existingReports.forEach((row) => {
       if (row.id) replacedReportIds.add(text(row.id));
     });
-    await deleteRows("ad_reports", {
-      channel: `eq.${normalizedChannel}`,
-      report_date: `in.(${reportDates.join(",")})`,
-    }).catch(() => []);
   }
   for (const recentBatch of recentBatches) {
     const batchId = text(recentBatch.id);
@@ -235,10 +223,44 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     existingReports.forEach((row) => {
       if (row.id) replacedReportIds.add(text(row.id));
     });
+  }
+  replacedCount = replacedReportIds.size;
+  if (replacedCount > 0 && !options?.forceReplace) {
+    return {
+      ok: false,
+      duplicate: true,
+      needs_confirmation: true,
+      message: `${reportDates.join(", ") || "선택 날짜"} ${normalizedChannel} 데이터가 이미 ${replacedCount.toLocaleString("ko-KR")}건 있습니다. 기존 데이터를 대체할까요?`,
+      success_count: 0,
+      fail_count: rows.length,
+      replaced_count: replacedCount,
+      replaced_dates: reportDates,
+    };
+  }
+
+  const [batch] = await insertRows<{ id: string }>("ad_upload_batches", {
+    channel: normalizedChannel,
+    source_file_name: fileName,
+    total_count: rows.length,
+    success_count: 0,
+    fail_count: 0,
+    status: "SAVED",
+  });
+
+  if (reportDates.length) {
+    await deleteRows("ad_reports", {
+      channel: `eq.${normalizedChannel}`,
+      report_date: `in.(${reportDates.join(",")})`,
+    }).catch(() => []);
+  }
+  for (const recentBatch of recentBatches) {
+    const batchId = text(recentBatch.id);
+    if (!batchId) continue;
     await deleteRows("ad_reports", { batch_id: `eq.${batchId}` }).catch(() => []);
     await patchRows("ad_upload_batches", { id: `eq.${batchId}` }, { status: "REPLACED", memo: `새 ${normalizedChannel} 업로드로 교체됨` }).catch(() => []);
   }
-  replacedCount = replacedReportIds.size;
+
+  const reports = previewReports.map((row) => ({ ...row, batch_id: batch.id }));
   const saved = reports.length ? await insertRows("ad_reports", reports) : [];
   await patchRows("ad_upload_batches", { id: `eq.${batch.id}` }, {
     success_count: saved.length,

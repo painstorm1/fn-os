@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       const form = await request.formData();
       const files = form.getAll("files").filter((item): item is File => item instanceof File);
       const fileChannels = form.getAll("file_channels").map(clean);
+      const forceReplace = clean(form.get("force")) === "true";
       if (!files.length) {
         return NextResponse.json({ ok: false, error: "업로드할 광고 파일이 없습니다." }, { status: 400 });
       }
@@ -76,18 +77,22 @@ export async function POST(request: NextRequest) {
 
       const results = [];
       for (const [channel, rows] of groupedRows.entries()) {
-        results.push(await importAdRows(rows, channel, (groupedFiles.get(channel) || []).join(", ")));
+        results.push(await importAdRows(rows, channel, (groupedFiles.get(channel) || []).join(", "), { forceReplace }));
       }
       const successCount = results.reduce((sum, result) => sum + result.success_count, 0);
       const failCount = results.reduce((sum, result) => sum + result.fail_count, 0);
       const hardFailures = results.filter((result) => !result.ok && !result.duplicate);
       const duplicateCount = results.filter((result) => result.duplicate).length;
+      const confirmationNeeded = results.some((result) => result.needs_confirmation);
       const replacedCount = results.reduce((sum, result) => sum + (result.replaced_count || 0), 0);
 
       return NextResponse.json({
-        ok: hardFailures.length === 0,
+        ok: hardFailures.length === 0 && !confirmationNeeded,
+        needs_confirmation: confirmationNeeded,
         message: hardFailures.length
           ? "일부 광고 파일을 저장하지 못했습니다."
+          : confirmationNeeded
+            ? results.filter((result) => result.needs_confirmation).map((result) => result.message).join("\n")
           : replacedCount
             ? `기존 광고 데이터 ${replacedCount.toLocaleString("ko-KR")}건을 지우고 ${successCount.toLocaleString("ko-KR")}건으로 교체했습니다.`
           : duplicateCount
@@ -99,7 +104,7 @@ export async function POST(request: NextRequest) {
         fail_count: failCount,
         replaced_count: replacedCount,
         results,
-      }, { status: hardFailures.length ? 400 : 200 });
+      }, { status: hardFailures.length ? 400 : confirmationNeeded ? 409 : 200 });
     }
 
     const body = await request.json();
@@ -107,7 +112,7 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ ok: false, error: "업로드할 광고 데이터가 없습니다." }, { status: 400 });
     }
-    const result = await importAdRows(rows, body.channel || "기타", body.source_file_name || body.sourceFileName);
+    const result = await importAdRows(rows, body.channel || "기타", body.source_file_name || body.sourceFileName, { forceReplace: body.force === true });
     return NextResponse.json(result, { status: result.ok ? 200 : result.duplicate ? 409 : 400 });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
