@@ -26,6 +26,8 @@ const IMPORT_API_URL =
   process.env.NEXT_PUBLIC_IMPORT_API_URL ||
   process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
   "http://localhost:5500";
+const IMPORT_API_BYPASS_SECRET = process.env.IMPORT_API_BYPASS_SECRET || "";
+const IMPORT_API_AUTH_TOKEN = process.env.IMPORT_API_AUTH_TOKEN || IMPORT_API_BYPASS_SECRET;
 let cachedUsdKrwRate: { value: number; at: number } | null = null;
 
 function text(value: unknown) {
@@ -110,7 +112,14 @@ async function getUsdKrwRate() {
   const now = Date.now();
   if (cachedUsdKrwRate && now - cachedUsdKrwRate.at < 60_000) return cachedUsdKrwRate.value;
   try {
-    const response = await fetch(`${IMPORT_API_URL.replace(/\/$/, "")}/api/fnos/settings`, { cache: "no-store" });
+    const response = await fetch(`${IMPORT_API_URL.replace(/\/$/, "")}/api/fnos/settings`, {
+      cache: "no-store",
+      headers: {
+        Origin: process.env.FN_OS_ORIGIN || "http://127.0.0.1:3000",
+        ...(IMPORT_API_BYPASS_SECRET ? { "x-vercel-protection-bypass": IMPORT_API_BYPASS_SECRET } : {}),
+        ...(IMPORT_API_AUTH_TOKEN ? { "x-fn-os-api-key": IMPORT_API_AUTH_TOKEN } : {}),
+      },
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     const usdRate = numberValue(data?.rates?.USD);

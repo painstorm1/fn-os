@@ -12,6 +12,8 @@ const IMPORT_API_URL =
   process.env.NEXT_PUBLIC_IMPORT_API_URL ||
   process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
   "http://localhost:5500";
+const IMPORT_API_BYPASS_SECRET = process.env.IMPORT_API_BYPASS_SECRET || "";
+const IMPORT_API_AUTH_TOKEN = process.env.IMPORT_API_AUTH_TOKEN || IMPORT_API_BYPASS_SECRET;
 
 const IMPORT_ERP_DIR = process.env.IMPORT_ERP_DIR || path.resolve(process.cwd(), "..", "수입ERP");
 const IMPORT_ERP_PYTHON = process.env.IMPORT_ERP_PYTHON || "python";
@@ -48,7 +50,11 @@ async function pingImportErp(timeoutMs = 1500) {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(`${IMPORT_API_URL.replace(/\/$/, "")}/api/fnos/dashboard`, {
       cache: "no-store",
-      headers: { Origin: LOCAL_ORIGIN },
+      headers: {
+        Origin: LOCAL_ORIGIN,
+        ...(IMPORT_API_BYPASS_SECRET ? { "x-vercel-protection-bypass": IMPORT_API_BYPASS_SECRET } : {}),
+        ...(IMPORT_API_AUTH_TOKEN ? { "x-fn-os-api-key": IMPORT_API_AUTH_TOKEN } : {}),
+      },
       signal: controller.signal,
     });
     clearTimeout(timeout);
