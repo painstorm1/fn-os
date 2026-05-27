@@ -25,27 +25,48 @@ export async function POST(request: NextRequest) {
     const contentType = request.headers.get("content-type") || "";
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
-      const channel = clean(form.get("channel")) || "기타";
       const files = form.getAll("files").filter((item): item is File => item instanceof File);
+      const fileChannels = form.getAll("file_channels").map(clean);
       if (!files.length) {
         return NextResponse.json({ ok: false, error: "업로드할 광고 파일이 없습니다." }, { status: 400 });
       }
 
-      const rows: Record<string, unknown>[] = [];
       const fileNames: string[] = [];
-      for (const file of files) {
+      const groupedRows = new Map<string, Record<string, unknown>[]>();
+      const groupedFiles = new Map<string, string[]>();
+      for (const [index, file] of files.entries()) {
+        const channel = fileChannels[index] || clean(form.get("channel")) || "기타";
         const buffer = Buffer.from(await file.arrayBuffer());
         const fileRows = rowsFromWorkbook(buffer).map((row) => ({ ...row, __source_file_name: file.name }));
-        rows.push(...fileRows);
+        groupedRows.set(channel, [...(groupedRows.get(channel) || []), ...fileRows]);
+        groupedFiles.set(channel, [...(groupedFiles.get(channel) || []), file.name]);
         fileNames.push(file.name);
       }
 
-      if (!rows.length) {
+      const parsedCount = Array.from(groupedRows.values()).reduce((sum, rows) => sum + rows.length, 0);
+      if (!parsedCount) {
         return NextResponse.json({ ok: false, error: "광고 파일에서 읽을 데이터가 없습니다." }, { status: 400 });
       }
 
-      const result = await importAdRows(rows, channel, fileNames.join(", "));
-      return NextResponse.json({ ...result, files: fileNames, parsed_count: rows.length }, { status: result.ok ? 200 : result.duplicate ? 409 : 400 });
+      const results = [];
+      for (const [channel, rows] of groupedRows.entries()) {
+        results.push(await importAdRows(rows, channel, (groupedFiles.get(channel) || []).join(", ")));
+      }
+      const successCount = results.reduce((sum, result) => sum + result.success_count, 0);
+      const failCount = results.reduce((sum, result) => sum + result.fail_count, 0);
+      const hasFailure = results.some((result) => !result.ok);
+
+      return NextResponse.json({
+        ok: !hasFailure,
+        message: hasFailure
+          ? "일부 광고 파일을 저장하지 못했습니다."
+          : `광고 파일 ${fileNames.length}개에서 ${successCount.toLocaleString("ko-KR")}건을 생성했습니다.`,
+        files: fileNames,
+        parsed_count: parsedCount,
+        success_count: successCount,
+        fail_count: failCount,
+        results,
+      }, { status: hasFailure ? 400 : 200 });
     }
 
     const body = await request.json();

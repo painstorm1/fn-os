@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx-js-style";
+import ArchiveWorkspace from "./archive-workspace";
 
 const IMPORT_ERP_URL = process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
@@ -5297,6 +5298,7 @@ function SalesSyncTools() {
     message?: string;
     error?: string;
   } | null>(null);
+  const [expandedLookupCode, setExpandedLookupCode] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncLoading, setSyncLoading] = useState<"" | "products" | "customers" | "warehouses" | "inventory">("");
   const customerFileRef = useRef<HTMLInputElement>(null);
@@ -5310,6 +5312,7 @@ function SalesSyncTools() {
     }
     setLookupLoading(true);
     setLookupResult(null);
+    setExpandedLookupCode(null);
     try {
       const res = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
@@ -6550,6 +6553,12 @@ function Dashboard() {
 }
 
 type AdsMetricRow = Record<string, unknown>;
+type AdSourceKey = "meta" | "naver-search" | "naver-gfa" | "naver-adboost" | "coupang";
+type UploadedAdFile = {
+  id: string;
+  sourceKey: AdSourceKey;
+  file: File;
+};
 
 type AdsSummary = {
   ok?: boolean;
@@ -6564,10 +6573,32 @@ type AdsSummary = {
   advice?: Array<{ title?: string; message?: string; tone?: string }>;
 };
 
-const adChannels = ["네이버 광고", "쿠팡 광고", "메타 광고", "기타"];
+const adSources: Array<{ key: AdSourceKey; label: string; shortLabel: string; hint: string }> = [
+  { key: "meta", label: "메타", shortLabel: "META", hint: "Meta Ads 엑셀/CSV" },
+  { key: "naver-search", label: "네이버검색", shortLabel: "NS", hint: "네이버 검색광고 리포트" },
+  { key: "naver-gfa", label: "네이버GTA", shortLabel: "GTA", hint: "네이버 GTA/GFA 리포트" },
+  { key: "naver-adboost", label: "네이버Advoost", shortLabel: "ADV", hint: "Advoost 리포트" },
+  { key: "coupang", label: "쿠팡", shortLabel: "CP", hint: "쿠팡 광고 리포트" },
+];
+
+const adSourceLabels = Object.fromEntries(adSources.map((source) => [source.key, source.label])) as Record<AdSourceKey, string>;
 
 function adUploadFileKey(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function uploadedAdFileKey(item: UploadedAdFile) {
+  return `${item.sourceKey}:${adUploadFileKey(item.file)}`;
+}
+
+function inferAdSourceKey(fileName: string): AdSourceKey {
+  const name = fileName.toLowerCase();
+  if (name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("페이스북") || name.includes("메타")) return "meta";
+  if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "naver-adboost";
+  if (name.includes("gfa") || name.includes("gta") || name.includes("성과형") || name.includes("네이버g")) return "naver-gfa";
+  if (name.includes("coupang") || name.includes("쿠팡")) return "coupang";
+  if (name.includes("naver") || name.includes("search") || name.includes("검색") || name.includes("네이버")) return "naver-search";
+  return "naver-search";
 }
 
 function adNumber(value: unknown) {
@@ -6579,12 +6610,13 @@ function adPercent(value: unknown) {
   return `${adNumber(value).toFixed(1)}%`;
 }
 
-function AdsMetricCard({ label, value, note }: { label: string; value: string; note?: string }) {
+function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
+  const toneClass = tone === "rose" ? "text-rose-600" : tone === "slate" ? "text-slate-600" : "text-orange-600";
   return (
     <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-black text-slate-500">{label}</p>
       <p className="mt-2 text-xl font-black text-slate-950">{value}</p>
-      {note && <p className="mt-1 text-xs font-bold text-orange-600">{note}</p>}
+      {note && <p className={`mt-1 text-xs font-bold ${toneClass}`}>{note}</p>}
     </article>
   );
 }
@@ -6615,11 +6647,81 @@ function AdsBarList({ title, rows, labelKey, valueKey }: { title: string; rows: 
   );
 }
 
+function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
+  const points = rows.slice(-14);
+  const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
+  const maxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 1);
+  const costPath = points.map((row, index) => {
+    const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * 100;
+    const y = 92 - (adNumber(row.cost) / maxCost) * 72;
+    return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ");
+  const roasPath = points.map((row, index) => {
+    const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * 100;
+    const y = 92 - (adNumber(row.roas) / maxRoas) * 72;
+    return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ");
+
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-black">일별 광고비 / ROAS</h2>
+        <div className="flex gap-3 text-xs font-black">
+          <span className="text-orange-600">광고비</span>
+          <span className="text-slate-600">ROAS</span>
+        </div>
+      </div>
+      <div className="mt-4 h-56 rounded-md bg-slate-50 p-3">
+        {points.length ? (
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+            <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
+            <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
+            <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
+            <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.4" vectorEffect="non-scaling-stroke" />
+            <path d={roasPath} fill="none" stroke="#475569" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" />
+          </svg>
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AdsSourceDashboard({ rows }: { rows: AdsMetricRow[] }) {
+  const byChannel = new Map(rows.map((row) => [String(row.channel || ""), row]));
+  const maxCost = Math.max(...rows.map((row) => adNumber(row.cost)), 1);
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-base font-black">5개 광고 파일 현황</h2>
+      <div className="mt-4 grid gap-3 lg:grid-cols-5">
+        {adSources.map((source) => {
+          const row = byChannel.get(source.label) || {};
+          const cost = adNumber(row.cost);
+          const roas = adNumber(row.roas);
+          return (
+            <div key={source.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded bg-slate-950 px-2 py-1 text-[11px] font-black text-white">{source.shortLabel}</span>
+                <span className={`text-xs font-black ${roas >= 300 ? "text-emerald-600" : roas > 0 && roas < 120 ? "text-rose-600" : "text-slate-500"}`}>{roas ? adPercent(roas) : "-"}</span>
+              </div>
+              <p className="mt-3 text-sm font-black text-slate-800">{source.label}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">{cost ? krw(cost) : "파일 대기 중"}</p>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (cost / maxCost) * 100)}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function AdsAnalysisWorkspace() {
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [channel, setChannel] = useState(adChannels[0]);
-  const [uploadedAdFiles, setUploadedAdFiles] = useState<File[]>([]);
+  const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
   const [mappingSku, setMappingSku] = useState("");
@@ -6639,14 +6741,19 @@ function AdsAnalysisWorkspace() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  function pickAdFiles(files: FileList | File[] | null) {
+  function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
     const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
     if (!next.length) {
       setMessage("엑셀 또는 CSV 광고 파일을 선택해 주세요.");
       return;
     }
-    const existing = new Set(uploadedAdFiles.map(adUploadFileKey));
-    const fresh = next.filter((file) => !existing.has(adUploadFileKey(file)));
+    const incoming = next.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      sourceKey: forcedSource || inferAdSourceKey(file.name),
+      file,
+    }));
+    const existing = new Set(uploadedAdFiles.map(uploadedAdFileKey));
+    const fresh = incoming.filter((item) => !existing.has(uploadedAdFileKey(item)));
     if (!fresh.length) {
       setMessage("이미 대기 목록에 있는 파일입니다.");
       return;
@@ -6655,15 +6762,15 @@ function AdsAnalysisWorkspace() {
     setMessage(`광고 파일 ${fresh.length}개를 대기 목록에 올렸습니다. 데이터 생성 버튼을 누르면 저장됩니다.`);
   }
 
-  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
-    pickAdFiles(event.target.files);
+  function onFileChange(event: ChangeEvent<HTMLInputElement>, sourceKey?: AdSourceKey) {
+    pickAdFiles(event.target.files, sourceKey);
     event.target.value = "";
   }
 
-  function removeAdFile(target: File) {
-    const key = adUploadFileKey(target);
-    setUploadedAdFiles((prev) => prev.filter((file) => adUploadFileKey(file) !== key));
-    setMessage(`${target.name} 파일을 대기 목록에서 제외했습니다.`);
+  function removeAdFile(target: UploadedAdFile) {
+    const key = uploadedAdFileKey(target);
+    setUploadedAdFiles((prev) => prev.filter((item) => uploadedAdFileKey(item) !== key));
+    setMessage(`${target.file.name} 파일을 대기 목록에서 제외했습니다.`);
   }
 
   async function uploadRows() {
@@ -6674,8 +6781,10 @@ function AdsAnalysisWorkspace() {
     setUploading(true);
     setMessage("");
     const form = new FormData();
-    form.append("channel", channel);
-    uploadedAdFiles.forEach((file) => form.append("files", file));
+    uploadedAdFiles.forEach((item) => {
+      form.append("files", item.file);
+      form.append("file_channels", adSourceLabels[item.sourceKey]);
+    });
     const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
     const data = await res.json();
     setUploading(false);
@@ -6714,41 +6823,59 @@ function AdsAnalysisWorkspace() {
   const channels = summary?.channels || [];
   const daily = summary?.daily || [];
   const unmapped = summary?.unmapped || [];
+  const sourceCounts = adSources.map((source) => ({
+    ...source,
+    count: uploadedAdFiles.filter((item) => item.sourceKey === source.key).length,
+  }));
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-black">광고분석</h1>
-          <p className="mt-1 text-sm font-bold text-slate-500">엑셀 업로드 기반으로 광고비, 매출, 순이익, 재고위험을 SKU 단위로 연결합니다.</p>
-        </div>
-        <button type="button" onClick={loadSummary} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm">새로고침</button>
+      <div>
+        <h1 className="text-2xl font-black">광고분석</h1>
+        <p className="mt-1 text-sm font-bold text-slate-500">메타, 네이버검색, 네이버GTA, 네이버Advoost, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
       </div>
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <div
-          className="grid gap-4 lg:grid-cols-[180px_1fr_auto]"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            pickAdFiles(event.dataTransfer.files);
-          }}
-        >
-          <label className="space-y-2 text-sm font-black text-slate-700">
-            광고 채널
-            <select value={channel} onChange={(event) => setChannel(event.target.value)} className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm">
-              {adChannels.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm font-black text-slate-700">
-            광고 파일 업로드
-            <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={onFileChange} className="field-input block h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" />
-          </label>
-          <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-10 self-end rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
-            {uploading ? "생성 중" : "데이터 생성"}
-          </button>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-black">광고 파일 업로드</h2>
+            <p className="mt-1 text-xs font-bold text-slate-500">클릭 업로드 또는 드래그앤드랍으로 5개 광고 파일을 각각 넣어 주세요.</p>
+          </div>
+          <div className="flex gap-2">
+            <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50">
+              파일 한번에 선택
+              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
+            </label>
+            <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
+              {uploading ? "생성 중" : "데이터 생성"}
+            </button>
+          </div>
         </div>
-        <p className="mt-3 text-xs font-bold text-slate-500">온라인 발주처럼 파일을 먼저 대기 목록에 올린 뒤, 데이터 생성 버튼으로 광고 데이터를 만듭니다. 여러 개를 한 번에 선택하거나 끌어다 놓을 수 있습니다.</p>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-5">
+          {sourceCounts.map((source) => (
+            <label
+              key={source.key}
+              className="flex min-h-36 cursor-pointer flex-col justify-between rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 hover:border-orange-300 hover:bg-orange-50"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                pickAdFiles(event.dataTransfer.files, source.key);
+              }}
+            >
+              <span>
+                <span className="inline-flex rounded bg-slate-950 px-2 py-1 text-[11px] font-black text-white">{source.shortLabel}</span>
+                <span className="mt-3 block text-sm font-black text-slate-800">{source.label}</span>
+                <span className="mt-1 block text-xs font-bold text-slate-500">{source.hint}</span>
+              </span>
+              <span className="mt-4 flex items-center justify-between gap-2 text-xs font-black">
+                <span className={source.count ? "text-orange-600" : "text-slate-400"}>{source.count ? `${source.count}개 대기` : "클릭/드롭"}</span>
+                <span className="rounded-md bg-white px-2 py-1 text-slate-500">업로드</span>
+              </span>
+              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event, source.key)} />
+            </label>
+          ))}
+        </div>
         {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
         {!!uploadedAdFiles.length && (
           <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -6757,11 +6884,12 @@ function AdsAnalysisWorkspace() {
               <button type="button" onClick={() => setUploadedAdFiles([])} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {uploadedAdFiles.map((file) => (
-                <span key={adUploadFileKey(file)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-                  <span className="truncate">{file.name}</span>
-                  <span className="text-slate-400">{fileSize(file.size)}</span>
-                  <button type="button" onClick={() => removeAdFile(file)} className="font-black text-rose-500" aria-label={`${file.name} 제외`}>x</button>
+              {uploadedAdFiles.map((item) => (
+                <span key={uploadedAdFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-600">{adSourceLabels[item.sourceKey]}</span>
+                  <span className="truncate">{item.file.name}</span>
+                  <span className="text-slate-400">{fileSize(item.file.size)}</span>
+                  <button type="button" onClick={() => removeAdFile(item)} className="font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
                 </span>
               ))}
             </div>
@@ -6773,16 +6901,17 @@ function AdsAnalysisWorkspace() {
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
       <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="선택 기간 전체" />
+        <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="전체 파일 합산" />
         <AdsMetricCard label="전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
-        <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} />
-        <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} />
+        <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
+        <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <AdsBarList title="일별 광고비" rows={daily} labelKey="date" valueKey="cost" />
-        <AdsBarList title="채널별 광고비" rows={channels} labelKey="channel" valueKey="cost" />
-        <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
+      <AdsSourceDashboard rows={channels} />
+
+      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+        <AdsLineChart rows={daily} />
+        <AdsBarList title="파일별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
       </section>
 
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -6930,8 +7059,14 @@ type AccountingSummary = {
   by_month?: Array<Record<string, unknown>>;
 };
 
-const expenseSourceTypes = ["카드내역", "통장내역", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
-const accountingTabs = ["비용 업로드", "비용 관리", "비용 자동 분류", "월별 손익", "거래처 미납/결제", "수입비용 정리", "비용 리포트"];
+const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
+const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙"];
+const accountingUploadSlots = [
+  { key: "국민카드 1", label: "국민카드 1", tone: "orange" },
+  { key: "국민카드 2", label: "국민카드 2", tone: "orange" },
+  { key: "국민은행", label: "국민은행", tone: "blue" },
+  { key: "기업은행", label: "기업은행", tone: "blue" },
+];
 
 function AccountingWorkspace() {
   const [activeTab, setActiveTab] = useState(accountingTabs[0]);
@@ -7451,6 +7586,8 @@ function HomeContent() {
             <AccountingWorkspace />
           ) : activeSlug === "ads" ? (
             <AdsAnalysisWorkspace />
+          ) : activeSlug === "archive" ? (
+            <ArchiveWorkspace />
           ) : (
             <section className="rounded-md border border-slate-200 bg-white p-8 shadow-sm">
               <h1 className="text-2xl font-black">{activeMenu}</h1>
