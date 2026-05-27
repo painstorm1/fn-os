@@ -954,7 +954,7 @@ type SalesInventorySummary = {
 };
 
 function apiUrl(path: string) {
-  return `${IMPORT_API_URL}${path}`;
+  return `/api/import-erp${path}`;
 }
 
 type CacheEntry<T> = {

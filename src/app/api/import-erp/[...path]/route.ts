@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const IMPORT_API_URL =
+  process.env.NEXT_PUBLIC_IMPORT_API_URL ||
+  process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
+  "http://localhost:5500";
+const LOCAL_ORIGIN = process.env.FN_OS_ORIGIN || "http://127.0.0.1:3000";
+
+type RouteContext = {
+  params: Promise<{ path?: string[] }>;
+};
+
+async function ensureImportErp() {
+  try {
+    await fetch("http://127.0.0.1:3000/api/fnos/import-erp/ensure", {
+      method: "POST",
+      cache: "no-store",
+    });
+  } catch {
+    // The actual proxy request below will return the useful failure if startup fails.
+  }
+}
+
+async function proxyImportErp(request: NextRequest, context: RouteContext) {
+  await ensureImportErp();
+
+  const params = await context.params;
+  const path = (params.path || []).map(encodeURIComponent).join("/");
+  const url = new URL(request.url);
+  const target = `${IMPORT_API_URL.replace(/\/$/, "")}/${path}${url.search}`;
+  const headers = new Headers();
+  const contentType = request.headers.get("content-type");
+  if (contentType) headers.set("content-type", contentType);
+  headers.set("origin", LOCAL_ORIGIN);
+
+  const hasBody = !["GET", "HEAD"].includes(request.method);
+  const response = await fetch(target, {
+    method: request.method,
+    headers,
+    body: hasBody ? await request.arrayBuffer() : undefined,
+    cache: "no-store",
+  });
+
+  const responseHeaders = new Headers();
+  const responseType = response.headers.get("content-type");
+  if (responseType) responseHeaders.set("content-type", responseType);
+  return new NextResponse(await response.arrayBuffer(), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+  });
+}
+
+export async function GET(request: NextRequest, context: RouteContext) {
+  return proxyImportErp(request, context);
+}
+
+export async function POST(request: NextRequest, context: RouteContext) {
+  return proxyImportErp(request, context);
+}
+
+export async function PUT(request: NextRequest, context: RouteContext) {
+  return proxyImportErp(request, context);
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  return proxyImportErp(request, context);
+}
