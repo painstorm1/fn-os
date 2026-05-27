@@ -101,7 +101,7 @@ async function optionalRows(table: string, query?: Record<string, string | numbe
 function isAggregateRow(row: AnyRecord) {
   const campaignId = text(first(row, ["캠페인 ID", "campaign_id"]));
   const campaignName = text(first(row, ["캠페인명", "캠페인 이름", "campaign_name"]));
-  return !campaignId && /결과|합계|total/i.test(campaignName);
+  return /결과|합계|total/i.test(`${campaignId} ${campaignName}`);
 }
 
 function hasAdSignal(row: AnyRecord) {
@@ -142,16 +142,18 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
   const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
   const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
+
   const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
   const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "구매 전환값", "purchase_conversion_value"]));
   const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
   const coupangSales = numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]));
+
   const conversions = isCoupang
     ? coupangOrders
-    : purchaseConversions || numberValue(first(row, ["conversions", "전환수", "전환", "결과", "ccnt"]));
+    : purchaseConversions;
   const conversionValue = isCoupang
     ? coupangSales
-    : purchaseValue || numberValue(first(row, ["conversion_value", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
+    : purchaseValue;
   const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "CTR(링크 클릭률)", "아웃바운드 CTR(클릭률)", "클릭률"])) || pct(clicks, impressions);
   const cpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"])) || (clicks > 0 ? cost / clicks : 0);
   const cvr = pct(conversions, clicks);
@@ -161,6 +163,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
     ...(isCoupang ? ["총광고수익률(14일)", "총광고수익률(1일)"] : []),
     "roas",
     "ROAS",
+    "총 광고수익률(%)",
   ])) || pct(conversionValue, cost);
   const productCode = text(first(row, [
     "product_code",
@@ -345,10 +348,10 @@ function adviceFrom(row: AnyRecord) {
   if (roas < 120 && stock <= 5) return "ROAS가 낮고 재고도 적어 광고 중단 또는 예산 축소를 우선 검토하세요.";
   if (roas < 120 && stock > 30) return "재고는 충분하지만 ROAS가 낮습니다. 상세페이지, 가격, 소재를 먼저 개선하세요.";
   if (roas >= 300 && stock <= 10) return "광고 효율은 좋지만 재고가 부족합니다. 발주/입고를 먼저 잡아야 합니다.";
-  if (cost > 0 && sales <= 0) return "광고비가 집행됐지만 매출 연결이 없습니다. 캠페인 추적과 SKU 매핑을 확인하세요.";
+  if (cost > 0 && sales <= 0) return "광고비가 집행되지만 매출 연결이 없습니다. 캠페인 추적과 SKU 매핑을 확인하세요.";
   if (ctr > 0 && ctr < 1) return "CTR이 낮습니다. 썸네일, 첫 문구, 후킹 소재를 교체해 보세요.";
   if (cvr > 0 && cvr < 1) return "CVR이 낮습니다. 상세페이지, 가격, 리뷰/배송 조건을 확인하세요.";
-  return "현재 지표는 유지 가능한 구간입니다. 예산 증액 전 재고와 순이익을 같이 확인하세요.";
+  return "현재 지표는 유지 가능한 구간입니다. 예산 증액 전 재고와 세트를 같이 확인하세요.";
 }
 
 export async function adsSummary(range?: SummaryRange) {

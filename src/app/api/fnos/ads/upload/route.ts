@@ -22,11 +22,21 @@ function rowsFromWorkbook(buffer: Buffer) {
 
 const adChannelOrder = ["메타GFA", "네이버쇼핑검색", "네이버Advoost", "네이버GFA", "쿠팡"];
 
+function ymd(raw: string) {
+  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+}
+
 function reportDateFromFileName(fileName: string) {
   const matches = fileName.match(/20\d{6}/g);
   if (!matches?.length) return new Date().toISOString().slice(0, 10);
-  const raw = matches[matches.length - 1];
-  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  if (matches.length >= 2) return ymd(matches[0]);
+
+  // Naver files usually contain the download date/time in the filename.
+  // The business report being uploaded is the previous day's ad result.
+  const raw = matches[0];
+  const date = new Date(Date.UTC(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)) - 1, Number(raw.slice(6, 8))));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 function inferAdChannel(fileName: string, index: number, total: number) {
