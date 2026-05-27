@@ -6549,6 +6549,871 @@ function Dashboard() {
   );
 }
 
+type AdsMetricRow = Record<string, unknown>;
+
+type AdsSummary = {
+  ok?: boolean;
+  error?: string;
+  total?: AdsMetricRow;
+  batches?: AdsMetricRow[];
+  daily?: AdsMetricRow[];
+  channels?: AdsMetricRow[];
+  products?: AdsMetricRow[];
+  campaigns?: AdsMetricRow[];
+  unmapped?: AdsMetricRow[];
+  advice?: Array<{ title?: string; message?: string; tone?: string }>;
+};
+
+const adChannels = ["네이버 광고", "쿠팡 광고", "메타 광고", "기타"];
+
+function adUploadFileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function adNumber(value: unknown) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function adPercent(value: unknown) {
+  return `${adNumber(value).toFixed(1)}%`;
+}
+
+function AdsMetricCard({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-black text-slate-500">{label}</p>
+      <p className="mt-2 text-xl font-black text-slate-950">{value}</p>
+      {note && <p className="mt-1 text-xs font-bold text-orange-600">{note}</p>}
+    </article>
+  );
+}
+
+function AdsBarList({ title, rows, labelKey, valueKey }: { title: string; rows: AdsMetricRow[]; labelKey: string; valueKey: string }) {
+  const max = Math.max(...rows.map((row) => adNumber(row[valueKey])), 1);
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="text-base font-black">{title}</h2>
+      <div className="mt-4 space-y-3">
+        {rows.slice(0, 8).map((row, index) => {
+          const value = adNumber(row[valueKey]);
+          return (
+            <div key={`${title}-${index}`} className="space-y-1">
+              <div className="flex items-center justify-between gap-3 text-xs font-bold">
+                <span className="truncate text-slate-700">{String(row[labelKey] || row.campaign_name || row.product_name || "-")}</span>
+                <span className="text-slate-950">{valueKey.includes("roas") ? adPercent(value) : krw(value)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+              </div>
+            </div>
+          );
+        })}
+        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+      </div>
+    </section>
+  );
+}
+
+function AdsAnalysisWorkspace() {
+  const [summary, setSummary] = useState<AdsSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [channel, setChannel] = useState(adChannels[0]);
+  const [uploadedAdFiles, setUploadedAdFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [mappingSku, setMappingSku] = useState("");
+  const [mappingProduct, setMappingProduct] = useState<AdsMetricRow | null>(null);
+
+  const loadSummary = () => {
+    setLoading(true);
+    fetch("/api/fnos/ads/summary", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => setSummary(data))
+      .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "광고 분석 조회 실패" }))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(loadSummary, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function pickAdFiles(files: FileList | File[] | null) {
+    const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
+    if (!next.length) {
+      setMessage("엑셀 또는 CSV 광고 파일을 선택해 주세요.");
+      return;
+    }
+    const existing = new Set(uploadedAdFiles.map(adUploadFileKey));
+    const fresh = next.filter((file) => !existing.has(adUploadFileKey(file)));
+    if (!fresh.length) {
+      setMessage("이미 대기 목록에 있는 파일입니다.");
+      return;
+    }
+    setUploadedAdFiles((prev) => [...prev, ...fresh]);
+    setMessage(`광고 파일 ${fresh.length}개를 대기 목록에 올렸습니다. 데이터 생성 버튼을 누르면 저장됩니다.`);
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    pickAdFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function removeAdFile(target: File) {
+    const key = adUploadFileKey(target);
+    setUploadedAdFiles((prev) => prev.filter((file) => adUploadFileKey(file) !== key));
+    setMessage(`${target.name} 파일을 대기 목록에서 제외했습니다.`);
+  }
+
+  async function uploadRows() {
+    if (!uploadedAdFiles.length) {
+      setMessage("먼저 광고 파일을 업로드해 주세요.");
+      return;
+    }
+    setUploading(true);
+    setMessage("");
+    const form = new FormData();
+    form.append("channel", channel);
+    uploadedAdFiles.forEach((file) => form.append("files", file));
+    const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
+    const data = await res.json();
+    setUploading(false);
+    setMessage(data.message || data.error || "업로드 처리 완료");
+    if (res.ok) {
+      setUploadedAdFiles([]);
+      loadSummary();
+    }
+  }
+
+  async function saveMapping(row: AdsMetricRow) {
+    const sku = mappingSku.trim();
+    if (!sku) return;
+    const res = await fetch("/api/fnos/ads/mappings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel: row.channel,
+        external_product_name: row.external_product_name || row.campaign_name,
+        external_product_code: row.external_product_code,
+        sku,
+      }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? "광고 상품 매핑을 저장했습니다." : data.error || "매핑 저장 실패");
+    if (data.ok) {
+      setMappingSku("");
+      setMappingProduct(null);
+      loadSummary();
+    }
+  }
+
+  const total = summary?.total || {};
+  const products = summary?.products || [];
+  const campaigns = summary?.campaigns || [];
+  const channels = summary?.channels || [];
+  const daily = summary?.daily || [];
+  const unmapped = summary?.unmapped || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black">광고분석</h1>
+          <p className="mt-1 text-sm font-bold text-slate-500">엑셀 업로드 기반으로 광고비, 매출, 순이익, 재고위험을 SKU 단위로 연결합니다.</p>
+        </div>
+        <button type="button" onClick={loadSummary} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm">새로고침</button>
+      </div>
+
+      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+        <div
+          className="grid gap-4 lg:grid-cols-[180px_1fr_auto]"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            pickAdFiles(event.dataTransfer.files);
+          }}
+        >
+          <label className="space-y-2 text-sm font-black text-slate-700">
+            광고 채널
+            <select value={channel} onChange={(event) => setChannel(event.target.value)} className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm">
+              {adChannels.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="space-y-2 text-sm font-black text-slate-700">
+            광고 파일 업로드
+            <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={onFileChange} className="field-input block h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </label>
+          <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-10 self-end rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
+            {uploading ? "생성 중" : "데이터 생성"}
+          </button>
+        </div>
+        <p className="mt-3 text-xs font-bold text-slate-500">온라인 발주처럼 파일을 먼저 대기 목록에 올린 뒤, 데이터 생성 버튼으로 광고 데이터를 만듭니다. 여러 개를 한 번에 선택하거나 끌어다 놓을 수 있습니다.</p>
+        {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
+        {!!uploadedAdFiles.length && (
+          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-black text-slate-700">대기 중인 광고 파일 {uploadedAdFiles.length}개</p>
+              <button type="button" onClick={() => setUploadedAdFiles([])} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {uploadedAdFiles.map((file) => (
+                <span key={adUploadFileKey(file)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                  <span className="truncate">{file.name}</span>
+                  <span className="text-slate-400">{fileSize(file.size)}</span>
+                  <button type="button" onClick={() => removeAdFile(file)} className="font-black text-rose-500" aria-label={`${file.name} 제외`}>x</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">광고 데이터를 불러오는 중입니다.</div>}
+      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
+
+      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+        <AdsMetricCard label="광고비" value={krw(adNumber(total.cost))} note="선택 기간 전체" />
+        <AdsMetricCard label="전환금액" value={krw(adNumber(total.conversion_value))} note={`ROAS ${adPercent(total.roas)}`} />
+        <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} />
+        <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <AdsBarList title="일별 광고비" rows={daily} labelKey="date" valueKey="cost" />
+        <AdsBarList title="채널별 광고비" rows={channels} labelKey="channel" valueKey="cost" />
+        <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
+      </section>
+
+      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-base font-black">상품별 광고 분석</h2>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                {["SKU", "상품명", "광고비", "매출", "ROAS", "예상 순이익", "재고", "지속 여부"].map((head) => <th key={head} className="whitespace-nowrap px-3 py-2 font-black">{head}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {products.slice(0, 15).map((row, index) => (
+                <tr key={index} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 font-bold">{String(row.sku || "-")}</td>
+                  <td className="min-w-56 px-3 py-2 font-bold text-slate-700">{String(row.product_name || "-")}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.cost))}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.sales_amount || row.conversion_value))}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-black">{adPercent(row.roas)}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{krw(adNumber(row.estimated_profit))}</td>
+                  <td className="whitespace-nowrap px-3 py-2">{adNumber(row.current_stock).toLocaleString("ko-KR")}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-black text-orange-600">{String(row.keep_ad || "점검")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+        <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-black">캠페인/소재 분석</h2>
+          <div className="mt-4 space-y-2">
+            {campaigns.slice(0, 10).map((row, index) => (
+              <div key={index} className="grid grid-cols-[1fr_auto_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+                <span className="truncate font-bold text-slate-700">{String(row.campaign_name || "-")} / {String(row.ad_name || "-")}</span>
+                <span className="font-black">{adPercent(row.roas)}</span>
+                <span className="rounded bg-white px-2 py-0.5 text-xs font-black text-orange-600">{String(row.grade || "-")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-black">광고 조언</h2>
+          <div className="mt-4 space-y-2">
+            {(summary?.advice || []).slice(0, 8).map((item, index) => (
+              <p key={index} className={`rounded-md px-3 py-2 text-sm font-bold ${item.tone === "danger" ? "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"}`}>
+                {item.title ? `${item.title}: ` : ""}{item.message}
+              </p>
+            ))}
+            {!summary?.advice?.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">조언을 만들 광고 데이터가 없습니다.</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-base font-black">광고 데이터 매핑 관리</h2>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {unmapped.slice(0, 8).map((row, index) => (
+            <div key={index} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-black text-slate-800">{String(row.external_product_name || row.campaign_name || "-")}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">{String(row.channel || "-")} / {String(row.external_product_code || "상품코드 없음")}</p>
+              <div className="mt-3 flex gap-2">
+                <input value={mappingProduct === row ? mappingSku : ""} onFocus={() => setMappingProduct(row)} onChange={(event) => setMappingSku(event.target.value)} placeholder="FN OS SKU 입력" className="field-input h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" />
+                <button type="button" onClick={() => saveMapping(row)} className="h-9 rounded-md bg-slate-950 px-3 text-xs font-black text-white">저장</button>
+              </div>
+            </div>
+          ))}
+          {!unmapped.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400 lg:col-span-2">미매칭 광고 데이터가 없습니다.</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type DashboardSummary = {
+  ok?: boolean;
+  error?: string;
+  today_sales?: number;
+  month_sales?: number;
+  today_order_count?: number;
+  waiting_shipment_count?: number;
+  missing_tracking_count?: number;
+  unmapped_product_count?: number;
+  risk_sku?: number;
+  ad_spend?: number;
+  expense_amount?: number;
+  estimated_profit?: number;
+  margin_rate?: number;
+  month_purchases?: number;
+  purchase_due_count?: number;
+  unpaid_customer_count?: number;
+  recent_sales?: Array<Record<string, unknown>>;
+  recent_purchases?: Array<Record<string, unknown>>;
+  recent_import_orders?: Array<Record<string, unknown>>;
+  recent_ads?: Array<Record<string, unknown>>;
+  recent_archives?: Array<Record<string, unknown>>;
+  inventory?: Array<Record<string, unknown>>;
+};
+
+function asNumber(value: unknown) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function DashboardMetric({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-bold text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
+      {note && <p className="mt-2 text-sm font-bold text-orange-600">{note}</p>}
+    </article>
+  );
+}
+
+function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; rows: Array<Record<string, unknown>>; primaryKey: string; amountKey?: string }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-base font-black">{title}</h2>
+      <div className="mt-4 space-y-2">
+        {rows.slice(0, 6).map((row, index) => (
+          <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+            <span className="truncate font-bold text-slate-700">{String(row[primaryKey] || row.product_name || row.prod_name || row.title || "-")}</span>
+            <span className="font-black text-slate-900">{amountKey ? krw(asNumber(row[amountKey])) : String(row.status || row.sale_status || row.sync_status || "-")}</span>
+          </div>
+        ))}
+        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+      </div>
+    </section>
+  );
+}
+
+type AccountingSummary = {
+  ok?: boolean;
+  error?: string;
+  categories?: Array<Record<string, unknown>>;
+  expenses?: Array<Record<string, unknown>>;
+  batches?: Array<Record<string, unknown>>;
+  payables?: Array<Record<string, unknown>>;
+  payments?: Array<Record<string, unknown>>;
+  import_orders?: Array<Record<string, unknown>>;
+  totals?: Record<string, unknown>;
+  by_category?: Array<Record<string, unknown>>;
+  by_vendor?: Array<Record<string, unknown>>;
+  by_month?: Array<Record<string, unknown>>;
+};
+
+const expenseSourceTypes = ["카드내역", "통장내역", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
+const accountingTabs = ["비용 업로드", "비용 관리", "비용 자동 분류", "월별 손익", "거래처 미납/결제", "수입비용 정리", "비용 리포트"];
+
+function AccountingWorkspace() {
+  const [activeTab, setActiveTab] = useState(accountingTabs[0]);
+  const [summary, setSummary] = useState<AccountingSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sourceType, setSourceType] = useState("카드내역");
+  const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<File[]>([]);
+  const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
+  const [parsedFiles, setParsedFiles] = useState<Array<Record<string, unknown>>>([]);
+  const [parsing, setParsing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [filters, setFilters] = useState({ q: "", category: "", from: "", to: "" });
+  const [manual, setManual] = useState({
+    expense_date: new Date().toISOString().slice(0, 10),
+    vendor_name: "",
+    description: "",
+    amount: "",
+    vat_amount: "",
+    total_amount: "",
+    payment_method: "",
+    category_name: "기타",
+    memo: "",
+  });
+
+  function loadSummary() {
+    setLoading(true);
+    fetch("/api/accounting/summary", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => setSummary(data))
+      .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(loadSummary, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function expenseFileKey(file: File) {
+    return `${file.name}:${file.size}:${file.lastModified}`;
+  }
+
+  function addExpenseFiles(files: FileList | File[] | null) {
+    const nextFiles = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
+    if (!nextFiles.length) {
+      setMessage("엑셀 또는 CSV 비용 파일을 선택해 주세요.");
+      return;
+    }
+    const existing = new Set(uploadedExpenseFiles.map(expenseFileKey));
+    const fresh = nextFiles.filter((file) => !existing.has(expenseFileKey(file)));
+    if (!fresh.length) {
+      setMessage("이미 대기 목록에 있는 파일입니다.");
+      return;
+    }
+    setUploadedExpenseFiles((prev) => [...prev, ...fresh]);
+    setPreviewRows([]);
+    setParsedFiles([]);
+    setMessage(`비용 파일 ${fresh.length}개를 대기 목록에 올렸습니다. 데이터 생성을 누르면 파일 기반 비용 데이터가 만들어집니다.`);
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    addExpenseFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function onExpenseDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    addExpenseFiles(event.dataTransfer.files);
+  }
+
+  function removeExpenseFile(target: File) {
+    setUploadedExpenseFiles((prev) => prev.filter((file) => expenseFileKey(file) !== expenseFileKey(target)));
+    setPreviewRows([]);
+    setParsedFiles([]);
+    setMessage(`${target.name} 파일을 대기 목록에서 제외했습니다.`);
+  }
+
+  async function previewExpenseFiles() {
+    if (!uploadedExpenseFiles.length) {
+      setMessage("먼저 비용 파일을 업로드해 주세요.");
+      return;
+    }
+    setParsing(true);
+    setMessage(`${uploadedExpenseFiles.length}개 파일을 읽어 비용 데이터를 생성하는 중입니다.`);
+    const form = new FormData();
+    form.append("source_type", sourceType);
+    uploadedExpenseFiles.forEach((file) => form.append("files", file));
+    const res = await fetch("/api/accounting/files/parse", { method: "POST", body: form });
+    const data = await res.json();
+    setParsing(false);
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "비용 파일 파싱 실패");
+      return;
+    }
+    setPreviewRows(Array.isArray(data.rows) ? data.rows.slice(0, 500) : []);
+    setParsedFiles(Array.isArray(data.files) ? data.files : []);
+    setMessage(`파일 ${Number(data.files?.length || 0).toLocaleString("ko-KR")}개에서 ${Number(data.rows?.length || 0).toLocaleString("ko-KR")}건의 비용 데이터를 생성했습니다.`);
+  }
+
+  async function uploadExpenses() {
+    if (!uploadedExpenseFiles.length) {
+      setMessage("먼저 비용 파일을 업로드해 주세요.");
+      return;
+    }
+    setUploading(true);
+    setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
+    const form = new FormData();
+    form.append("source_type", sourceType);
+    uploadedExpenseFiles.forEach((file) => form.append("files", file));
+    const res = await fetch("/api/accounting/upload", {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json();
+    setUploading(false);
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "비용 업로드 실패");
+      return;
+    }
+    setMessage(`데이터 생성 완료: 파일 ${Number(data.files?.length || uploadedExpenseFiles.length).toLocaleString("ko-KR")}개 / 비용 ${Number(data.success_count || 0).toLocaleString("ko-KR")}건 저장`);
+    setUploadedExpenseFiles([]);
+    setPreviewRows([]);
+    setParsedFiles(Array.isArray(data.files) ? data.files : []);
+    loadSummary();
+  }
+
+  async function saveManualExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const total = Number(manual.total_amount || 0) || Number(manual.amount || 0) + Number(manual.vat_amount || 0);
+    const res = await fetch("/api/accounting/expenses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...manual, source_type: "manual", total_amount: total }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "비용 저장 실패");
+      return;
+    }
+    setMessage("비용 1건을 저장했습니다.");
+    setManual((prev) => ({ ...prev, vendor_name: "", description: "", amount: "", vat_amount: "", total_amount: "", memo: "" }));
+    loadSummary();
+  }
+
+  function exportExpenses() {
+    const sheet = XLSX.utils.json_to_sheet(filteredExpenses);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "expenses");
+    XLSX.writeFile(book, `FN_OS_비용_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  const categories = summary?.categories || [];
+  const expenses = summary?.expenses || [];
+  const categoryById = new Map(categories.map((row) => [String(row.id || ""), String(row.category_name || "")]));
+  const filteredExpenses = expenses.filter((row) => {
+    const q = filters.q.trim().toLowerCase();
+    const rowDate = String(row.expense_date || "");
+    const category = categoryById.get(String(row.category_id || "")) || String(row.category || "");
+    if (q && !`${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""}`.toLowerCase().includes(q)) return false;
+    if (filters.category && category !== filters.category) return false;
+    if (filters.from && rowDate < filters.from) return false;
+    if (filters.to && rowDate > filters.to) return false;
+    return true;
+  });
+  const totals = summary?.totals || {};
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black">회계/비용</h1>
+          <p className="mt-1 text-sm font-bold text-slate-500">엑셀 비용 수집부터 자동 분류, 손익, 미납, 수입비용 연결까지 FN OS DB 기준으로 관리합니다.</p>
+        </div>
+        <button type="button" onClick={loadSummary} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700">새로고침</button>
+      </div>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <DashboardMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" />
+        <DashboardMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 성과 DB 연결" />
+        <DashboardMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 purchases" />
+        <DashboardMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} />
+        <DashboardMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 관리 필요" />
+      </section>
+
+      {loading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">회계 데이터를 불러오는 중입니다.</div>}
+      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">{summary.error}</div>}
+      {message && <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</div>}
+
+      <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
+        {accountingTabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-black ${activeTab === tab ? "border-orange-500 text-orange-600" : "border-transparent text-slate-500"}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "비용 업로드" && (
+        <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
+          <form className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">비용 파일 작업실</h2>
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs font-black text-slate-500">자료 유형</label>
+              <select className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+                {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
+              </select>
+              <div
+                className="rounded-md border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={onExpenseDrop}
+              >
+                <input className="field-input w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
+                <p className="mt-2 text-xs font-bold text-slate-500">파일을 여러 개 선택하거나 여기로 끌어다 놓으세요.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
+                  {parsing ? "생성 중" : "데이터 생성"}
+                </button>
+                <button type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:bg-slate-300">
+                  {uploading ? "저장 중" : "DB 저장"}
+                </button>
+              </div>
+            </div>
+            {uploadedExpenseFiles.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-black text-slate-500">대기 중 파일 {uploadedExpenseFiles.length}개</p>
+                {uploadedExpenseFiles.map((file) => (
+                  <div key={expenseFileKey(file)} className="grid grid-cols-[1fr_auto] gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <div className="min-w-0">
+                      <p className="truncate font-black text-slate-700">{file.name}</p>
+                      <p className="text-slate-400">{(file.size / 1024).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} KB</p>
+                    </div>
+                    <button type="button" onClick={() => removeExpenseFile(file)} className="font-black text-slate-400 hover:text-rose-500">삭제</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {parsedFiles.length > 0 && (
+              <div className="mt-4 rounded-md bg-slate-50 p-3">
+                <p className="text-xs font-black text-slate-500">최근 생성 결과</p>
+                <div className="mt-2 space-y-1">
+                  {parsedFiles.map((file, index) => (
+                    <div key={`${String(file.name)}-${index}`} className="flex justify-between gap-2 text-xs font-bold text-slate-600">
+                      <span className="truncate">{String(file.name)}</span>
+                      <span>{Number(file.row_count || 0).toLocaleString("ko-KR")}건</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-500">
+              카드내역, 통장내역, 세금계산서, 물류비, 광고비 파일을 한 번에 올린 뒤 파일 내용을 기반으로 비용 행을 생성합니다.
+            </div>
+          </form>
+          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">생성 데이터 미리보기 / 자동 컬럼 매핑</h2>
+            <ExpenseTable rows={previewRows} categoryById={categoryById} compact />
+          </section>
+        </section>
+      )}
+
+      {activeTab === "비용 관리" && (
+        <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="grid gap-2 md:grid-cols-4">
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="업체/내용/메모" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} />
+              <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={filters.category} onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value }))}>
+                <option value="">전체 카테고리</option>
+                {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
+              </select>
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.from} onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))} />
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
+            </div>
+            <button type="button" onClick={exportExpenses} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀 내보내기</button>
+          </div>
+          <ExpenseTable rows={filteredExpenses} categoryById={categoryById} />
+        </section>
+      )}
+
+      {activeTab === "비용 자동 분류" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">규칙 기반 분류 결과</h2>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {["네이버파이낸셜 -> 광고비 또는 정산", "쿠팡 -> 판매수수료/정산", "CJ대한통운 -> 택배비", "관세사 -> 통관수수료", "카드사 해외결제 -> 샘플비/수입비용 후보", "포장/박스/봉투 -> 포장비"].map((rule) => (
+                <div key={rule} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700">{rule}</div>
+              ))}
+            </div>
+            <div className="mt-5">
+              <ExpenseTable rows={expenses.slice(0, 20)} categoryById={categoryById} compact />
+            </div>
+          </div>
+          <form onSubmit={saveManualExpense} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">수동 비용 입력</h2>
+            <div className="mt-4 space-y-2">
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="업체명" value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="내용" value={manual.description} onChange={(event) => setManual((prev) => ({ ...prev, description: event.target.value }))} />
+              <select className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={manual.category_name} onChange={(event) => setManual((prev) => ({ ...prev, category_name: event.target.value }))}>
+                {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
+              </select>
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="공급가액" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="부가세" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="합계" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
+              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="결제수단" value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
+              <textarea className="field-input min-h-[80px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="메모" value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
+              <button className="w-full rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">저장</button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {activeTab === "월별 손익" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">월별 손익 계산</h2>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="border-b border-slate-200 text-xs text-slate-500"><tr><th className="py-2 text-left">월</th><th className="py-2 text-right">매출</th><th className="py-2 text-right">상품매입</th><th className="py-2 text-right">광고비</th><th className="py-2 text-right">비용</th><th className="py-2 text-right">예상 순이익</th></tr></thead>
+                <tbody><tr className="border-b border-slate-100"><td className="py-3 font-black">{String(totals.month || "-")}</td><td className="py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="py-3 text-right font-black text-orange-600">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <ReportList title="비용 카테고리 비중" rows={summary?.by_category || []} />
+        </section>
+      )}
+
+      {activeTab === "거래처 미납/결제" && (
+        <section className="grid gap-4 xl:grid-cols-2">
+          <AccountingList title="거래처 미납" rows={summary?.payables || []} primaryKey="base_month" amountKey="balance_amount" emptyText="아직 미납 데이터가 없습니다." />
+          <AccountingList title="결제 기록" rows={summary?.payments || []} primaryKey="payment_date" amountKey="amount" emptyText="아직 결제 기록이 없습니다." />
+        </section>
+      )}
+
+      {activeTab === "수입비용 정리" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <AccountingList title="수입 발주 연결 후보" rows={summary?.import_orders || []} primaryKey="order_no" amountKey="total_amount" emptyText="수입 발주 데이터가 없습니다." />
+          <ReportList title="수입비용 후보" rows={(summary?.by_category || []).filter((row) => ["수입비용", "관세", "부가세", "통관수수료", "샘플비", "물류비"].includes(String(row.label)))} />
+        </section>
+      )}
+
+      {activeTab === "비용 리포트" && (
+        <section className="grid gap-4 xl:grid-cols-3">
+          <ReportList title="카테고리별 비용" rows={summary?.by_category || []} />
+          <ReportList title="업체별 비용" rows={summary?.by_vendor || []} />
+          <ReportList title="월별 비용 추이" rows={summary?.by_month || []} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+function ExpenseTable({ rows, categoryById, compact = false }: { rows: Array<Record<string, unknown>>; categoryById: Map<string, string>; compact?: boolean }) {
+  if (!rows.length) return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">데이터 없음</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className={`w-full text-sm ${compact ? "min-w-[760px]" : "min-w-[980px]"}`}>
+        <thead className="border-b border-slate-200 text-xs text-slate-500">
+          <tr><th className="py-2 text-left">일자</th><th className="py-2 text-left">자료</th><th className="py-2 text-left">업체</th><th className="py-2 text-left">내용</th><th className="py-2 text-left">분류</th><th className="py-2 text-right">합계</th>{!compact && <th className="py-2 text-left">메모</th>}</tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={String(row.id || index)} className="border-b border-slate-100">
+              <td className="py-2 font-bold">{String(row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
+              <td className="py-2">{String(row.source_type || "-")}</td>
+              <td className="py-2 font-bold">{String(row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
+              <td className="max-w-[280px] truncate py-2">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
+              <td className="py-2"><StatusPill status={categoryById.get(String(row.category_id || "")) || String(row.category || "기타")} /></td>
+              <td className="py-2 text-right font-black">{krw(asNumber(row.total_amount || row["합계"] || row["금액"] || row.amount))}</td>
+              {!compact && <td className="max-w-[220px] truncate py-2 text-slate-500">{String(row.memo || "-")}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AccountingList({ title, rows, primaryKey, amountKey, emptyText }: { title: string; rows: Array<Record<string, unknown>>; primaryKey: string; amountKey: string; emptyText: string }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-base font-black">{title}</h2>
+      <div className="mt-4 space-y-2">
+        {rows.map((row, index) => (
+          <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+            <span className="truncate font-bold text-slate-700">{String(row[primaryKey] || row.customer_name || row.memo || "-")}</span>
+            <span className="font-black">{krw(asNumber(row[amountKey]))}</span>
+          </div>
+        ))}
+        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{emptyText}</p>}
+      </div>
+    </section>
+  );
+}
+
+function ReportList({ title, rows }: { title: string; rows: Array<Record<string, unknown>> }) {
+  const max = Math.max(1, ...rows.map((row) => asNumber(row.amount)));
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-base font-black">{title}</h2>
+      <div className="mt-4 space-y-3">
+        {rows.slice(0, 10).map((row, index) => {
+          const amount = asNumber(row.amount);
+          return (
+            <div key={`${title}-${index}`}>
+              <div className="mb-1 flex justify-between gap-3 text-sm"><span className="truncate font-bold">{String(row.label || "-")}</span><span className="font-black">{krw(amount)}</span></div>
+              <div className="h-2 rounded bg-slate-100"><div className="h-2 rounded bg-orange-500" style={{ width: `${Math.max(4, (amount / max) * 100)}%` }} /></div>
+            </div>
+          );
+        })}
+        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+      </div>
+    </section>
+  );
+}
+
+function DashboardNew() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/dashboard/summary", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setSummary(data);
+      })
+      .catch((error) => {
+        if (alive) setSummary({ ok: false, error: error instanceof Error ? error.message : "대시보드 조회 실패" });
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-black">FN OS 메인 대시보드</h1>
+        <p className="mt-1 text-sm font-bold text-slate-500">쇼핑몰 API, 엑셀 업로드, 자체 입력 데이터를 FN OS 자체 DB 기준으로 요약합니다.</p>
+      </div>
+
+      {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">대시보드 데이터를 불러오는 중입니다.</div>}
+      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
+
+      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+        <DashboardMetric label="오늘 매출" value={krw(asNumber(summary?.today_sales))} note={`오늘 주문 ${asNumber(summary?.today_order_count).toLocaleString("ko-KR")}건`} />
+        <DashboardMetric label="이번 달 매출" value={krw(asNumber(summary?.month_sales))} note={`마진율 ${asNumber(summary?.margin_rate).toFixed(1)}%`} />
+        <DashboardMetric label="광고비" value={krw(asNumber(summary?.ad_spend))} note="월 누적 광고비" />
+        <DashboardMetric label="이번 달 총비용" value={krw(asNumber(summary?.expense_amount))} note="회계/비용 업로드" />
+        <DashboardMetric label="예상 순이익" value={krw(asNumber(summary?.estimated_profit))} note={`구매/입고 ${krw(asNumber(summary?.month_purchases))}`} />
+        <DashboardMetric label="재고 위험" value={`${asNumber(summary?.risk_sku).toLocaleString("ko-KR")} SKU`} note="가용 재고 5개 이하" />
+        <DashboardMetric label="출고 대기" value={`${asNumber(summary?.waiting_shipment_count).toLocaleString("ko-KR")}건`} note="송장/출고 확인 필요" />
+        <DashboardMetric label="송장 미입력" value={`${asNumber(summary?.missing_tracking_count).toLocaleString("ko-KR")}건`} note="tracking_no 없음" />
+        <DashboardMetric label="미매칭 상품" value={`${asNumber(summary?.unmapped_product_count).toLocaleString("ko-KR")}건`} note="SKU 매핑 필요" />
+        <DashboardMetric label="입고 예정" value={`${asNumber(summary?.purchase_due_count).toLocaleString("ko-KR")}건`} note="수입/구매 입고 예정" />
+        <DashboardMetric label="미납 거래처" value={`${asNumber(summary?.unpaid_customer_count).toLocaleString("ko-KR")}곳`} note="비용/정산 확인" />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <DashboardList title="최근 판매" rows={summary?.recent_sales || []} primaryKey="prod_name" amountKey="total_amount" />
+        <DashboardList title="최근 구매" rows={summary?.recent_purchases || []} primaryKey="prod_name" amountKey="total_amount" />
+        <DashboardList title="재고 위험 TOP" rows={summary?.inventory || []} primaryKey="sku" />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <DashboardList title="최근 수입 발주" rows={summary?.recent_import_orders || []} primaryKey="order_no" amountKey="total_amount" />
+        <DashboardList title="최근 광고 성과" rows={summary?.recent_ads || []} primaryKey="campaign_name" amountKey="spend_amount" />
+        <DashboardList title="최근 아카이브" rows={summary?.recent_archives || []} primaryKey="title" />
+      </section>
+    </div>
+  );
+}
+
 function HomeContent() {
   const searchParams = useSearchParams();
   const activeSlug = searchParams.get("menu") || "dashboard";
@@ -6579,9 +7444,13 @@ function HomeContent() {
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
           ) : activeSlug === "dashboard" ? (
-            <Dashboard />
+            <DashboardNew />
           ) : activeSlug === "sales" ? (
             <SalesInventoryWorkspace section={salesSection} />
+          ) : activeSlug === "accounting" ? (
+            <AccountingWorkspace />
+          ) : activeSlug === "ads" ? (
+            <AdsAnalysisWorkspace />
           ) : (
             <section className="rounded-md border border-slate-200 bg-white p-8 shadow-sm">
               <h1 className="text-2xl font-black">{activeMenu}</h1>

@@ -30,6 +30,15 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function dateKey(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "";
+  if (/^\d{8}$/.test(raw)) return raw;
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10).replace(/\D/g, "");
+  return raw.replace(/\D/g, "").slice(0, 8);
+}
+
 function todayCompact() {
   return new Date().toISOString().slice(0, 10).replace(/\D/g, "");
 }
@@ -43,13 +52,14 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
   const price = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
   const supplyAmt = numberValue(first(row, ["공급가액", "supply_amt", "SUPPLY_AMT"])) || qty * price;
   const totalAmt = numberValue(first(row, ["정산예정금액", "총금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
+  const saleDate = text(first(row, ["일자", "sale_date", "io_date", "IO_DATE"])) || todayCompact();
 
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
     upload_batch_id: batchId,
-    io_date: text(first(row, ["일자", "sale_date", "io_date", "IO_DATE"])) || todayCompact(),
-    sale_date: text(first(row, ["일자", "sale_date", "io_date", "IO_DATE"])) || todayCompact(),
+    io_date: saleDate,
+    sale_date: saleDate,
     upload_ser_no: text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1),
     cust_code: text(first(row, ["거래처코드", "customer_code", "cust_code", "CUST"])),
     cust_name: text(first(row, ["거래처명", "customer_name", "cust_name", "CUST_DES"])),
@@ -85,13 +95,14 @@ function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFi
   const price = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
   const supplyAmt = numberValue(first(row, ["공급가액", "supply_amt", "SUPPLY_AMT"])) || qty * price;
   const totalAmt = numberValue(first(row, ["총금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
+  const purchaseDate = text(first(row, ["일자", "purchase_date", "io_date", "IO_DATE"])) || todayCompact();
 
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
     upload_batch_id: batchId,
-    io_date: text(first(row, ["일자", "purchase_date", "io_date", "IO_DATE"])) || todayCompact(),
-    purchase_date: text(first(row, ["일자", "purchase_date", "io_date", "IO_DATE"])) || todayCompact(),
+    io_date: purchaseDate,
+    purchase_date: purchaseDate,
     upload_ser_no: text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1),
     cust_code: text(first(row, ["거래처코드", "supplier_code", "cust_code", "CUST"])),
     cust_name: text(first(row, ["거래처명", "supplier_name", "cust_name", "CUST_DES"])),
@@ -125,6 +136,14 @@ function noDbResult(rows: RawRow[]): ImportResult {
     errors: ["Supabase environment variables are not configured."],
     external_sync_enabled: false,
   };
+}
+
+async function optionalRows(table: string, query?: Record<string, string | number | boolean | null | undefined>) {
+  return selectRows<Record<string, unknown>>(table, query).catch(() => []);
+}
+
+function sum(rows: RawRow[], pick: (row: RawRow) => unknown) {
+  return rows.reduce((total, row) => total + numberValue(pick(row)), 0);
 }
 
 export async function importSalesRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
@@ -168,46 +187,73 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
 }
 
 export async function dashboardSummary() {
-  const [sales, purchases, inventory, logs] = await Promise.all([
-    selectRows<Record<string, unknown>>("sales", { order: "created_at.desc", limit: 200 }),
-    selectRows<Record<string, unknown>>("purchases", { order: "created_at.desc", limit: 100 }),
-    selectRows<Record<string, unknown>>("inventory_current", { order: "updated_at.desc", limit: 200 }),
-    selectRows<Record<string, unknown>>("api_sync_logs", { order: "created_at.desc", limit: 20 }),
+  const [sales, purchases, inventory, orders, orderItems, shipments, ads, expenses, legacyExpenses, importOrders, archives, logs] = await Promise.all([
+    optionalRows("sales", { order: "created_at.desc", limit: 500 }),
+    optionalRows("purchases", { order: "created_at.desc", limit: 200 }),
+    optionalRows("inventory_current", { order: "updated_at.desc", limit: 300 }),
+    optionalRows("orders", { order: "created_at.desc", limit: 300 }),
+    optionalRows("order_items", { order: "created_at.desc", limit: 300 }),
+    optionalRows("shipments", { order: "created_at.desc", limit: 300 }),
+    optionalRows("ad_daily_metrics", { order: "metric_date.desc", limit: 120 }),
+    optionalRows("expenses", { order: "expense_date.desc", limit: 120 }),
+    optionalRows("expense_entries", { order: "expense_date.desc", limit: 120 }),
+    optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 50 }),
+    optionalRows("archive_items", { order: "created_at.desc", limit: 50 }),
+    optionalRows("api_sync_logs", { order: "created_at.desc", limit: 20 }),
   ]);
 
   const today = todayCompact();
   const month = today.slice(0, 6);
-  const saleRows = Array.isArray(sales) ? sales : [];
-  const purchaseRows = Array.isArray(purchases) ? purchases : [];
-  const inventoryRows = Array.isArray(inventory) ? inventory : [];
-  const syncRows = Array.isArray(logs) ? logs : [];
+  const todaySalesRows = sales.filter((row) => dateKey(row.io_date ?? row.sale_date ?? row.created_at) === today);
+  const monthSalesRows = sales.filter((row) => dateKey(row.io_date ?? row.sale_date ?? row.created_at).startsWith(month));
+  const todayOrders = orders.filter((row) => dateKey(row.order_date ?? row.created_at) === today);
+  const waitingShipments = shipments.filter((row) => ["pending", "ready", "waiting", "출고대기"].includes(text(row.shipment_status).toLowerCase()));
+  const missingTracking = shipments.filter((row) => !text(row.tracking_no));
+  const unmappedItems = orderItems.filter((row) => text(row.mapping_status || "UNMAPPED").toUpperCase() !== "MAPPED");
+  const riskInventory = inventory.filter((row) => numberValue(row.available_qty ?? row.on_hand_qty ?? row.bal_qty) <= 5);
+  const monthAds = ads.filter((row) => dateKey(row.metric_date ?? row.created_at).startsWith(month));
+  const expenseRows = expenses.length ? expenses : legacyExpenses;
+  const monthExpenses = expenseRows.filter((row) => dateKey(row.expense_date ?? row.created_at).startsWith(month));
+  const purchaseDue = importOrders.filter((row) => !["done", "closed", "입고완료"].includes(text(row.status).toLowerCase()));
+  const unpaidCustomers = new Set(
+    expenseRows
+      .filter((row) => ["unpaid", "pending", "미납"].includes(text(row.payment_status).toLowerCase()))
+      .map((row) => text(row.customer_id || row.customer_name || row.title))
+      .filter(Boolean),
+  );
 
-  const todaySales = saleRows
-    .filter((row) => text(row.io_date ?? row.sale_date) === today)
-    .reduce((sum, row) => sum + numberValue(row.supply_amt ?? row.supply_amount ?? row.total_amount), 0);
-  const monthSales = saleRows
-    .filter((row) => text(row.io_date ?? row.sale_date).startsWith(month))
-    .reduce((sum, row) => sum + numberValue(row.supply_amt ?? row.supply_amount ?? row.total_amount), 0);
-  const monthPurchases = purchaseRows
-    .filter((row) => text(row.io_date ?? row.purchase_date).startsWith(month))
-    .reduce((sum, row) => sum + numberValue(row.supply_amt ?? row.supply_amount ?? row.total_amount), 0);
-  const todayQty = saleRows
-    .filter((row) => text(row.io_date ?? row.sale_date) === today)
-    .reduce((sum, row) => sum + numberValue(row.qty), 0);
-  const riskSku = inventoryRows.filter((row) => numberValue(row.available_qty ?? row.on_hand_qty ?? row.bal_qty) <= 5).length;
-  const failCount = syncRows.filter((row) => text(row.status).toUpperCase() === "FAIL").length;
+  const todaySales = sum(todaySalesRows, (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt);
+  const monthSales = sum(monthSalesRows, (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt);
+  const adSpend = sum(monthAds, (row) => row.spend_amount);
+  const expenseTotal = sum(monthExpenses, (row) => row.total_amount ?? row.amount ?? row.supply_amount);
+  const purchaseTotal = sum(purchases.filter((row) => dateKey(row.io_date ?? row.purchase_date ?? row.created_at).startsWith(month)), (row) => row.total_amount ?? row.supply_amount ?? row.supply_amt);
+  const estimatedProfit = monthSales - purchaseTotal - adSpend - expenseTotal;
+  const marginRate = monthSales ? (estimatedProfit / monthSales) * 100 : 0;
 
   return {
     today_sales: todaySales,
     month_sales: monthSales,
-    today_qty: todayQty,
-    month_purchases: monthPurchases,
-    risk_sku: riskSku,
-    fail_count: failCount,
-    recent_sales: saleRows.slice(0, 20),
-    recent_purchases: purchaseRows.slice(0, 20),
-    inventory: inventoryRows.slice(0, 50),
-    sync_logs: syncRows,
+    today_order_count: todayOrders.length,
+    today_qty: sum(todaySalesRows, (row) => row.qty),
+    waiting_shipment_count: waitingShipments.length,
+    missing_tracking_count: missingTracking.length,
+    unmapped_product_count: unmappedItems.length,
+    risk_sku: riskInventory.length,
+    ad_spend: adSpend,
+    expense_amount: expenseTotal,
+    estimated_profit: estimatedProfit,
+    margin_rate: marginRate,
+    month_purchases: purchaseTotal,
+    purchase_due_count: purchaseDue.length,
+    unpaid_customer_count: unpaidCustomers.size,
+    recent_sales: sales.slice(0, 20),
+    recent_purchases: purchases.slice(0, 20),
+    recent_inventory_movements: await optionalRows("inventory_movements", { order: "created_at.desc", limit: 20 }),
+    recent_import_orders: importOrders.slice(0, 10),
+    recent_ads: ads.slice(0, 10),
+    recent_archives: archives.slice(0, 10),
+    inventory: riskInventory.slice(0, 50),
+    sync_logs: logs,
   };
 }
 
@@ -216,9 +262,9 @@ export async function searchProducts(query: string) {
   if (!keyword) return [];
   const escaped = keyword.replace(/[%*]/g, "");
   const [byCode, bySku, byName] = await Promise.all([
-    selectRows<Record<string, unknown>>("products", { product_code: `ilike.*${escaped}*`, limit: 20 }).catch(() => []),
-    selectRows<Record<string, unknown>>("products", { sku: `ilike.*${escaped}*`, limit: 20 }).catch(() => []),
-    selectRows<Record<string, unknown>>("products", { product_name: `ilike.*${escaped}*`, limit: 20 }).catch(() => []),
+    optionalRows("products", { product_code: `ilike.*${escaped}*`, limit: 20 }),
+    optionalRows("products", { sku: `ilike.*${escaped}*`, limit: 20 }),
+    optionalRows("products", { product_name: `ilike.*${escaped}*`, limit: 20 }),
   ]);
   const map = new Map<string, Record<string, unknown>>();
   [...byCode, ...bySku, ...byName].forEach((row) => map.set(text(row.id || row.product_code || row.sku || row.prod_cd), row));
@@ -229,7 +275,7 @@ export async function syncProducts(_payload?: unknown) {
   return {
     ok: false,
     count: 0,
-    message: "External product sync is disabled. Use channel adapters or Excel upload in the next phase.",
+    message: "External product sync is disabled. Use FN OS DB, channel adapters, or Excel upload.",
   };
 }
 
@@ -237,7 +283,7 @@ export async function syncInventory(_payload?: unknown) {
   return {
     ok: false,
     count: 0,
-    message: "External inventory sync is disabled. FN OS inventory will be managed from its own DB.",
+    message: "External inventory sync is disabled. FN OS inventory is managed from its own DB.",
   };
 }
 
@@ -248,4 +294,3 @@ export async function upsertLocalProducts(rows: Record<string, unknown>[]) {
 export async function markBatchStatus(id: string, status: string) {
   return patchRows("upload_batches", { id: `eq.${id}` }, { status });
 }
-

@@ -1,1 +1,1 @@
-﻿export { POST } from "../../../fnos/customers/upload/route";
+export { GET, POST } from "../../disabled";

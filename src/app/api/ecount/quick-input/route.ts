@@ -1,1 +1,1 @@
-﻿export { POST } from "../../fnos/quick-input/route";
+export { GET, POST } from "../disabled";

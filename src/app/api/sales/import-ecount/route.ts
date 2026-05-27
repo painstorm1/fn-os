@@ -1,1 +1,1 @@
-export { GET, POST } from "../import/route";
+export { GET, POST } from "../../ecount/disabled";

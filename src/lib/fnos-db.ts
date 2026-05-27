@@ -6,6 +6,7 @@ const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   "";
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "archive";
 
 export class FnosDbError extends Error {
   status: number;
@@ -22,8 +23,8 @@ export function hasDbConfig() {
 }
 
 function friendlySupabaseError(text: string, status: number) {
-  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|customers|warehouses|inventory_current|inventory_snapshots|api_sync_logs/i.test(text)) {
-    return "FN OS 매출/재고 DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
+  if (/PGRST205|Could not find the table|schema cache|upload_batches|sales|purchases|products|product_boms|product_bom_items|customers|warehouses|inventory_current|inventory_snapshots|api_sync_logs|ad_daily_metrics|expense_entries|expense_categories|expense_upload_batches|expenses|payment_records|customer_payables|archive_items/i.test(text)) {
+    return "FN OS DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
   }
   if (/row-level security|violates row-level security/i.test(text)) {
     return "Supabase 권한 정책 때문에 요청이 차단되었습니다. Vercel에 SUPABASE_SERVICE_ROLE_KEY가 설정되어 있는지 확인해 주세요.";
@@ -96,6 +97,47 @@ export async function patchRows<T>(table: string, filters: Record<string, QueryV
     },
     filters,
   );
+}
+
+export async function deleteRows<T>(table: string, filters: Record<string, QueryValue>) {
+  return request<T[]>(
+    table,
+    {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" },
+    },
+    filters,
+  );
+}
+
+export async function uploadStorageFile(file: File, pathPrefix = "archive") {
+  if (!hasDbConfig()) throw new FnosDbError("Supabase environment variables are not configured.", 503);
+  const safeName = file.name.replace(/[^\w.\-가-힣]/g, "_");
+  const date = new Date().toISOString().slice(0, 10);
+  const objectPath = `${pathPrefix}/${date}/${crypto.randomUUID()}-${safeName}`;
+  const url = new URL(`/storage/v1/object/${SUPABASE_STORAGE_BUCKET}/${objectPath}`, SUPABASE_URL);
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": file.type || "application/octet-stream",
+      "x-upsert": "true",
+    },
+    body: await file.arrayBuffer(),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new FnosDbError(friendlySupabaseError(text, response.status), response.status);
+  }
+
+  return {
+    bucket: SUPABASE_STORAGE_BUCKET,
+    path: objectPath,
+    url: `${SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/${SUPABASE_STORAGE_BUCKET}/${objectPath}`,
+  };
 }
 
 export async function createUploadBatch(batchType: string, sourceFileName: string | undefined, totalCount: number) {
