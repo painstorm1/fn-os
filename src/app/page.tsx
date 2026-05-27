@@ -103,6 +103,7 @@ function formatDateKey(date: Date) {
 type CalendarServerMemo = {
   memo: string;
   order_id?: number;
+  order_code?: string;
 };
 
 function CalendarMemo() {
@@ -234,23 +235,24 @@ function CalendarMemo() {
       </div>
       <div className="mt-4 pt-2">
         <strong className="text-xs font-bold text-slate-500">{selected}</strong>
-        <div className="mt-2 space-y-1">
+        <div className="mt-2 space-y-2">
           {(serverMemos[selected] || []).map((memo, index) => (
-            <div key={`server-${memo.memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
+            <div key={`server-${memo.memo}-${index}`} className="rounded-md bg-orange-50 px-2 py-1.5 text-xs font-bold text-orange-700">
               {memo.order_id ? (
-                <Link href={importHref(`/orders?open=${memo.order_id}`)} className="break-all hover:underline">
-                  - {memo.memo}
+                <Link href={importHref(`/orders?open=${memo.order_id}`)} className="block break-keep hover:underline">
+                  {memo.memo}
+                  {memo.order_code ? <span className="ml-1 text-orange-500">({memo.order_code})</span> : null}
                 </Link>
               ) : (
-                <span className="break-all">- {memo.memo}</span>
+                <span className="block break-keep">{memo.memo}</span>
               )}
             </div>
           ))}
           {(memos[selected] || []).map((memo, index) => (
-            <div key={`local-${memo}-${index}`} className="flex items-start justify-between gap-2 text-xs">
-              <span className="break-all">• {memo}</span>
-              <button type="button" className="text-slate-400 hover:text-rose-500" onClick={() => deleteMemo(index)}>
-                ×
+            <div key={`local-${memo}-${index}`} className="flex items-start justify-between gap-2 rounded-md bg-slate-50 px-2 py-1.5 text-xs">
+              <span className="break-all">{memo}</span>
+              <button type="button" className="font-black text-slate-400 hover:text-rose-500" onClick={() => deleteMemo(index)}>
+                삭제
               </button>
             </div>
           ))}
@@ -263,7 +265,7 @@ function CalendarMemo() {
               if (event.key === "Enter") addMemo();
             }}
             className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400"
-            placeholder="일정 입력"
+            placeholder="내 메모 입력"
           />
           <button type="button" onClick={addMemo} className="rounded-md bg-orange-500 px-3 text-xs font-black text-white">
             저장

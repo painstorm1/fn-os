@@ -45,6 +45,20 @@ function dateKey(value: unknown) {
   return text(value).slice(0, 10);
 }
 
+function addDaysDateKey(value: unknown, days: unknown) {
+  const key = dateKey(value);
+  if (!key) return "";
+  const [year, month, day] = key.split("-").map(Number);
+  if (!year || !month || !day) return "";
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + numberValue(days));
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -512,20 +526,30 @@ async function handleGet(path: string, request: NextRequest) {
   }
   if (path === "api/fnos/calendar-production-memos") {
     const orders = await db(
-      `select id, order_code, order_date, factory_ship_date, production_days
-         from ${q(TABLES.orders)}
-        where factory_ship_date is not null or order_date is not null`,
+      `select o.id, o.order_code, o.order_date, o.production_days,
+              (select i.product_name
+                 from ${q(TABLES.orderItems)} i
+                where i.order_id=o.id
+                order by i.sort_order, i.id
+                limit 1) as repr_product
+         from ${q(TABLES.orders)} o
+        where o.production_days is not null
+          and o.production_days > 0
+          and (o.fn_arrived is null or o.fn_arrived = '')`,
     );
     const grouped: Record<string, AnyRecord[]> = {};
     for (const order of orders) {
-      let key = dateKey(order.factory_ship_date);
-      if (!key && order.order_date) {
-        const dueDate = new Date(order.order_date);
-        dueDate.setDate(dueDate.getDate() + numberValue(order.production_days));
-        key = dueDate.toISOString().slice(0, 10);
-      }
+      const key = addDaysDateKey(order.order_date, order.production_days);
       if (!key) continue;
-      grouped[key] = [...(grouped[key] || []), { memo: text(order.order_code), order_id: Number(order.id) }];
+      const productName = text(order.repr_product) || "대표상품 미지정";
+      grouped[key] = [
+        ...(grouped[key] || []),
+        {
+          memo: `[제작완료] ${productName}`,
+          order_id: Number(order.id),
+          order_code: text(order.order_code),
+        },
+      ];
     }
     return json(grouped);
   }
