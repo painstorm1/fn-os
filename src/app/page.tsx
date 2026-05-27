@@ -7699,6 +7699,7 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
   const [loading, setLoading] = useState(true);
   const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [isAdDragOver, setIsAdDragOver] = useState(false);
   const [message, setMessage] = useState("");
   const [mappingSku, setMappingSku] = useState("");
   const [mappingProduct, setMappingProduct] = useState<AdsMetricRow | null>(null);
@@ -7758,6 +7759,30 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
   function onFileChange(event: ChangeEvent<HTMLInputElement>, sourceKey?: AdSourceKey) {
     pickAdFiles(event.target.files, sourceKey);
     event.target.value = "";
+  }
+
+  function onAdDragEnter(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsAdDragOver(true);
+  }
+
+  function onAdDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsAdDragOver(true);
+  }
+
+  function onAdDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsAdDragOver(false);
+    }
+  }
+
+  function onAdDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsAdDragOver(false);
+    pickAdFiles(event.dataTransfer.files);
   }
 
   function removeAdFile(target: UploadedAdFile) {
@@ -7850,18 +7875,23 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
       <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
           <label
-            className="flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-3 hover:border-orange-300 hover:bg-orange-50"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              pickAdFiles(event.dataTransfer.files);
-            }}
+            className={`flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3 transition ${
+              isAdDragOver
+                ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
+                : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
+            }`}
+            onDragEnter={onAdDragEnter}
+            onDragOver={onAdDragOver}
+            onDragLeave={onAdDragLeave}
+            onDrop={onAdDrop}
           >
             <span className="min-w-0">
               <span className="block text-sm font-black text-slate-800">광고 파일 5개를 한 번에 업로드</span>
               <span className="mt-1 block truncate text-xs font-bold text-slate-500">위에서부터 메타GFA / 네이버쇼핑검색 / 네이버Advoost / 네이버GFA / 쿠팡 순서로 자동 반영</span>
             </span>
-            <span className="shrink-0 rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-black text-orange-600">파일 선택</span>
+            <span className={`shrink-0 rounded-md border px-3 py-2 text-xs font-black transition ${
+              isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
+            }`}>파일 선택</span>
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
           </label>
           <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
