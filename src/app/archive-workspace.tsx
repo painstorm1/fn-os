@@ -147,9 +147,11 @@ function extractArchiveDrafts(rawText: string) {
   let compactText = rawText
     .replace(/\u200B/g, "")
     .replace(/(^|[\s([{<])ttps:\/\//gi, "$1https://")
-    .replace(/(^|[\s([{<])h\s+ttps:\/\//gi, "$1https://");
+    .replace(/(^|[\s([{<])h\s+ttps:\/\//gi, "$1https://")
+    .replace(/h\s*t\s*t\s*p\s*s?\s*:?\s*(?:\/\s*\/)?\s*(?:www|w{2,3}|wany|suns|sun|sns)?\.?\s*(?:i\s*)?nstagram\s*\.?\s*com/gi, "https://www.instagram.com")
+    .replace(/instagram\s+com/gi, "instagram.com");
   for (let index = 0; index < 3; index += 1) {
-    compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{3,})/g, "$1$2");
+    compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{2,})/g, "$1$2");
   }
   const matches = Array.from(compactText.matchAll(/https?:\/\/[^\s"'<>]+/g));
   const seen = new Set<string>();
