@@ -8,8 +8,6 @@ import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx-js-style";
 import ArchiveWorkspace from "./archive-workspace";
 
-const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
-
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
   if (event.nativeEvent.isComposing) return;
@@ -551,7 +549,7 @@ function RightTools() {
       return;
     }
     try {
-      const res = await fetch(`${IMPORT_API_URL}/api/lcl-fee?method=${encodeURIComponent(next.method)}&cbm=${encodeURIComponent(cbm.toFixed(3))}`, {
+      const res = await fetch(apiUrl(`/api/lcl-fee?method=${encodeURIComponent(next.method)}&cbm=${encodeURIComponent(cbm.toFixed(3))}`), {
         credentials: "include",
       });
       const data = await res.json();
@@ -1042,7 +1040,7 @@ function importHref(path: string) {
 function assetUrl(path?: string) {
   if (!path) return "";
   if (path.startsWith("http") || path.startsWith("data:image/")) return path;
-  return `${IMPORT_API_URL}/static/${path.replace(/^\/?static\//, "")}`;
+  return `/api/import-erp/static/${path.replace(/^\/?static\//, "")}`;
 }
 
 function sortFactories(factories?: ImportFactory[]) {
@@ -2405,15 +2403,22 @@ function NativeProductDetail({ id }: { id: number }) {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000),
-      fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" }).then((res) => res.json()).catch(() => ({})),
-    ])
-      .then(([next, linkData]) => {
+    cachedJson<ImportProductDetail>(`/api/fnos/products/${id}`, 60_000)
+      .then((next) => {
         if (!alive) return;
         setDetail(next);
-        setSkuLinks(linkData.links || []);
-        setBomRows(linkData.bom || []);
+        fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" })
+          .then(async (res): Promise<{ links?: ImportSkuLink[]; bom?: ImportBomStatus[] }> => res.ok ? res.json() : {})
+          .then((linkData) => {
+            if (!alive) return;
+            setSkuLinks(linkData.links || []);
+            setBomRows(linkData.bom || []);
+          })
+          .catch(() => {
+            if (!alive) return;
+            setSkuLinks([]);
+            setBomRows([]);
+          });
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2582,7 +2587,7 @@ function GptMiniProductBox() {
     setLoading(true);
     setResult("GPTmini 조회 중...");
     try {
-      const res = await fetch(`${IMPORT_API_URL}/api/gptmini/hs`, {
+      const res = await fetch(apiUrl("/api/gptmini/hs"), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

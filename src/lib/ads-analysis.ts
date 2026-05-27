@@ -20,7 +20,12 @@ type SummaryRange = {
 };
 
 const FALLBACK_USD_KRW_RATE = Number(process.env.AD_USD_KRW_RATE || 1380);
-const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
+const IMPORT_API_URL =
+  process.env.IMPORT_API_URL ||
+  process.env.IMPORT_ERP_URL ||
+  process.env.NEXT_PUBLIC_IMPORT_API_URL ||
+  process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
+  "http://localhost:5500";
 let cachedUsdKrwRate: { value: number; at: number } | null = null;
 
 function text(value: unknown) {

@@ -4,6 +4,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const IMPORT_API_URL =
+  process.env.IMPORT_API_URL ||
+  process.env.IMPORT_ERP_URL ||
   process.env.NEXT_PUBLIC_IMPORT_API_URL ||
   process.env.NEXT_PUBLIC_IMPORT_ERP_URL ||
   "http://localhost:5500";
