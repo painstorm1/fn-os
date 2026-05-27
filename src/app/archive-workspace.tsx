@@ -221,9 +221,6 @@ export default function ArchiveWorkspace() {
   }), [categoryById, categoryFilteredItems, filters]);
 
   const referenceItems = filteredItems.filter((item) => item.content_type === "ad_reference" || item.reference_type);
-  const unclassifiedCount = data.items.filter((item) => !item.category_id).length;
-  const selectedCount = filteredItems.length;
-
   async function refresh() {
     setLoading(true);
     try {
@@ -446,16 +443,7 @@ export default function ArchiveWorkspace() {
         <p className="mt-1 text-sm font-bold text-slate-500">링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다.</p>
       </div>
 
-      <section className="grid gap-3 xl:grid-cols-[300px_1fr]">
-        <div className="rounded-md border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs font-black text-slate-500">현재 표시</p>
-          <div className="mt-1 flex items-end gap-2">
-            <b className="text-2xl leading-none text-orange-600">{selectedCount.toLocaleString("ko-KR")}</b>
-            <span className="text-sm font-black text-slate-700">건</span>
-            {unclassifiedCount > 0 && <span className="ml-auto text-xs font-bold text-rose-600">미분류 {unclassifiedCount}</span>}
-          </div>
-          {loading && <p className="mt-2 text-xs font-bold text-orange-600">불러오는 중</p>}
-        </div>
+      <section>
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
           {menuItems.map(([key, label]) => (
             <button key={key} type="button" onClick={() => openMenu(key)} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
@@ -465,6 +453,7 @@ export default function ArchiveWorkspace() {
           <button type="button" onClick={() => openMenu("taxo")} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === "taxo" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
             카테고리
           </button>
+          {loading && <span className="text-xs font-bold text-orange-600">불러오는 중</span>}
         </div>
       </section>
 
