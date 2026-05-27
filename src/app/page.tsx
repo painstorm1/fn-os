@@ -7770,7 +7770,11 @@ function adPercent2(value: unknown) {
 }
 
 function adDateInput(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
