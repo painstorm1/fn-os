@@ -29,6 +29,29 @@ function normalizeInventory(row: AnyRecord) {
   };
 }
 
+async function inventoryForProduct(code: string) {
+  const bySku = await selectRows<AnyRecord>("inventory_current", {
+    sku: `eq.${code}`,
+    order: "synced_at.desc",
+    limit: 100,
+  }).catch(() => []);
+  const byProductCode = bySku.length ? [] : await selectRows<AnyRecord>("inventory_current", {
+    prod_cd: `eq.${code}`,
+    order: "synced_at.desc",
+    limit: 100,
+  }).catch(() => []);
+  const seen = new Set<string>();
+  return [...bySku, ...byProductCode]
+    .map(normalizeInventory)
+    .filter((row) => {
+      const key = row.whCode || row.whName || "_";
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 30);
+}
+
 function includesQuery(row: ReturnType<typeof normalizeProduct>, query: string) {
   const haystack = `${row.code} ${row.name} ${row.size}`.toLowerCase();
   return haystack.includes(query.toLowerCase());
@@ -46,31 +69,18 @@ export async function POST(request: NextRequest) {
       .filter((row) => includesQuery(row, query))
       .slice(0, 20);
 
-    const first = products[0] || null;
-    let inventory: ReturnType<typeof normalizeInventory>[] = [];
-    if (first?.code) {
-      const inventoryRows = await selectRows<AnyRecord>("inventory_current", {
-        sku: `eq.${first.code}`,
-        order: "synced_at.desc",
-        limit: 100,
-      }).catch(() => []);
-      const seen = new Set<string>();
-      inventory = inventoryRows
-        .map(normalizeInventory)
-        .filter((row) => {
-          const key = row.whCode || row.whName || "_";
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-        .slice(0, 30);
-    }
+    const productsWithInventory = await Promise.all(products.map(async (product) => ({
+      ...product,
+      inventory: product.code ? await inventoryForProduct(product.code) : [],
+    })));
+    const first = productsWithInventory[0] || null;
+    const inventory = first?.inventory || [];
 
     return NextResponse.json({
       ok: true,
       source: "fnos-db",
       product: first,
-      products,
+      products: productsWithInventory,
       inventory,
       counts: {
         products: products.length,

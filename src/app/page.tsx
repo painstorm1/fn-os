@@ -5926,17 +5926,13 @@ function SalesSyncTools() {
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<{
-    product?: { code?: string; name?: string; inPrice?: string; outPrice?: string } | null;
-    products?: Array<{ code?: string; name?: string; inPrice?: string; outPrice?: string }>;
+    product?: { code?: string; name?: string; inPrice?: string; outPrice?: string; inventory?: Array<{ whCode?: string; whName?: string; qty?: string; syncedAt?: string }> } | null;
+    products?: Array<{ code?: string; name?: string; inPrice?: string; outPrice?: string; inventory?: Array<{ whCode?: string; whName?: string; qty?: string; syncedAt?: string }> }>;
     inventory?: Array<{ whCode?: string; whName?: string; qty?: string; syncedAt?: string }>;
     message?: string;
     error?: string;
   } | null>(null);
   const [expandedLookupCode, setExpandedLookupCode] = useState<string | null>(null);
-  const [syncMessage, setSyncMessage] = useState("");
-  const [syncLoading, setSyncLoading] = useState<"" | "products" | "customers" | "warehouses" | "inventory">("");
-  const customerFileRef = useRef<HTMLInputElement>(null);
-  const warehouseFileRef = useRef<HTMLInputElement>(null);
 
   async function quickLookup() {
     const query = lookupQuery.trim();
@@ -5964,111 +5960,6 @@ function SalesSyncTools() {
       setLookupResult({ error: error instanceof Error ? error.message : "상품 조회 실패" });
     } finally {
       setLookupLoading(false);
-    }
-  }
-
-  async function syncProductsFromFnOs() {
-    setSyncLoading("products");
-    setSyncMessage("");
-    try {
-      const res = await fetch("/api/fnos/products/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ PROD_CD: "", PROD_TYPE: "" }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        window.alert(FNOS_DB_ERROR_MESSAGE);
-        setSyncMessage(data.error || "상품정보 동기화 실패");
-        return;
-      }
-      setSyncMessage(`상품정보 ${data.count || 0}건을 동기화했습니다.`);
-    } catch (error) {
-      window.alert(FNOS_DB_ERROR_MESSAGE);
-      setSyncMessage(error instanceof Error ? error.message : "상품정보 동기화 실패");
-    } finally {
-      setSyncLoading("");
-    }
-  }
-
-  async function uploadCustomersFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setSyncLoading("customers");
-    setSyncMessage("");
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/fnos/customers/upload", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        setSyncMessage(data.error || "거래처정보 업로드 실패");
-        return;
-      }
-      setSyncMessage(`거래처정보 ${data.count || 0}건을 업로드했습니다.`);
-    } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "거래처정보 업로드 실패");
-    } finally {
-      setSyncLoading("");
-      event.target.value = "";
-    }
-  }
-
-  async function uploadWarehousesFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setSyncLoading("warehouses");
-    setSyncMessage("");
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/fnos/warehouses/upload", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        setSyncMessage(data.error || "창고정보 업로드 실패");
-        return;
-      }
-      setSyncMessage(`창고정보 ${data.count || 0}건을 업로드했습니다.`);
-    } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "창고정보 업로드 실패");
-    } finally {
-      setSyncLoading("");
-      event.target.value = "";
-    }
-  }
-
-  async function syncInventoryFromFnOs() {
-    setSyncLoading("inventory");
-    setSyncMessage("");
-    try {
-      const baseDate = new Date().toISOString().slice(0, 10).replace(/\D/g, "");
-      const res = await fetch("/api/fnos/inventory/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ PROD_CD: "", WH_CD: "", BASE_DATE: baseDate }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        window.alert(FNOS_DB_ERROR_MESSAGE);
-        setSyncMessage(data.error || "재고 동기화 실패");
-        return;
-      }
-      setSyncMessage(`재고 ${data.count || 0}건을 동기화했습니다.`);
-    } catch (error) {
-      window.alert(FNOS_DB_ERROR_MESSAGE);
-      setSyncMessage(error instanceof Error ? error.message : "재고 동기화 실패");
-    } finally {
-      setSyncLoading("");
     }
   }
 
@@ -6118,10 +6009,23 @@ function SalesSyncTools() {
                       <span className="shrink-0 text-sm font-black text-orange-500">{isOpen ? "−" : "+"}</span>
                     </button>
                     {isOpen && (
-                      <div className="grid grid-cols-[76px_1fr] gap-y-1 border-t border-orange-100 bg-orange-50 px-3 py-2 text-xs text-slate-600">
-                        <span>품목코드</span><b className="text-slate-950">{item.code || "-"}</b>
-                        <span>입고단가</span><b className="text-slate-950">{item.inPrice || "-"}</b>
-                        <span>출고단가</span><b className="text-slate-950">{item.outPrice || "-"}</b>
+                      <div className="border-t border-orange-100 bg-orange-50 px-3 py-2 text-xs text-slate-600">
+                        <div className="grid grid-cols-[76px_1fr] gap-y-1">
+                          <span>품목코드</span><b className="text-slate-950">{item.code || "-"}</b>
+                          <span>입고단가</span><b className="text-slate-950">{item.inPrice || "-"}</b>
+                          <span>출고단가</span><b className="text-slate-950">{item.outPrice || "-"}</b>
+                        </div>
+                        <div className="mt-2 rounded-md border border-orange-100 bg-white">
+                          <div className="border-b border-orange-100 px-2 py-1 font-black text-slate-500">창고별 현재고</div>
+                          <div className="grid gap-1 p-2">
+                            {item.inventory?.length ? item.inventory.map((stock, stockIndex) => (
+                              <div key={`${item.code}-${stock.whCode || stock.whName}-${stockIndex}`} className="flex items-center justify-between gap-2">
+                                <span className="truncate">{stock.whName || stock.whCode || "창고"}</span>
+                                <b className="text-slate-950">{stock.qty || "0"}</b>
+                              </div>
+                            )) : <span className="text-slate-400">창고별 재고 없음</span>}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -6132,39 +6036,6 @@ function SalesSyncTools() {
         )}
       </ToolSection>
 
-      <ToolSection title="상품정보 동기화" showChevron={false}>
-        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-          FN OS products 테이블을 기준 상품정보로 갱신합니다.
-        </div>
-        <button type="button" onClick={syncProductsFromFnOs} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
-          {syncLoading === "products" ? "동기화 중" : "상품정보 동기화"}
-        </button>
-      </ToolSection>
-
-      <ToolSection title="거래처정보 업로드/동기화" showChevron={false}>
-        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-          FN_거래처, FN_창고 엑셀을 업로드해 FN OS 기준정보에 저장합니다.
-        </div>
-        <input ref={customerFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadCustomersFile} />
-        <input ref={warehouseFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadWarehousesFile} />
-        <button type="button" onClick={() => customerFileRef.current?.click()} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-black text-orange-600 disabled:opacity-50">
-          {syncLoading === "customers" ? "업로드 중" : "거래처 엑셀 업로드"}
-        </button>
-        <button type="button" onClick={() => warehouseFileRef.current?.click()} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-50">
-          {syncLoading === "warehouses" ? "업로드 중" : "창고 엑셀 업로드"}
-        </button>
-      </ToolSection>
-
-      <ToolSection title="재고 동기화" showChevron={false}>
-        <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
-          FN OS inventory_current 최신 재고 캐시를 갱신합니다.
-        </div>
-        <button type="button" onClick={syncInventoryFromFnOs} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
-          {syncLoading === "inventory" ? "동기화 중" : "재고 동기화"}
-        </button>
-      </ToolSection>
-
-      {syncMessage && <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{syncMessage}</div>}
     </aside>
   );
 }
@@ -6993,7 +6864,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <Panel
           title="재고현황"
           subtitle="FN OS 재고 DB를 판매 DB와 결합해 품절 위험을 계산합니다."
-          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
         >
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">
@@ -7310,7 +7180,11 @@ function MasterManagementPanel({
       )}
 
       {activeMasterTab === "warehouses" && (
-        <Panel title="창고 목록" subtitle="창고는 RG/NG 같은 재고상태 또는 창고 유형 기준으로 관리합니다.">
+        <Panel
+          title="창고 목록"
+          subtitle="창고는 RG/NG 같은 재고상태 또는 창고 유형 기준으로 관리합니다."
+          action={<button type="button" className="rounded-md bg-slate-950 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
+        >
           <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">창고 목록 테이블은 다음 단계에서 창고 조회 API와 연결합니다.</div>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
