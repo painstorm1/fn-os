@@ -6688,36 +6688,6 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
   );
 }
 
-function AdsSourceDashboard({ rows }: { rows: AdsMetricRow[] }) {
-  const byChannel = new Map(rows.map((row) => [String(row.channel || ""), row]));
-  const maxCost = Math.max(...rows.map((row) => adNumber(row.cost)), 1);
-  return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-base font-black">5개 광고 파일 현황</h2>
-      <div className="mt-4 grid gap-3 lg:grid-cols-5">
-        {adSources.map((source) => {
-          const row = byChannel.get(source.label) || {};
-          const cost = adNumber(row.cost);
-          const roas = adNumber(row.roas);
-          return (
-            <div key={source.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="rounded bg-slate-950 px-2 py-1 text-[11px] font-black text-white">{source.shortLabel}</span>
-                <span className={`text-xs font-black ${roas >= 300 ? "text-emerald-600" : roas > 0 && roas < 120 ? "text-rose-600" : "text-slate-500"}`}>{roas ? adPercent(roas) : "-"}</span>
-              </div>
-              <p className="mt-3 text-sm font-black text-slate-800">{source.label}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">{cost ? krw(cost) : "파일 대기 중"}</p>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
-                <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (cost / maxCost) * 100)}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function AdsAnalysisWorkspace() {
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -6823,10 +6793,6 @@ function AdsAnalysisWorkspace() {
   const channels = summary?.channels || [];
   const daily = summary?.daily || [];
   const unmapped = summary?.unmapped || [];
-  const sourceCounts = adSources.map((source) => ({
-    ...source,
-    count: uploadedAdFiles.filter((item) => item.sourceKey === source.key).length,
-  }));
 
   return (
     <div className="space-y-6">
@@ -6835,55 +6801,35 @@ function AdsAnalysisWorkspace() {
         <p className="mt-1 text-sm font-bold text-slate-500">메타, 네이버검색, 네이버GTA, 네이버Advoost, 쿠팡 파일을 올리면 광고 데이터를 생성하고 매출/재고와 연결합니다.</p>
       </div>
 
-      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-base font-black">광고 파일 업로드</h2>
-            <p className="mt-1 text-xs font-bold text-slate-500">클릭 업로드 또는 드래그앤드랍으로 5개 광고 파일을 각각 넣어 주세요.</p>
-          </div>
-          <div className="flex gap-2">
-            <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50">
-              파일 한번에 선택
-              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
-            </label>
-            <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
-              {uploading ? "생성 중" : "데이터 생성"}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-5">
-          {sourceCounts.map((source) => (
-            <label
-              key={source.key}
-              className="flex min-h-36 cursor-pointer flex-col justify-between rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 hover:border-orange-300 hover:bg-orange-50"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                pickAdFiles(event.dataTransfer.files, source.key);
-              }}
-            >
-              <span>
-                <span className="inline-flex rounded bg-slate-950 px-2 py-1 text-[11px] font-black text-white">{source.shortLabel}</span>
-                <span className="mt-3 block text-sm font-black text-slate-800">{source.label}</span>
-                <span className="mt-1 block text-xs font-bold text-slate-500">{source.hint}</span>
-              </span>
-              <span className="mt-4 flex items-center justify-between gap-2 text-xs font-black">
-                <span className={source.count ? "text-orange-600" : "text-slate-400"}>{source.count ? `${source.count}개 대기` : "클릭/드롭"}</span>
-                <span className="rounded-md bg-white px-2 py-1 text-slate-500">업로드</span>
-              </span>
-              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event, source.key)} />
-            </label>
-          ))}
+      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
+          <label
+            className="flex min-h-16 cursor-pointer items-center justify-between gap-4 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-3 hover:border-orange-300 hover:bg-orange-50"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              pickAdFiles(event.dataTransfer.files);
+            }}
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-black text-slate-800">광고 파일 5개를 한 번에 업로드</span>
+              <span className="mt-1 block truncate text-xs font-bold text-slate-500">메타 / 네이버검색 / 네이버GTA / 네이버Advoost / 쿠팡 파일을 끌어다 놓거나 클릭해 선택</span>
+            </span>
+            <span className="shrink-0 rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-black text-orange-600">파일 선택</span>
+            <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
+          </label>
+          <button type="button" onClick={uploadRows} disabled={uploading || !uploadedAdFiles.length} className="h-16 rounded-md bg-orange-500 px-6 text-sm font-black text-white disabled:bg-slate-300">
+            {uploading ? "생성 중" : "데이터 생성"}
+          </button>
         </div>
         {message && <p className="mt-3 rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">{message}</p>}
         {!!uploadedAdFiles.length && (
-          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-black text-slate-700">대기 중인 광고 파일 {uploadedAdFiles.length}개</p>
               <button type="button" onClick={() => setUploadedAdFiles([])} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               {uploadedAdFiles.map((item) => (
                 <span key={uploadedAdFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-600">{adSourceLabels[item.sourceKey]}</span>
@@ -6906,8 +6852,6 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="클릭/CTR" value={`${adNumber(total.clicks).toLocaleString("ko-KR")}회`} note={`CTR ${adPercent(total.ctr)}`} tone="slate" />
         <AdsMetricCard label="전환/CVR" value={`${adNumber(total.conversions).toLocaleString("ko-KR")}건`} note={`CVR ${adPercent(total.cvr)}`} tone="rose" />
       </section>
-
-      <AdsSourceDashboard rows={channels} />
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
         <AdsLineChart rows={daily} />
