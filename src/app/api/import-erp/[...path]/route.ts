@@ -13,9 +13,9 @@ type RouteContext = {
   params: Promise<{ path?: string[] }>;
 };
 
-async function ensureImportErp() {
+async function ensureImportErp(origin: string) {
   try {
-    await fetch("http://127.0.0.1:3000/api/fnos/import-erp/ensure", {
+    await fetch(`${origin}/api/fnos/import-erp/ensure`, {
       method: "POST",
       cache: "no-store",
     });
@@ -25,7 +25,7 @@ async function ensureImportErp() {
 }
 
 async function proxyImportErp(request: NextRequest, context: RouteContext) {
-  await ensureImportErp();
+  await ensureImportErp(request.nextUrl.origin);
 
   const params = await context.params;
   const path = (params.path || []).map(encodeURIComponent).join("/");

@@ -993,7 +993,7 @@ function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   if (cached?.promise) return cached.promise;
   const promise = ensureImportErpServer()
     .catch(() => undefined)
-    .then(() => fetch(key, { credentials: "include" }))
+    .then(() => fetch(key, { credentials: "include", cache: "no-store" }))
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json() as Promise<T>;
