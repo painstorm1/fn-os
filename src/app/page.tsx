@@ -1159,18 +1159,24 @@ function rateNoteText(rates?: Record<string, number>, currencies: string[] = [])
   return ordered.map((currency) => `${currency}=₩${Number(rates?.[currency] || (currency === "KRW" ? 1 : 0)).toLocaleString("ko-KR")}`).join(" · ");
 }
 
+function parseLocalDate(value?: string | null) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function productionDueText(order: ImportOrder) {
-  if (order.fn_arrived) return "-";
+  if (String(order.fn_arrived || "").trim()) return "-";
   const days = Number(order.production_days || 0);
-  const paidOrOrder = order.order_date;
-  if (!days || !paidOrOrder) return "-";
-  const base = new Date(`${paidOrOrder}T00:00:00`);
-  if (Number.isNaN(base.getTime())) return "-";
-  const due = new Date(base);
-  due.setDate(base.getDate() + days);
+  const base = parseLocalDate(order.order_date);
+  const due = base ? new Date(base) : parseLocalDate(order.production_due_date);
+  if (!due || (!days && !order.production_due_date)) return "-";
+  if (base && days) due.setDate(base.getDate() + days);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const diff = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
   if (diff > 0) return `D-${diff}`;
   if (diff === 0) return "D-Day";
   return "-";
@@ -1232,9 +1238,14 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
               </button>
               {openStage === stage.name && (
                 <input
-                  className="field-input h-9 w-[118px] max-w-full px-2 text-xs"
+                  className="field-input relative z-30 h-9 w-[112px] max-w-full px-2 text-xs"
                   type="date"
                   value={value}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    event.currentTarget.showPicker?.();
+                  }}
+                  onFocus={(event) => event.currentTarget.showPicker?.()}
                   onChange={(event) => onChange(stage.name, event.target.value)}
                 />
               )}
