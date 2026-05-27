@@ -124,12 +124,12 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const isCoupang = channel.includes("쿠팡");
   const isMeta = channel.includes("메타");
   const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
-  const clicks = numberValue(first(row, ["clicks", "클릭수", "클릭", "clk", "clkCnt"]));
+  const clicks = numberValue(first(row, ["clicks", "클릭수", "링크 클릭", "클릭(전체)", "클릭", "clk", "clkCnt"]));
   const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
   const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
   const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
-  const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "purchase_conversions"]));
-  const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "purchase_conversion_value"]));
+  const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
+  const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "구매 전환값", "purchase_conversion_value"]));
   const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
   const coupangSales = numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]));
   const conversions = isCoupang
@@ -138,7 +138,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const conversionValue = isCoupang
     ? coupangSales
     : purchaseValue || numberValue(first(row, ["conversion_value", "전환금액", "매출", "구매금액", "salesAmt", "revenue"]));
-  const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "클릭률"])) || pct(clicks, impressions);
+  const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "CTR(링크 클릭률)", "아웃바운드 CTR(클릭률)", "클릭률"])) || pct(clicks, impressions);
   const cpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"])) || (clicks > 0 ? cost / clicks : 0);
   const cvr = pct(conversions, clicks);
   const roas = percentValue(first(row, [
