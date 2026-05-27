@@ -117,6 +117,22 @@ export async function createArchiveFileItem(formData: FormData) {
   const file = formData.get("file");
   if (!(file instanceof File) || !file.name) throw new Error("업로드할 파일이 없습니다.");
   const uploaded = await uploadStorageFile(file);
+  const url = text(formData.get("url"));
+  if (url) {
+    return createArchiveItem({
+      title: text(formData.get("title")) || url,
+      url,
+      file_url: uploaded.url,
+      source_type: text(formData.get("source_type")),
+      content_type: text(formData.get("content_type")) || "link",
+      memo: text(formData.get("memo")),
+      category_id: text(formData.get("category_id")) || null,
+      category_name: text(formData.get("category_name")),
+      tags: text(formData.get("tags")),
+      status: text(formData.get("status")) || "active",
+      thumbnail_url: file.type.startsWith("image/") ? uploaded.url : text(formData.get("thumbnail_url")),
+    });
+  }
   return createArchiveItem({
     title: text(formData.get("title")) || file.name,
     file_url: uploaded.url,

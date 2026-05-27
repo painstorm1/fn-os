@@ -328,15 +328,31 @@ export default function ArchiveWorkspace() {
     setAutoWorking(true);
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
-      await Promise.all(autoDrafts.map((draft) => postJson("/api/fnos/archive", {
-        ...draft,
-        category_id: categoryIdByName.get(draft.category_name) || null,
-        tags: "",
-        status: "active",
-      })));
+      await Promise.all(autoDrafts.map((draft) => {
+        const payload = {
+          ...draft,
+          category_id: categoryIdByName.get(draft.category_name) || null,
+          tags: "",
+          status: "active",
+        };
+        if (!autoImageFileRef.current) return postJson("/api/fnos/archive", payload);
+        const formData = new FormData();
+        Object.entries(payload).forEach(([key, value]) => formData.set(key, String(value ?? "")));
+        formData.set("file", autoImageFileRef.current as File);
+        return fetch("/api/fnos/archive", { method: "POST", body: formData }).then(async (res) => {
+          const result = await res.json();
+          if (!res.ok || result.ok === false) throw new Error(result.error || "저장 실패");
+          return result;
+        });
+      }));
       const savedCount = autoDrafts.length;
       setAutoDrafts([]);
       setAutoText("");
+      autoImageFileRef.current = null;
+      setAutoImagePreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return "";
+      });
       if (autoImageRef.current) autoImageRef.current.value = "";
       setMessage(`${savedCount.toLocaleString("ko-KR")}개 항목을 아카이브에 저장했습니다.`);
       await refresh();
