@@ -184,6 +184,11 @@ async function upsert(table, rows, conflictColumn) {
     );
     if (!response.ok) {
       const body = await response.text();
+      if (response.status === 404 && body.includes("PGRST205")) {
+        throw new Error(
+          `${table} 테이블을 찾지 못했습니다. 먼저 npm run db:schema 로 schema_sales_inventory.sql을 실행해 주세요.`
+        );
+      }
       throw new Error(`${table} 업서트 실패 (${response.status}): ${body}`);
     }
     count += chunk.length;
@@ -224,4 +229,3 @@ await main().catch((error) => {
   console.error(error.message);
   process.exit(1);
 });
-
