@@ -7862,7 +7862,9 @@ function adUploadDateLabel(value: unknown) {
   ].join("-") + ` ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
+type AdRangePreset = "yesterday" | "7d" | "14d" | "30d";
+
+function adRangeForPreset(preset: AdRangePreset) {
   const today = new Date();
   const end = new Date(today);
   end.setDate(today.getDate() - 1);
@@ -7870,6 +7872,14 @@ function adRangeForPreset(preset: "yesterday" | "7d" | "14d" | "30d") {
   const days = preset === "yesterday" ? 1 : preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
   start.setDate(end.getDate() - days + 1);
   return { from: adDateInput(start), to: adDateInput(end) };
+}
+
+function adPresetForRange(from: string, to: string): AdRangePreset | "custom" {
+  for (const preset of ["yesterday", "7d", "14d", "30d"] as const) {
+    const range = adRangeForPreset(preset);
+    if (range.from === from && range.to === to) return preset;
+  }
+  return "custom";
 }
 
 function adRangeDays(from: string, to: string) {
@@ -8199,7 +8209,7 @@ function AdsRightPanel() {
   const [uploading, setUploading] = useState(false);
   const [isAdDragOver, setIsAdDragOver] = useState(false);
   const [message, setMessage] = useState("");
-  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("yesterday");
+  const [rangePreset, setRangePreset] = useState<AdRangePreset | "custom">(adPresetForRange(initialFrom, initialTo));
   const [dateFrom, setDateFrom] = useState(initialFrom);
   const [dateTo, setDateTo] = useState(initialTo);
 
@@ -8208,7 +8218,7 @@ function AdsRightPanel() {
     goToInternal(`/?${params.toString()}`);
   }
 
-  function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
+  function applyRangePreset(preset: AdRangePreset) {
     const range = adRangeForPreset(preset);
     setRangePreset(preset);
     setDateFrom(range.from);
@@ -8305,6 +8315,12 @@ function AdsRightPanel() {
   }
 
   useEffect(() => {
+    setDateFrom(initialFrom);
+    setDateTo(initialTo);
+    setRangePreset(adPresetForRange(initialFrom, initialTo));
+  }, [initialFrom, initialTo]);
+
+  useEffect(() => {
     let alive = true;
     Promise.all([
       ["어제", adRangeForPreset("yesterday")],
@@ -8385,8 +8401,8 @@ function AdsRightPanel() {
               <button
                 key={key}
                 type="button"
-                onClick={() => applyRangePreset(key as "yesterday" | "7d" | "14d" | "30d")}
-                className={`h-9 rounded-md border px-2 text-xs font-black ${rangePreset === key ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
+                onClick={() => applyRangePreset(key as AdRangePreset)}
+                className={`h-8 rounded-md px-2 text-xs font-black transition ${rangePreset === key ? "bg-orange-50 text-orange-600 ring-1 ring-orange-200" : "bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800"}`}
               >
                 {label}
               </button>
