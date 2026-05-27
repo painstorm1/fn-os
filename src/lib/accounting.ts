@@ -179,10 +179,11 @@ export async function importExpenseRows(rows: RawRow[], sourceType = "기타", s
     const total = numberValue(first(row, ["total_amount", "합계", "금액", "이용금액", "출금액", "입금액", "청구금액", "배송비", "운임", "비용", "결제금액", "사용금액"]));
     const vat = numberValue(first(row, ["vat_amount", "부가세", "VAT", "세액"]));
     const amount = numberValue(first(row, ["amount", "공급가액", "공급가", "승인금액", "배송비", "운임", "비용"])) || Math.max(0, total - vat);
-    const categoryName = text(first(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, sourceType);
+    const rowSourceType = text(row.source_type) || sourceType;
+    const categoryName = text(first(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, rowSourceType);
     return {
       expense_date: isoDate(first(row, ["expense_date", "날짜", "일자", "거래일자", "이용일자", "승인일자", "작성일자"])),
-      source_type: sourceType,
+      source_type: rowSourceType,
       vendor_name: vendor || description || sourceType,
       description,
       amount,

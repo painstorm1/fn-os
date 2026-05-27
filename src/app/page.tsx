@@ -7044,6 +7044,113 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
   );
 }
 
+function AccountingMetric({ label, value, note, tone = "slate" }: { label: string; value: string; note?: string; tone?: "slate" | "orange" | "green" | "rose" }) {
+  const toneClass = {
+    slate: "text-slate-950",
+    orange: "text-orange-600",
+    green: "text-emerald-600",
+    rose: "text-rose-600",
+  }[tone];
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-black text-slate-500">{label}</p>
+      <p className={`mt-2 text-xl font-black ${toneClass}`}>{value}</p>
+      {note && <p className="mt-1 text-xs font-bold text-slate-500">{note}</p>}
+    </article>
+  );
+}
+
+function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<string, unknown>>; compact?: boolean }) {
+  const chartRows = rows.slice(0, 8).reverse();
+  const max = Math.max(1, ...chartRows.map((row) => asNumber(row.amount)));
+  const points = chartRows.length
+    ? chartRows.map((row, index) => {
+        const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
+        const y = 92 - (asNumber(row.amount) / max) * 76;
+        return `${x},${y}`;
+      }).join(" ")
+    : "";
+  return (
+    <section className={`${compact ? "" : "rounded-md border border-slate-200 bg-white p-5 shadow-sm"}`}>
+      {!compact && <h2 className="text-base font-black">월별 비용 추이</h2>}
+      <div className="mt-3 rounded-md bg-slate-50 p-3">
+        <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label="월별 비용 추이 그래프">
+          <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
+          {points && <polyline points={points} fill="none" stroke="#f97316" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+          {chartRows.map((row, index) => {
+            const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
+            const y = 92 - (asNumber(row.amount) / max) * 76;
+            return <circle key={`${String(row.label)}-${index}`} cx={x} cy={y} r="2.8" fill="#f97316" />;
+          })}
+        </svg>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {chartRows.slice(-4).map((row, index) => (
+            <div key={`${String(row.label)}-${index}`} className="rounded bg-white px-2 py-2 text-xs">
+              <p className="font-black text-slate-500">{String(row.label || "-")}</p>
+              <p className="mt-1 font-black text-slate-950">{krw(asNumber(row.amount))}</p>
+            </div>
+          ))}
+          {!chartRows.length && <p className="col-span-full rounded bg-white px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AccountingCategoryChart({ rows, compact = false }: { rows: Array<Record<string, unknown>>; compact?: boolean }) {
+  const chartRows = rows.slice(0, 6);
+  const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
+  const colors = ["#f97316", "#0ea5e9", "#10b981", "#f43f5e", "#64748b", "#a855f7"];
+  let offset = 0;
+  return (
+    <section className={`${compact ? "" : "rounded-md border border-slate-200 bg-white p-5 shadow-sm"}`}>
+      {!compact && <h2 className="text-base font-black">카테고리 비중</h2>}
+      <div className="mt-3 grid gap-4 rounded-md bg-slate-50 p-3 md:grid-cols-[160px_1fr]">
+        <svg viewBox="0 0 42 42" className="h-40 w-40">
+          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" strokeWidth="6" />
+          {chartRows.map((row, index) => {
+            const value = (asNumber(row.amount) / total) * 100;
+            const dash = `${value} ${100 - value}`;
+            const rotate = offset;
+            offset += value;
+            return (
+              <circle
+                key={`${String(row.label)}-${index}`}
+                cx="21"
+                cy="21"
+                r="15.915"
+                fill="transparent"
+                stroke={colors[index % colors.length]}
+                strokeWidth="6"
+                strokeDasharray={dash}
+                strokeDashoffset="25"
+                transform={`rotate(${rotate * 3.6} 21 21)`}
+              />
+            );
+          })}
+          <text x="21" y="20" textAnchor="middle" className="fill-slate-950 text-[4px] font-black">비용</text>
+          <text x="21" y="25" textAnchor="middle" className="fill-orange-600 text-[4px] font-black">{chartRows.length}개</text>
+        </svg>
+        <div className="space-y-2">
+          {chartRows.map((row, index) => {
+            const amount = asNumber(row.amount);
+            return (
+              <div key={`${String(row.label)}-${index}`}>
+                <div className="mb-1 flex justify-between gap-3 text-xs font-bold">
+                  <span className="truncate text-slate-700"><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />{String(row.label || "-")}</span>
+                  <span className="text-slate-950">{krw(amount)}</span>
+                </div>
+                <div className="h-2 rounded bg-white"><div className="h-2 rounded" style={{ width: `${Math.max(4, (amount / total) * 100)}%`, backgroundColor: colors[index % colors.length] }} /></div>
+              </div>
+            );
+          })}
+          {!chartRows.length && <p className="rounded bg-white px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type AccountingSummary = {
   ok?: boolean;
   error?: string;
@@ -7059,6 +7166,11 @@ type AccountingSummary = {
   by_month?: Array<Record<string, unknown>>;
 };
 
+type ExpenseUploadItem = {
+  file: File;
+  sourceType: string;
+};
+
 const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
 const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙"];
 const accountingUploadSlots = [
@@ -7072,8 +7184,8 @@ function AccountingWorkspace() {
   const [activeTab, setActiveTab] = useState(accountingTabs[0]);
   const [summary, setSummary] = useState<AccountingSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [sourceType, setSourceType] = useState("카드내역");
-  const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<File[]>([]);
+  const [sourceType, setSourceType] = useState("국민카드 1");
+  const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const [parsedFiles, setParsedFiles] = useState<Array<Record<string, unknown>>>([]);
   const [parsing, setParsing] = useState(false);
@@ -7106,18 +7218,20 @@ function AccountingWorkspace() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  function expenseFileKey(file: File) {
-    return `${file.name}:${file.size}:${file.lastModified}`;
+  function expenseFileKey(item: ExpenseUploadItem) {
+    return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
   }
 
-  function addExpenseFiles(files: FileList | File[] | null) {
+  function addExpenseFiles(files: FileList | File[] | null, nextSourceType = sourceType) {
     const nextFiles = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
     if (!nextFiles.length) {
       setMessage("엑셀 또는 CSV 비용 파일을 선택해 주세요.");
       return;
     }
     const existing = new Set(uploadedExpenseFiles.map(expenseFileKey));
-    const fresh = nextFiles.filter((file) => !existing.has(expenseFileKey(file)));
+    const fresh = nextFiles
+      .map((file) => ({ file, sourceType: nextSourceType }))
+      .filter((item) => !existing.has(expenseFileKey(item)));
     if (!fresh.length) {
       setMessage("이미 대기 목록에 있는 파일입니다.");
       return;
@@ -7133,16 +7247,21 @@ function AccountingWorkspace() {
     event.target.value = "";
   }
 
-  function onExpenseDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    addExpenseFiles(event.dataTransfer.files);
+  function pickExpenseSlot(slotKey: string) {
+    setSourceType(slotKey);
+    setMessage(`${slotKey} 파일을 올릴 준비가 됐습니다.`);
   }
 
-  function removeExpenseFile(target: File) {
-    setUploadedExpenseFiles((prev) => prev.filter((file) => expenseFileKey(file) !== expenseFileKey(target)));
+  function onExpenseDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    addExpenseFiles(event.dataTransfer.files, sourceType);
+  }
+
+  function removeExpenseFile(target: ExpenseUploadItem) {
+    setUploadedExpenseFiles((prev) => prev.filter((item) => expenseFileKey(item) !== expenseFileKey(target)));
     setPreviewRows([]);
     setParsedFiles([]);
-    setMessage(`${target.name} 파일을 대기 목록에서 제외했습니다.`);
+    setMessage(`${target.file.name} 파일을 대기 목록에서 제외했습니다.`);
   }
 
   async function previewExpenseFiles() {
@@ -7154,7 +7273,8 @@ function AccountingWorkspace() {
     setMessage(`${uploadedExpenseFiles.length}개 파일을 읽어 비용 데이터를 생성하는 중입니다.`);
     const form = new FormData();
     form.append("source_type", sourceType);
-    uploadedExpenseFiles.forEach((file) => form.append("files", file));
+    form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
+    uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
     const res = await fetch("/api/accounting/files/parse", { method: "POST", body: form });
     const data = await res.json();
     setParsing(false);
@@ -7176,7 +7296,8 @@ function AccountingWorkspace() {
     setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
     const form = new FormData();
     form.append("source_type", sourceType);
-    uploadedExpenseFiles.forEach((file) => form.append("files", file));
+    form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
+    uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
     const res = await fetch("/api/accounting/upload", {
       method: "POST",
       body: form,
@@ -7233,80 +7354,144 @@ function AccountingWorkspace() {
     return true;
   });
   const totals = summary?.totals || {};
+  const recentBatches = summary?.batches || [];
+  const monthRows = summary?.by_month || [];
+  const categoryRows = summary?.by_category || [];
+  const vendorRows = summary?.by_vendor || [];
+  const bankCardExpense = expenses.filter((row) => ["국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
+  const bankCardTotal = bankCardExpense.reduce((total, row) => total + asNumber(row.total_amount || row.amount), 0);
+  const largestCategory = categoryRows[0];
+  const pendingUploadCount = uploadedExpenseFiles.length;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
         <div>
           <h1 className="text-2xl font-black">회계/비용</h1>
-          <p className="mt-1 text-sm font-bold text-slate-500">엑셀 비용 수집부터 자동 분류, 손익, 미납, 수입비용 연결까지 FN OS DB 기준으로 관리합니다.</p>
+          <p className="mt-1 text-sm font-bold text-slate-500">국민카드, 은행 입출금, 세금계산서, 물류/광고 비용을 파일 기반으로 모아 손익까지 봅니다.</p>
         </div>
-        <button type="button" onClick={loadSummary} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700">새로고침</button>
       </div>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" />
-        <DashboardMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 성과 DB 연결" />
-        <DashboardMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 purchases" />
-        <DashboardMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} />
-        <DashboardMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 관리 필요" />
+      <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-6">
+        <AccountingMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" tone="orange" />
+        <AccountingMetric label="카드/은행" value={krw(bankCardTotal)} note="국민카드/국민은행/기업은행" />
+        <AccountingMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 DB 연결" />
+        <AccountingMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 연결" />
+        <AccountingMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} tone="green" />
+        <AccountingMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 확인" tone="rose" />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <AccountingLineChart rows={monthRows} />
+        <AccountingCategoryChart rows={categoryRows} />
       </section>
 
       {loading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">회계 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">{summary.error}</div>}
       {message && <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</div>}
 
-      <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
+      <div className="flex gap-2 overflow-x-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
         {accountingTabs.map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-black ${activeTab === tab ? "border-orange-500 text-orange-600" : "border-transparent text-slate-500"}`}
+            className={`h-10 shrink-0 rounded-md px-4 text-sm font-black ${activeTab === tab ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"}`}
           >
             {tab}
           </button>
         ))}
       </div>
 
-      {activeTab === "비용 업로드" && (
-        <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-          <form className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">비용 파일 작업실</h2>
-            <div className="mt-4 space-y-3">
-              <label className="block text-xs font-black text-slate-500">자료 유형</label>
-              <select className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+      {activeTab === "작업실" && (
+        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black">비용 파일 작업실</h2>
+                <p className="mt-1 text-xs font-bold text-slate-500">기본 업로드 슬롯: 국민카드 2개, 국민은행 1개, 기업은행 1개</p>
+              </div>
+              <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm font-bold" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
                 {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
-              <div
-                className="rounded-md border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={onExpenseDrop}
-              >
-                <input className="field-input w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
-                <p className="mt-2 text-xs font-bold text-slate-500">파일을 여러 개 선택하거나 여기로 끌어다 놓으세요.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
-                  {parsing ? "생성 중" : "데이터 생성"}
-                </button>
-                <button type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:bg-slate-300">
-                  {uploading ? "저장 중" : "DB 저장"}
-                </button>
+            </div>
+
+            <div
+              className="mt-4 grid gap-3 lg:grid-cols-[auto_auto_auto_auto_1fr]"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={onExpenseDrop}
+            >
+              {accountingUploadSlots.map((slot) => (
+                <label
+                  key={slot.key}
+                  className={`flex h-10 cursor-pointer items-center justify-center rounded-md border px-5 text-sm font-black ${
+                    sourceType === slot.key
+                      ? "border-orange-300 bg-orange-50 text-orange-600"
+                      : slot.tone === "blue"
+                        ? "border-blue-200 bg-white text-blue-600 hover:bg-blue-50"
+                        : "border-orange-200 bg-white text-orange-600 hover:bg-orange-50"
+                  }`}
+                  onClick={() => pickExpenseSlot(slot.key)}
+                >
+                  {slot.label} 업로드
+                  <input
+                    className="hidden"
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    multiple
+                    onChange={(event) => {
+                      addExpenseFiles(event.target.files, slot.key);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              ))}
+              <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-5 text-sm font-black text-slate-600 hover:bg-slate-50" onClick={() => pickExpenseSlot("기타")}>
+                기타 파일
+                <input
+                  className="hidden"
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  multiple
+                  onChange={(event) => {
+                    addExpenseFiles(event.target.files, "기타");
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <div className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm font-black text-slate-500">
+                파일을 여러 개 끌어다 놓을 수 있습니다.
               </div>
             </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
+                선택 유형 <b className="text-slate-950">{sourceType}</b> · 대기 파일 {pendingUploadCount.toLocaleString("ko-KR")}개
+              </div>
+              <button type="button" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="h-10 rounded-md border border-slate-300 px-4 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
+                {parsing ? "생성 중" : "데이터 생성"}
+              </button>
+              <button type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
+                {uploading ? "저장 중" : "DB 저장"}
+              </button>
+            </div>
+
             {uploadedExpenseFiles.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-black text-slate-500">대기 중 파일 {uploadedExpenseFiles.length}개</p>
-                {uploadedExpenseFiles.map((file) => (
-                  <div key={expenseFileKey(file)} className="grid grid-cols-[1fr_auto] gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-                    <div className="min-w-0">
-                      <p className="truncate font-black text-slate-700">{file.name}</p>
-                      <p className="text-slate-400">{(file.size / 1024).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} KB</p>
-                    </div>
-                    <button type="button" onClick={() => removeExpenseFile(file)} className="font-black text-slate-400 hover:text-rose-500">삭제</button>
-                  </div>
-                ))}
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-black text-slate-700">대기 중 파일 {uploadedExpenseFiles.length}개</p>
+                  <button type="button" onClick={() => { setUploadedExpenseFiles([]); setPreviewRows([]); setParsedFiles([]); }} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {uploadedExpenseFiles.map((item) => (
+                    <span key={expenseFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-600">{item.sourceType}</span>
+                      <span className="truncate">{item.file.name}</span>
+                      <span className="text-slate-400">{(item.file.size / 1024).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} KB</span>
+                      <button type="button" onClick={() => removeExpenseFile(item)} className="font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
             {parsedFiles.length > 0 && (
@@ -7322,18 +7507,21 @@ function AccountingWorkspace() {
                 </div>
               </div>
             )}
-            <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-500">
-              카드내역, 통장내역, 세금계산서, 물류비, 광고비 파일을 한 번에 올린 뒤 파일 내용을 기반으로 비용 행을 생성합니다.
-            </div>
-          </form>
+          </div>
+
           <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">생성 데이터 미리보기 / 자동 컬럼 매핑</h2>
-            <ExpenseTable rows={previewRows} categoryById={categoryById} compact />
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-black">생성 데이터 미리보기</h2>
+              <span className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">{previewRows.length.toLocaleString("ko-KR")}건</span>
+            </div>
+            <div className="mt-4">
+              <ExpenseTable rows={previewRows} categoryById={categoryById} compact />
+            </div>
           </section>
         </section>
       )}
 
-      {activeTab === "비용 관리" && (
+      {activeTab === "비용 내역" && (
         <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div className="grid gap-2 md:grid-cols-4">
@@ -7351,7 +7539,7 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "비용 자동 분류" && (
+      {activeTab === "분류 규칙" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-black">규칙 기반 분류 결과</h2>
@@ -7384,10 +7572,14 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "월별 손익" && (
+      {activeTab === "손익 그래프" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-black">월별 손익 계산</h2>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <AccountingLineChart rows={monthRows} compact />
+              <AccountingCategoryChart rows={categoryRows} compact />
+            </div>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="border-b border-slate-200 text-xs text-slate-500"><tr><th className="py-2 text-left">월</th><th className="py-2 text-right">매출</th><th className="py-2 text-right">상품매입</th><th className="py-2 text-right">광고비</th><th className="py-2 text-right">비용</th><th className="py-2 text-right">예상 순이익</th></tr></thead>
@@ -7399,25 +7591,32 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "거래처 미납/결제" && (
+      {activeTab === "미납/결제" && (
         <section className="grid gap-4 xl:grid-cols-2">
           <AccountingList title="거래처 미납" rows={summary?.payables || []} primaryKey="base_month" amountKey="balance_amount" emptyText="아직 미납 데이터가 없습니다." />
           <AccountingList title="결제 기록" rows={summary?.payments || []} primaryKey="payment_date" amountKey="amount" emptyText="아직 결제 기록이 없습니다." />
         </section>
       )}
 
-      {activeTab === "수입비용 정리" && (
+      {activeTab === "수입비용" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <AccountingList title="수입 발주 연결 후보" rows={summary?.import_orders || []} primaryKey="order_no" amountKey="total_amount" emptyText="수입 발주 데이터가 없습니다." />
           <ReportList title="수입비용 후보" rows={(summary?.by_category || []).filter((row) => ["수입비용", "관세", "부가세", "통관수수료", "샘플비", "물류비"].includes(String(row.label)))} />
         </section>
       )}
 
-      {activeTab === "비용 리포트" && (
+      {activeTab === "작업실" && (
         <section className="grid gap-4 xl:grid-cols-3">
-          <ReportList title="카테고리별 비용" rows={summary?.by_category || []} />
-          <ReportList title="업체별 비용" rows={summary?.by_vendor || []} />
-          <ReportList title="월별 비용 추이" rows={summary?.by_month || []} />
+          <AccountingList title="최근 업로드" rows={recentBatches} primaryKey="source_file_name" amountKey="success_count" emptyText="아직 업로드 기록이 없습니다." />
+          <ReportList title="업체별 비용" rows={vendorRows} />
+          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-black">한눈에 보기</h2>
+            <div className="mt-4 space-y-2 text-sm font-bold text-slate-600">
+              <p className="rounded-md bg-slate-50 px-3 py-2">가장 큰 비용: <b className="text-slate-950">{String(largestCategory?.label || "데이터 없음")}</b></p>
+              <p className="rounded-md bg-slate-50 px-3 py-2">최근 비용 행: <b className="text-slate-950">{expenses.length.toLocaleString("ko-KR")}건</b></p>
+              <p className="rounded-md bg-slate-50 px-3 py-2">파일 대기: <b className="text-orange-600">{pendingUploadCount.toLocaleString("ko-KR")}개</b></p>
+            </div>
+          </section>
         </section>
       )}
     </div>
@@ -7458,7 +7657,7 @@ function AccountingList({ title, rows, primaryKey, amountKey, emptyText }: { tit
         {rows.map((row, index) => (
           <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
             <span className="truncate font-bold text-slate-700">{String(row[primaryKey] || row.customer_name || row.memo || "-")}</span>
-            <span className="font-black">{krw(asNumber(row[amountKey]))}</span>
+            <span className="font-black">{amountKey.includes("count") ? `${asNumber(row[amountKey]).toLocaleString("ko-KR")}건` : krw(asNumber(row[amountKey]))}</span>
           </div>
         ))}
         {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{emptyText}</p>}

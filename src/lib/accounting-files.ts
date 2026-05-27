@@ -39,11 +39,12 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
   );
 }
 
-export async function parseExpenseFiles(files: File[], sourceType: string) {
+export async function parseExpenseFiles(files: File[], sourceType: string, fileSourceTypes: string[] = []) {
   const rows: RawRow[] = [];
-  const filesSummary: Array<{ name: string; sheet_count: number; row_count: number }> = [];
+  const filesSummary: Array<{ name: string; source_type: string; sheet_count: number; row_count: number }> = [];
 
-  for (const file of files) {
+  for (const [fileIndex, file] of files.entries()) {
+    const fileSourceType = clean(fileSourceTypes[fileIndex]) || sourceType;
     const buffer = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
     let fileRowCount = 0;
@@ -56,15 +57,16 @@ export async function parseExpenseFiles(files: File[], sourceType: string) {
         const description = clean(pick(row, ["description", "내용", "품목", "메모", "적요", "이용내역", "거래내용"]));
         rows.push({
           ...row,
+          source_type: fileSourceType,
           source_file_name: file.name,
           source_sheet_name: sheetName,
           source_row_no: index + 2,
-          category: clean(pick(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, sourceType),
+          category: clean(pick(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, fileSourceType),
         });
       });
     }
 
-    filesSummary.push({ name: file.name, sheet_count: workbook.SheetNames.length, row_count: fileRowCount });
+    filesSummary.push({ name: file.name, source_type: fileSourceType, sheet_count: workbook.SheetNames.length, row_count: fileRowCount });
   }
 
   return { rows, files: filesSummary };
