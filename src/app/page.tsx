@@ -8,7 +8,7 @@ import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx-js-style";
 import ArchiveWorkspace from "./archive-workspace";
 
-const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || "http://localhost:5500";
+const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
 
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
