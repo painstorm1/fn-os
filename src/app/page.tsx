@@ -6989,10 +6989,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {isMasterSection && (
-        <SalesProductMasterPanel message={message} setMessage={setMessage} sync={sync} />
-      )}
-
       {isInventorySection && (
         <Panel
           title="재고현황"
@@ -7093,19 +7089,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
 
       {isMasterSection && (
-        <Panel
-          title="쇼핑몰 채널 관리"
-          subtitle="주문수집 대상 쇼핑몰과 API/엑셀 수집 방식을 관리합니다."
-          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={async () => {
-            const res = await fetch("/api/fnos/sales-channels", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ seed: true }) });
-            const data = await res.json().catch(() => ({}));
-            setMessage(data.ok ? `기본 채널 ${data.count || 0}개를 저장했습니다.` : data.error || "채널 저장 실패");
-            loadSummary();
-          }}>기본 채널 생성</button>}
-        >
-          <ChannelTable rows={summary?.sales_channels || []} />
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
+        <MasterManagementPanel
+          summary={summary}
+          message={message}
+          setMessage={setMessage}
+          sync={sync}
+          loadSummary={loadSummary}
+        />
       )}
 
       {isOnlineSection && (
@@ -7213,6 +7203,289 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   );
 }
 
+type MasterTabKey = "customers" | "products" | "warehouses" | "channels" | "attendance";
+
+const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploadEndpoint?: string; templateHeaders: string[]; sampleRow: string[] }> = [
+  {
+    key: "customers",
+    label: "거래처 관리",
+    title: "거래처",
+    uploadEndpoint: "/api/fnos/customers/upload",
+    templateHeaders: ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "사용구분", "메모"],
+    sampleRow: ["CUST001", "샘플거래처", "쇼핑몰/공급처", "000-00-00000", "담당자", "010-0000-0000", "월말결제", "사용", ""],
+  },
+  {
+    key: "products",
+    label: "품목관리",
+    title: "품목",
+    templateHeaders: ["품목코드", "SKU", "품목명", "옵션", "바코드", "품목구분", "표준단가", "매입단가", "재고관리여부", "사용구분", "메모"],
+    sampleRow: ["SKU001", "SKU001", "샘플품목", "블랙", "", "상품", "10000", "7000", "Y", "사용", ""],
+  },
+  {
+    key: "warehouses",
+    label: "창고관리",
+    title: "창고",
+    uploadEndpoint: "/api/fnos/warehouses/upload",
+    templateHeaders: ["창고코드", "창고명", "창고구분", "재고상태", "사용구분", "메모"],
+    sampleRow: ["WH001", "본사창고", "RG", "정상", "사용", ""],
+  },
+  {
+    key: "channels",
+    label: "쇼핑몰관리",
+    title: "쇼핑몰",
+    templateHeaders: ["쇼핑몰코드", "쇼핑몰명", "ID", "거래처명", "수집처구분", "사용구분", "진행상태", "판매자사이트 URL", "API 연동 여부"],
+    sampleRow: ["NAVER", "네이버 스마트스토어", "seller-id", "네이버", "api", "사용", "planned", "https://sell.smartstore.naver.com/", "Y"],
+  },
+  {
+    key: "attendance",
+    label: "근태관리",
+    title: "근태",
+    templateHeaders: ["직원코드", "직원명", "근무일", "출근시간", "퇴근시간", "근태구분", "휴게시간", "메모"],
+    sampleRow: ["EMP001", "홍길동", "2026-05-27", "09:00", "18:00", "정상", "1", ""],
+  },
+];
+
+function masterTemplate(tab: MasterTabKey) {
+  return masterTabs.find((item) => item.key === tab) || masterTabs[0];
+}
+
+async function readXlsxObjects(file: File) {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false });
+}
+
+function MasterManagementPanel({
+  summary,
+  message,
+  setMessage,
+  sync,
+  loadSummary,
+}: {
+  summary: SalesInventorySummary | null;
+  message: string;
+  setMessage: (value: string) => void;
+  sync: (target: "products" | "inventory") => void;
+  loadSummary: () => void;
+}) {
+  const [activeMasterTab, setActiveMasterTab] = useState<MasterTabKey>("customers");
+  const activeConfig = masterTemplate(activeMasterTab);
+
+  return (
+    <div className="space-y-4">
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
+        <div className="flex min-w-max gap-1">
+          {masterTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveMasterTab(tab.key)}
+              className={`h-10 rounded-md px-4 text-sm font-black ${
+                activeMasterTab === tab.key ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <MasterEntryPanel
+        config={activeConfig}
+        setMessage={setMessage}
+        loadSummary={loadSummary}
+      />
+
+      {activeMasterTab === "customers" && (
+        <Panel title="거래처 목록" subtitle="거래처는 개별 등록 또는 엑셀 업로드로 추가합니다.">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">거래처 목록 테이블은 다음 단계에서 고객 조회 API와 연결합니다.</div>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {activeMasterTab === "products" && (
+        <SalesProductMasterPanel message={message} setMessage={setMessage} sync={sync} />
+      )}
+
+      {activeMasterTab === "warehouses" && (
+        <Panel title="창고 목록" subtitle="창고는 RG/NG 같은 재고상태 또는 창고 유형 기준으로 관리합니다.">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">창고 목록 테이블은 다음 단계에서 창고 조회 API와 연결합니다.</div>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {activeMasterTab === "channels" && (
+        <Panel
+          title="쇼핑몰 목록"
+          subtitle="주문수집 대상 쇼핑몰과 API/엑셀 수집 방식을 관리합니다."
+          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={async () => {
+            const res = await fetch("/api/fnos/sales-channels", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ seed: true }) });
+            const data = await res.json().catch(() => ({}));
+            setMessage(data.ok ? `기본 채널 ${data.count || 0}개를 저장했습니다.` : data.error || "채널 저장 실패");
+            loadSummary();
+          }}>기본 채널 생성</button>}
+        >
+          <ChannelTable rows={summary?.sales_channels || []} />
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+
+      {activeMasterTab === "attendance" && (
+        <Panel title="근태 목록" subtitle="근태는 직원별 일자, 출근/퇴근, 근태구분 기준으로 관리합니다.">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">근태 저장 테이블은 다음 단계에서 DB 스키마와 저장 API를 연결합니다.</div>
+          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof masterTabs)[number]; setMessage: (value: string) => void; loadSummary: () => void }) {
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    setDraft(Object.fromEntries(config.templateHeaders.slice(0, 6).map((header) => [header, ""])));
+  }, [config.key]);
+
+  function updateField(header: string, value: string) {
+    setDraft((prev) => ({ ...prev, [header]: value }));
+  }
+
+  function downloadTemplate() {
+    downloadTableXlsx(`FN_OS_${config.title}_업로드_서식.xlsx`, `${config.title}업로드`, config.templateHeaders, [config.sampleRow]);
+  }
+
+  async function saveRows(rows: Record<string, unknown>[]) {
+    if (config.key === "products") {
+      let success = 0;
+      for (const row of rows) {
+        const res = await fetch("/api/fnos/quick-register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            mode: "product",
+            form: {
+              prod_cd: row["품목코드"],
+              product_code: row["품목코드"],
+              prod_name: row["품목명"],
+              product_name: row["품목명"],
+              size_des: row["옵션"],
+              out_price: row["표준단가"],
+              in_price: row["매입단가"],
+            },
+          }),
+        });
+        if (res.ok) success += 1;
+      }
+      setMessage(`품목 ${success}건을 저장했습니다.`);
+      return;
+    }
+
+    if (config.key === "channels") {
+      const res = await fetch("/api/fnos/sales-channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessage(res.ok && data.ok !== false ? `쇼핑몰 ${data.count || rows.length}건을 저장했습니다.` : data.error || "쇼핑몰 저장 실패");
+      loadSummary();
+      return;
+    }
+
+    if (config.key === "attendance") {
+      setMessage("근태 입력 화면을 준비했습니다. DB 저장은 근태 테이블 생성 후 연결합니다.");
+      return;
+    }
+  }
+
+  async function uploadExcel(file: File) {
+    setUploading(true);
+    try {
+      if (config.uploadEndpoint) {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(config.uploadEndpoint, { method: "POST", credentials: "include", body: form });
+        const data = await res.json().catch(() => ({}));
+        setMessage(res.ok && data.ok !== false ? `${config.title} ${data.count || 0}건을 업로드했습니다.` : data.error || `${config.title} 업로드 실패`);
+        return;
+      }
+      const rows = await readXlsxObjects(file);
+      await saveRows(rows);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : `${config.title} 업로드 실패`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function saveDraft() {
+    const row = { ...draft };
+    if (config.key === "customers") {
+      const res = await fetch("/api/fnos/quick-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          mode: "customer",
+          form: {
+            cust_code: row["거래처코드"],
+            cust_name: row["거래처명"],
+            business_no: row["사업자번호"],
+            contact_name: row["담당자"],
+            phone: row["전화"],
+            memo: row["메모"],
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessage(res.ok && data.ok !== false ? "거래처를 저장했습니다." : data.error || "거래처 저장 실패");
+      return;
+    }
+    await saveRows([row]);
+  }
+
+  return (
+    <Panel
+      title={`${config.title} 입력`}
+      subtitle="개별 입력 또는 엑셀 업로드로 기초 데이터를 관리합니다."
+      action={
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={downloadTemplate} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">엑셀 서식 다운로드</button>
+          <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">
+            {uploading ? "업로드 중" : "엑셀 업로드"}
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadExcel(file);
+              event.target.value = "";
+            }} />
+          </label>
+        </div>
+      }
+    >
+      <div className="grid gap-2 md:grid-cols-3">
+        {config.templateHeaders.slice(0, 6).map((header) => (
+          <input
+            key={`${config.key}-${header}`}
+            className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm"
+            placeholder={header}
+            value={draft[header] || ""}
+            onChange={(event) => updateField(header, event.target.value)}
+          />
+        ))}
+      </div>
+      <div className="mt-3 flex justify-end">
+        <button type="button" onClick={() => void saveDraft()} className="rounded-md bg-slate-950 px-4 py-2 text-sm font-black text-white">개별 입력 저장</button>
+      </div>
+    </Panel>
+  );
+}
+
 function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   if (!rows.length) {
     return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
@@ -7306,10 +7579,9 @@ function SalesProductMasterPanel({ message, setMessage, sync }: { message: strin
         <Link className="inline-flex h-[38px] items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600" href={importHref("/products/new")}>새 수입관리 상품</Link>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-sm">
+        <table className="w-full min-w-[820px] text-sm">
           <thead className="border-b border-slate-200 text-xs text-slate-500">
             <tr>
-              <th className="py-2 text-left">이미지</th>
               <th className="py-2 text-left">SKU</th>
               <th className="py-2 text-left">품목명</th>
               <th className="py-2 text-left">옵션</th>
@@ -7322,7 +7594,6 @@ function SalesProductMasterPanel({ message, setMessage, sync }: { message: strin
           <tbody>
             {products.map((product) => (
               <tr key={product.id} className="border-b border-slate-100">
-                <td className="py-2"><div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{product.image_url && <img src={product.image_url} alt="" className="h-full w-full object-cover" />}</div></td>
                 <td className="py-2 font-black">{fnProductSku(product)}</td>
                 <td className="py-2">{fnProductName(product)}</td>
                 <td className="py-2">{fnProductOption(product)}</td>
@@ -7691,11 +7962,8 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   );
 }
 
-function AdsAnalysisWorkspace({ section }: { section: string }) {
-  const defaultRange = adRangeForPreset("30d");
-  const yesterdayRange = adRangeForPreset("yesterday");
-  const normalizedAdsSection = section === "db" ? "db" : "daily";
-  const [activeAdsTab, setActiveAdsTab] = useState<"daily" | "db">(normalizedAdsSection);
+function AdsAnalysisWorkspace({ section: _section }: { section: string }) {
+  const defaultRange = adRangeForPreset("yesterday");
   const [summary, setSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadedAdFiles, setUploadedAdFiles] = useState<UploadedAdFile[]>([]);
@@ -7704,15 +7972,14 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
   const [message, setMessage] = useState("");
   const [mappingSku, setMappingSku] = useState("");
   const [mappingProduct, setMappingProduct] = useState<AdsMetricRow | null>(null);
-  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("30d");
+  const [rangePreset, setRangePreset] = useState<"yesterday" | "7d" | "14d" | "30d" | "custom">("yesterday");
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo, setDateTo] = useState(defaultRange.to);
-  const [dailyDate, setDailyDate] = useState(yesterdayRange.to);
   const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
   const loadSummary = () => {
     setLoading(true);
-    const params = new URLSearchParams(activeAdsTab === "daily" ? { from: dailyDate, to: dailyDate } : { from: dateFrom, to: dateTo });
+    const params = new URLSearchParams({ from: dateFrom, to: dateTo });
     fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => setSummary(data))
@@ -7723,17 +7990,20 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
-  }, [activeAdsTab, dailyDate, dateFrom, dateTo]);
-
-  useEffect(() => {
-    setActiveAdsTab(normalizedAdsSection);
-  }, [normalizedAdsSection]);
+  }, [dateFrom, dateTo]);
 
   function applyRangePreset(preset: "yesterday" | "7d" | "14d" | "30d") {
     const range = adRangeForPreset(preset);
     setRangePreset(preset);
     setDateFrom(range.from);
     setDateTo(range.to);
+  }
+
+  function moveRange(direction: -1 | 1) {
+    const next = shiftAdDateRange(dateFrom, dateTo, direction);
+    setRangePreset("custom");
+    setDateFrom(next.from);
+    setDateTo(next.to);
   }
 
   function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
@@ -7851,7 +8121,7 @@ function AdsAnalysisWorkspace({ section }: { section: string }) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `fnos-ad-report-${activeAdsTab === "daily" ? dailyDate : `${dateFrom}_${dateTo}`}.csv`;
+    anchor.download = `fnos-ad-report-${dateFrom}_${dateTo}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
