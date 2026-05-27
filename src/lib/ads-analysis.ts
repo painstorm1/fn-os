@@ -16,7 +16,9 @@ type SummaryRange = {
   to?: string;
 };
 
-const USD_KRW_RATE = Number(process.env.AD_USD_KRW_RATE || 1380);
+const FALLBACK_USD_KRW_RATE = Number(process.env.AD_USD_KRW_RATE || 1380);
+const IMPORT_API_URL = process.env.NEXT_PUBLIC_IMPORT_API_URL || process.env.NEXT_PUBLIC_IMPORT_ERP_URL || "http://localhost:5500";
+let cachedUsdKrwRate: { value: number; at: number } | null = null;
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -90,14 +92,33 @@ function hasAdSignal(row: AnyRecord) {
   return ["impressions", "clicks", "cost", "conversions", "conversion_value"].some((key) => numberValue(row[key]) > 0);
 }
 
-function normalizeReport(row: AnyRecord, batchId: string, channel: string) {
+async function getUsdKrwRate() {
+  const now = Date.now();
+  if (cachedUsdKrwRate && now - cachedUsdKrwRate.at < 60_000) return cachedUsdKrwRate.value;
+  try {
+    const response = await fetch(`${IMPORT_API_URL.replace(/\/$/, "")}/api/fnos/settings`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const usdRate = numberValue(data?.rates?.USD);
+    if (usdRate > 0) {
+      cachedUsdKrwRate = { value: usdRate, at: now };
+      return usdRate;
+    }
+  } catch {
+    // 수입관리 서버가 꺼져 있으면 환경변수 기준 fallback을 사용한다.
+  }
+  cachedUsdKrwRate = { value: FALLBACK_USD_KRW_RATE, at: now };
+  return FALLBACK_USD_KRW_RATE;
+}
+
+function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKrwRate: number) {
   const isCoupang = channel.includes("쿠팡");
   const isMeta = channel.includes("메타");
   const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
   const clicks = numberValue(first(row, ["clicks", "클릭수", "클릭", "clk", "clkCnt"]));
   const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
   const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
-  const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * USD_KRW_RATE) : 0);
+  const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
   const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "purchase_conversions"]));
   const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "purchase_conversion_value"]));
   const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
@@ -150,7 +171,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string) {
     cpc,
     cvr,
     roas,
-    raw_payload: row,
+    raw_payload: isMeta ? { ...row, __usd_krw_rate: usdKrwRate } : row,
   };
 }
 
@@ -189,9 +210,10 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     status: "SAVED",
   });
 
+  const usdKrwRate = await getUsdKrwRate();
   const reports = rows
     .filter((row) => !isAggregateRow(row))
-    .map((row) => normalizeReport(row, batch.id, normalizedChannel))
+    .map((row) => normalizeReport(row, batch.id, normalizedChannel, usdKrwRate))
     .filter(hasAdSignal);
   const saved = reports.length ? await insertRows("ad_reports", reports) : [];
   await patchRows("ad_upload_batches", { id: `eq.${batch.id}` }, {
