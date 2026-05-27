@@ -300,10 +300,18 @@ export default function ArchiveWorkspace() {
     }
   }
 
+  function imageFromClipboard(data: DataTransfer) {
+    const fileImage = Array.from(data.files).find((file) => file.type.startsWith("image/"));
+    if (fileImage) return fileImage;
+    const itemImage = Array.from(data.items).find((item) => item.type.startsWith("image/"));
+    return itemImage?.getAsFile() || undefined;
+  }
+
   async function onPasteAuto(event: ClipboardEvent<HTMLTextAreaElement | HTMLDivElement>) {
-    const image = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
+    const image = imageFromClipboard(event.clipboardData);
     if (!image) return;
     event.preventDefault();
+    event.stopPropagation();
     await processImageFile(image);
   }
 
@@ -398,7 +406,7 @@ export default function ArchiveWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" onPaste={activeMenu === "save" && saveMode === "auto" ? onPasteAuto : undefined}>
       <div>
         <h1 className="text-2xl font-black">아카이브</h1>
         <p className="mt-1 text-sm font-bold text-slate-500">링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다.</p>
@@ -451,6 +459,12 @@ export default function ArchiveWorkspace() {
                   onPaste={onPasteAuto}
                   onChange={(event) => setAutoText(event.target.value)}
                 />
+                {autoImagePreview && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="mb-2 text-xs font-black text-slate-500">붙여넣은 이미지 미리보기</div>
+                    <img src={autoImagePreview} alt="붙여넣은 이미지 미리보기" className="max-h-48 w-full rounded border border-slate-200 bg-white object-contain" />
+                  </div>
+                )}
                 <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
                   <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600">
                     이미지 선택
@@ -459,12 +473,6 @@ export default function ArchiveWorkspace() {
                   <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0])} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
                   <button type="button" onClick={() => extractFromText()} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">텍스트 정리</button>
                 </div>
-                {autoImagePreview && (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="mb-2 text-xs font-black text-slate-500">붙여넣은 이미지 미리보기</div>
-                    <img src={autoImagePreview} alt="붙여넣은 이미지 미리보기" className="max-h-48 w-full rounded border border-slate-200 bg-white object-contain" />
-                  </div>
-                )}
               </>
             ) : (
               <div className="space-y-4">
