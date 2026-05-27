@@ -2835,6 +2835,39 @@ function NativeProductForm({ id }: { id?: number }) {
   }, [id]);
 
   useEffect(() => {
+    if (id) return;
+    const raw = localStorage.getItem("fnos-import-product-prefill");
+    if (!raw) return;
+    localStorage.removeItem("fnos-import-product-prefill");
+    try {
+      const parsed = JSON.parse(raw) as { product?: FnProduct };
+      const fnProduct = parsed.product;
+      if (!fnProduct?.id) return;
+      setFnSkuLinks([{
+        product_id: fnProduct.id,
+        sku: fnProductSku(fnProduct),
+        default_ratio: 1,
+        default_qty: 0,
+        is_primary: true,
+        product: fnProduct,
+      }]);
+      if (fnProduct.image_url) setPreviewUrl(fnProduct.image_url);
+      window.setTimeout(() => {
+        const nameInput = document.querySelector<HTMLInputElement>('input[name="name"]');
+        const optionInput = document.querySelector<HTMLInputElement>('input[name="options"]');
+        const priceInput = document.querySelector<HTMLInputElement>('input[name="std_price"]');
+        const currencySelect = document.querySelector<HTMLSelectElement>('select[name="currency"]');
+        if (nameInput && !nameInput.value) nameInput.value = fnProduct.product_name || "";
+        if (optionInput && !optionInput.value) optionInput.value = fnProduct.option_name || "";
+        if (priceInput && !priceInput.value && fnProductPrice(fnProduct)) priceInput.value = String(fnProductPrice(fnProduct));
+        if (currencySelect && fnProduct.currency) currencySelect.value = fnProduct.currency;
+      }, 0);
+    } catch {
+      localStorage.removeItem("fnos-import-product-prefill");
+    }
+  }, [id]);
+
+  useEffect(() => {
     if (!id) return;
     let alive = true;
     fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" })
@@ -3214,14 +3247,14 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
         .catch(() => [productId, []] as const)
     ))).then((entries) => {
       if (!alive) return;
-      const nextLinks = Object.fromEntries(entries);
+      const nextLinks = Object.fromEntries(entries) as Record<number, ImportSkuLink[]>;
       setLinksByImportProduct(nextLinks);
       const nextAllocations: Record<string, number> = {};
       (detail.items || []).forEach((item) => {
         const importProductId = Number(item.product_id || 0);
         const links = nextLinks[importProductId] || [];
         const qty = Number(item.quantity || 0);
-        const ratioTotal = links.reduce((sum, link) => sum + Number(link.default_ratio || 1), 0) || links.length || 1;
+        const ratioTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_ratio || 1), 0) || links.length || 1;
         links.forEach((link) => {
           nextAllocations[`${importProductId}:${link.product_id}`] = Math.round((qty * Number(link.default_ratio || 1) / ratioTotal) * 100) / 100;
         });
@@ -3245,7 +3278,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
 
   function ratioAllocate(importProductId: number, qty: number) {
     const links = linksByImportProduct[importProductId] || [];
-    const total = links.reduce((sum, link) => sum + Number(link.default_ratio || 1), 0) || 1;
+    const total = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_ratio || 1), 0) || 1;
     setAllocations((prev) => ({
       ...prev,
       ...Object.fromEntries(links.map((link) => [`${importProductId}:${link.product_id}`, Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
@@ -3305,7 +3338,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
             const importProductId = Number(item.product_id || 0);
             const links = linksByImportProduct[importProductId] || [];
             const qty = Number(item.quantity || 0);
-            const allocatedTotal = links.reduce((sum, link) => sum + Number(allocations[`${importProductId}:${link.product_id}`] || 0), 0);
+            const allocatedTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(allocations[`${importProductId}:${link.product_id}`] || 0), 0);
             return (
               <section key={item.id || importProductId} className="rounded-md border border-slate-200">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -3356,6 +3389,7 @@ function NativeOrderDetail({ id }: { id: number }) {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -3369,6 +3403,14 @@ function NativeOrderDetail({ id }: { id: number }) {
     return () => {
       alive = false;
     };
+  }, [id]);
+
+  useEffect(() => {
+    const key = `fnos-open-import-receipt-${id}`;
+    if (localStorage.getItem(key) === "1") {
+      localStorage.removeItem(key);
+      setReceiptOpen(true);
+    }
   }, [id]);
 
   const order = detail?.order;
@@ -3411,7 +3453,12 @@ function NativeOrderDetail({ id }: { id: number }) {
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : order ? (
         <div className="grid gap-5">
           <div className="flex justify-end">
-            <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600 disabled:opacity-50" onClick={deleteOrder} disabled={deleting}>삭제</button>
+            <div className="flex gap-2">
+              {order.fn_arrived && (
+                <button type="button" className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700" onClick={() => setReceiptOpen(true)}>구매/입고 생성</button>
+              )}
+              <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600 disabled:opacity-50" onClick={deleteOrder} disabled={deleting}>삭제</button>
+            </div>
           </div>
           <div className="grid gap-3 md:grid-cols-4">
             <Info label="발주일" value={order.order_date || "-"} />
@@ -3445,6 +3492,7 @@ function NativeOrderDetail({ id }: { id: number }) {
               onChanged={(count) => setDetail((prev) => prev ? { ...prev, order: { ...prev.order, attachment_count: count } } : prev)}
             />
           )}
+          {receiptOpen && detail && <ImportReceiptModal detail={detail} onClose={() => setReceiptOpen(false)} />}
         </div>
       ) : <p className="text-sm text-rose-600">발주를 찾을 수 없습니다.</p>}
     </Panel>
@@ -3666,6 +3714,15 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
+      const savedId = id || json.order?.id;
+      if (!order?.fn_arrived && visibleStageValues.fn_arrived && savedId) {
+        const createNow = window.confirm("입고일이 저장되었습니다.\n이 발주건을 FN OS 구매/입고로 반영하시겠습니까?");
+        if (createNow) {
+          localStorage.setItem(`fnos-open-import-receipt-${savedId}`, "1");
+          window.location.href = importHref(`/orders/${savedId}`);
+          return;
+        }
+      }
       window.location.href = importHref("/orders");
     } catch (err) {
       setError(err instanceof Error ? err.message : "발주 저장에 실패했습니다.");
@@ -5010,14 +5067,14 @@ type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
-type EcountProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
-type EcountProductSearchState = {
+type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
+type FnOsProductSearchState = {
   open: boolean;
   row: number;
   col: number;
   query: string;
   searchedQuery: string;
-  results: EcountProductSearchItem[];
+  results: FnOsProductSearchItem[];
   selectedIndex: number;
   loading: boolean;
   error: string;
@@ -5078,7 +5135,7 @@ function SalesExcelGrid({
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
   const productCodeCol = headers.indexOf("품목코드");
-  const [productSearch, setProductSearch] = useState<EcountProductSearchState>({
+  const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
     open: false,
     row: 0,
     col: productCodeCol,
@@ -5134,7 +5191,7 @@ function SalesExcelGrid({
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     onChange(rows.map((row, r) => r === rowIndex ? row.map((cell, c) => c === colIndex ? value : cell) : row));
   }
-  async function searchEcountProducts(query: string) {
+  async function searchFnOsProducts(query: string) {
     const keyword = query.trim();
     if (!keyword) {
       setProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
@@ -5173,9 +5230,9 @@ function SalesExcelGrid({
       loading: false,
       error: "",
     });
-    void searchEcountProducts(query);
+    void searchFnOsProducts(query);
   }
-  function selectProductSearchItem(item: EcountProductSearchItem) {
+  function selectProductSearchItem(item: FnOsProductSearchItem) {
     if (!item.code) return;
     updateCell(productSearch.row, productSearch.col, item.code);
     setProductSearch((prev) => ({ ...prev, open: false }));
@@ -5475,7 +5532,7 @@ function SalesExcelGrid({
                       selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
                       return;
                     }
-                    void searchEcountProducts(productSearch.query);
+                    void searchFnOsProducts(productSearch.query);
                   }
                 }}
                 className="min-w-0 flex-1 rounded border border-orange-300 px-3 py-2 text-sm outline-orange-500"
@@ -5483,7 +5540,7 @@ function SalesExcelGrid({
               />
               <button
                 type="button"
-                onClick={() => void searchEcountProducts(productSearch.query)}
+                onClick={() => void searchFnOsProducts(productSearch.query)}
                 disabled={productSearch.loading}
                 className="rounded bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600 disabled:opacity-50"
               >
@@ -5830,7 +5887,7 @@ function SalesSyncTools() {
     }
   }
 
-  async function syncProductsFromEcount() {
+  async function syncProductsFromFnOs() {
     setSyncLoading("products");
     setSyncMessage("");
     try {
@@ -5909,7 +5966,7 @@ function SalesSyncTools() {
     }
   }
 
-  async function syncInventoryFromEcount() {
+  async function syncInventoryFromFnOs() {
     setSyncLoading("inventory");
     setSyncMessage("");
     try {
@@ -5999,7 +6056,7 @@ function SalesSyncTools() {
         <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
           FN OS products 테이블을 기준 상품정보로 갱신합니다.
         </div>
-        <button type="button" onClick={syncProductsFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+        <button type="button" onClick={syncProductsFromFnOs} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
           {syncLoading === "products" ? "동기화 중" : "상품정보 동기화"}
         </button>
       </ToolSection>
@@ -6022,7 +6079,7 @@ function SalesSyncTools() {
         <div className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-600">
           FN OS inventory_current 최신 재고 캐시를 갱신합니다.
         </div>
-        <button type="button" onClick={syncInventoryFromEcount} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+        <button type="button" onClick={syncInventoryFromFnOs} disabled={Boolean(syncLoading)} className="mt-2 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
           {syncLoading === "inventory" ? "동기화 중" : "재고 동기화"}
         </button>
       </ToolSection>
@@ -6917,14 +6974,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
 
       {activeTab === "품목관리" && (
-        <Panel
-          title="품목관리"
-          subtitle="FN OS 품목 마스터를 관리하고, 쇼핑몰 SKU와 내부 품목코드를 매핑합니다."
-          action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("products")}>품목 동기화</button>}
-        >
-          <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-600">매핑 구조: 쇼핑몰 SKU → FN SKU → FN OS 품목코드. 다음 단계에서 미매칭 리스트와 수정 UI를 붙이면 됩니다.</p>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
+        <SalesProductMasterPanel message={message} setMessage={setMessage} sync={sync} />
       )}
 
       {(activeTab === "재고현황" || activeTab === "품절예측") && (
@@ -7182,6 +7232,96 @@ function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> })
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SalesProductMasterPanel({ message, setMessage, sync }: { message: string; setMessage: (value: string) => void; sync: (target: "products" | "inventory") => void }) {
+  const [query, setQuery] = useState("");
+  const [products, setProducts] = useState<FnProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("q", query.trim());
+    fetch(`/api/fnos/products/search?${params.toString()}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setProducts(data.products || []);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [query]);
+
+  async function linkProduct(product: FnProduct) {
+    const createNew = window.confirm("새 수입관리 대표상품을 생성할까요?\n취소를 누르면 기존 수입관리 제품 ID에 연결합니다.");
+    if (createNew) {
+      localStorage.setItem("fnos-import-product-prefill", JSON.stringify({ product }));
+      goToInternal(importHref("/products/new"));
+      return;
+    }
+    const importProductId = window.prompt("연결할 기존 수입관리 제품 ID를 입력해 주세요.");
+    if (!importProductId) return;
+    const res = await fetch("/api/fnos/import-product-links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        import_product_id: importProductId,
+        links: [{ product_id: product.id, sku: fnProductSku(product), default_ratio: 1, is_primary: true }],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setMessage(res.ok && data.ok !== false ? "수입관리 대표상품에 SKU를 연결했습니다." : data.error || "연결 실패");
+  }
+
+  return (
+    <Panel
+      title="품목관리"
+      subtitle="FN OS 품목 마스터를 관리하고 수입관리 대표상품과 연결합니다."
+      action={<button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={() => sync("products")}>품목 동기화</button>}
+    >
+      <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto]">
+        <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU / 품목명 / 옵션 검색" />
+        <Link className="inline-flex h-[38px] items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600" href={importHref("/products/new")}>새 수입관리 상품</Link>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead className="border-b border-slate-200 text-xs text-slate-500">
+            <tr>
+              <th className="py-2 text-left">이미지</th>
+              <th className="py-2 text-left">SKU</th>
+              <th className="py-2 text-left">품목명</th>
+              <th className="py-2 text-left">옵션</th>
+              <th className="py-2 text-right">현재재고</th>
+              <th className="py-2 text-right">가용재고</th>
+              <th className="py-2 text-right">표준단가</th>
+              <th className="py-2 text-center">수입관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((product) => (
+              <tr key={product.id} className="border-b border-slate-100">
+                <td className="py-2"><div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{product.image_url && <img src={product.image_url} alt="" className="h-full w-full object-cover" />}</div></td>
+                <td className="py-2 font-black">{fnProductSku(product)}</td>
+                <td className="py-2">{fnProductName(product)}</td>
+                <td className="py-2">{fnProductOption(product)}</td>
+                <td className="py-2 text-right">{Number(product.current_stock || 0).toLocaleString("ko-KR")}</td>
+                <td className="py-2 text-right">{Number(product.available_stock || 0).toLocaleString("ko-KR")}</td>
+                <td className="py-2 text-right">{krw(fnProductPrice(product))}</td>
+                <td className="py-2 text-center"><button type="button" className="h-8 rounded-md border border-orange-200 px-3 text-xs font-black text-orange-600" onClick={() => void linkProduct(product)}>수입관리와 연동</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!products.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "품목이 없습니다."}</p>}
+      </div>
+      {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+    </Panel>
   );
 }
 
