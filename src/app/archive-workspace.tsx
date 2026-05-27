@@ -131,11 +131,10 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
   }
 
   const titleSeed = sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url);
-  const dateMatch = context.match(/20\d{2}[년.-]\s*\d{1,2}[월.-]\s*\d{1,2}일?/);
   return {
     url,
     title: shortenTitle(titleSeed, sourceType),
-    memo: [dateMatch?.[0], context.replace(url, "").trim()].filter(Boolean).join(" / "),
+    memo: "",
     source_type: sourceType,
     content_type: contentType,
     category_group: categoryGroup,
@@ -149,8 +148,12 @@ function extractArchiveDrafts(rawText: string) {
     .replace(/(^|[\s([{<])ttps:\/\//gi, "$1https://")
     .replace(/(^|[\s([{<])h\s+ttps:\/\//gi, "$1https://")
     .replace(/h\s*t\s*t\s*p\s*s?\s*:?\s*(?:\/\s*\/)?\s*(?:www|w{2,3}|wany|suns|sun|sns)?[\s.,]*(?:i|l|1)?\s*n\s*s?\s*t\s*a\s*g\s*r\s*a\s*m[\s.,]*com/gi, "https://www.instagram.com")
-    .replace(/(?:i|l|1)?\s*n\s*s?\s*t\s*a\s*g\s*r\s*a\s*m[\s.,]+com/gi, "instagram.com");
-  for (let index = 0; index < 3; index += 1) {
+    .replace(/(?:i|l|1)?\s*n\s*s?\s*t\s*a\s*g\s*r\s*a\s*m[\s.,]+com/gi, "instagram.com")
+    .replace(/(^|[\s([{<])(?:[a-z]{1,8})?instagram\.com/gi, "$1https://www.instagram.com")
+    .replace(/\/?2\s*img[\s_-]*index/gi, "/?img_index")
+    .replace(/\bimg[\s_-]+index/gi, "img_index")
+    .replace(/([0-9])\s*igsh/gi, "$1&igsh");
+  for (let index = 0; index < 5; index += 1) {
     compactText = compactText.replace(/(https?:\/\/[^\s"'<>]+)\s+(?!https?:\/\/)([A-Za-z][A-Za-z0-9?=&_%./-]{2,})/g, "$1$2");
   }
   const matches = Array.from(compactText.matchAll(/https?:\/\/[^\s"'<>]+/g));
@@ -158,7 +161,8 @@ function extractArchiveDrafts(rawText: string) {
   return matches.flatMap((match) => {
     const url = match[0]
       .replace(/[)\],.]+$/g, "")
-      .replace(/^https?:\/\/(?:wany|wwv|wvw)\.instagram/i, "https://www.instagram");
+      .replace(/^https?:\/\/(?:wany|wwv|wvw)\.instagram/i, "https://www.instagram")
+      .replace(/(instagram\.com\/(?:reel|p)\/[A-Za-z0-9_-]{8,})(?:L2|I2|12)&igsh/gi, "$1/?igsh");
     if (seen.has(url)) return [];
     seen.add(url);
     const start = Math.max(0, match.index - 100);
@@ -523,8 +527,8 @@ export default function ArchiveWorkspace() {
             <div className="mt-4 space-y-3">
               {autoDrafts.map((draft, index) => (
                 <div key={`${draft.url}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="grid gap-2 md:grid-cols-[150px_160px_1fr]">
-                    <input className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.title} maxLength={14} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,3fr)_minmax(110px,1fr)_minmax(110px,1fr)]">
+                    <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.title} maxLength={24} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
                     <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_group} onChange={(event) => {
                       const group = event.target.value as CategoryGroup;
                       const firstCategory = categoryTree[group][0];
