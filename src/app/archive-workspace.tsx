@@ -278,6 +278,18 @@ export default function ArchiveWorkspace() {
     }
   }
 
+  async function updateArchiveItem(item: ArchiveItem) {
+    try {
+      const res = await fetch("/api/fnos/archive", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+      const result = await res.json();
+      if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 수정 실패");
+      setMessage("아카이브를 수정했습니다.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "아카이브 수정 실패");
+    }
+  }
+
   async function runOcr(file: File) {
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker("eng");
@@ -592,6 +604,7 @@ export default function ArchiveWorkspace() {
           setFilters={setFilters}
           data={data}
           onRegeneratePreview={requestPreview}
+          onUpdateItem={updateArchiveItem}
         />
       )}
     </div>
@@ -605,6 +618,7 @@ function ArchiveList({
   setFilters,
   data,
   onRegeneratePreview,
+  onUpdateItem,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
@@ -612,7 +626,23 @@ function ArchiveList({
   setFilters: (filters: { q: string; category: string; source: string; date: string }) => void;
   data: ArchiveData;
   onRegeneratePreview: (id?: string, force?: boolean) => void;
+  onUpdateItem: (item: ArchiveItem) => Promise<void>;
 }) {
+  const [editingId, setEditingId] = useState("");
+  const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
+
+  function startEdit(item: ArchiveItem) {
+    setEditingId(item.id);
+    setEditDraft({ ...item });
+  }
+
+  async function saveEdit() {
+    if (!editDraft) return;
+    await onUpdateItem(editDraft);
+    setEditingId("");
+    setEditDraft(null);
+  }
+
   return (
     <div className="space-y-4">
       <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
@@ -646,10 +676,40 @@ function ArchiveList({
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
                 </div>
-                {item.preview_status === "failed" && (
-                  <button type="button" onClick={() => onRegeneratePreview(item.id, true)} className="mt-2 h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
-                    미리보기 다시 생성
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <button type="button" onClick={() => startEdit(item)} className="h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
+                    수정
                   </button>
+                  {!previewUrl && (
+                    <button type="button" onClick={() => onRegeneratePreview(item.id, true)} className="h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
+                      미리보기 재생성
+                    </button>
+                  )}
+                </div>
+                {editingId === item.id && editDraft && (
+                  <div className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
+                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <select className="field-input h-9 rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
+                        <option value="">소스</option>
+                        {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+                      </select>
+                      <select className="field-input h-9 rounded-md border border-slate-200 bg-white px-2 text-xs" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
+                        const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
+                        setEditDraft({ ...editDraft, category_id: category?.id || "" });
+                      }}>
+                        <option value="">카테고리</option>
+                        {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
+                      </select>
+                    </div>
+                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
+                    <textarea className="field-input min-h-16 w-full rounded-md border border-slate-200 bg-white p-2 text-xs" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => { setEditingId(""); setEditDraft(null); }} className="h-8 rounded-md border border-slate-200 bg-white text-xs font-black text-slate-600">취소</button>
+                      <button type="button" onClick={() => void saveEdit()} className="h-8 rounded-md bg-orange-500 text-xs font-black text-white">저장</button>
+                    </div>
+                  </div>
                 )}
               </div>
             </article>
