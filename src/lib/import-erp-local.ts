@@ -125,6 +125,12 @@ async function nextId(table: string) {
   return Number(row.id);
 }
 
+async function nextIds(table: string, count: number) {
+  if (count <= 0) return [];
+  const first = await nextId(table);
+  return Array.from({ length: count }, (_, index) => first + index);
+}
+
 async function ratesMap() {
   if (ratesCache && Date.now() - ratesCache.at < 30_000) return ratesCache.data;
   const rows = await db(`select * from ${q(TABLES.rates)} order by currency`);
@@ -490,22 +496,18 @@ function materialMovementQtyFromNote(note: unknown) {
   return qty > 0 ? -qty : qty;
 }
 
-async function insertOrderMaterialMovement(orderId: number, orderItemId: number, product: AnyRecord, lineNote: unknown) {
-  const qty = materialMovementQtyFromNote(lineNote);
-  if (!qty) return;
-  const row = {
-    id: await nextId(TABLES.materialMovements),
-    material_id: Number(product.id),
-    order_id: orderId,
-    order_item_id: orderItemId,
-    movement_type: "ORDER_NOTE",
-    qty,
-    unit_cost: numberValue(product.material_unit_cost) || numberValue(product.material_cost),
-    memo: `주문서 비고 재고이동: ${text(lineNote)}`,
-    created_at: nowIso(),
-  };
-  const keys = Object.keys(row);
-  await db(`insert into ${q(TABLES.materialMovements)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
+async function insertRows(table: string, rows: AnyRecord[]) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const values: unknown[] = [];
+  const groups = rows.map((row) => {
+    const placeholders = keys.map((key) => {
+      values.push(row[key]);
+      return `$${values.length}`;
+    });
+    return `(${placeholders.join(", ")})`;
+  });
+  await db(`insert into ${q(table)} (${keys.map(q).join(", ")}) values ${groups.join(", ")}`, values);
 }
 
 async function orderDetail(id: number) {
@@ -548,6 +550,7 @@ async function generateOrderCode(orderDate: string) {
 
 async function saveOrder(request: NextRequest, id?: number) {
   const body = await request.json();
+  const minimalResponse = request.nextUrl.searchParams.get("minimal") === "1";
   const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(body, field);
   const orderFields = [
     "order_code", "parent_order_id", "factory_id", "platform", "currency", "fx_rate", "order_date",
@@ -602,9 +605,12 @@ async function saveOrder(request: NextRequest, id?: number) {
     ? await db(`select id, item_type, material_unit_cost, material_cost from ${q(TABLES.products)} where id = any($1::bigint[])`, [productIds])
     : [];
   const productMap = new Map(productRows.map((product) => [Number(product.id), product]));
-  for (const line of incomingLines) {
-    const orderItemId = await nextId(TABLES.orderItems);
-    const row = {
+  const orderItemIds = await nextIds(TABLES.orderItems, incomingLines.length);
+  const itemRows: AnyRecord[] = [];
+  const movementRows: AnyRecord[] = [];
+  for (const [index, line] of incomingLines.entries()) {
+    const orderItemId = orderItemIds[index];
+    const row: AnyRecord = {
       id: orderItemId,
       order_id: savedId,
       product_id: text(line.product_id) ? Number(line.product_id) : null,
@@ -617,13 +623,28 @@ async function saveOrder(request: NextRequest, id?: number) {
       line_note: text(line.line_note) || null,
       sort_order: sortOrder++,
     };
-    const keys = Object.keys(row);
-    await db(`insert into ${q(TABLES.orderItems)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
+    itemRows.push(row);
     const product = row.product_id ? productMap.get(Number(row.product_id)) : null;
     if (product && text(product.item_type).toUpperCase() === "MATERIAL") {
-      await insertOrderMaterialMovement(savedId, orderItemId, product, row.line_note);
+      const qty = materialMovementQtyFromNote(row.line_note);
+      if (qty) {
+        movementRows.push({
+          material_id: Number(product.id),
+          order_id: savedId,
+          order_item_id: orderItemId,
+          movement_type: "ORDER_NOTE",
+          qty,
+          unit_cost: numberValue(product.material_unit_cost) || numberValue(product.material_cost),
+          memo: `주문서 비고 재고이동: ${text(row.line_note)}`,
+          created_at: nowIso(),
+        });
+      }
     }
   }
+  await insertRows(TABLES.orderItems, itemRows);
+  const movementIds = await nextIds(TABLES.materialMovements, movementRows.length);
+  await insertRows(TABLES.materialMovements, movementRows.map((row, index) => ({ id: movementIds[index], ...row })));
+  if (minimalResponse) return json({ ok: true, order: { id: savedId, ...values }, items: itemRows });
   const detail = await orderDetail(savedId);
   return json(detail || { ok: true, order: { id: savedId }, items: [] });
 }

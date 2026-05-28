@@ -113,13 +113,18 @@ function conflictColumnsFor(table, columns) {
 }
 
 const INDEX_COLUMNS = {
+  products: [
+    ["updated_at", "id"],
+  ],
   orders: [
     ["order_date"],
+    ["order_date", "id"],
     ["status"],
     ["factory_id"],
   ],
   order_items: [
     ["order_id"],
+    ["order_id", "sort_order", "id"],
     ["product_id"],
   ],
   attachments: [
@@ -131,6 +136,7 @@ const INDEX_COLUMNS = {
   ],
   material_movements: [
     ["material_id"],
+    ["order_id"],
     ["movement_date"],
   ],
 };

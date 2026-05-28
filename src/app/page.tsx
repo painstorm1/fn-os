@@ -3815,7 +3815,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
         actual_payment_usd_2: "",
       };
     try {
-      const res = await fetch(apiUrl(id ? `/api/fnos/orders/${id}` : "/api/fnos/orders"), {
+      const res = await fetch(apiUrl(id ? `/api/fnos/orders/${id}?minimal=1` : "/api/fnos/orders?minimal=1"), {
         method: id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
