@@ -199,9 +199,62 @@ async function findProduct(row: RawRow) {
   return bySku[0] || null;
 }
 
-async function updateCurrentInventory(row: RawRow, deltaQty: number) {
+function productCode(row: RawRow | null | undefined) {
+  return text(row?.product_code || row?.prod_cd || row?.sku);
+}
+
+function productName(row: RawRow | null | undefined) {
+  return text(row?.product_name || row?.prod_name || row?.name);
+}
+
+async function activeBomItems(productId: string) {
+  if (!productId) return [];
+  const boms = await optionalRows("product_boms", {
+    parent_product_id: `eq.${productId}`,
+    is_active: "eq.true",
+    order: "created_at.asc",
+    limit: 1,
+  });
+  const bom = boms[0];
+  if (!bom?.id) return [];
+  return optionalRows("product_bom_items", { bom_id: `eq.${bom.id}`, order: "created_at.asc", limit: 200 });
+}
+
+async function expandSaleInventoryRows(row: RawRow) {
   const product = await findProduct(row);
   const productId = text(product?.id);
+  const items = await activeBomItems(productId);
+  const saleQty = Math.abs(numberValue(row.qty));
+  if (!items.length || saleQty === 0) return [{ row, movementType: "sale_out" }];
+
+  const expanded: Array<{ row: RawRow; movementType: "bom_consume" }> = [];
+  for (const item of items) {
+    const componentId = text(item.component_product_id);
+    const [component] = componentId ? await optionalRows("products", { id: `eq.${componentId}`, limit: 1 }) : [];
+    const code = productCode(component) || text(item.component_sku);
+    if (!code) continue;
+    const componentQty = saleQty * numberValue(item.qty_per_unit ?? 1);
+    expanded.push({
+      movementType: "bom_consume",
+      row: {
+        ...row,
+        product_id: componentId || null,
+        prod_cd: code,
+        product_code: code,
+        sku: text(component?.sku) || code,
+        prod_name: productName(component) || text(row.prod_name),
+        qty: componentQty,
+        remarks: `${text(row.remarks)} BOM 구성품 차감`.trim(),
+      },
+    });
+  }
+
+  return expanded.length ? expanded : [{ row, movementType: "sale_out" }];
+}
+
+async function updateCurrentInventory(row: RawRow, deltaQty: number) {
+  const product = text(row.product_id) ? row : await findProduct(row);
+  const productId = text(row.product_id || product?.id);
   const productCode = text(row.prod_cd || product?.product_code || product?.prod_cd);
   const productName = text(row.prod_name || product?.product_name || product?.prod_name);
   const sku = text(row.sku || product?.sku || productCode);
@@ -240,21 +293,28 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
 }
 
 async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in") {
-  const movementPairs = rows
-    .filter((row) => numberValue(row.qty) !== 0 && (text(row.prod_cd) || text(row.sku)))
-    .map((row) => ({
-      sourceRow: row,
-      movement: {
-        movement_date: nowIso(),
-        movement_type: movementType,
-        sku: text(row.sku || row.prod_cd),
-        qty: movementType === "sale_out" ? -Math.abs(numberValue(row.qty)) : Math.abs(numberValue(row.qty)),
-        source_type: movementType === "sale_out" ? "sales" : "purchases",
-        source_ref_id: text(row.id || row.source_ref_id),
-        memo: text(row.remarks),
-        created_at: nowIso(),
-      },
-    }));
+  const expandedRows = movementType === "sale_out"
+    ? (await Promise.all(rows.map(expandSaleInventoryRows))).flat()
+    : rows.map((row) => ({ row, movementType }));
+  const movementPairs = expandedRows
+    .filter((item) => numberValue(item.row.qty) !== 0 && (text(item.row.prod_cd) || text(item.row.sku)))
+    .map((item) => {
+      const qty = item.movementType === "purchase_in" ? Math.abs(numberValue(item.row.qty)) : -Math.abs(numberValue(item.row.qty));
+      return {
+        sourceRow: item.row,
+        movement: {
+          movement_date: nowIso(),
+          movement_type: item.movementType,
+          product_id: text(item.row.product_id) || null,
+          sku: text(item.row.sku || item.row.prod_cd),
+          qty,
+          source_type: item.movementType === "purchase_in" ? "purchases" : "sales",
+          source_ref_id: text(item.row.id || item.row.source_ref_id),
+          memo: text(item.row.remarks),
+          created_at: nowIso(),
+        },
+      };
+    });
   const movementRows = movementPairs.map((pair) => pair.movement);
   if (!movementRows.length) return 0;
   const saved = await insertRows<Record<string, unknown>>("inventory_movements", movementRows);
