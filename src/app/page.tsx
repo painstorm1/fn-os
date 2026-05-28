@@ -8035,28 +8035,44 @@ function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string;
   );
 }
 
-function AdsBarList({ title, rows, labelKey, valueKey }: { title: string; rows: AdsMetricRow[]; labelKey: string; valueKey: string }) {
-  const max = Math.max(...rows.map((row) => adNumber(row[valueKey])), 1);
+function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; selectedChannels: string[] }) {
+  const selected = new Set(selectedChannels);
+  const orderedRows = adReportChannelOrder
+    .filter((channel) => selected.has(channel))
+    .map((channel) => {
+      const row = rows.find((item) => String(item.channel || "") === channel) || { channel };
+      return {
+        channel,
+        label: adReportChannelNames[channel] || channel,
+        cost: adNumber(row.cost),
+        roas: adNumber(row.roas),
+      };
+    });
+  const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
   return (
     <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-black">{title}</h2>
+      <h2 className="text-base font-black">채널별 현황</h2>
       <div className="mt-4 space-y-3">
-        {rows.slice(0, 8).map((row, index) => {
-          const value = adNumber(row[valueKey]);
-          return (
-            <div key={`${title}-${index}`} className="space-y-1">
-              <div className="flex items-center justify-between gap-3 text-xs font-bold">
-                <span className="truncate text-slate-700">{String(row[labelKey] || row.campaign_name || row.product_name || "-")}</span>
-                <span className="text-slate-950">{valueKey.includes("roas") ? adPercent(value) : krw(value)}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
-              </div>
+        {orderedRows.map((row) => (
+          <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="flex min-w-0 items-center gap-1.5 font-black text-slate-700">
+                <AdChannelLogo channel={row.channel} />
+                <span className="truncate">{row.label}</span>
+              </span>
+              <span className="shrink-0 font-black text-slate-950">{adPercent(row.roas)}</span>
             </div>
-          );
-        })}
-        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
-      </div>
+            <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500">
+              <span>광고비</span>
+              <span className="text-orange-600">{krw(row.cost)}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
+            </div>
+          </div>
+        ))}
+        {!orderedRows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+              </div>
     </section>
   );
 }
@@ -8470,11 +8486,6 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-        <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
-        <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
-      </section>
-
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-black">광고 리포트</h2>
@@ -8495,6 +8506,11 @@ function AdsAnalysisWorkspace() {
         <div className="mt-4">
           <AdsReportTable rows={reportRows} />
         </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+        <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
+        <AdsChannelStatus rows={channels} selectedChannels={selectedAdChannels} />
       </section>
     </div>
   );
