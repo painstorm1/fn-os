@@ -163,13 +163,7 @@ function productTotals(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
     lineNativeTotals[currency] = numberValue(lineNativeTotals[currency]) + qty * unit;
     lineProductWon += qty * unit * lineRate(order, line, rates);
   }
-  const actualKrw = actualPaymentKrw(order, rates);
-  const actualTotal = numberValue(order.actual_payment_total || order.actual_payment_usd);
-  const actualCurrency = text(order.actual_payment_currency || (order.actual_payment_usd ? "USD" : ""));
-  const nativeTotals = actualKrw && actualTotal && actualCurrency
-    ? { [actualCurrency]: actualTotal }
-    : lineNativeTotals;
-  return { nativeTotals, productWon: actualKrw || lineProductWon, displayProductWon: lineProductWon, lineProductWon };
+  return { nativeTotals: lineNativeTotals, productWon: lineProductWon, displayProductWon: lineProductWon, lineProductWon };
 }
 
 function orderChinaExtra(order: AnyRecord, rates: AnyRecord) {
@@ -183,6 +177,8 @@ function orderChinaExtra(order: AnyRecord, rates: AnyRecord) {
 }
 
 function orderTotalWon(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
+  const actualKrw = actualPaymentKrw(order, rates);
+  if (actualKrw) return actualKrw + koreaExtraCost(order);
   const { productWon } = productTotals(order, lines, rates);
   return productWon +
     numberValue(order.shipping_cost) +
@@ -212,7 +208,8 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
   const chinaExtraCost = orderChinaExtra(order, rates);
   const koreaExtra = koreaExtraCost(order);
   const extraTotal = chinaExtraCost + koreaExtra;
-  const totalWon = productBaseTotal + extraTotal;
+  const actualKrw = actualPaymentKrw(order, rates);
+  const totalWon = actualKrw ? actualKrw + koreaExtra : productBaseTotal + extraTotal;
   const hasProductLines = lines.some((line) => text(line.item_type).toUpperCase() !== "MATERIAL");
   const allocationLines = hasProductLines
     ? lines.filter((line) => text(line.item_type).toUpperCase() !== "MATERIAL")

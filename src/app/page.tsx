@@ -1319,6 +1319,10 @@ function nativeTotalText(totals?: Record<string, number>, fallbackCurrency = "CN
     .join(" + ");
 }
 
+function nativeAmountText(value: number, currency: string) {
+  return `${Number(value || 0).toLocaleString("ko-KR", { maximumFractionDigits: currency === "KRW" ? 0 : 2 })} ${currency}`;
+}
+
 function rateNoteText(rates?: Record<string, number>, currencies: string[] = []) {
   const ordered = Array.from(new Set([...currencies, "CNY", "USD"].filter(Boolean)));
   return ordered.map((currency) => `${currency}=₩${Number(rates?.[currency] || (currency === "KRW" ? 1 : 0)).toLocaleString("ko-KR")}`).join(" · ");
@@ -1908,10 +1912,12 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const isTT = isTTPayment(order.payment_method);
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
   const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(detail.fx_rates?.USD || 0)) : 0;
-  const chinaExtraWon = Number(detail.cost_grid?.china_extra_cost || 0);
+  const chinaExtraNative = Number(costs.china_domestic_shipping || 0) + Number(costs.china_fee || 0) + Number(costs.china_other_cost || 0);
+  const chinaExtraCurrency = costs.china_cost_currency || order.currency || "CNY";
+  const chinaExtraWon = chinaExtraNative * Number(detail.fx_rates?.[chinaExtraCurrency] || order.fx_rate || 1);
   const panelProductWon = productWon;
-  const koreaExtraWon = Number(detail.cost_grid?.korea_extra_cost || orderExtraCost(order));
-  const panelTotalWon = Number(detail.total_won || detail.cost_grid?.total_won || (panelProductWon + chinaExtraWon + koreaExtraWon));
+  const koreaExtraWon = ["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"].reduce((sum, key) => sum + Number(costs[key as keyof typeof costs] || 0), 0);
+  const panelTotalWon = actualPaymentKrw > 0 ? actualPaymentKrw + koreaExtraWon : panelProductWon + chinaExtraWon + koreaExtraWon;
   const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
 
   useEffect(() => {
@@ -2049,7 +2055,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <div className="mt-4 grid gap-2 text-sm">
             <p className="flex justify-between"><span>제품합계(선택통화)</span><b>{nativeTotals}</b></p>
             <p className="flex justify-between"><span>제품합계(원화)</span><b>{krw(panelProductWon)}</b></p>
-            <p className="flex justify-between"><span>중국내 부대비용</span><b>{krw(chinaExtraWon)}</b></p>
+            <p className="flex justify-between"><span>중국내 부대비용</span><b>{nativeAmountText(chinaExtraNative, chinaExtraCurrency)} / {krw(chinaExtraWon)}</b></p>
             <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(koreaExtraWon)}</b></p>
             {materialOnlyCost.cardUnitCost != null && <p className="flex justify-between"><span>예상원가</span><b>{krw(materialOnlyCost.cardUnitCost)}</b></p>}
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
