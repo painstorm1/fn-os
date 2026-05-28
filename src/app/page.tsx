@@ -7898,6 +7898,26 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     );
   }
 
+  function downloadVisibleProducts() {
+    const filterLabel = relationFilters.find((filter) => filter.key === relationFilter)?.label || "품목";
+    const rows = products.map((product) => [
+      product.product_code || product.sku || "",
+      product.product_name || "",
+      String(product.cost_price ?? ""),
+      String(product.standard_price ?? ""),
+      String(product.current_stock ?? 0),
+      (product.inventory || []).map((stock) => `${stock.warehouse_name || stock.warehouse_code}:${Number(stock.qty || 0).toLocaleString("ko-KR")}`).join(" / "),
+      (product.bom || []).map((item) => `${item.component_product_code || item.component_sku}:${item.qty_per_unit}`).join(" / "),
+      (product.import_links || []).map((item) => `${item.import_product_name || item.import_product_id}${item.import_option_name ? `/${item.import_option_name}` : ""}`).join(" / "),
+    ]);
+    void downloadTableXlsx(
+      `FN_OS_품목_${filterLabel}_${todayMmdd()}.xlsx`,
+      "품목정보",
+      ["품목코드", "품목명", "입고가", "출고가", "현재고", "창고별재고", "BOM구성", "수입연동"],
+      rows,
+    );
+  }
+
   async function uploadProducts(file: File) {
     const rows = await readXlsxObjects(file);
     const allRes = await fetch("/api/fnos/products/master?page=1&pageSize=5000", { cache: "no-store" });
@@ -8040,6 +8060,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={openNewProduct} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 품목</button>
             <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
+            <button type="button" onClick={downloadVisibleProducts} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">상품정보 다운로드</button>
             <button
               type="button"
               onClick={downloadProductTemplate}
