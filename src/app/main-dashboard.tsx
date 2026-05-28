@@ -143,12 +143,16 @@ function AdLineChart({ points }: { points?: Point[] }) {
 
   return (
     <div className="relative h-28 rounded-md bg-slate-50 px-3 py-3">
+      <div className="absolute right-3 top-2 z-10 flex items-center gap-2 text-[10px] font-black">
+        <span className="flex items-center gap-1 text-orange-600"><span className="h-1.5 w-3 rounded-full bg-orange-500" />총비용</span>
+        <span className="flex items-center gap-1 text-emerald-600"><span className="h-1.5 w-3 rounded-full bg-emerald-500" />ROAS</span>
+      </div>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="최근 7일 광고비와 ROAS">
         {[20, 54, 88].map((y) => (
           <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
         {chartPoints.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.1" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
-        {chartPoints.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="1.9" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
+        {chartPoints.length > 1 && <path d={roasPath} fill="none" stroke="#10b981" strokeWidth="1.9" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
       </svg>
       <div className="absolute inset-x-3 top-3 h-[calc(100%-1.5rem)]">
         {chartPoints.map(({ row, x, costY, roasY }, index) => {
@@ -158,7 +162,7 @@ function AdLineChart({ points }: { points?: Point[] }) {
           return (
             <div key={`${row.date || row.label || index}`} className="group absolute top-0 h-full w-8 -translate-x-1/2" style={{ left }}>
               <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-orange-500 shadow-sm" style={{ left: "50%", top: `${costY}%` }} />
-              <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-slate-600 shadow-sm" style={{ left: "50%", top: `${roasY}%` }} />
+              <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-emerald-500 shadow-sm" style={{ left: "50%", top: `${roasY}%` }} />
               <div className={`absolute z-10 hidden min-w-[142px] rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 shadow-lg group-hover:block ${tooltipLeft}`} style={{ top: tooltipTop }}>
                 <p className="font-black text-slate-950">{dateText(row.date || row.label)}</p>
                 <p className="mt-1 flex justify-between gap-3"><span>ROAS</span><span>{n(row.roas).toFixed(1)}%</span></p>

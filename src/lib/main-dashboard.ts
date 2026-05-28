@@ -119,6 +119,17 @@ function compactRange(days: number) {
   });
 }
 
+function compactRangeUntil(days: number, endDate: string) {
+  if (!/^\d{8}$/.test(endDate)) return compactRange(days);
+  const base = new Date(`${endDate.slice(0, 4)}-${endDate.slice(4, 6)}-${endDate.slice(6, 8)}T00:00:00+09:00`);
+  return Array.from({ length: days }, (_, index) => {
+    const current = new Date(base);
+    current.setDate(base.getDate() - days + 1 + index);
+    const key = `${current.getFullYear()}${String(current.getMonth() + 1).padStart(2, "0")}${String(current.getDate()).padStart(2, "0")}`;
+    return { key, date: iso(key), label: `${Number(key.slice(4, 6))}/${Number(key.slice(6, 8))}` };
+  });
+}
+
 function monthRange(months: number) {
   const base = new Date(Date.now() + 9 * 60 * 60 * 1000);
   base.setDate(1);
@@ -140,8 +151,8 @@ function dailySeries(rows: Row[], days: number, pickDate: (row: Row) => unknown,
   }));
 }
 
-function dailyAdSeries(rows: Row[], days: number, pickDate: (row: Row) => unknown, pickSpend: (row: Row) => unknown, pickConversionSales: (row: Row) => unknown) {
-  return compactRange(days).map((day) => {
+function dailyAdSeries(rows: Row[], days: number, endDate: string, pickDate: (row: Row) => unknown, pickSpend: (row: Row) => unknown, pickConversionSales: (row: Row) => unknown) {
+  return compactRangeUntil(days, endDate).map((day) => {
     const dayRows = rows.filter((row) => dateKey(pickDate(row)) === day.key);
     const cost = sum(dayRows, pickSpend);
     const conversionSales = sum(dayRows, pickConversionSales);
@@ -336,7 +347,7 @@ export async function mainDashboardSummary() {
     ad_month_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
     ad_conversion_sales: conversionSales,
     ad_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
-    ad_daily: dailyAdSeries(adRows, 7, adDate, adSpend, adConversionSales),
+    ad_daily: dailyAdSeries(adRows, 7, latestAdDate, adDate, adSpend, adConversionSales),
     card_expense_amount: cardRows.length
       ? sum(cardRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount)
       : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
