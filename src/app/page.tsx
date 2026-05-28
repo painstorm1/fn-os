@@ -7786,7 +7786,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   function filterProductsByRelation(rows: FnProduct[], filter: ProductRelationFilter) {
     if (filter === "bom") return rows.filter((product) => (product.bom || []).length > 0);
     if (filter === "import") return rows.filter((product) => (product.import_links || []).length > 0);
-    return rows.filter((product) => !(product.bom || []).length && !(product.import_links || []).length);
+    return rows.filter((product) => !(product.bom || []).length);
   }
 
   async function loadProducts(nextPage = page, nextQuery = query, nextFilter = relationFilter) {
@@ -8017,8 +8017,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }).filter((value) => value <= pageCount);
   const relationFilters: Array<{ key: ProductRelationFilter; label: string }> = [
     { key: "plain", label: "일반" },
-    { key: "bom", label: "BOM연동" },
-    { key: "import", label: "수입연동" },
+    { key: "bom", label: "BOM제품" },
+    { key: "import", label: "수입" },
   ];
 
   return (
