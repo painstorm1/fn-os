@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 
 type Row = Record<string, unknown>;
-type Point = { date?: string; label?: string; month?: string; value?: number; count?: number; orders?: Row[] };
+type Point = {
+  date?: string;
+  label?: string;
+  month?: string;
+  value?: number;
+  cost?: number;
+  conversion_sales?: number;
+  roas?: number;
+  count?: number;
+  orders?: Row[];
+};
 
 type DashboardSummary = {
   ok?: boolean;
@@ -114,6 +124,50 @@ function MiniBars({ points, tone = "orange", height = "h-14" }: { points?: Point
           <div className={`w-full rounded-t-sm ${color} opacity-85`} style={{ height: `${Math.max(7, (n(point.value) / max) * 100)}%` }} />
         </div>
       ))}
+    </div>
+  );
+}
+
+function AdLineChart({ points }: { points?: Point[] }) {
+  const rows: Point[] = points?.length ? points : Array.from({ length: 7 }, (_, index) => ({ label: String(index + 1), date: "", cost: 0, value: 0, roas: 0 }));
+  const maxCost = Math.max(...rows.map((point) => n(point.cost ?? point.value)), 1);
+  const maxRoas = Math.max(...rows.map((point) => n(point.roas)), 1);
+  const chartPoints = rows.map((row, index) => {
+    const x = rows.length === 1 ? 50 : 6 + (index / (rows.length - 1)) * 88;
+    const costY = 88 - (n(row.cost ?? row.value) / maxCost) * 68;
+    const roasY = 88 - (n(row.roas) / maxRoas) * 68;
+    return { row, x, costY, roasY };
+  });
+  const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
+  const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
+
+  return (
+    <div className="relative h-28 rounded-md bg-slate-50 px-3 py-3">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="최근 7일 광고비와 ROAS">
+        {[20, 54, 88].map((y) => (
+          <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        ))}
+        {chartPoints.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.1" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+        {chartPoints.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="1.9" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
+      </svg>
+      <div className="absolute inset-x-3 top-3 h-[calc(100%-1.5rem)]">
+        {chartPoints.map(({ row, x, costY, roasY }, index) => {
+          const left = `${x}%`;
+          const tooltipLeft = x > 78 ? "right-0" : x < 22 ? "left-0" : "left-1/2 -translate-x-1/2";
+          const tooltipTop = `${Math.max(2, Math.min(costY, roasY) - 4)}%`;
+          return (
+            <div key={`${row.date || row.label || index}`} className="group absolute top-0 h-full w-8 -translate-x-1/2" style={{ left }}>
+              <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-orange-500 shadow-sm" style={{ left: "50%", top: `${costY}%` }} />
+              <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-slate-600 shadow-sm" style={{ left: "50%", top: `${roasY}%` }} />
+              <div className={`absolute z-10 hidden min-w-[142px] rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 shadow-lg group-hover:block ${tooltipLeft}`} style={{ top: tooltipTop }}>
+                <p className="font-black text-slate-950">{dateText(row.date || row.label)}</p>
+                <p className="mt-1 flex justify-between gap-3"><span>ROAS</span><span>{n(row.roas).toFixed(1)}%</span></p>
+                <p className="mt-1 flex justify-between gap-3"><span>총비용</span><span>{krw(row.cost ?? row.value)}</span></p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -300,12 +354,8 @@ export default function MainDashboard() {
             <Stat label="전환매출" value={krw(summary?.ad_conversion_sales)} />
             <Stat label="ROAS" value={`${n(summary?.ad_roas).toFixed(1)}%`} tone={n(summary?.ad_roas) >= 300 ? "green" : "slate"} />
           </div>
-          <div className="mt-3 rounded-md bg-slate-50 p-3">
-            <div className="mb-2 flex items-center justify-between text-[11px] font-black text-slate-500">
-              <span>14일 광고비</span>
-              <span>{krwLong(summary?.ad_seven_day_spend)}</span>
-            </div>
-            <MiniBars points={summary?.ad_daily} tone="green" />
+          <div className="mt-3">
+            <AdLineChart points={summary?.ad_daily} />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
             <Stat label="최근 7일" value={krw(summary?.ad_seven_day_spend)} note={`ROAS ${n(summary?.ad_seven_day_roas).toFixed(1)}%`} />

@@ -140,6 +140,21 @@ function dailySeries(rows: Row[], days: number, pickDate: (row: Row) => unknown,
   }));
 }
 
+function dailyAdSeries(rows: Row[], days: number, pickDate: (row: Row) => unknown, pickSpend: (row: Row) => unknown, pickConversionSales: (row: Row) => unknown) {
+  return compactRange(days).map((day) => {
+    const dayRows = rows.filter((row) => dateKey(pickDate(row)) === day.key);
+    const cost = sum(dayRows, pickSpend);
+    const conversionSales = sum(dayRows, pickConversionSales);
+    return {
+      ...day,
+      value: cost,
+      cost,
+      conversion_sales: conversionSales,
+      roas: cost ? (conversionSales / cost) * 100 : 0,
+    };
+  });
+}
+
 function monthlySeries(rows: Row[], months: number, pickDate: (row: Row) => unknown, pickAmount: (row: Row) => unknown) {
   return monthRange(months).map((item) => ({
     ...item,
@@ -200,6 +215,7 @@ export async function mainDashboardSummary() {
   const adRows = adReports.length ? adReports : adDailyMetrics;
   const adDate = (row: Row) => row.report_date ?? row.metric_date ?? row.created_at;
   const adSpend = (row: Row) => row.cost ?? row.spend_amount ?? row.spend;
+  const adConversionSales = (row: Row) => row.conversion_value ?? row.purchase_conversion_value;
   const expenseRows = expenses.length ? expenses : legacyExpenses;
   const expenseDate = (row: Row) => row.expense_date ?? row.created_at;
   const factoryById = new Map(importErpFactories.map((row) => [String(row.id), text(row.name)]));
@@ -274,8 +290,8 @@ export async function mainDashboardSummary() {
 
   const adSevenDaySpend = sum(sevenDayAdRows, adSpend);
   const adMonthSpend = sum(monthAdRows, adSpend);
-  const adSevenDayConversionSales = sum(sevenDayAdRows, (row) => row.conversion_value ?? row.purchase_conversion_value);
-  const conversionSales = sum(monthAdRows, (row) => row.conversion_value ?? row.purchase_conversion_value);
+  const adSevenDayConversionSales = sum(sevenDayAdRows, adConversionSales);
+  const conversionSales = sum(monthAdRows, adConversionSales);
   const importMonthly = monthlySeries(importOrders, 6, importDate, importAmount)
     .map((group) => {
       const rows = importOrders
@@ -320,7 +336,7 @@ export async function mainDashboardSummary() {
     ad_month_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
     ad_conversion_sales: conversionSales,
     ad_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
-    ad_daily: dailySeries(adRows, 14, adDate, adSpend),
+    ad_daily: dailyAdSeries(adRows, 7, adDate, adSpend, adConversionSales),
     card_expense_amount: cardRows.length
       ? sum(cardRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount)
       : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
