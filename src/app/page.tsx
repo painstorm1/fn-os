@@ -8105,6 +8105,22 @@ const adReportChannelNames: Record<string, string> = {
   쿠팡: "쿠팡",
 };
 
+function AdChannelLogo({ channel }: { channel: string }) {
+  if (channel === "total") {
+    return <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[9px] font-black text-white">Σ</span>;
+  }
+  if (channel.includes("메타")) {
+    return <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#0866ff] text-[9px] font-black text-white">M</span>;
+  }
+  if (channel.includes("네이버")) {
+    return <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-[#03c75a] text-[9px] font-black text-white">N</span>;
+  }
+  if (channel.includes("쿠팡")) {
+    return <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#e52528] text-[9px] font-black text-white">C</span>;
+  }
+  return <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-300 text-[9px] font-black text-slate-700">A</span>;
+}
+
 function adMetricReportRows(channels: AdsMetricRow[], selectedChannels: string[]) {
   const selected = new Set(selectedChannels);
   const channelRows = adReportChannelOrder
@@ -8172,7 +8188,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   ] as const;
   return (
     <div className="overflow-x-hidden">
-      <table className="w-full table-fixed border-collapse text-center text-[11px]">
+      <table className="w-full table-fixed border-collapse text-center text-xs">
         <colgroup>
           <col className="w-[11%]" />
           <col className="w-[7.6%]" />
@@ -8191,24 +8207,29 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
           <tr>
             <th className="border border-slate-200 bg-white px-2 py-2 text-left font-black">광고</th>
             {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1.5 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 font-black" : "bg-white"}>
-              <td className="truncate border border-slate-200 bg-inherit px-2 py-2 text-left font-black">{row.label}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cost)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.purchaseValue)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 bg-inherit px-1.5 py-2 text-left font-black">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <AdChannelLogo channel={row.channel} />
+                  <span className="truncate">{row.label}</span>
+                </span>
+              </td>
+              <td className="border border-slate-200 px-1 py-2">{krw(row.cost)}</td>
+              <td className="border border-slate-200 px-1 py-2">{krw(row.purchaseValue)}</td>
+              <td className="border border-slate-200 px-1 py-2">{adPercent(row.roas)}</td>
               <td className="border border-slate-200 px-1 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.costPerPurchase)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{adPercent2(row.ctr)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpm)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpc)}</td>
+              <td className="border border-slate-200 px-1 py-2">{krw(row.costPerPurchase)}</td>
+              <td className="border border-slate-200 px-1 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-1 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-1 py-2">{adPercent2(row.ctr)}</td>
+              <td className="border border-slate-200 px-1 py-2">{krw(row.cpm)}</td>
+              <td className="border border-slate-200 px-1 py-2">{krw(row.cpc)}</td>
               <td className="border border-slate-200 px-1 py-2">{adPercent2(row.purchaseCvr)}</td>
             </tr>
           ))}
