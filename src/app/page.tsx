@@ -740,6 +740,22 @@ type FnProduct = {
   standard_price?: number;
   cost_price?: number;
   currency?: string;
+  inventory?: ProductInventoryRow[];
+};
+
+type ProductInventoryRow = {
+  id?: string;
+  warehouse_id?: string;
+  warehouse_code?: string;
+  warehouse_name?: string;
+  qty?: number;
+  available_qty?: number;
+};
+
+type WarehouseOption = {
+  id?: string;
+  warehouse_code: string;
+  warehouse_name: string;
 };
 
 type ImportSkuLink = {
@@ -2082,13 +2098,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <p className="mt-2 text-2xl font-black">{krw(panelTotalWon)}</p>
           <div className="mt-4 grid gap-2 text-sm">
             <p className="flex justify-between"><span>제품합계(선택통화)</span><b>{nativeTotals}</b></p>
-            <p className="flex justify-between"><span>제품합계(원화)</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>중국내 부대비용</span><b>{nativeAmountText(chinaExtraNative, chinaExtraCurrency)} / {krw(chinaExtraWon)}</b></p>
-            <p className="flex justify-between border-t border-orange-100 pt-2"><span>환산 기준 합계</span><b>{krw(convertedOrderTotalWon)}</b></p>
-            {actualPaymentKrw > 0 && <p className="flex justify-between"><span>실제 결제금액</span><b>{krw(actualPaymentKrw)}</b></p>}
-            {actualPaymentKrw > 0 && <p className="flex justify-between"><span>결제차액</span><b className={paymentDeltaWon >= 0 ? "text-rose-600" : "text-emerald-600"}>{krw(paymentDeltaWon)}</b></p>}
+            <p className="flex justify-between border-t border-orange-100 pt-2"><span>실제 결제금액</span><b>{krw(supplierPaymentWon)}</b></p>
             <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(koreaExtraWon)}</b></p>
-            <p className="flex justify-between"><span>원가계산 기준</span><b>{actualPaymentKrw > 0 ? "실제 결제" : "환산 합계"}</b></p>
             {materialOnlyCost.cardUnitCost != null && <p className="flex justify-between"><span>예상원가</span><b>{krw(materialOnlyCost.cardUnitCost)}</b></p>}
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
             {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
@@ -7513,11 +7525,13 @@ function MasterManagementPanel({
         </div>
       </div>
 
-      <MasterEntryPanel
-        config={activeConfig}
-        setMessage={setMessage}
-        loadSummary={loadSummary}
-      />
+      {activeMasterTab !== "products" && (
+        <MasterEntryPanel
+          config={activeConfig}
+          setMessage={setMessage}
+          loadSummary={loadSummary}
+        />
+      )}
 
       {activeMasterTab === "customers" && (
         <Panel title="거래처 목록" subtitle="거래처는 개별 등록 또는 엑셀 업로드로 추가합니다.">
@@ -7527,7 +7541,7 @@ function MasterManagementPanel({
       )}
 
       {activeMasterTab === "products" && (
-        <SalesProductMasterPanel message={message} setMessage={setMessage} sync={sync} />
+        <ProductManagementPanel message={message} setMessage={setMessage} />
       )}
 
       {activeMasterTab === "warehouses" && (
@@ -7563,6 +7577,341 @@ function MasterManagementPanel({
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
+    </div>
+  );
+}
+
+function ProductManagementPanel({ message, setMessage }: { message: string; setMessage: (value: string) => void }) {
+  const [products, setProducts] = useState<FnProduct[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pageSize = 20;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  function blankDraft() {
+    return {
+      id: "",
+      product_code: "",
+      product_name: "",
+      cost_price: "",
+      standard_price: "",
+      ...Object.fromEntries(warehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
+    };
+  }
+
+  async function loadProducts(nextPage = page, nextQuery = query) {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
+      if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "품목 조회 실패");
+        return;
+      }
+      setProducts(data.products || []);
+      setWarehouses(data.warehouses || []);
+      setTotal(Number(data.total || 0));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadProducts(page, query);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [page, query]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2") return;
+      event.preventDefault();
+      openNewProduct();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [warehouses]);
+
+  function openNewProduct() {
+    setDraft(blankDraft());
+    setModalOpen(true);
+  }
+
+  function openProduct(product: FnProduct) {
+    const stockValues = Object.fromEntries(warehouses.map((warehouse) => {
+      const stock = (product.inventory || []).find((item) => item.warehouse_code === warehouse.warehouse_code);
+      return [`stock_${warehouse.warehouse_code}`, stock?.qty != null ? String(stock.qty) : ""];
+    }));
+    setDraft({
+      id: product.id || "",
+      product_code: product.product_code || product.sku || "",
+      product_name: product.product_name || "",
+      cost_price: product.cost_price != null ? String(product.cost_price) : "",
+      standard_price: product.standard_price != null ? String(product.standard_price) : "",
+      ...stockValues,
+    });
+    setModalOpen(true);
+  }
+
+  function updateDraft(key: string, value: string) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveProductDraft() {
+    const productCode = String(draft.product_code || "").trim();
+    const productName = String(draft.product_name || "").trim();
+    if (!productCode || !productName) {
+      setMessage("품목코드와 품목명은 필수입니다.");
+      return;
+    }
+    const inventory = warehouses
+      .map((warehouse) => ({
+        warehouse_id: warehouse.id,
+        warehouse_code: warehouse.warehouse_code,
+        qty: draft[`stock_${warehouse.warehouse_code}`],
+      }))
+      .filter((item) => String(item.qty ?? "").trim() !== "");
+    const res = await fetch("/api/fnos/products/master", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        product: {
+          id: draft.id,
+          product_code: productCode,
+          product_name: productName,
+          cost_price: draft.cost_price,
+          standard_price: draft.standard_price,
+        },
+        inventory,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "품목 저장 실패");
+      return;
+    }
+    setMessage(`품목 저장 완료: ${productCode}`);
+    setModalOpen(false);
+    await loadProducts(page, query);
+  }
+
+  function downloadProductTemplate() {
+    void downloadTableXlsx(
+      "FN_OS_품목_엑셀폼.xlsx",
+      "품목",
+      ["품목코드", "품목명", "입고가", "출고가", "창고코드", "재고등록(수정)"],
+      [["FL0001", "펀링크 C to C 케이블_BK_0.5M", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0"]],
+    );
+  }
+
+  async function uploadProducts(file: File) {
+    const rows = await readXlsxObjects(file);
+    const allRes = await fetch("/api/fnos/products/master?page=1&pageSize=5000", { cache: "no-store" });
+    const allData = await allRes.json().catch(() => ({}));
+    const existing = new Map<string, FnProduct>((allData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
+    const normalized = rows
+      .map((row) => ({
+        product_code: String(row["품목코드"] || row["SKU"] || row["sku"] || "").trim(),
+        product_name: String(row["품목명"] || row["상품명"] || "").trim(),
+        cost_price: String(row["입고가"] || row["매입가"] || "").trim(),
+        standard_price: String(row["출고가"] || row["판매가"] || "").trim(),
+        warehouse_code: String(row["창고코드"] || warehouses[0]?.warehouse_code || "100").trim(),
+        qty: String(row["재고등록(수정)"] || row["재고"] || "").trim(),
+      }))
+      .filter((row) => row.product_code && row.product_name);
+    const exactMatches = normalized.filter((row) => {
+      const found = existing.get(row.product_code);
+      return found && String(found.product_name || "").trim() === row.product_name;
+    });
+    const overwrite = exactMatches.length
+      ? window.confirm(`${exactMatches.length}개 품목의 품목코드와 품목명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      : false;
+    let saved = 0;
+    let skipped = 0;
+    for (const row of normalized) {
+      const found = existing.get(row.product_code);
+      if (found && !overwrite) {
+        skipped += 1;
+        continue;
+      }
+      if (found && String(found.product_name || "").trim() !== row.product_name) {
+        skipped += 1;
+        continue;
+      }
+      const res = await fetch("/api/fnos/products/master", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          product: {
+            id: found?.id,
+            product_code: row.product_code,
+            product_name: row.product_name,
+            cost_price: row.cost_price,
+            standard_price: row.standard_price,
+          },
+          inventory: row.qty === "" ? [] : [{ warehouse_code: row.warehouse_code, qty: row.qty }],
+        }),
+      });
+      if (res.ok) saved += 1;
+    }
+    setMessage(`엑셀 등록 완료: 저장 ${saved}건 / 스킵 ${skipped}건`);
+    await loadProducts(1, query);
+    setPage(1);
+  }
+
+  const pageNumbers = Array.from({ length: Math.min(6, pageCount) }, (_, index) => {
+    const start = Math.min(Math.max(1, page - 2), Math.max(1, pageCount - 5));
+    return start + index;
+  }).filter((value) => value <= pageCount);
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="품목관리"
+        subtitle="품목코드 하나로 관리하고 모든 금액은 부가세 포함 기준으로 저장합니다."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={openNewProduct} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 품목</button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
+            <button type="button" onClick={downloadProductTemplate} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" aria-label="엑셀폼다운로드">↓</button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadProducts(file);
+              event.target.value = "";
+            }} />
+          </div>
+        }
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm font-black text-slate-700">상품수 {total.toLocaleString("ko-KR")}개</div>
+          <input
+            className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={query}
+            onChange={(event) => {
+              setPage(1);
+              setQuery(event.target.value);
+            }}
+            placeholder="품목코드 / 품목명 검색"
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[840px] text-sm">
+            <thead className="border-b border-slate-200 text-xs text-slate-500">
+              <tr>
+                <th className="py-2 text-left">품목코드</th>
+                <th className="py-2 text-left">품목명</th>
+                <th className="py-2 text-right">입고가</th>
+                <th className="py-2 text-right">출고가</th>
+                <th className="py-2 text-right">현재고</th>
+                <th className="py-2 text-left">창고별 재고</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
+                  <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
+                  <td className="py-2 font-bold">{product.product_name || "-"}</td>
+                  <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
+                  <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
+                  <td className="py-2 text-right font-black">{Number(product.current_stock || 0).toLocaleString("ko-KR")}</td>
+                  <td className="py-2 text-xs font-bold text-slate-500">
+                    {(product.inventory || []).length
+                      ? (product.inventory || []).map((stock) => `${stock.warehouse_name || stock.warehouse_code}: ${Number(stock.qty || 0).toLocaleString("ko-KR")}`).join(" / ")
+                      : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!products.length && <div className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "품목이 없습니다."}</div>}
+        </div>
+        <div className="mt-4 flex items-center justify-center gap-1">
+          {pageNumbers.map((number) => (
+            <button
+              key={number}
+              type="button"
+              onClick={() => setPage(number)}
+              className={`h-7 min-w-7 rounded px-2 text-xs font-black ${page === number ? "bg-slate-950 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}
+            >
+              {number}
+            </button>
+          ))}
+        </div>
+        {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+      </Panel>
+
+      {modalOpen && (
+        <ProductEditModal
+          draft={draft}
+          warehouses={warehouses}
+          onClose={() => setModalOpen(false)}
+          onChange={updateDraft}
+          onSave={() => void saveProductDraft()}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductEditModal({
+  draft,
+  warehouses,
+  onClose,
+  onChange,
+  onSave,
+}: {
+  draft: Record<string, string>;
+  warehouses: WarehouseOption[];
+  onClose: () => void;
+  onChange: (key: string, value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
+      <div className="w-full max-w-3xl rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+          <h3 className="text-xl font-black">{draft.id ? "품목 수정" : "새 품목 등록"}</h3>
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">입고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">출고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></label>
+        </div>
+        <div className="mt-5 rounded-md border border-slate-200 p-4">
+          <div className="mb-3 text-sm font-black text-slate-700">재고등록(수정)</div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {warehouses.map((warehouse) => (
+              <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
+                {warehouse.warehouse_name || warehouse.warehouse_code}
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold"
+                  type="number"
+                  value={draft[`stock_${warehouse.warehouse_code}`] || ""}
+                  onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, event.target.value)}
+                />
+              </label>
+            ))}
+            {!warehouses.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">등록된 창고가 없습니다. 먼저 창고관리에서 창고를 등록해 주세요.</div>}
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-500">닫기</button>
+          <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
+        </div>
+      </div>
     </div>
   );
 }
