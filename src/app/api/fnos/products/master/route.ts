@@ -24,6 +24,13 @@ function productName(row: AnyRecord) {
   return text(row.product_name || row.prod_name);
 }
 
+function productKind(row: { product_code?: string; product_name?: string }) {
+  const value = `${text(row.product_code)} ${text(row.product_name)}`.toUpperCase();
+  if (/\[RG[\]\}]/.test(value)) return "rg";
+  if (/\[NG[\]\}]/.test(value)) return "set";
+  return "plain";
+}
+
 function compactSearchText(value: unknown) {
   return text(value).toLowerCase().replace(/[\s_\-()[\]{}]/g, "");
 }
@@ -169,6 +176,7 @@ export async function GET(request: NextRequest) {
         id: text(row.id),
         product_code: code,
         product_name: productName(row),
+        product_kind: productKind({ product_code: code, product_name: productName(row) }),
         cost_price: numberValue(row.cost_price ?? row.in_price),
         standard_price: numberValue(row.standard_price ?? row.out_price),
         current_stock: currentStock,
@@ -180,9 +188,11 @@ export async function GET(request: NextRequest) {
     });
     const filtered = normalizedProducts.filter((row) => {
       if (relation === "bom" && !row.bom.length) return false;
+      if (relation === "ng" && row.product_kind !== "set") return false;
+      if (relation === "rg" && row.product_kind !== "rg") return false;
       if (relation === "import" && !row.import_links.length) return false;
-      if (relation === "plain" && row.bom.length) return false;
-      if (excludeBom && row.bom.length) return false;
+      if (relation === "plain" && row.product_kind !== "plain") return false;
+      if (excludeBom && (row.bom.length || row.product_kind === "set" || row.product_kind === "rg")) return false;
       return matchesSearchTokens([
         row.product_code,
         row.product_name,

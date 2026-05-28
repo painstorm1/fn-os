@@ -743,6 +743,7 @@ type FnProduct = {
   inventory?: ProductInventoryRow[];
   bom?: ProductBomRow[];
   import_links?: ProductImportLinkRow[];
+  product_kind?: ProductAttribute;
 };
 
 type ProductInventoryRow = {
@@ -779,7 +780,22 @@ type ProductImportLinkRow = {
   default_ratio?: number;
 };
 
-type ProductRelationFilter = "plain" | "bom" | "import";
+type ProductRelationFilter = "plain" | "ng" | "rg" | "import";
+type ProductAttribute = "plain" | "set" | "rg";
+
+function productAttributeFromName(value: unknown): ProductAttribute {
+  const textValue = String(value || "").toUpperCase();
+  if (/\[RG[\]\}]/.test(textValue)) return "rg";
+  if (/\[NG[\]\}]/.test(textValue)) return "set";
+  return "plain";
+}
+
+function productNameWithAttribute(name: string, attribute: unknown) {
+  const baseName = String(name || "").replace(/^\s*\[(RG|NG|NS)[\]\}]\s*/i, "").trim();
+  if (attribute === "rg") return `[RG]${baseName}`;
+  if (attribute === "set") return `[NG]${baseName}`;
+  return baseName;
+}
 
 function sortWarehousesByCode(a: WarehouseOption, b: WarehouseOption) {
   return String(a.warehouse_code || "").localeCompare(String(b.warehouse_code || ""), "ko-KR", { numeric: true });
@@ -7637,8 +7653,8 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     key: "products",
     label: "품목관리",
     title: "품목",
-    templateHeaders: ["품목코드", "SKU", "품목명", "옵션", "바코드", "품목구분", "표준단가", "매입단가", "재고관리여부", "사용구분", "메모"],
-    sampleRow: ["SKU001", "SKU001", "샘플품목", "블랙", "", "상품", "10000", "7000", "Y", "사용", ""],
+    templateHeaders: ["품목코드", "품목명", "속성", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
+    sampleRow: ["SET001", "세트상품명", "세트", "7000", "10000", "100", "0", "FL0001", "2"],
   },
   {
     key: "warehouses",
@@ -7791,6 +7807,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       id: "",
       product_code: "",
       product_name: "",
+      product_kind: "plain",
       cost_price: "",
       standard_price: "",
       ...Object.fromEntries(usableWarehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
@@ -7849,6 +7866,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       id: product.id || "",
       product_code: product.product_code || product.sku || "",
       product_name: product.product_name || "",
+      product_kind: productAttributeFromName(product.product_name),
       cost_price: product.cost_price != null ? String(product.cost_price) : "",
       standard_price: product.standard_price != null ? String(product.standard_price) : "",
       ...stockValues,
@@ -7864,8 +7882,9 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   async function saveProductDraft() {
     const productCode = String(draft.product_code || "").trim();
-    const productName = String(draft.product_name || "").trim();
-    if (!productCode || !productName) {
+    const rawProductName = String(draft.product_name || "").trim();
+    const productName = productNameWithAttribute(rawProductName, draft.product_kind);
+    if (!productCode || !rawProductName) {
       setProductMessage("품목코드와 품목명은 필수입니다.");
       return;
     }
@@ -7907,8 +7926,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     void downloadTableXlsx(
       "FN_OS_품목_엑셀폼.xlsx",
       "품목",
-      ["품목코드", "품목명", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
-      [["SET001", "세트상품명", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
+      ["품목코드", "품목명", "속성", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
+      [["SET001", "세트상품명", "세트", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
     );
   }
 
@@ -7926,6 +7945,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const rows = exportProducts.map((product) => [
       product.product_code || product.sku || "",
       product.product_name || "",
+      productAttributeFromName(product.product_name) === "rg" ? "RG" : productAttributeFromName(product.product_name) === "set" ? "세트" : "일반",
       String(product.cost_price ?? ""),
       String(product.standard_price ?? ""),
       String(product.current_stock ?? 0),
@@ -7936,7 +7956,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     void downloadTableXlsx(
       `FN_OS_품목_${filterLabel}_${exportProducts.length}건_${todayMmdd()}.xlsx`,
       "품목정보",
-      ["품목코드", "품목명", "입고가", "출고가", "현재고", "창고별재고", "BOM구성", "수입연동"],
+      ["품목코드", "품목명", "속성", "입고가", "출고가", "현재고", "창고별재고", "BOM구성", "수입연동"],
       rows,
     );
   }
@@ -7947,16 +7967,23 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const allData = await allRes.json().catch(() => ({}));
     const existing = new Map<string, FnProduct>((allData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
     const normalized = rows
-      .map((row) => ({
-        product_code: String(row["품목코드"] || row["SKU"] || row["sku"] || "").trim(),
-        product_name: String(row["품목명"] || row["상품명"] || "").trim(),
-        cost_price: String(row["입고가"] || row["매입가"] || "").trim(),
-        standard_price: String(row["출고가"] || row["판매가"] || "").trim(),
-        warehouse_code: String(row["창고코드"] || warehouses[0]?.warehouse_code || "100").trim(),
-        qty: String(row["재고등록(수정)"] || row["재고"] || "").trim(),
-        bom_component_code: String(row["BOM구성품코드"] || row["BOM연동품목코드"] || row["BOM품목코드"] || row["bom_component_code"] || "").trim(),
-        bom_qty: String(row["BOM수량"] || row["BOM연동수량"] || row["bom_qty"] || "").trim(),
-      }))
+      .map((row) => {
+        const rawProductName = String(row["품목명"] || row["상품명"] || "").trim();
+        const rawAttribute = String(row["속성"] || row["품목속성"] || "").toUpperCase();
+        return {
+          product_code: String(row["품목코드"] || row["SKU"] || row["sku"] || "").trim(),
+          product_name: productNameWithAttribute(
+            rawProductName,
+            rawAttribute.includes("RG") ? "rg" : rawAttribute.includes("세트") ? "set" : productAttributeFromName(rawProductName),
+          ),
+          cost_price: String(row["입고가"] || row["매입가"] || "").trim(),
+          standard_price: String(row["출고가"] || row["판매가"] || "").trim(),
+          warehouse_code: String(row["창고코드"] || warehouses[0]?.warehouse_code || "100").trim(),
+          qty: String(row["재고등록(수정)"] || row["재고"] || "").trim(),
+          bom_component_code: String(row["BOM구성품코드"] || row["BOM연동품목코드"] || row["BOM품목코드"] || row["bom_component_code"] || "").trim(),
+          bom_qty: String(row["BOM수량"] || row["BOM연동수량"] || row["bom_qty"] || "").trim(),
+        };
+      })
       .filter((row) => row.product_code && row.product_name);
     const grouped = Array.from(normalized.reduce((map, row) => {
       const current = map.get(row.product_code) || { ...row, bom: [] as Array<{ component_code: string; qty: string }> };
@@ -8052,8 +8079,9 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }).filter((value) => value <= pageCount);
   const relationFilters: Array<{ key: ProductRelationFilter; label: string }> = [
     { key: "plain", label: "일반" },
-    { key: "bom", label: "BOM제품" },
-    { key: "import", label: "수입" },
+    { key: "ng", label: "[NG]세트" },
+    { key: "rg", label: "[RG]로켓그로스" },
+    { key: "import", label: "수입연동" },
   ];
 
   return (
@@ -8265,6 +8293,13 @@ function ProductEditModal({
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">속성
+            <select className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_kind || "plain"} onChange={(event) => onChange("product_kind", event.target.value)}>
+              <option value="plain">일반</option>
+              <option value="set">세트</option>
+              <option value="rg">RG</option>
+            </select>
+          </label>
           <label className="text-xs font-black text-slate-500">입고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">출고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></label>
         </div>
