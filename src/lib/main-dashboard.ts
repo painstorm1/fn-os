@@ -272,7 +272,9 @@ export async function mainDashboardSummary() {
     latestImportDate && { label: "수입관리", date: iso(latestImportDate) },
   ].filter(Boolean);
 
+  const adSevenDaySpend = sum(sevenDayAdRows, adSpend);
   const adMonthSpend = sum(monthAdRows, adSpend);
+  const adSevenDayConversionSales = sum(sevenDayAdRows, (row) => row.conversion_value ?? row.purchase_conversion_value);
   const conversionSales = sum(monthAdRows, (row) => row.conversion_value ?? row.purchase_conversion_value);
   const importMonthly = monthlySeries(importOrders, 6, importDate, importAmount)
     .map((group) => {
@@ -312,8 +314,10 @@ export async function mainDashboardSummary() {
     ad_latest_date: iso(latestAdDate),
     ad_latest_spend: sum(latestAdRows, adSpend),
     ad_yesterday_spend: sum(yesterdayAdRows, adSpend),
-    ad_seven_day_spend: sum(sevenDayAdRows, adSpend),
+    ad_seven_day_spend: adSevenDaySpend,
     ad_month_spend: adMonthSpend,
+    ad_seven_day_roas: adSevenDaySpend ? (adSevenDayConversionSales / adSevenDaySpend) * 100 : 0,
+    ad_month_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
     ad_conversion_sales: conversionSales,
     ad_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
     ad_daily: dailySeries(adRows, 14, adDate, adSpend),

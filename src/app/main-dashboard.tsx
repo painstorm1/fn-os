@@ -25,6 +25,8 @@ type DashboardSummary = {
   ad_yesterday_spend?: number;
   ad_seven_day_spend?: number;
   ad_month_spend?: number;
+  ad_seven_day_roas?: number;
+  ad_month_roas?: number;
   ad_conversion_sales?: number;
   ad_roas?: number;
   ad_daily?: Point[];
@@ -306,8 +308,8 @@ export default function MainDashboard() {
             <MiniBars points={summary?.ad_daily} tone="green" />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
-            <Stat label="최근 7일" value={krw(summary?.ad_seven_day_spend)} />
-            <Stat label="이번달" value={krw(summary?.ad_month_spend)} />
+            <Stat label="최근 7일" value={krw(summary?.ad_seven_day_spend)} note={`ROAS ${n(summary?.ad_seven_day_roas).toFixed(1)}%`} />
+            <Stat label="이번달" value={krw(summary?.ad_month_spend)} note={`ROAS ${n(summary?.ad_month_roas).toFixed(1)}%`} />
           </div>
         </Panel>
 
