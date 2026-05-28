@@ -860,6 +860,8 @@ type ImportOrderDetail = {
   total_qty?: number;
 };
 
+type ActualPaymentCurrency = "KRW" | "USD" | "CNY";
+
 type CostGridRow = {
   order_item_id?: number;
   option_name?: string;
@@ -869,6 +871,8 @@ type CostGridRow = {
   item_currency?: string;
   unit_price?: number;
   cost_ratio?: number;
+  unit_china_extra_cost?: number;
+  unit_payment_adjustment?: number;
   unit_extra_cost?: number;
   material_unit_cost?: number;
   estimated_unit_cost?: number;
@@ -888,6 +892,10 @@ type CostGrid = {
   total_extra_cost?: number;
   product_base_total?: number;
   goods_total_won?: number;
+  converted_order_total_won?: number;
+  actual_payment_won?: number;
+  payment_delta_won?: number;
+  costing_base_won?: number;
   total_won?: number;
 };
 
@@ -1296,7 +1304,13 @@ function actualUsdTotal(order?: ImportOrder | null) {
 }
 
 function actualPaymentCurrency(order?: ImportOrder | null) {
-  return String(order?.actual_payment_currency || (actualUsdTotal(order) > 0 ? "USD" : "KRW")).toUpperCase() === "USD" ? "USD" : "KRW";
+  const currency = String(order?.actual_payment_currency || (actualUsdTotal(order) > 0 ? "USD" : "KRW")).toUpperCase();
+  return (["KRW", "USD", "CNY"].includes(currency) ? currency : "KRW") as ActualPaymentCurrency;
+}
+
+function actualPaymentWon(amount: number, currency: ActualPaymentCurrency, rates?: Record<string, number>) {
+  if (!amount) return 0;
+  return currency === "KRW" ? amount : amount * Number(rates?.[currency] || 0);
 }
 
 function actualPaymentFirst(order?: ImportOrder | null) {
@@ -1912,7 +1926,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     note: order.note || "",
   });
   const [productionDays, setProductionDays] = useState(order.production_days != null ? String(order.production_days) : "");
-  const [actualCurrency, setActualCurrency] = useState<"KRW" | "USD">(actualPaymentCurrency(order));
+  const [actualCurrency, setActualCurrency] = useState<ActualPaymentCurrency>(actualPaymentCurrency(order));
   const [actualPayment, setActualPayment] = useState(actualPaymentSingle(order));
   const [actualPayment1, setActualPayment1] = useState(actualPaymentFirst(order));
   const [actualPayment2, setActualPayment2] = useState(actualPaymentSecond(order));
@@ -1922,13 +1936,16 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const rateNote = rateNoteText(detail.fx_rates, Array.from(new Set([...usedCurrencies, "CNY", "USD"])));
   const isTT = isTTPayment(order.payment_method);
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
-  const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(detail.fx_rates?.USD || 0)) : 0;
+  const actualPaymentKrw = actualPaymentWon(actualPaymentValue, actualCurrency, detail.fx_rates);
   const chinaExtraNative = Number(costs.china_domestic_shipping || 0) + Number(costs.china_fee || 0) + Number(costs.china_other_cost || 0);
   const chinaExtraCurrency = costs.china_cost_currency || order.currency || "CNY";
   const chinaExtraWon = chinaExtraNative * Number(detail.fx_rates?.[chinaExtraCurrency] || order.fx_rate || 1);
   const panelProductWon = productWon;
   const koreaExtraWon = ["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"].reduce((sum, key) => sum + Number(costs[key as keyof typeof costs] || 0), 0);
-  const panelTotalWon = actualPaymentKrw > 0 ? actualPaymentKrw + koreaExtraWon : panelProductWon + chinaExtraWon + koreaExtraWon;
+  const convertedOrderTotalWon = panelProductWon + chinaExtraWon;
+  const supplierPaymentWon = actualPaymentKrw > 0 ? actualPaymentKrw : convertedOrderTotalWon;
+  const paymentDeltaWon = actualPaymentKrw > 0 ? actualPaymentKrw - convertedOrderTotalWon : 0;
+  const panelTotalWon = supplierPaymentWon + koreaExtraWon;
   const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
 
   useEffect(() => {
@@ -2067,7 +2084,11 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <p className="flex justify-between"><span>제품합계(선택통화)</span><b>{nativeTotals}</b></p>
             <p className="flex justify-between"><span>제품합계(원화)</span><b>{krw(panelProductWon)}</b></p>
             <p className="flex justify-between"><span>중국내 부대비용</span><b>{nativeAmountText(chinaExtraNative, chinaExtraCurrency)} / {krw(chinaExtraWon)}</b></p>
+            <p className="flex justify-between border-t border-orange-100 pt-2"><span>환산 기준 합계</span><b>{krw(convertedOrderTotalWon)}</b></p>
+            {actualPaymentKrw > 0 && <p className="flex justify-between"><span>실제 결제금액</span><b>{krw(actualPaymentKrw)}</b></p>}
+            {actualPaymentKrw > 0 && <p className="flex justify-between"><span>결제차액</span><b className={paymentDeltaWon >= 0 ? "text-rose-600" : "text-emerald-600"}>{krw(paymentDeltaWon)}</b></p>}
             <p className="flex justify-between"><span>한국 부대비용</span><b>{krw(koreaExtraWon)}</b></p>
+            <p className="flex justify-between"><span>원가계산 기준</span><b>{actualPaymentKrw > 0 ? "실제 결제" : "환산 합계"}</b></p>
             {materialOnlyCost.cardUnitCost != null && <p className="flex justify-between"><span>예상원가</span><b>{krw(materialOnlyCost.cardUnitCost)}</b></p>}
             <p className="text-xs text-slate-500">총 {Number(detail.total_qty || 0).toLocaleString("ko-KR")}개 기준</p>
             {rateNote && <p className="text-xs text-slate-500">{rateNote}</p>}
@@ -2083,9 +2104,10 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
               </div>
             </Field>
             <Field label="통화">
-              <select className="field-input" value={actualCurrency} onChange={(e) => setActualCurrency(e.target.value as "KRW" | "USD")}>
+              <select className="field-input" value={actualCurrency} onChange={(e) => setActualCurrency(e.target.value as ActualPaymentCurrency)}>
                 <option>KRW</option>
                 <option>USD</option>
+                <option>CNY</option>
               </select>
             </Field>
             {isTT ? (
@@ -2189,10 +2211,10 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
         {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1120px] text-xs">
+        <table className="min-w-[1280px] text-xs">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              {["옵션명", "수량", "상품단가", "비용%", "개당비용", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"].map((head) => (
+              {["옵션명", "수량", "상품단가", "원가배분%", "중국비용/개", "결제차액/개", "한국비용/개", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"].map((head) => (
                 <th key={head} className="border-b border-r border-slate-200 px-2 py-2 text-left font-black last:border-r-0">{head}</th>
               ))}
             </tr>
@@ -2214,6 +2236,8 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
+                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
                     <td colSpan={6} className="px-2 py-2 text-center font-bold text-slate-400">부자재 전용 원가 참고</td>
                   </tr>
@@ -2225,6 +2249,8 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.quantity || 0).toLocaleString("ko-KR")}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.unit_price || 0).toLocaleString("ko-KR")} {row.item_currency}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(Number(row.cost_ratio || 0) * 100)}</td>
+                  <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.unit_china_extra_cost || 0)}</td>
+                  <td className={`border-r border-slate-200 px-2 py-2 text-right ${Number(row.unit_payment_adjustment || 0) > 0 ? "text-rose-600" : Number(row.unit_payment_adjustment || 0) < 0 ? "text-emerald-600" : ""}`}>{krw(row.unit_payment_adjustment || 0)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.unit_extra_cost || 0)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
@@ -2238,7 +2264,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
               );
             })}
             {!rows.length && (
-              <tr><td colSpan={13} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
+              <tr><td colSpan={15} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
             )}
           </tbody>
         </table>
@@ -7866,7 +7892,7 @@ function SalesSummaryGroups({ summary }: { summary: SalesInventorySummary | null
 
 function Dashboard() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
         {kpis.map((item) => (
           <article key={item.label} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -8027,9 +8053,9 @@ function shiftAdDateRange(from: string, to: string, direction: -1 | 1) {
 function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
   const toneClass = tone === "rose" ? "text-rose-600" : tone === "slate" ? "text-slate-600" : "text-orange-600";
   return (
-    <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+    <article className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
       <p className="text-xs font-black text-slate-500">{label}</p>
-      <p className="mt-2 text-xl font-black text-slate-950">{value}</p>
+      <p className="mt-1.5 text-lg font-black text-slate-950">{value}</p>
       {note && <p className={`mt-1 text-xs font-bold ${toneClass}`}>{note}</p>}
     </article>
   );
@@ -8050,9 +8076,9 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
     });
   const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
       <h2 className="text-base font-black">채널별 현황</h2>
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-2">
         {orderedRows.map((row) => (
           <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
             <div className="flex items-center justify-between gap-3 text-xs">
@@ -8066,7 +8092,7 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
               <span>광고비</span>
               <span className="text-orange-600">{krw(row.cost)}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
               <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
             </div>
           </div>
@@ -8169,7 +8195,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
       <div className="mt-4 rounded-md bg-slate-50 p-3">
         {points.length ? (
           <>
-            <div className="relative h-52">
+            <div className="relative h-40">
               <div className="pointer-events-none absolute inset-0 z-10">
                 {axisTicks.map((tick) => (
                   <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between px-1 text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
@@ -8201,9 +8227,9 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 </div>
               ))}
             </div>
-            <div className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
+            <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
               {points.map((row, index) => (
-                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 rounded bg-white px-1 py-1.5 text-center text-[11px]">
+                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 rounded bg-white px-1 py-1 text-center text-[10px]">
                   <p className="truncate font-black text-slate-500">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
                   <p className="mt-0.5 truncate font-black text-orange-600">{krw(adNumber(row.cost))}</p>
                   <p className="mt-0.5 truncate font-black text-slate-700">{adPercent(adNumber(row.roas))}</p>
@@ -8212,7 +8238,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
             </div>
           </>
         ) : (
-          <div className="flex h-52 items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
+          <div className="flex h-40 items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
         )}
       </div>
     </section>
@@ -8359,7 +8385,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   };
   return (
     <div className="overflow-x-hidden">
-      <table className="w-full table-fixed border-collapse text-center text-xs">
+      <table className="w-full table-fixed border-collapse text-center text-[11px]">
         <colgroup>
           <col className="w-[11%]" />
           <col className="w-[7.6%]" />
@@ -8376,32 +8402,32 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
         </colgroup>
         <thead>
           <tr>
-            <th className="border border-slate-200 bg-white px-2 py-2 text-left font-black">광고</th>
+            <th className="border border-slate-200 bg-white px-2 py-1.5 text-left font-black">광고</th>
             {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1 py-1.5 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 font-black" : "bg-white"}>
-              <td className="border border-slate-200 bg-inherit px-1.5 py-2 text-left font-black">
+              <td className="border border-slate-200 bg-inherit px-1.5 py-1.5 text-left font-black">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AdChannelLogo channel={row.channel} />
                   <span className="truncate">{row.label}</span>
                 </span>
               </td>
-              <td className="border border-slate-200 px-1 py-2">{krw(row.cost)}</td>
-              <td className="border border-slate-200 px-1 py-2">{krw(row.purchaseValue)}</td>
-              <td className={`border border-slate-200 px-1 py-2 text-sm font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
-              <td className="border border-slate-200 px-1 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-1 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
-              <td className="border border-slate-200 px-1 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-1 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
-              <td className="border border-slate-200 px-1 py-2">{krw(row.cpm)}</td>
-              <td className="border border-slate-200 px-1 py-2">{krw(row.cpc)}</td>
-              <td className={`border border-slate-200 px-1 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cost)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{krw(row.purchaseValue)}</td>
+              <td className={`border border-slate-200 px-1 py-1.5 text-xs font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{row.purchases.toLocaleString("ko-KR")}</td>
+              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cpm)}</td>
+              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cpc)}</td>
+              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
             </tr>
           ))}
         </tbody>
@@ -8476,17 +8502,15 @@ function AdsAnalysisWorkspace() {
 
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
-      <section className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
         <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
         <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
         <AdsMetricCard label="구매완료 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
-        <AdsMetricCard label="구매당 광고비" value={krw(mainReport.costPerPurchase)} note="CPA" />
-        <AdsMetricCard label="CTR" value={adPercent2(mainReport.ctr)} note={`${mainReport.clicks.toLocaleString("ko-KR")} 클릭`} tone="slate" />
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
-      <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-black">광고 리포트</h2>
           <div className="flex flex-wrap items-center gap-2">
@@ -8666,9 +8690,9 @@ function AdsRightPanel() {
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
-        <div className="space-y-3">
+        <div className="space-y-2">
           <label
-            className={`flex min-h-20 cursor-pointer flex-col justify-center rounded-md border border-dashed px-3 py-3 transition ${
+            className={`flex min-h-16 cursor-pointer flex-col justify-center rounded-md border border-dashed px-3 py-2 transition ${
               isAdDragOver
                 ? "border-orange-500 bg-orange-50 shadow-[0_0_0_3px_rgba(249,115,22,0.16)]"
                 : "border-slate-300 bg-slate-50 hover:border-orange-300 hover:bg-orange-50"
@@ -8680,12 +8704,12 @@ function AdsRightPanel() {
           >
             <span className="text-sm font-black text-slate-800">파일 업로드</span>
             <span className="mt-1 text-xs font-bold text-slate-500">5개 광고 엑셀/CSV를 한번에 드래그</span>
-            <span className={`mt-3 inline-flex h-8 w-fit items-center rounded-md border px-3 text-xs font-black transition ${
+            <span className={`mt-2 inline-flex h-7 w-fit items-center rounded-md border px-3 text-xs font-black transition ${
               isAdDragOver ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-white text-orange-600"
             }`}>파일 선택</span>
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
           </label>
-          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-10 w-full rounded-md bg-orange-500 text-sm font-black text-white disabled:bg-slate-300">
+          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-9 w-full rounded-md bg-orange-500 text-sm font-black text-white disabled:bg-slate-300">
             {uploading ? "생성 중" : `데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
           </button>
           {message && <p className="rounded-md bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">{message}</p>}
