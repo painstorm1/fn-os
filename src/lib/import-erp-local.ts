@@ -154,17 +154,22 @@ function actualPaymentKrw(order: AnyRecord, rates: AnyRecord) {
 }
 
 function productTotals(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
-  const nativeTotals: AnyRecord = {};
-  let productWon = 0;
+  const lineNativeTotals: AnyRecord = {};
+  let lineProductWon = 0;
   for (const line of lines) {
     const qty = numberValue(line.quantity);
     const unit = numberValue(line.unit_price);
     const currency = text(line.item_currency || order.currency || "CNY");
-    nativeTotals[currency] = numberValue(nativeTotals[currency]) + qty * unit;
-    productWon += qty * unit * lineRate(order, line, rates);
+    lineNativeTotals[currency] = numberValue(lineNativeTotals[currency]) + qty * unit;
+    lineProductWon += qty * unit * lineRate(order, line, rates);
   }
   const actualKrw = actualPaymentKrw(order, rates);
-  return { nativeTotals, productWon: actualKrw || productWon, displayProductWon: productWon };
+  const actualTotal = numberValue(order.actual_payment_total || order.actual_payment_usd);
+  const actualCurrency = text(order.actual_payment_currency || (order.actual_payment_usd ? "USD" : ""));
+  const nativeTotals = actualKrw && actualTotal && actualCurrency
+    ? { [actualCurrency]: actualTotal }
+    : lineNativeTotals;
+  return { nativeTotals, productWon: actualKrw || lineProductWon, displayProductWon: lineProductWon, lineProductWon };
 }
 
 function orderChinaExtra(order: AnyRecord, rates: AnyRecord) {
@@ -190,13 +195,31 @@ function orderTotalWon(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
     orderChinaExtra(order, rates);
 }
 
+function koreaExtraCost(order: AnyRecord) {
+  return numberValue(order.shipping_cost) +
+    numberValue(order.customs_duty) +
+    numberValue(order.vat) +
+    numberValue(order.customs_fee) +
+    numberValue(order.inspection_fee) +
+    numberValue(order.domestic_shipping_cost) +
+    numberValue(order.other_cost);
+}
+
 function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
-  const totalWon = orderTotalWon(order, lines, rates);
+  const totals = productTotals(order, lines, rates);
+  const productBaseTotal = totals.productWon;
+  const lineProductTotal = totals.lineProductWon;
+  const chinaExtraCost = orderChinaExtra(order, rates);
+  const koreaExtra = koreaExtraCost(order);
+  const extraTotal = chinaExtraCost + koreaExtra;
+  const totalWon = productBaseTotal + extraTotal;
   const rows = lines.map((line) => {
     const qty = numberValue(line.quantity);
-    const lineProductWon = qty * numberValue(line.unit_price) * lineRate(order, line, rates);
-    const costRatio = totalWon ? lineProductWon / Math.max(1, totalWon) : 0;
+    const lineBaseWon = qty * numberValue(line.unit_price) * lineRate(order, line, rates);
+    const costRatio = lineProductTotal > 0 ? lineBaseWon / lineProductTotal : (totalQty ? qty / totalQty : 0);
+    const allocatedProductWon = productBaseTotal * costRatio;
+    const allocatedExtraWon = extraTotal * costRatio;
     return {
       order_item_id: line.id,
       product_id: line.product_id,
@@ -205,18 +228,27 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
       quantity: qty,
       item_currency: line.item_currency,
       unit_price: numberValue(line.unit_price),
-      line_product_won: lineProductWon,
+      line_product_won: allocatedProductWon,
       cost_ratio: costRatio,
-      unit_extra_cost: totalQty ? (totalWon - lineProductWon) / totalQty : 0,
+      unit_extra_cost: qty ? allocatedExtraWon / qty : 0,
       material_unit_cost: 0,
-      base_unit_cost: qty ? lineProductWon / qty : 0,
-      estimated_unit_cost: qty ? totalWon / Math.max(totalQty, 1) : 0,
+      base_unit_cost: qty ? allocatedProductWon / qty : 0,
+      estimated_unit_cost: qty ? (allocatedProductWon + allocatedExtraWon) / qty : 0,
       coupang_margin: { amount: null, pct: null },
       naver_free_margin: { amount: null, pct: null },
       naver_cod_margin: { amount: null, pct: null },
     };
   });
-  return { rows, total_extra_cost: totalWon, total_qty: totalQty };
+  return {
+    rows,
+    china_extra_cost: chinaExtraCost,
+    korea_extra_cost: koreaExtra,
+    total_extra_cost: extraTotal,
+    product_base_total: productBaseTotal,
+    goods_total_won: productBaseTotal,
+    total_won: totalWon,
+    total_qty: totalQty,
+  };
 }
 
 async function materialInfoForProducts(productIds: Array<number | string>) {
@@ -584,6 +616,7 @@ async function orderDetail(id: number) {
     cost_grid: costGrid(order, lines, rates),
     self_total_won: orderTotalWon(order, lines, rates),
     native_totals: productTotals(order, lines, rates).nativeTotals,
+    product_won: productTotals(order, lines, rates).productWon,
     display_product_won: productTotals(order, lines, rates).displayProductWon,
   };
 }

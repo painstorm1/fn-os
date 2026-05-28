@@ -887,6 +887,7 @@ type CostGrid = {
   total_extra_cost?: number;
   product_base_total?: number;
   goods_total_won?: number;
+  total_won?: number;
 };
 
 type ImportProductDetail = {
@@ -1899,7 +1900,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const [actualPayment, setActualPayment] = useState(actualPaymentSingle(order));
   const [actualPayment1, setActualPayment1] = useState(actualPaymentFirst(order));
   const [actualPayment2, setActualPayment2] = useState(actualPaymentSecond(order));
-  const productWon = Number(detail.product_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
+  const productWon = Number(detail.product_won ?? detail.cost_grid?.goods_total_won ?? Math.max(0, Number(detail.total_won || 0) - orderExtraCost(order)));
   const nativeTotals = nativeTotalText(detail.native_totals, order.currency || "CNY");
   const usedCurrencies = Object.keys(detail.native_totals || (order.currency ? { [order.currency]: 0 } : { CNY: 0 }));
   const rateNote = rateNoteText(detail.fx_rates, Array.from(new Set([...usedCurrencies, "CNY", "USD"])));
@@ -1907,9 +1908,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
   const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(detail.fx_rates?.USD || 0)) : 0;
   const chinaExtraWon = Number(detail.cost_grid?.china_extra_cost || 0);
-  const panelProductWon = Math.max(0, productWon - chinaExtraWon);
+  const panelProductWon = productWon;
   const koreaExtraWon = Number(detail.cost_grid?.korea_extra_cost || orderExtraCost(order));
-  const panelTotalWon = panelProductWon + Number(detail.cost_grid?.total_extra_cost || orderExtraCost(order));
+  const panelTotalWon = Number(detail.total_won || detail.cost_grid?.total_won || (panelProductWon + chinaExtraWon + koreaExtraWon));
   const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
 
   useEffect(() => {
