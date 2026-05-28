@@ -8134,6 +8134,11 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
   const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
   const labelColumns = Math.min(points.length || 1, range.mode === "month" ? 6 : 10);
+  const axisTicks = [
+    { y: 20, cost: maxCost, roas: maxRoas },
+    { y: 56, cost: maxCost / 2, roas: maxRoas / 2 },
+    { y: 92, cost: 0, roas: 0 },
+  ];
 
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -8149,6 +8154,14 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
         {points.length ? (
           <>
             <div className="relative h-52">
+              <div className="pointer-events-none absolute inset-0 z-10">
+                {axisTicks.map((tick) => (
+                  <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between px-1 text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
+                    <span className="rounded bg-slate-50/80 px-1 text-orange-500/60">{krw(tick.cost)}</span>
+                    <span className="rounded bg-slate-50/80 px-1 text-slate-500/60">{adPercent(tick.roas)}</span>
+                  </div>
+                ))}
+              </div>
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="광고비와 ROAS 그래프">
                 <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
                 <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
