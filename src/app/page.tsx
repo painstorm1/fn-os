@@ -7977,20 +7977,24 @@ function adUploadDateLabel(value: unknown) {
   ].join("-") + ` ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-type AdRangePreset = "yesterday" | "7d" | "14d" | "30d";
+type AdRangePreset = "7d" | "14d" | "30d" | "month";
 
 function adRangeForPreset(preset: AdRangePreset) {
   const today = new Date();
   const end = new Date(today);
   end.setDate(today.getDate() - 1);
   const start = new Date(end);
-  const days = preset === "yesterday" ? 1 : preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
+  if (preset === "month") {
+    start.setDate(1);
+    return { from: adDateInput(start), to: adDateInput(end) };
+  }
+  const days = preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
   start.setDate(end.getDate() - days + 1);
   return { from: adDateInput(start), to: adDateInput(end) };
 }
 
 function adPresetForRange(from: string, to: string): AdRangePreset | "custom" {
-  for (const preset of ["yesterday", "7d", "14d", "30d"] as const) {
+  for (const preset of ["7d", "14d", "30d", "month"] as const) {
     const range = adRangeForPreset(preset);
     if (range.from === from && range.to === to) return preset;
   }
@@ -8054,13 +8058,19 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
   const points = rows.slice(-14);
   const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
   const maxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 1);
+  const chartPoints = points.map((row, index) => {
+    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
+    const costY = 92 - (adNumber(row.cost) / maxCost) * 72;
+    const roasY = 92 - (adNumber(row.roas) / maxRoas) * 72;
+    return { row, x, costY, roasY };
+  });
   const costPath = points.map((row, index) => {
-    const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * 100;
+    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
     const y = 92 - (adNumber(row.cost) / maxCost) * 72;
     return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(" ");
   const roasPath = points.map((row, index) => {
-    const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * 100;
+    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
     const y = 92 - (adNumber(row.roas) / maxRoas) * 72;
     return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(" ");
@@ -8074,17 +8084,50 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
           <span className="text-slate-600">ROAS</span>
         </div>
       </div>
-      <div className="mt-4 h-56 rounded-md bg-slate-50 p-3">
+      <div className="mt-4 rounded-md bg-slate-50 p-3">
         {points.length ? (
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-            <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
-            <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
-            <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
-            <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.4" vectorEffect="non-scaling-stroke" />
-            <path d={roasPath} fill="none" stroke="#475569" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" />
-          </svg>
+          <>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-52 w-full overflow-visible" role="img" aria-label="일별 광고비와 ROAS 그래프">
+              <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
+              <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
+              <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
+              {chartPoints.map(({ row, x }, index) => {
+                const barHeight = (adNumber(row.cost) / maxCost) * 72;
+                const barWidth = points.length <= 1 ? 10 : Math.min(8, 72 / points.length);
+                return (
+                  <rect
+                    key={`ad-cost-bar-${String(row.date)}-${index}`}
+                    x={x - barWidth / 2}
+                    y={92 - barHeight}
+                    width={barWidth}
+                    height={barHeight}
+                    rx="1"
+                    fill="#fed7aa"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+              {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+              {points.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
+              {chartPoints.map(({ row, x, costY, roasY }, index) => (
+                <g key={`ad-point-${String(row.date)}-${index}`}>
+                  <circle cx={x} cy={costY} r="2.6" fill="#f97316" vectorEffect="non-scaling-stroke" />
+                  <circle cx={x} cy={roasY} r="2.3" fill="#475569" vectorEffect="non-scaling-stroke" />
+                </g>
+              ))}
+            </svg>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {points.slice(-4).map((row, index) => (
+                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="rounded bg-white px-2 py-2 text-xs">
+                  <p className="font-black text-slate-500">{String(row.date || "-")}</p>
+                  <p className="mt-1 font-black text-orange-600">{krw(adNumber(row.cost))}</p>
+                  <p className="mt-0.5 font-black text-slate-700">ROAS {adPercent(adNumber(row.roas))}</p>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
+          <div className="flex h-52 items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
         )}
       </div>
     </section>
@@ -8256,7 +8299,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
 
 function AdsAnalysisWorkspace() {
   const searchParams = useSearchParams();
-  const defaultRange = adRangeForPreset("yesterday");
+  const defaultRange = adRangeForPreset("7d");
   const dateFrom = searchParams.get("adsFrom") || defaultRange.from;
   const dateTo = searchParams.get("adsTo") || defaultRange.to;
   const [summary, setSummary] = useState<AdsSummary | null>(null);
@@ -8350,7 +8393,7 @@ function AdsAnalysisWorkspace() {
 
 function AdsRightPanel() {
   const searchParams = useSearchParams();
-  const defaultRange = adRangeForPreset("yesterday");
+  const defaultRange = adRangeForPreset("7d");
   const initialFrom = searchParams.get("adsFrom") || defaultRange.from;
   const initialTo = searchParams.get("adsTo") || defaultRange.to;
   const [summaries, setSummaries] = useState<Record<string, AdsSummary>>({});
@@ -8472,8 +8515,8 @@ function AdsRightPanel() {
   useEffect(() => {
     let alive = true;
     Promise.all([
-      ["어제", adRangeForPreset("yesterday")],
-      ["최근 1주일", adRangeForPreset("7d")],
+      ["최근 7일", adRangeForPreset("7d")],
+      ["이번달", adRangeForPreset("month")],
       ["최근 30일", adRangeForPreset("30d")],
     ].map(([label, range]) => {
       const params = new URLSearchParams(range as { from: string; to: string });
@@ -8492,8 +8535,12 @@ function AdsRightPanel() {
     };
   }, []);
 
-  const uploadSource = summaries["어제"] || summaries["최근 1주일"] || summaries["최근 30일"] || {};
+  const uploadSource = summaries["최근 7일"] || summaries["이번달"] || summaries["최근 30일"] || {};
   const recentBatches = uploadSource.batches || [];
+  const quickSummaryRows = [
+    { label: "최근 7일", summary: summaries["최근 7일"] },
+    { label: "이번달", summary: summaries["이번달"] },
+  ];
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
@@ -8542,8 +8589,8 @@ function AdsRightPanel() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             {[
-              ["yesterday", "어제"],
-              ["7d", "최근 1주"],
+              ["7d", "최근 7일"],
+              ["month", "이번달"],
               ["14d", "최근 2주"],
               ["30d", "최근 30일"],
             ].map(([key, label]) => (
@@ -8555,6 +8602,15 @@ function AdsRightPanel() {
               >
                 {label}
               </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {quickSummaryRows.map(({ label, summary }) => (
+              <div key={label} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <p className="font-black text-slate-500">{label}</p>
+                <p className="mt-1 font-black text-slate-950">{krw(adNumber(summary?.total?.cost))}</p>
+                <p className="mt-0.5 font-bold text-orange-600">ROAS {adPercent(adNumber(summary?.total?.roas))}</p>
+              </div>
             ))}
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
