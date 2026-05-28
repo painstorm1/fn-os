@@ -1960,7 +1960,6 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const koreaExtraWon = ["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"].reduce((sum, key) => sum + Number(costs[key as keyof typeof costs] || 0), 0);
   const convertedOrderTotalWon = panelProductWon + chinaExtraWon;
   const supplierPaymentWon = actualPaymentKrw > 0 ? actualPaymentKrw : convertedOrderTotalWon;
-  const paymentDeltaWon = actualPaymentKrw > 0 ? actualPaymentKrw - convertedOrderTotalWon : 0;
   const panelTotalWon = supplierPaymentWon + koreaExtraWon;
   const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
 
