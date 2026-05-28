@@ -2263,7 +2263,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
   }
 
   const headers = ["옵션명", "수량", "상품단가", "원가배분%", "부대비용/개", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"];
-  const widths = ["12%", "5%", "8%", "6%", "8%", "7%", "8%", "7%", "8%", "7%", "8%", "7%", "9%"];
+  const widths = ["9%", "5%", "8%", "6%", "8%", "7%", "8%", "8%", "8%", "8%", "8%", "8%", "9%"];
 
   return (
     <section className="rounded-md border border-slate-200 bg-white">
@@ -2272,7 +2272,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
         {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] table-fixed text-[11px]">
+        <table className="w-full min-w-[1040px] table-fixed text-xs">
           <colgroup>
             {widths.map((width, index) => <col key={`${width}-${index}`} style={{ width }} />)}
           </colgroup>
@@ -2315,11 +2315,11 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right">{krw(unitExtraCost)}</td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-[11px] outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(cp)}>{formatMargin(cp)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-[11px] outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(nf)}>{formatMargin(nf)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-[11px] outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
                   <td className="truncate px-1.5 py-2 text-right" title={formatMargin(nc)}>{formatMargin(nc)}</td>
                 </tr>
               );
