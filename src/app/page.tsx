@@ -8222,7 +8222,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
               </td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.cost)}</td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.purchaseValue)}</td>
-              <td className="border border-slate-200 px-1 py-2">{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 px-1 py-2 text-sm font-black text-slate-950">{adPercent(row.roas)}</td>
               <td className="border border-slate-200 px-1 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.costPerPurchase)}</td>
               <td className="border border-slate-200 px-1 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
