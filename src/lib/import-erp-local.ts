@@ -420,6 +420,7 @@ async function generateOrderCode(orderDate: string) {
 
 async function saveOrder(request: NextRequest, id?: number) {
   const body = await request.json();
+  const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(body, field);
   const orderFields = [
     "order_code", "parent_order_id", "factory_id", "platform", "currency", "fx_rate", "order_date",
     "payment_method", "first_payment_date", "paid_date", "factory_ship_date", "badaeji_arrived",
@@ -433,18 +434,23 @@ async function saveOrder(request: NextRequest, id?: number) {
   const savedId = id || await nextId(TABLES.orders);
   const values: AnyRecord = {};
   for (const field of orderFields) {
-    if (body[field] !== undefined) values[field] = body[field] === "" ? null : body[field];
+    if (hasBodyField(field)) values[field] = body[field] === "" ? null : body[field];
   }
-  for (const field of ["parent_order_id", "factory_id"]) values[field] = text(values[field]) ? Number(values[field]) : null;
+  for (const field of ["parent_order_id", "factory_id"]) {
+    if (field in values) values[field] = text(values[field]) ? Number(values[field]) : null;
+  }
   for (const field of ["fx_rate", "shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost", "production_days", "actual_payment_usd", "actual_payment_usd_1", "actual_payment_usd_2", "china_domestic_shipping", "china_other_cost", "actual_payment_1", "actual_payment_2", "actual_payment_total", "actual_payment_total_krw", "china_fee"]) {
-    values[field] = numberValue(values[field]);
+    if (field in values) values[field] = numberValue(values[field]);
   }
-  values.order_code = text(values.order_code) || await generateOrderCode(dateKey(values.order_date));
+  if (!id || "order_code" in values) {
+    values.order_code = text(values.order_code) || await generateOrderCode(dateKey(values.order_date));
+  }
   values.updated_at = nowIso();
+  const shouldReplaceItems = Array.isArray(body.items);
   if (id) {
     const keys = Object.keys(values);
     await db(`update ${q(TABLES.orders)} set ${keys.map((key, index) => `${q(key)}=$${index + 1}`).join(", ")} where id=$${keys.length + 1}`, [...Object.values(values), id]);
-    await db(`delete from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
+    if (shouldReplaceItems) await db(`delete from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
   } else {
     values.id = savedId;
     values.created_at = nowIso();
@@ -452,7 +458,7 @@ async function saveOrder(request: NextRequest, id?: number) {
     await db(`insert into ${q(TABLES.orders)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(values));
   }
   let sortOrder = 0;
-  for (const line of (Array.isArray(body.items) ? body.items : [])) {
+  for (const line of (shouldReplaceItems ? body.items : [])) {
     const row = {
       id: await nextId(TABLES.orderItems),
       order_id: savedId,
