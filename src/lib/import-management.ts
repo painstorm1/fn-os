@@ -6,15 +6,24 @@ export type ImportSkuLinkInput = {
   import_product_id: number | string;
   product_id: string;
   sku?: string;
+  import_option_key?: string;
+  import_option_name?: string;
+  match_group_label?: string;
+  variant_label?: string;
   default_ratio?: number;
   default_qty?: number;
   is_primary?: boolean;
+  sort_order?: number;
+  is_active?: boolean;
   memo?: string;
 };
 
 export type ImportReceiptAllocation = {
   import_order_id: number | string;
+  import_order_item_id?: number | string;
   import_product_id: number | string;
+  import_option_key?: string;
+  import_option_name?: string;
   product_id: string;
   sku?: string;
   allocated_qty: number;
@@ -156,9 +165,15 @@ export async function saveImportProductLinks(importProductId: number | string, l
       import_product_id: Number(importProductId),
       product_id: link.product_id,
       sku: text(link.sku),
+      import_option_key: text(link.import_option_key) || null,
+      import_option_name: text(link.import_option_name) || null,
+      match_group_label: text(link.match_group_label) || null,
+      variant_label: text(link.variant_label) || null,
       default_ratio: Number(link.default_ratio || 0) || 1,
       default_qty: Number(link.default_qty || 0),
       is_primary: Boolean(link.is_primary || index === 0),
+      sort_order: Number(link.sort_order ?? index) || 0,
+      is_active: link.is_active !== false,
       memo: text(link.memo) || null,
       created_at: now,
       updated_at: now,
@@ -340,7 +355,10 @@ export async function createImportReceipt(payload: {
 
   const allocationRows = allocations.map((item, index) => ({
     import_order_id: Number(item.import_order_id),
+    import_order_item_id: text(item.import_order_item_id) ? Number(item.import_order_item_id) : null,
     import_product_id: Number(item.import_product_id),
+    import_option_key: text(item.import_option_key) || null,
+    import_option_name: text(item.import_option_name) || null,
     product_id: text(item.product_id),
     sku: text(item.sku) || productSku(productMap.get(text(item.product_id)) || {}),
     allocated_qty: numberValue(item.allocated_qty),

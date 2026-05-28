@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError } from "@/lib/fnos-db";
-import { bomStatusForImportProduct, listImportProductLinks, saveImportProductLinks } from "@/lib/import-management";
+import { bomStatusForImportProduct, listImportProductLinks, saveImportProductLinks, type ImportSkuLinkInput } from "@/lib/import-management";
 
 function importProductId(request: NextRequest, body?: Record<string, unknown>) {
   return String(body?.import_product_id || request.nextUrl.searchParams.get("import_product_id") || "").trim();
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { import_product_id?: string | number; links?: [] };
+    const body = (await request.json().catch(() => ({}))) as { import_product_id?: string | number; links?: ImportSkuLinkInput[] };
     const id = importProductId(request, body);
     if (!id) return NextResponse.json({ ok: false, error: "import_product_id가 필요합니다." }, { status: 400 });
     const saved = await saveImportProductLinks(id, Array.isArray(body.links) ? body.links : []);

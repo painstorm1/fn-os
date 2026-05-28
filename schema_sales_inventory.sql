@@ -649,9 +649,15 @@ create table if not exists import_product_sku_links (
   import_product_id bigint not null,
   product_id uuid references products(id) on delete cascade,
   sku text,
+  import_option_key text,
+  import_option_name text,
+  match_group_label text,
+  variant_label text,
   default_ratio double precision default 1,
   default_qty double precision default 0,
   is_primary boolean default false,
+  sort_order integer default 0,
+  is_active boolean default true,
   memo text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -661,16 +667,25 @@ create table if not exists import_product_sku_links (
 alter table import_product_sku_links add column if not exists import_product_id bigint;
 alter table import_product_sku_links add column if not exists product_id uuid;
 alter table import_product_sku_links add column if not exists sku text;
+alter table import_product_sku_links add column if not exists import_option_key text;
+alter table import_product_sku_links add column if not exists import_option_name text;
+alter table import_product_sku_links add column if not exists match_group_label text;
+alter table import_product_sku_links add column if not exists variant_label text;
 alter table import_product_sku_links add column if not exists default_ratio double precision default 1;
 alter table import_product_sku_links add column if not exists default_qty double precision default 0;
 alter table import_product_sku_links add column if not exists is_primary boolean default false;
+alter table import_product_sku_links add column if not exists sort_order integer default 0;
+alter table import_product_sku_links add column if not exists is_active boolean default true;
 alter table import_product_sku_links add column if not exists memo text;
 alter table import_product_sku_links add column if not exists updated_at timestamptz default now();
 
 create table if not exists import_purchase_sku_allocations (
   id uuid primary key default gen_random_uuid(),
   import_order_id bigint not null,
+  import_order_item_id bigint,
   import_product_id bigint not null,
+  import_option_key text,
+  import_option_name text,
   product_id uuid references products(id) on delete set null,
   sku text,
   allocated_qty double precision default 0,
@@ -682,7 +697,10 @@ create table if not exists import_purchase_sku_allocations (
 );
 
 alter table import_purchase_sku_allocations add column if not exists import_order_id bigint;
+alter table import_purchase_sku_allocations add column if not exists import_order_item_id bigint;
 alter table import_purchase_sku_allocations add column if not exists import_product_id bigint;
+alter table import_purchase_sku_allocations add column if not exists import_option_key text;
+alter table import_purchase_sku_allocations add column if not exists import_option_name text;
 alter table import_purchase_sku_allocations add column if not exists product_id uuid;
 alter table import_purchase_sku_allocations add column if not exists sku text;
 alter table import_purchase_sku_allocations add column if not exists allocated_qty double precision default 0;
@@ -829,8 +847,10 @@ create index if not exists idx_payment_records_date on payment_records(payment_d
 create index if not exists idx_customer_payables_month on customer_payables(base_month, status);
 create index if not exists idx_import_po_status on import_purchase_orders(status, expected_inbound_date);
 create index if not exists idx_import_product_sku_links_import on import_product_sku_links(import_product_id);
+create index if not exists idx_import_product_sku_links_option on import_product_sku_links(import_product_id, import_option_key, sort_order);
 create index if not exists idx_import_product_sku_links_product on import_product_sku_links(product_id);
 create index if not exists idx_import_purchase_alloc_order on import_purchase_sku_allocations(import_order_id);
+create index if not exists idx_import_purchase_alloc_item on import_purchase_sku_allocations(import_order_id, import_order_item_id);
 create index if not exists idx_import_purchase_alloc_product on import_purchase_sku_allocations(product_id);
 create index if not exists idx_archive_created on archive_items(created_at desc);
 create index if not exists idx_archive_category on archive_items(category_id);
