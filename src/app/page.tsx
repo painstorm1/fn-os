@@ -779,6 +779,8 @@ type ProductImportLinkRow = {
   default_ratio?: number;
 };
 
+type ProductRelationFilter = "plain" | "bom" | "import";
+
 type ImportSkuLink = {
   id?: string;
   import_product_id?: number;
@@ -4678,7 +4680,7 @@ function LegacyNativeSettings() {
   );
 }
 
-function Panel({ title, subtitle, action, children, className = "" }: { title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+function Panel({ title, subtitle, action, children, className = "" }: { title: string; subtitle?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <section className={`rounded-md border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -7765,6 +7767,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [bomRows, setBomRows] = useState<ProductBomRow[]>([]);
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
+  const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -7780,10 +7783,16 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     };
   }
 
-  async function loadProducts(nextPage = page, nextQuery = query) {
+  function filterProductsByRelation(rows: FnProduct[], filter: ProductRelationFilter) {
+    if (filter === "bom") return rows.filter((product) => (product.bom || []).length > 0);
+    if (filter === "import") return rows.filter((product) => (product.import_links || []).length > 0);
+    return rows.filter((product) => !(product.bom || []).length && !(product.import_links || []).length);
+  }
+
+  async function loadProducts(nextPage = page, nextQuery = query, nextFilter = relationFilter) {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
+      const params = new URLSearchParams({ page: "1", pageSize: "5000" });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
@@ -7791,9 +7800,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         setProductMessage(data.error || "품목 조회 실패");
         return;
       }
-      setProducts(data.products || []);
+      const nextProducts = filterProductsByRelation(data.products || [], nextFilter);
+      const start = (nextPage - 1) * pageSize;
+      setProducts(nextProducts.slice(start, start + pageSize));
       setWarehouses(data.warehouses || []);
-      setTotal(Number(data.total || 0));
+      setTotal(nextProducts.length);
     } finally {
       setLoading(false);
     }
@@ -7801,10 +7812,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadProducts(page, query);
+      void loadProducts(page, query, relationFilter);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [page, query]);
+  }, [page, query, relationFilter]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -8004,12 +8015,35 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const start = Math.min(Math.max(1, page - 2), Math.max(1, pageCount - 5));
     return start + index;
   }).filter((value) => value <= pageCount);
+  const relationFilters: Array<{ key: ProductRelationFilter; label: string }> = [
+    { key: "plain", label: "일반" },
+    { key: "bom", label: "BOM연동" },
+    { key: "import", label: "수입연동" },
+  ];
 
   return (
     <div className="space-y-4">
       <Panel
         title="품목관리"
-        subtitle="품목코드 하나로 관리하고 모든 금액은 부가세 포함 기준으로 저장합니다."
+        subtitle={
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {relationFilters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => {
+                  setRelationFilter(filter.key);
+                  setPage(1);
+                }}
+                className={`font-black underline-offset-4 hover:underline ${
+                  relationFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        }
         action={
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={openNewProduct} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 품목</button>
