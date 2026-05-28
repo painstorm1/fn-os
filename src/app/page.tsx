@@ -8255,6 +8255,34 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
     ["CPC\n(클릭당 비용)", false],
     ["구매완료\n전환율", true],
   ] as const;
+  const channelRows = rows.filter((row) => row.channel !== "total");
+  const cpaValues = channelRows.filter((row) => row.purchases > 0 && row.costPerPurchase > 0).map((row) => row.costPerPurchase);
+  const ctrValues = channelRows.map((row) => row.ctr);
+  const purchaseCvrValues = channelRows.map((row) => row.purchaseCvr);
+  const minCpa = cpaValues.length ? Math.min(...cpaValues) : null;
+  const maxCpa = cpaValues.length ? Math.max(...cpaValues) : null;
+  const minCtr = ctrValues.length ? Math.min(...ctrValues) : null;
+  const maxCtr = ctrValues.length ? Math.max(...ctrValues) : null;
+  const minPurchaseCvr = purchaseCvrValues.length ? Math.min(...purchaseCvrValues) : null;
+  const maxPurchaseCvr = purchaseCvrValues.length ? Math.max(...purchaseCvrValues) : null;
+  const isSameMetric = (a: number, b: number | null) => b !== null && Math.abs(a - b) < 0.0001;
+  const roasCellClass = (roas: number) => {
+    if (roas >= 450) return "bg-emerald-50 text-emerald-800";
+    if (roas >= 300) return "bg-yellow-100 text-yellow-900";
+    return "bg-rose-50 text-rose-700";
+  };
+  const cpaCellClass = (row: (typeof rows)[number]) => {
+    if (row.channel === "total" || !row.purchases || row.costPerPurchase <= 0 || minCpa === maxCpa) return "";
+    if (isSameMetric(row.costPerPurchase, minCpa)) return "bg-emerald-50 text-emerald-800";
+    if (isSameMetric(row.costPerPurchase, maxCpa)) return "bg-rose-50 text-rose-700";
+    return "";
+  };
+  const highLowCellClass = (value: number, min: number | null, max: number | null, isTotal: boolean) => {
+    if (isTotal || min === null || max === null || min === max) return "";
+    if (isSameMetric(value, max)) return "bg-emerald-50 text-emerald-800";
+    if (isSameMetric(value, min)) return "bg-rose-50 text-rose-700";
+    return "";
+  };
   return (
     <div className="overflow-x-hidden">
       <table className="w-full table-fixed border-collapse text-center text-xs">
@@ -8291,15 +8319,15 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
               </td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.cost)}</td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.purchaseValue)}</td>
-              <td className="border border-slate-200 px-1 py-2 text-sm font-black text-slate-950">{adPercent(row.roas)}</td>
+              <td className={`border border-slate-200 px-1 py-2 text-sm font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
               <td className="border border-slate-200 px-1 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1 py-2">{krw(row.costPerPurchase)}</td>
+              <td className={`border border-slate-200 px-1 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
               <td className="border border-slate-200 px-1 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
               <td className="border border-slate-200 px-1 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1 py-2">{adPercent2(row.ctr)}</td>
+              <td className={`border border-slate-200 px-1 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.cpm)}</td>
               <td className="border border-slate-200 px-1 py-2">{krw(row.cpc)}</td>
-              <td className="border border-slate-200 px-1 py-2">{adPercent2(row.purchaseCvr)}</td>
+              <td className={`border border-slate-200 px-1 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
             </tr>
           ))}
         </tbody>
