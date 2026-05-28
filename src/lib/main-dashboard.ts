@@ -117,7 +117,9 @@ export async function mainDashboardSummary() {
     legacyExpenses,
     payables,
     importPurchaseOrders,
-    importErpOrders,
+    importErpOrdersRaw,
+    importErpItems,
+    importErpFactories,
   ] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
     optionalRows("orders", { order: "created_at.desc", limit: 700 }),
@@ -129,7 +131,9 @@ export async function mainDashboardSummary() {
     optionalRows("expense_entries", { order: "expense_date.desc", limit: 500 }),
     optionalRows("customer_payables", { order: "due_date.asc", limit: 100 }),
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
-    optionalRows("import_erp_orders", { order: "created_at.desc", limit: 120 }),
+    optionalRows("import_erp_orders", { order: "order_date.desc", limit: 160 }),
+    optionalRows("import_erp_order_items", { order: "sort_order.asc", limit: 1200 }),
+    optionalRows("import_erp_factories", { order: "name.asc", limit: 300 }),
   ]);
 
   const today = kstDate();
@@ -149,6 +153,24 @@ export async function mainDashboardSummary() {
   const adSpend = (row: Row) => row.cost ?? row.spend_amount ?? row.spend;
   const expenseRows = expenses.length ? expenses : legacyExpenses;
   const expenseDate = (row: Row) => row.expense_date ?? row.created_at;
+  const factoryById = new Map(importErpFactories.map((row) => [String(row.id), text(row.name)]));
+  const itemsByOrder = new Map<string, Row[]>();
+  for (const item of importErpItems) {
+    const key = text(item.order_id);
+    if (!key) continue;
+    itemsByOrder.set(key, [...(itemsByOrder.get(key) || []), item]);
+  }
+  const importErpOrders = importErpOrdersRaw.map((row) => {
+    const lines = itemsByOrder.get(text(row.id)) || [];
+    const firstLine = lines[0] || {};
+    return {
+      ...row,
+      factory_name: factoryById.get(text(row.factory_id)) || row.factory_name,
+      repr_product: firstLine.product_name || row.repr_product,
+      total_qty: lines.reduce((total, line) => total + numberValue(line.quantity), 0),
+      line_count: lines.length,
+    };
+  });
   const importOrders = importPurchaseOrders.length ? importPurchaseOrders : importErpOrders;
   const importDate = (row: Row) => row.order_date ?? row.expected_inbound_date ?? row.created_at;
   const importAmount = (row: Row) =>
@@ -198,6 +220,18 @@ export async function mainDashboardSummary() {
 
   const adMonthSpend = sum(monthAdRows, adSpend);
   const conversionSales = sum(monthAdRows, (row) => row.conversion_value ?? row.purchase_conversion_value);
+  const importMonthly = monthlySeries(importOrders, 6, importDate, importAmount)
+    .map((group) => {
+      const rows = importOrders
+        .filter((row) => dateKey(importDate(row)).startsWith(group.month))
+        .sort((left, right) => dateKey(importDate(right)).localeCompare(dateKey(importDate(left))));
+      return {
+        ...group,
+        count: rows.length,
+        orders: rows.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
+      };
+    })
+    .reverse();
 
   return {
     title: "FN OS",
@@ -236,6 +270,6 @@ export async function mainDashboardSummary() {
     upcoming_fixed_costs: upcomingFixedCosts.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
     import_recent_orders: importOrders.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
     import_six_month_amount: sum(importSixMonthRows, importAmount),
-    import_monthly: monthlySeries(importOrders, 6, importDate, importAmount),
+    import_monthly: importMonthly,
   };
 }
