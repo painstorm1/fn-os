@@ -718,6 +718,12 @@ create table if not exists archive_items (
   content_type text default 'link',
   source_ref_id text,
   summary text,
+  original_url text,
+  description text,
+  preview_image_url text,
+  preview_status text default 'pending',
+  preview_error text,
+  preview_generated_at timestamptz,
   thumbnail_url text,
   file_url text,
   status text default 'active',
@@ -732,6 +738,12 @@ create table if not exists archive_items (
 alter table archive_items add column if not exists url text;
 alter table archive_items add column if not exists content_type text default 'link';
 alter table archive_items add column if not exists summary text;
+alter table archive_items add column if not exists original_url text;
+alter table archive_items add column if not exists description text;
+alter table archive_items add column if not exists preview_image_url text;
+alter table archive_items add column if not exists preview_status text default 'pending';
+alter table archive_items add column if not exists preview_error text;
+alter table archive_items add column if not exists preview_generated_at timestamptz;
 alter table archive_items add column if not exists thumbnail_url text;
 alter table archive_items add column if not exists status text default 'active';
 alter table archive_items add column if not exists is_favorite boolean default false;
@@ -857,6 +869,7 @@ create index if not exists idx_archive_category on archive_items(category_id);
 create index if not exists idx_archive_source on archive_items(source_type);
 create index if not exists idx_archive_content on archive_items(content_type);
 create index if not exists idx_archive_status on archive_items(status);
+create index if not exists idx_archive_preview_status on archive_items(preview_status);
 create index if not exists idx_archive_favorite on archive_items(is_favorite);
 create index if not exists idx_archive_item_tags_item on archive_item_tags(archive_item_id);
 create index if not exists idx_archive_item_tags_tag on archive_item_tags(tag_id);

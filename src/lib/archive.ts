@@ -8,6 +8,12 @@ export type ArchiveInput = {
   source_type?: string;
   content_type?: string;
   summary?: string;
+  original_url?: string;
+  description?: string;
+  preview_image_url?: string;
+  preview_status?: string;
+  preview_error?: string;
+  preview_generated_at?: string;
   memo?: string;
   thumbnail_url?: string;
   file_url?: string;
@@ -101,6 +107,12 @@ export async function createArchiveItem(input: ArchiveInput) {
     source_type: inferSourceType(url, text(input.source_type)),
     content_type: contentType,
     summary: text(input.summary) || null,
+    original_url: text(input.original_url || url) || null,
+    description: text(input.description) || null,
+    preview_image_url: text(input.preview_image_url) || null,
+    preview_status: text(input.preview_status) || (url ? "pending" : "manual"),
+    preview_error: text(input.preview_error) || null,
+    preview_generated_at: text(input.preview_generated_at) || null,
     memo: text(input.memo) || null,
     thumbnail_url: text(input.thumbnail_url) || null,
     file_url: text(input.file_url) || null,
@@ -154,6 +166,12 @@ export async function updateArchiveItem(id: string, input: ArchiveInput) {
     source_type: inferSourceType(text(input.url), text(input.source_type)),
     content_type: text(input.content_type) || "link",
     summary: text(input.summary) || null,
+    original_url: text(input.original_url || input.url) || null,
+    description: text(input.description) || null,
+    preview_image_url: text(input.preview_image_url) || null,
+    preview_status: text(input.preview_status) || (text(input.url) ? "pending" : "manual"),
+    preview_error: text(input.preview_error) || null,
+    preview_generated_at: text(input.preview_generated_at) || null,
     memo: text(input.memo) || null,
     thumbnail_url: text(input.thumbnail_url) || null,
     file_url: text(input.file_url) || null,
