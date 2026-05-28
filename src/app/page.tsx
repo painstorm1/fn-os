@@ -8918,8 +8918,8 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-black">일별 광고비 / ROAS</h2>
-        <div className="flex gap-3 text-xs font-black">
+        <h2 className="whitespace-nowrap text-base font-black">일별 광고비 / ROAS</h2>
+        <div className="flex shrink-0 gap-2.5 text-xs font-black">
           <span className="text-orange-600">광고비</span>
           <span className="text-slate-600">ROAS</span>
           <span className="text-slate-400">{range.title}</span>
@@ -9283,7 +9283,7 @@ function AdsAnalysisWorkspace() {
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.65fr_0.75fr]">
+      <section className="grid gap-4 xl:grid-cols-[1.15fr_1.05fr]">
         <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
         <AdsChannelStatus rows={channels} selectedChannels={selectedAdChannels} />
       </section>
