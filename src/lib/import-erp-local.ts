@@ -225,6 +225,7 @@ async function materialInfoForProducts(productIds: Array<number | string>) {
     `with movement_summary as (
        select material_id, coalesce(sum(qty), 0) as movement_qty
          from ${q(TABLES.materialMovements)}
+        where upper(coalesce(movement_type, '')) not in ('IN', 'USE')
         group by material_id
      ),
      incoming_summary as (
@@ -233,15 +234,25 @@ async function materialInfoForProducts(productIds: Array<number | string>) {
          join ${q(TABLES.products)} mp on mp.id = i.product_id
         where upper(coalesce(mp.item_type, '')) = 'MATERIAL'
         group by i.product_id
+     ),
+     usage_summary as (
+       select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as usage_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
+         join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
+        where upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+        group by pm.material_id
      )
      select pm.*, p.name as material_name, p.material_cost, p.material_unit_cost, p.material_stock_adjust, p.material_initial_qty,
             coalesce(ms.movement_qty, 0) as material_movement_qty,
             coalesce(inc.incoming_qty, 0) as material_incoming_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
+            coalesce(usg.usage_qty, 0) as material_usage_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
        from ${q(TABLES.productMaterials)} pm
        left join ${q(TABLES.products)} p on p.id = pm.material_id
        left join movement_summary ms on ms.material_id = p.id
        left join incoming_summary inc on inc.material_id = p.id
+       left join usage_summary usg on usg.material_id = p.id
       where pm.product_id = any($1::bigint[])`,
     [productIds.map(Number)],
   );
@@ -261,6 +272,7 @@ async function materialStats(materialIds: Array<number | string>) {
        select material_id, coalesce(sum(qty), 0) as movement_qty
          from ${q(TABLES.materialMovements)}
         where material_id = any($1::bigint[])
+          and upper(coalesce(movement_type, '')) not in ('IN', 'USE')
         group by material_id
      ),
      incoming_summary as (
@@ -270,14 +282,25 @@ async function materialStats(materialIds: Array<number | string>) {
         where i.product_id = any($1::bigint[])
           and upper(coalesce(mp.item_type, '')) = 'MATERIAL'
         group by i.product_id
+     ),
+     usage_summary as (
+       select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as usage_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
+         join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
+        where pm.material_id = any($1::bigint[])
+          and upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+        group by pm.material_id
      )
      select p.id,
             coalesce(ms.movement_qty, 0) as movement_qty,
             coalesce(inc.incoming_qty, 0) as incoming_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
+            coalesce(usg.usage_qty, 0) as usage_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
        from ${q(TABLES.products)} p
        left join movement_summary ms on ms.material_id = p.id
        left join incoming_summary inc on inc.material_id = p.id
+       left join usage_summary usg on usg.material_id = p.id
       where p.id = any($1::bigint[])`,
     [materialIds.map(Number)],
   );
