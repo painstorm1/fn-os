@@ -3590,24 +3590,22 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
     };
   }, [detail.items]);
 
-  function equalAllocate(importProductId: number, qty: number) {
-    const item = (detail.items || []).find((row) => Number(row.product_id || 0) === importProductId);
-    const links = item ? linksForOrderItem(item) : (linksByImportProduct[importProductId] || []);
+  function equalAllocate(item: ImportOrderItem, qty: number) {
+    const links = linksForOrderItem(item);
     if (!links.length) return;
     const perQty = Math.round((qty / links.length) * 100) / 100;
     setAllocations((prev) => ({
       ...prev,
-      ...Object.fromEntries(links.map((link) => [allocationKey(item || { product_id: importProductId }, link), perQty])),
+      ...Object.fromEntries(links.map((link) => [allocationKey(item, link), perQty])),
     }));
   }
 
-  function ratioAllocate(importProductId: number, qty: number) {
-    const item = (detail.items || []).find((row) => Number(row.product_id || 0) === importProductId);
-    const links = item ? linksForOrderItem(item) : (linksByImportProduct[importProductId] || []);
+  function ratioAllocate(item: ImportOrderItem, qty: number) {
+    const links = linksForOrderItem(item);
     const total = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_ratio || 1), 0) || 1;
     setAllocations((prev) => ({
       ...prev,
-      ...Object.fromEntries(links.map((link) => [allocationKey(item || { product_id: importProductId }, link), Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
+      ...Object.fromEntries(links.map((link) => [allocationKey(item, link), Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
     }));
   }
 
@@ -3667,17 +3665,18 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
             const importProductId = Number(item.product_id || 0);
             const links = linksForOrderItem(item);
             const qty = Number(item.quantity || 0);
-            const allocatedTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(allocations[`${importProductId}:${link.product_id}`] || 0), 0);
+            const allocatedTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(allocations[allocationKey(item, link)] || 0), 0);
             return (
               <section key={item.id || importProductId} className="rounded-md border border-slate-200">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
                   <div>
                     <b>{item.product_name || "-"}</b>
+                    {item.option_value && <span className="ml-2 rounded bg-white px-2 py-1 text-xs font-black text-slate-500">{item.option_value}</span>}
                     <span className="ml-3 text-sm font-bold text-slate-500">수입 수량 {qty.toLocaleString("ko-KR")} / 배분 {allocatedTotal.toLocaleString("ko-KR")}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" className="h-8 rounded-md border border-slate-300 px-3 text-xs font-black" onClick={() => equalAllocate(importProductId, qty)}>동일 수량</button>
-                    <button type="button" className="h-8 rounded-md border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-600" onClick={() => ratioAllocate(importProductId, qty)}>기본 비율</button>
+                    <button type="button" className="h-8 rounded-md border border-slate-300 px-3 text-xs font-black" onClick={() => equalAllocate(item, qty)}>동일 수량</button>
+                    <button type="button" className="h-8 rounded-md border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-600" onClick={() => ratioAllocate(item, qty)}>기본 비율</button>
                   </div>
                 </div>
                 <div className="grid gap-2 p-3">
@@ -3855,6 +3854,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
   ]);
   const [orderLineLinks, setOrderLineLinks] = useState<Record<string, ImportSkuLink[]>>({});
+  const [expandedSkuLines, setExpandedSkuLines] = useState<Record<number, boolean>>({});
 
   useEscapeToClose(catalogOpen, () => setCatalogOpen(false));
 
@@ -4205,12 +4205,23 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                       <p className={`text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
                     ) : null}
                     {linkedSkus.length > 0 && (
-                      <div className="flex flex-wrap gap-1 text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-3">
-                        {linkedSkus.map((link) => (
-                          <span key={`${linkOptionName(link)}:${link.product_id}`} className="rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-orange-700">
-                            {linkVariantLabel(link) || fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
-                          </span>
-                        ))}
+                      <div className="grid gap-1 text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-3">
+                        <button
+                          type="button"
+                          className="w-fit rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-left font-black text-orange-700"
+                          onClick={() => setExpandedSkuLines((prev) => ({ ...prev, [index]: !prev[index] }))}
+                        >
+                          {linkedSkus.length.toLocaleString("ko-KR")}개 품목 연동
+                        </button>
+                        {expandedSkuLines[index] && (
+                          <div className="flex flex-wrap gap-1">
+                            {linkedSkus.map((link) => (
+                              <span key={`${linkOptionName(link)}:${link.product_id}`} className="rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-orange-700">
+                                {linkVariantLabel(link) || fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     <input className="field-input xl:col-start-7 xl:row-start-1" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder={String(line.item_type || "").toUpperCase() === "MATERIAL" ? "재고이동: 수량입력" : "비고"} />
