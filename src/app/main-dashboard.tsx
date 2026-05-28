@@ -58,7 +58,7 @@ function amountFrom(row: Row) {
 }
 
 function orderAmount(row: Row) {
-  return row.total_amount ?? row.amount ?? row.actual_payment_total_krw ?? row.actual_payment_total ?? row.actual_payment_usd ?? 0;
+  return row.total_won ?? row.total_amount ?? row.amount ?? row.actual_payment_total_krw ?? row.actual_payment_total ?? row.actual_payment_usd ?? 0;
 }
 
 function titleFrom(row: Row) {
@@ -79,7 +79,25 @@ function monthTitle(point: Point) {
 function importOrderHref(row: Row) {
   const id = row.id;
   if (id === undefined || id === null || id === "") return "/?menu=import&section=%2Forders";
-  return `/?menu=import&section=${encodeURIComponent(`/orders/${id}/edit`)}`;
+  return `/?menu=import&section=${encodeURIComponent(`/orders?open=${id}`)}`;
+}
+
+function monthOrdersHref(point: Point) {
+  const month = String(point.month || "").replace(/\D/g, "");
+  if (!/^\d{6}$/.test(month)) return "/?menu=import&section=%2Forders";
+  const year = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(4, 6));
+  const from = `${month.slice(0, 4)}-${month.slice(4, 6)}-01`;
+  const lastDay = new Date(year, monthIndex, 0).getDate();
+  const to = `${month.slice(0, 4)}-${month.slice(4, 6)}-${String(lastDay).padStart(2, "0")}`;
+  return `/?menu=import&section=${encodeURIComponent(`/orders?date_from=${from}&date_to=${to}`)}`;
+}
+
+function assetUrl(path?: unknown) {
+  const value = String(path || "");
+  if (!value) return "";
+  if (value.startsWith("http") || value.startsWith("data:image/")) return value;
+  return `/api/import-erp/static/${value.replace(/^\/?static\//, "")}`;
 }
 
 function MiniBars({ points, tone = "orange", height = "h-14" }: { points?: Point[]; tone?: "orange" | "green" | "rose"; height?: string }) {
@@ -136,36 +154,50 @@ function Panel({ title, subtitle, children, className = "" }: { title: string; s
   );
 }
 
-function MonthlyImportList({ months }: { months?: Point[] }) {
-  const groups = months || [];
-  if (!groups.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">수입 발주 데이터가 없습니다.</p>;
+function ImportOrderRows({ rows }: { rows: Row[] }) {
+  if (!rows.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">수입 발주 데이터가 없습니다.</p>;
   return (
     <div className="overflow-hidden rounded-md border border-slate-200">
+      <div className="grid grid-cols-[112px_minmax(0,1.6fr)_90px_132px_90px] gap-3 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
+        <span>주문날짜</span>
+        <span>대표 제품</span>
+        <span className="text-right">수량</span>
+        <span className="text-right">금액(원)</span>
+        <span className="text-right">상태</span>
+      </div>
+      {rows.slice(0, 10).map((row, index) => (
+        <a
+          key={`${row.id || index}`}
+          href={importOrderHref(row)}
+          className="grid grid-cols-[112px_minmax(0,1.6fr)_90px_132px_90px] items-center gap-3 border-t border-slate-100 px-3 py-2 text-sm transition hover:bg-orange-50"
+        >
+          <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
+          <span className="grid min-w-0 grid-cols-[48px_1fr] items-center gap-3">
+            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-12 w-12 rounded-md object-cover" /> : <span className="h-12 w-12 rounded-md bg-slate-100" />}
+            <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
+          </span>
+          <span className="text-right font-bold text-slate-700">{n(row.total_qty).toLocaleString("ko-KR")}</span>
+          <span className="text-right font-black text-slate-950">{krwLong(orderAmount(row))}</span>
+          <span className="text-right text-xs font-black text-orange-600">{String(row.status || "-")}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
+  const groups = months || [];
+  if (!groups.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">월별 발주금액이 없습니다.</p>;
+  return (
+    <div className="space-y-2">
       {groups.map((group) => (
-        <section key={group.month || group.label} className="border-b border-slate-100 last:border-b-0">
-          <div className="grid grid-cols-[130px_1fr_80px] items-center bg-slate-50 px-3 py-2 text-sm">
-            <p className="font-black text-slate-950">{monthTitle(group)}</p>
-            <p className="font-black text-orange-600">{krwLong(group.value)}</p>
-            <p className="text-right text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</p>
+        <a key={group.month || group.label} href={monthOrdersHref(group)} className="block rounded-md border border-slate-200 bg-slate-50 px-3 py-3 transition hover:border-orange-200 hover:bg-orange-50">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-black text-slate-950">{monthTitle(group)}</span>
+            <span className="text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
           </div>
-          <div className="divide-y divide-slate-100">
-            {(group.orders || []).slice(0, 8).map((row, index) => (
-              <a
-                key={`${row.id || index}`}
-                href={importOrderHref(row)}
-                className="grid grid-cols-[96px_minmax(0,1.3fr)_minmax(0,1fr)_80px_110px_82px] items-center gap-3 px-3 py-2 text-xs transition hover:bg-orange-50"
-              >
-                <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
-                <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
-                <span className="truncate font-bold text-slate-600">{String(row.factory_name || "-")}</span>
-                <span className="text-right font-bold text-slate-700">{n(row.total_qty).toLocaleString("ko-KR")}</span>
-                <span className="text-right font-black text-slate-950">{krwLong(orderAmount(row))}</span>
-                <span className="text-right font-black text-orange-600">{String(row.status || "-")}</span>
-              </a>
-            ))}
-            {!(group.orders || []).length && <p className="px-3 py-3 text-xs font-bold text-slate-400">해당 월 발주가 없습니다.</p>}
-          </div>
-        </section>
+          <p className="mt-1 text-sm font-black text-orange-600">{krwLong(group.value)}</p>
+        </a>
       ))}
     </div>
   );
@@ -279,14 +311,22 @@ export default function MainDashboard() {
           </div>
         </Panel>
 
-        <Panel title="수입관리" subtitle="월별 발주금액과 발주목록입니다. 행을 클릭하면 해당 발주 빠른수정 화면으로 이동합니다." className="xl:col-span-3">
-          <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-            <div className="rounded-md bg-orange-50 p-4">
-              <p className="text-xs font-black text-orange-700">최근 6개월 발주금액</p>
-              <p className="mt-2 text-2xl font-black text-orange-600">{krw(summary?.import_six_month_amount)}</p>
-              <p className="mt-1 text-xs font-bold text-orange-700/70">최근 발주 {importOrders.length.toLocaleString("ko-KR")}건</p>
+        <Panel title="수입관리" subtitle="왼쪽 발주 행은 클릭하면 주문목록에서 해당 주문이 펼쳐집니다. 오른쪽 월별 금액은 해당 월 발주목록으로 이동합니다." className="xl:col-span-3">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(260px,3fr)]">
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs font-black text-slate-500">최근 발주목록</p>
+                <p className="text-xs font-bold text-slate-400">{importOrders.length.toLocaleString("ko-KR")}건</p>
+              </div>
+              <ImportOrderRows rows={importOrders} />
             </div>
-            <MonthlyImportList months={summary?.import_monthly} />
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs font-black text-slate-500">월별 수입 금액</p>
+                <p className="text-xs font-bold text-slate-400">최근 6개월</p>
+              </div>
+              <ImportMonthlyAmounts months={summary?.import_monthly} />
+            </div>
           </div>
         </Panel>
       </main>

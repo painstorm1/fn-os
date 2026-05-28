@@ -16,6 +16,51 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function rateFor(rates: Map<string, number>, currency: unknown, fallback: unknown) {
+  const key = text(currency || "CNY");
+  return rates.get(key) || numberValue(fallback) || 1;
+}
+
+function actualPaymentKrw(order: Row, rates: Map<string, number>) {
+  const totalKrw = numberValue(order.actual_payment_total_krw);
+  if (totalKrw) return totalKrw;
+  const total = numberValue(order.actual_payment_total || order.actual_payment_usd);
+  if (!total) return 0;
+  const currency = text(order.actual_payment_currency || (order.actual_payment_usd ? "USD" : "KRW"));
+  return currency === "KRW" ? total : total * rateFor(rates, currency, order.fx_rate);
+}
+
+function koreaExtraCost(order: Row) {
+  return (
+    numberValue(order.shipping_cost) +
+    numberValue(order.customs_duty) +
+    numberValue(order.vat) +
+    numberValue(order.customs_fee) +
+    numberValue(order.inspection_fee) +
+    numberValue(order.domestic_shipping_cost) +
+    numberValue(order.other_cost)
+  );
+}
+
+function chinaExtraCost(order: Row, rates: Map<string, number>) {
+  const currency = text(order.china_cost_currency || order.currency || "CNY");
+  return (
+    numberValue(order.china_domestic_shipping) +
+    numberValue(order.china_fee) +
+    numberValue(order.china_other_cost)
+  ) * rateFor(rates, currency, order.fx_rate);
+}
+
+function importOrderTotalWon(order: Row, lines: Row[], rates: Map<string, number>) {
+  const actualKrw = actualPaymentKrw(order, rates);
+  if (actualKrw) return actualKrw + koreaExtraCost(order);
+  const productWon = lines.reduce((total, line) => {
+    const currency = line.item_currency || order.currency || "CNY";
+    return total + numberValue(line.quantity) * numberValue(line.unit_price) * rateFor(rates, currency, order.fx_rate);
+  }, 0);
+  return productWon + koreaExtraCost(order) + chinaExtraCost(order, rates);
+}
+
 function kstDate(daysOffset = 0) {
   return new Date(Date.now() + 9 * 60 * 60 * 1000 + daysOffset * 86400000)
     .toISOString()
@@ -119,6 +164,8 @@ export async function mainDashboardSummary() {
     importPurchaseOrders,
     importErpOrdersRaw,
     importErpItems,
+    importErpProducts,
+    importErpRates,
     importErpFactories,
   ] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
@@ -133,6 +180,8 @@ export async function mainDashboardSummary() {
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
     optionalRows("import_erp_orders", { order: "order_date.desc", limit: 160 }),
     optionalRows("import_erp_order_items", { order: "sort_order.asc", limit: 1200 }),
+    optionalRows("import_erp_products", { order: "id.asc", limit: 1200 }),
+    optionalRows("import_erp_fx_rates", { order: "currency.asc", limit: 50 }),
     optionalRows("import_erp_factories", { order: "name.asc", limit: 300 }),
   ]);
 
@@ -154,6 +203,8 @@ export async function mainDashboardSummary() {
   const expenseRows = expenses.length ? expenses : legacyExpenses;
   const expenseDate = (row: Row) => row.expense_date ?? row.created_at;
   const factoryById = new Map(importErpFactories.map((row) => [String(row.id), text(row.name)]));
+  const productById = new Map(importErpProducts.map((row) => [text(row.id), row]));
+  const importRateMap = new Map(importErpRates.map((row) => [text(row.currency), numberValue(row.rate)]));
   const itemsByOrder = new Map<string, Row[]>();
   for (const item of importErpItems) {
     const key = text(item.order_id);
@@ -167,13 +218,16 @@ export async function mainDashboardSummary() {
       ...row,
       factory_name: factoryById.get(text(row.factory_id)) || row.factory_name,
       repr_product: firstLine.product_name || row.repr_product,
+      repr_image: firstLine.image_path || (productById.get(text(firstLine.product_id)) || {}).image_path || row.repr_image,
       total_qty: lines.reduce((total, line) => total + numberValue(line.quantity), 0),
       line_count: lines.length,
+      total_won: importOrderTotalWon(row, lines, importRateMap),
     };
   });
   const importOrders = importPurchaseOrders.length ? importPurchaseOrders : importErpOrders;
   const importDate = (row: Row) => row.order_date ?? row.expected_inbound_date ?? row.created_at;
   const importAmount = (row: Row) =>
+    row.total_won ??
     row.total_amount ??
     row.amount ??
     row.actual_payment_total_krw ??

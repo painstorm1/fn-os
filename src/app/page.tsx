@@ -1514,6 +1514,11 @@ function NativeImportWorkspace({ path }: { path: string }) {
   const query = new URLSearchParams(queryString);
   const openOrderId = Number(query.get("open") || 0) || null;
   const copyOrderId = Number(query.get("copy") || 0) || undefined;
+  const initialOrderFilters = {
+    q: query.get("q") || "",
+    dateFrom: query.get("date_from") || "",
+    dateTo: query.get("date_to") || "",
+  };
   const orderEditMatch = basePath.match(/^\/orders\/(\d+)\/edit/);
   const orderMatch = basePath.match(/^\/orders\/(\d+)/);
   const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
@@ -1531,7 +1536,7 @@ function NativeImportWorkspace({ path }: { path: string }) {
   if (productMatch) return <NativeProductForm id={Number(productMatch[1])} />;
   if (basePath.startsWith("/products")) return <NativeProducts />;
   if (basePath.startsWith("/settings")) return <NativeSettings />;
-  return <NativeOrders initialOpenOrderId={openOrderId} />;
+  return <NativeOrders initialOpenOrderId={openOrderId} initialFilters={initialOrderFilters} />;
 }
 
 function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrder; onClose: () => void; onChanged?: (count: number) => void }) {
@@ -1715,15 +1720,21 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
 }
 
 
-function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: number | null }) {
+function NativeOrders({
+  initialOpenOrderId = null,
+  initialFilters = { q: "", dateFrom: "", dateTo: "" },
+}: {
+  initialOpenOrderId?: number | null;
+  initialFilters?: { q: string; dateFrom: string; dateTo: string };
+}) {
   useF2Navigate(true, importHref("/orders/new"));
   const [orders, setOrders] = useState<ImportOrder[]>([]);
   const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [folderOrder, setFolderOrder] = useState<ImportOrder | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ q: "", dateFrom: "", dateTo: "" });
-  const [appliedFilters, setAppliedFilters] = useState({ q: "", dateFrom: "", dateTo: "" });
+  const [filters, setFilters] = useState(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState(initialFilters);
 
   async function loadOrders(nextFilters = appliedFilters) {
     const params = new URLSearchParams();
