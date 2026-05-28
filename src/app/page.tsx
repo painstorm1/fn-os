@@ -7901,8 +7901,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     void downloadTableXlsx(
       "FN_OS_품목_엑셀폼.xlsx",
       "품목",
-      ["품목코드", "품목명", "입고가", "출고가", "창고코드", "재고등록(수정)"],
-      [["FL0001", "펀링크 C to C 케이블_BK_0.5M", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0"]],
+      ["품목코드", "품목명", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
+      [["SET001", "세트상품명", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
     );
   }
 
@@ -7919,9 +7919,17 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         standard_price: String(row["출고가"] || row["판매가"] || "").trim(),
         warehouse_code: String(row["창고코드"] || warehouses[0]?.warehouse_code || "100").trim(),
         qty: String(row["재고등록(수정)"] || row["재고"] || "").trim(),
+        bom_component_code: String(row["BOM구성품코드"] || row["BOM연동품목코드"] || row["BOM품목코드"] || row["bom_component_code"] || "").trim(),
+        bom_qty: String(row["BOM수량"] || row["BOM연동수량"] || row["bom_qty"] || "").trim(),
       }))
       .filter((row) => row.product_code && row.product_name);
-    const exactMatches = normalized.filter((row) => {
+    const grouped = Array.from(normalized.reduce((map, row) => {
+      const current = map.get(row.product_code) || { ...row, bom: [] as Array<{ component_code: string; qty: string }> };
+      if (row.bom_component_code) current.bom.push({ component_code: row.bom_component_code, qty: row.bom_qty || "1" });
+      map.set(row.product_code, current);
+      return map;
+    }, new Map<string, typeof normalized[number] & { bom: Array<{ component_code: string; qty: string }> }>()).values());
+    const exactMatches = grouped.filter((row) => {
       const found = existing.get(row.product_code);
       return found && String(found.product_name || "").trim() === row.product_name;
     });
@@ -7930,7 +7938,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       : false;
     let saved = 0;
     let skipped = 0;
-    for (const row of normalized) {
+    const processedRows: typeof grouped = [];
+    for (const row of grouped) {
       const found = existing.get(row.product_code);
       if (found && !overwrite) {
         skipped += 1;
@@ -7955,7 +7964,46 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           inventory: row.qty === "" ? [] : [{ warehouse_code: row.warehouse_code, qty: row.qty }],
         }),
       });
-      if (res.ok) saved += 1;
+      if (res.ok) {
+        saved += 1;
+        processedRows.push(row);
+      }
+    }
+    const refreshedRes = await fetch("/api/fnos/products/master?page=1&pageSize=5000", { cache: "no-store" });
+    const refreshedData = await refreshedRes.json().catch(() => ({}));
+    const productsByCode = new Map<string, FnProduct>((refreshedData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
+    for (const row of processedRows.filter((item) => item.bom.length > 0)) {
+      const parent = productsByCode.get(row.product_code);
+      if (!parent) continue;
+      const bom = row.bom
+        .map((item) => {
+          const component = productsByCode.get(item.component_code);
+          return component ? {
+            component_product_id: component.id,
+            component_sku: component.product_code || component.sku,
+            component_product_code: component.product_code || component.sku,
+            component_product_name: component.product_name,
+            qty_per_unit: Number(String(item.qty || "1").replace(/[^\d.-]/g, "")) || 1,
+          } : null;
+        })
+        .filter(Boolean);
+      if (!bom.length) continue;
+      await fetch("/api/fnos/products/master", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          product: {
+            id: parent.id,
+            product_code: row.product_code,
+            product_name: row.product_name,
+            cost_price: row.cost_price,
+            standard_price: row.standard_price,
+          },
+          inventory: [],
+          bom,
+        }),
+      });
     }
     setProductMessage(`엑셀 등록 완료: 저장 ${saved}건 / 스킵 ${skipped}건`);
     setMessage("");
