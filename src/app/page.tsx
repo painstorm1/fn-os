@@ -7935,7 +7935,20 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={openNewProduct} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 품목</button>
             <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
-            <button type="button" onClick={downloadProductTemplate} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" aria-label="엑셀폼다운로드">↓</button>
+            <button
+              type="button"
+              onClick={downloadProductTemplate}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+              aria-label="엑셀폼 다운로드"
+              title="엑셀폼 다운로드"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path d="M5 3h9l5 5v13H5z" fill="currentColor" opacity="0.16" />
+                <path d="M14 3v5h5M5 3h9l5 5v13H5V3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                <path d="M8 11h8M8 14h8M8 17h8M11 11v6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M8.2 9.2l2.9 3.8m0-3.8-2.9 3.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadProducts(file);
