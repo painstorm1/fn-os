@@ -865,6 +865,7 @@ type CostGridRow = {
   option_name?: string;
   product_name?: string;
   quantity?: number;
+  item_type?: string;
   item_currency?: string;
   unit_price?: number;
   cost_ratio?: number;
@@ -2187,7 +2188,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
               const cp = calc(price.coupang, unitCost, 0.12, 3000);
               const nf = calc(price.naverFree, unitCost, 0.06, 3000);
               const nc = calc(price.naverCod, unitCost, 0.06, 0);
-              if (row.material_only) {
+              if (row.material_only || String(row.item_type || "").toUpperCase() === "MATERIAL") {
                 return (
                   <tr key={row.order_item_id || `${row.option_name}-${row.product_name}`} className="odd:bg-white even:bg-slate-50/50">
                     <td className="border-r border-slate-200 px-2 py-2 font-bold">{row.option_name || row.product_name || "-"}</td>

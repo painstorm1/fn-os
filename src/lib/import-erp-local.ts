@@ -209,15 +209,26 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const totals = productTotals(order, lines, rates);
   const productBaseTotal = totals.productWon;
-  const lineProductTotal = totals.lineProductWon;
   const chinaExtraCost = orderChinaExtra(order, rates);
   const koreaExtra = koreaExtraCost(order);
   const extraTotal = chinaExtraCost + koreaExtra;
   const totalWon = productBaseTotal + extraTotal;
+  const hasProductLines = lines.some((line) => text(line.item_type).toUpperCase() !== "MATERIAL");
+  const allocationLines = hasProductLines
+    ? lines.filter((line) => text(line.item_type).toUpperCase() !== "MATERIAL")
+    : lines;
+  const allocationTotal = allocationLines.reduce((sum, line) => {
+    return sum + numberValue(line.quantity) * numberValue(line.unit_price) * lineRate(order, line, rates);
+  }, 0);
+  const allocationQty = allocationLines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const rows = lines.map((line) => {
     const qty = numberValue(line.quantity);
     const lineBaseWon = qty * numberValue(line.unit_price) * lineRate(order, line, rates);
-    const costRatio = lineProductTotal > 0 ? lineBaseWon / lineProductTotal : (totalQty ? qty / totalQty : 0);
+    const isMaterialLine = text(line.item_type).toUpperCase() === "MATERIAL";
+    const excludeFromAllocation = hasProductLines && isMaterialLine;
+    const costRatio = excludeFromAllocation
+      ? 0
+      : (allocationTotal > 0 ? lineBaseWon / allocationTotal : (allocationQty ? qty / allocationQty : 0));
     const allocatedProductWon = productBaseTotal * costRatio;
     const allocatedExtraWon = extraTotal * costRatio;
     return {
@@ -226,6 +237,7 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
       product_name: line.product_name,
       option_name: line.option_value,
       quantity: qty,
+      item_type: line.item_type,
       item_currency: line.item_currency,
       unit_price: numberValue(line.unit_price),
       line_product_won: allocatedProductWon,
