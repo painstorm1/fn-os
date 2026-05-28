@@ -518,8 +518,8 @@ export default function ArchiveWorkspace() {
       </div>
 
       <section>
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex shrink-0 items-center gap-2">
+        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
             {menuItems.map(([key, label]) => (
               <button key={key} type="button" onClick={() => openMenu(key)} className={`h-10 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
@@ -527,7 +527,7 @@ export default function ArchiveWorkspace() {
             ))}
           </div>
           {activeMenu !== "save" && (
-            <div className="grid w-full grid-cols-[56px_minmax(150px,1fr)_104px_104px_104px_56px_104px_12px_104px] items-center gap-2 2xl:ml-auto 2xl:w-[60%]">
+            <div className="grid w-full grid-cols-[56px_minmax(140px,1fr)_110px_110px_110px_52px_96px_12px_96px] items-center gap-2">
               <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-10 whitespace-nowrap rounded-md border px-2 text-sm font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-950 bg-slate-950 text-white"}`}>
                 선택
               </button>
@@ -553,9 +553,9 @@ export default function ArchiveWorkspace() {
                 {sources.map((source) => <option key={source} value={source}>{source}</option>)}
               </select>
               <span className="text-xs font-black text-slate-500">기간선택</span>
-              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
               <span className="text-center text-sm font-black text-slate-400">~</span>
-              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
             </div>
           )}
         </div>
