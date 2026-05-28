@@ -3686,7 +3686,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
   const [catalogOptions, setCatalogOptions] = useState<Record<number, string>>({});
   const [paymentMethod, setPaymentMethod] = useState("플랫폼 카드결제");
   const [productionDays, setProductionDays] = useState("");
-  const [actualCurrency, setActualCurrency] = useState<"KRW" | "USD">("KRW");
+  const [actualCurrency, setActualCurrency] = useState<ActualPaymentCurrency>("KRW");
   const [actualPayment, setActualPayment] = useState("");
   const [actualPayment1, setActualPayment1] = useState("");
   const [actualPayment2, setActualPayment2] = useState("");
@@ -3793,7 +3793,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
   const fxRate = order?.fx_rate || data?.rates?.CNY || 195;
   const isTT = isTTPayment(paymentMethod);
   const actualPaymentValue = isTT ? Number(actualPayment1 || 0) + Number(actualPayment2 || 0) : Number(actualPayment || 0);
-  const actualPaymentKrw = actualPaymentValue > 0 ? (actualCurrency === "KRW" ? actualPaymentValue : actualPaymentValue * Number(data?.rates?.USD || 0)) : 0;
+  const actualPaymentKrw = actualPaymentWon(actualPaymentValue, actualCurrency, data?.rates);
   const orderLineWon = lines.reduce((sum, line) => {
     return sum + (Number(line.quantity || 0) * Number(line.unit_price || 0) * Number(data?.rates?.[line.item_currency || "CNY"] || 0));
   }, 0) + (chinaCostAmount * Number(data?.rates?.[chinaCosts.currency || "CNY"] || 0));
@@ -3801,7 +3801,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
   const formRateNote = rateNoteText(data?.rates, Object.keys(orderNativeTotals));
   const orderSummaryParts = [
     nativeTotalText(orderNativeTotals, "CNY"),
-    ...(actualPaymentValue > 0 ? [actualCurrency === "KRW" ? krw(actualPaymentValue) : `${actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} USD`] : []),
+    ...(actualPaymentValue > 0 ? [actualCurrency === "KRW" ? krw(actualPaymentValue) : `${actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} ${actualCurrency}`] : []),
   ];
   const visibleStageValues = paymentMethod === "T/T송금" || paymentMethod === "TT송금" ? stageValues : { ...stageValues, first_payment_date: "" };
 
@@ -4040,9 +4040,10 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 {isTT ? (
                   <>
                     <Field label="실결제 통화">
-                      <select className="field-input" value={actualCurrency} onChange={(event) => setActualCurrency(event.target.value as "KRW" | "USD")}>
+                      <select className="field-input" value={actualCurrency} onChange={(event) => setActualCurrency(event.target.value as ActualPaymentCurrency)}>
                         <option>KRW</option>
                         <option>USD</option>
+                        <option>CNY</option>
                       </select>
                     </Field>
                     <Field label={`1차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(event) => setActualPayment1(event.target.value)} /></Field>
@@ -4052,9 +4053,10 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 ) : (
                   <>
                     <Field label="실결제 통화">
-                      <select className="field-input" value={actualCurrency} onChange={(event) => setActualCurrency(event.target.value as "KRW" | "USD")}>
+                      <select className="field-input" value={actualCurrency} onChange={(event) => setActualCurrency(event.target.value as ActualPaymentCurrency)}>
                         <option>KRW</option>
                         <option>USD</option>
+                        <option>CNY</option>
                       </select>
                     </Field>
                     <Field label={`실 결제금액(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment} onChange={(event) => setActualPayment(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>

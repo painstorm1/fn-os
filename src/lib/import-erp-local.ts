@@ -207,9 +207,11 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
   const productBaseTotal = totals.productWon;
   const chinaExtraCost = orderChinaExtra(order, rates);
   const koreaExtra = koreaExtraCost(order);
-  const extraTotal = chinaExtraCost + koreaExtra;
+  const convertedOrderTotal = productBaseTotal + chinaExtraCost;
   const actualKrw = actualPaymentKrw(order, rates);
-  const totalWon = actualKrw ? actualKrw + koreaExtra : productBaseTotal + extraTotal;
+  const supplierPaymentTotal = actualKrw || convertedOrderTotal;
+  const paymentDelta = actualKrw ? actualKrw - convertedOrderTotal : 0;
+  const totalWon = supplierPaymentTotal + koreaExtra;
   const hasProductLines = lines.some((line) => text(line.item_type).toUpperCase() !== "MATERIAL");
   const allocationLines = hasProductLines
     ? lines.filter((line) => text(line.item_type).toUpperCase() !== "MATERIAL")
@@ -227,7 +229,10 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
       ? 0
       : (allocationTotal > 0 ? lineBaseWon / allocationTotal : (allocationQty ? qty / allocationQty : 0));
     const allocatedProductWon = productBaseTotal * costRatio;
-    const allocatedExtraWon = extraTotal * costRatio;
+    const allocatedChinaExtraWon = chinaExtraCost * costRatio;
+    const allocatedPaymentDelta = paymentDelta * costRatio;
+    const allocatedSupplierPaymentWon = supplierPaymentTotal * costRatio;
+    const allocatedKoreaExtraWon = koreaExtra * costRatio;
     return {
       order_item_id: line.id,
       product_id: line.product_id,
@@ -239,10 +244,12 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
       unit_price: numberValue(line.unit_price),
       line_product_won: allocatedProductWon,
       cost_ratio: costRatio,
-      unit_extra_cost: qty ? allocatedExtraWon / qty : 0,
+      unit_china_extra_cost: qty ? allocatedChinaExtraWon / qty : 0,
+      unit_payment_adjustment: qty ? allocatedPaymentDelta / qty : 0,
+      unit_extra_cost: qty ? allocatedKoreaExtraWon / qty : 0,
       material_unit_cost: 0,
       base_unit_cost: qty ? allocatedProductWon / qty : 0,
-      estimated_unit_cost: qty ? (allocatedProductWon + allocatedExtraWon) / qty : 0,
+      estimated_unit_cost: qty ? (allocatedSupplierPaymentWon + allocatedKoreaExtraWon) / qty : 0,
       coupang_margin: { amount: null, pct: null },
       naver_free_margin: { amount: null, pct: null },
       naver_cod_margin: { amount: null, pct: null },
@@ -252,9 +259,13 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
     rows,
     china_extra_cost: chinaExtraCost,
     korea_extra_cost: koreaExtra,
-    total_extra_cost: extraTotal,
+    total_extra_cost: chinaExtraCost + koreaExtra,
     product_base_total: productBaseTotal,
     goods_total_won: productBaseTotal,
+    converted_order_total_won: convertedOrderTotal,
+    actual_payment_won: actualKrw,
+    payment_delta_won: paymentDelta,
+    costing_base_won: totalWon,
     total_won: totalWon,
     total_qty: totalQty,
   };
