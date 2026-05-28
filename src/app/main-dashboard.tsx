@@ -154,13 +154,23 @@ function Panel({ title, subtitle, children, className = "" }: { title: string; s
   );
 }
 
+function importStatusClass(status: unknown) {
+  const value = String(status || "");
+  if (value.includes("입고완료") || value.includes("통관완료")) return "bg-emerald-50 text-emerald-700";
+  if (value.includes("공장출고") || value.includes("출고")) return "bg-orange-50 text-orange-700";
+  if (value.includes("결제")) return "bg-rose-50 text-rose-700";
+  if (value.includes("발주") || value.includes("생산")) return "bg-sky-50 text-sky-700";
+  return "bg-slate-100 text-slate-600";
+}
+
 function ImportOrderRows({ rows }: { rows: Row[] }) {
   if (!rows.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">수입 발주 데이터가 없습니다.</p>;
   return (
     <div className="overflow-hidden rounded-md border border-slate-200">
-      <div className="grid grid-cols-[112px_minmax(0,1.6fr)_90px_132px_90px] gap-3 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
+      <div className="grid grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] gap-3 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
         <span>주문날짜</span>
         <span>대표 제품</span>
+        <span>공장</span>
         <span className="text-right">수량</span>
         <span className="text-right">금액(원)</span>
         <span className="text-right">상태</span>
@@ -169,16 +179,19 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <a
           key={`${row.id || index}`}
           href={importOrderHref(row)}
-          className="grid grid-cols-[112px_minmax(0,1.6fr)_90px_132px_90px] items-center gap-3 border-t border-slate-100 px-3 py-2 text-sm transition hover:bg-orange-50"
+          className="grid grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] items-center gap-3 border-t border-slate-100 px-3 py-2 text-sm transition hover:bg-orange-50"
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
           <span className="grid min-w-0 grid-cols-[48px_1fr] items-center gap-3">
             {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-12 w-12 rounded-md object-cover" /> : <span className="h-12 w-12 rounded-md bg-slate-100" />}
             <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
           </span>
+          <span className="truncate font-bold text-slate-600">{String(row.factory_name || "-")}</span>
           <span className="text-right font-bold text-slate-700">{n(row.total_qty).toLocaleString("ko-KR")}</span>
           <span className="text-right font-black text-slate-950">{krwLong(orderAmount(row))}</span>
-          <span className="text-right text-xs font-black text-orange-600">{String(row.status || "-")}</span>
+          <span className="text-right">
+            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${importStatusClass(row.status)}`}>{String(row.status || "-")}</span>
+          </span>
         </a>
       ))}
     </div>
@@ -309,7 +322,7 @@ export default function MainDashboard() {
           </div>
         </Panel>
 
-        <Panel title="수입관리" subtitle="왼쪽 발주 행은 클릭하면 주문목록에서 해당 주문이 펼쳐집니다. 오른쪽 월별 금액은 해당 월 발주목록으로 이동합니다." className="xl:col-span-3">
+        <Panel title="수입관리" className="xl:col-span-3">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(260px,3fr)]">
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
