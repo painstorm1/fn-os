@@ -742,13 +742,13 @@ function ArchiveList({
         </section>
       )}
 
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(250px,250px))] gap-3">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(148px,148px))] gap-2">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className={`relative w-[250px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
+            <article key={item.id} className={`relative min-h-[178px] w-[148px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
               {selectMode && (
                 <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
                   <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
@@ -756,25 +756,25 @@ function ArchiveList({
                 </label>
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
-                <div className="flex h-[200px] w-[250px] items-center justify-center bg-slate-100">
+                <div className="flex h-[92px] w-[148px] items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
-              <div className="p-3">
+              <div className="p-2">
                 <div className="flex items-center gap-2">
-                  <h2 className="min-w-0 flex-1 truncate text-sm font-black text-slate-950">{item.title || "제목 없음"}</h2>
-                  <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                  <h2 className="min-w-0 flex-1 truncate text-xs font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                  <button type="button" onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
                       <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
                       <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </button>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-1 text-xs font-black">
-                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
-                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
+                <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] font-black">
+                  <span className="truncate rounded bg-slate-100 px-1.5 py-1 text-slate-600">{item.source_type || "-"}</span>
+                  <span className="truncate rounded bg-slate-100 px-1.5 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
                 </div>
-                {item.memo && <p className="mt-2 line-clamp-2 text-xs font-bold leading-5 text-slate-500">{item.memo}</p>}
+                {item.memo && <p className="mt-1 line-clamp-1 text-[10px] font-bold leading-4 text-slate-500">{item.memo}</p>}
               </div>
             </article>
           );
