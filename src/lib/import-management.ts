@@ -6,6 +6,8 @@ export type ImportSkuLinkInput = {
   import_product_id: number | string;
   product_id: string;
   sku?: string;
+  option_name?: string;
+  group_label?: string;
   import_option_key?: string;
   import_option_name?: string;
   match_group_label?: string;
@@ -126,14 +128,21 @@ async function productsByIds(productIds: string[]) {
 
 export async function searchFnProducts(query: string, limit = 80) {
   if (!hasDbConfig()) return [];
-  const keyword = text(query).toLowerCase();
+  const keywords = text(query).toLowerCase().split(/\s+/).filter(Boolean);
   const rows = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2500 });
   const matched = rows
-    .filter((row) => {
-      if (!keyword) return true;
-      return [row.product_code, row.sku, row.product_name, row.prod_cd, row.prod_name, row.option_name, row.size_des]
-        .some((value) => text(value).toLowerCase().includes(keyword));
+    .map((row) => {
+      const haystack = [row.product_code, row.sku, row.product_name, row.prod_cd, row.prod_name, row.option_name, row.size_des]
+        .map((value) => text(value).toLowerCase())
+        .join(" ");
+      const score = keywords.length
+        ? keywords.reduce((sum, keyword) => sum + (haystack.includes(keyword) ? 1 : 0), 0)
+        : 1;
+      return { row, score };
     })
+    .filter((item) => !keywords.length || item.score > 0)
+    .sort((a, b) => b.score - a.score || productName(a.row).localeCompare(productName(b.row), "ko-KR", { numeric: true, sensitivity: "base" }))
+    .map((item) => item.row)
     .slice(0, limit);
   const inventoryByProduct = await inventoryForProducts(matched.map((row) => text(row.id)));
   return matched.map((row) => normalizeProduct(row, inventoryByProduct));
@@ -143,16 +152,26 @@ export async function listImportProductLinks(importProductId: number | string): 
   if (!hasDbConfig()) return [];
   const links = await selectRows<AnyRecord>("import_product_sku_links", {
     import_product_id: `eq.${importProductId}`,
-    order: "is_primary.desc,created_at.asc",
+    order: "sort_order.asc,is_primary.desc,created_at.asc",
     limit: 500,
   }).catch(() => []);
   const productRows = await productsByIds(links.map((row) => text(row.product_id)));
   const inventoryByProduct = await inventoryForProducts(productRows.map((row) => text(row.id)));
   const productMap = new Map(productRows.map((row) => [text(row.id), normalizeProduct(row, inventoryByProduct)]));
-  return links.map((link) => ({
-    ...link,
-    product: productMap.get(text(link.product_id)) || null,
-  }));
+  return links.map((link) => {
+    const optionName = text(link.option_name || link.import_option_name || link.import_option_key);
+    const groupLabel = text(link.group_label || link.match_group_label || optionName);
+    return {
+      ...link,
+      option_name: optionName,
+      group_label: groupLabel,
+      import_option_key: text(link.import_option_key || optionName),
+      import_option_name: text(link.import_option_name || optionName),
+      match_group_label: groupLabel,
+      sort_order: numberValue(link.sort_order),
+      product: productMap.get(text(link.product_id)) || null,
+    };
+  });
 }
 
 export async function saveImportProductLinks(importProductId: number | string, links: ImportSkuLinkInput[]) {
@@ -165,9 +184,9 @@ export async function saveImportProductLinks(importProductId: number | string, l
       import_product_id: Number(importProductId),
       product_id: link.product_id,
       sku: text(link.sku),
-      import_option_key: text(link.import_option_key) || null,
-      import_option_name: text(link.import_option_name) || null,
-      match_group_label: text(link.match_group_label) || null,
+      import_option_key: text(link.import_option_key || link.option_name || link.import_option_name) || null,
+      import_option_name: text(link.import_option_name || link.option_name || link.import_option_key) || null,
+      match_group_label: text(link.match_group_label || link.group_label || link.option_name || link.import_option_name) || null,
       variant_label: text(link.variant_label) || null,
       default_ratio: Number(link.default_ratio || 0) || 1,
       default_qty: Number(link.default_qty || 0),
