@@ -121,11 +121,11 @@ function compactRange(days: number) {
 
 function compactRangeUntil(days: number, endDate: string) {
   if (!/^\d{8}$/.test(endDate)) return compactRange(days);
-  const base = new Date(`${endDate.slice(0, 4)}-${endDate.slice(4, 6)}-${endDate.slice(6, 8)}T00:00:00+09:00`);
+  const base = new Date(Date.UTC(Number(endDate.slice(0, 4)), Number(endDate.slice(4, 6)) - 1, Number(endDate.slice(6, 8))));
   return Array.from({ length: days }, (_, index) => {
     const current = new Date(base);
-    current.setDate(base.getDate() - days + 1 + index);
-    const key = `${current.getFullYear()}${String(current.getMonth() + 1).padStart(2, "0")}${String(current.getDate()).padStart(2, "0")}`;
+    current.setUTCDate(base.getUTCDate() - days + 1 + index);
+    const key = `${current.getUTCFullYear()}${String(current.getUTCMonth() + 1).padStart(2, "0")}${String(current.getUTCDate()).padStart(2, "0")}`;
     return { key, date: iso(key), label: `${Number(key.slice(4, 6))}/${Number(key.slice(6, 8))}` };
   });
 }
