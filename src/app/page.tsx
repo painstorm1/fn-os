@@ -741,6 +741,8 @@ type FnProduct = {
   cost_price?: number;
   currency?: string;
   inventory?: ProductInventoryRow[];
+  bom?: ProductBomRow[];
+  import_links?: ProductImportLinkRow[];
 };
 
 type ProductInventoryRow = {
@@ -756,6 +758,25 @@ type WarehouseOption = {
   id?: string;
   warehouse_code: string;
   warehouse_name: string;
+};
+
+type ProductBomRow = {
+  id?: string;
+  bom_id?: string;
+  component_product_id: string;
+  component_sku?: string;
+  component_product_code?: string;
+  component_product_name?: string;
+  qty_per_unit: number;
+};
+
+type ProductImportLinkRow = {
+  id?: string;
+  import_product_id?: string;
+  import_product_name?: string;
+  import_option_name?: string;
+  default_qty?: number;
+  default_ratio?: number;
 };
 
 type ImportSkuLink = {
@@ -7736,6 +7757,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [modalOpen, setModalOpen] = useState(false);
   const [productMessage, setProductMessage] = useState("");
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [bomRows, setBomRows] = useState<ProductBomRow[]>([]);
+  const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -7789,6 +7812,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   function openNewProduct() {
     setDraft(blankDraft());
+    setBomRows([]);
+    setImportLinks([]);
     setModalOpen(true);
   }
 
@@ -7805,6 +7830,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       standard_price: product.standard_price != null ? String(product.standard_price) : "",
       ...stockValues,
     });
+    setBomRows(product.bom || []);
+    setImportLinks(product.import_links || []);
     setModalOpen(true);
   }
 
@@ -7839,6 +7866,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           standard_price: draft.standard_price,
         },
         inventory,
+        bom: bomRows,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -7976,6 +8004,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 <th className="py-2 text-right">출고가</th>
                 <th className="py-2 text-right">현재고</th>
                 <th className="py-2 text-left">창고별 재고</th>
+                <th className="py-2 text-left">BOM / 수입연동</th>
               </tr>
             </thead>
             <tbody>
@@ -7990,6 +8019,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                     {(product.inventory || []).length
                       ? (product.inventory || []).map((stock) => `${stock.warehouse_name || stock.warehouse_code}: ${Number(stock.qty || 0).toLocaleString("ko-KR")}`).join(" / ")
                       : "-"}
+                  </td>
+                  <td className="py-2 text-xs font-black">
+                    <span className={`mr-2 rounded px-2 py-1 ${(product.bom || []).length ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-400"}`}>BOM {(product.bom || []).length}</span>
+                    <span className={`rounded px-2 py-1 ${(product.import_links || []).length ? "bg-orange-50 text-orange-700" : "bg-slate-50 text-slate-400"}`}>수입 {(product.import_links || []).length}</span>
                   </td>
                 </tr>
               ))}
@@ -8016,8 +8049,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         <ProductEditModal
           draft={draft}
           warehouses={warehouses}
+          bomRows={bomRows}
+          importLinks={importLinks}
           onClose={() => setModalOpen(false)}
           onChange={updateDraft}
+          onBomRowsChange={setBomRows}
           onSave={() => void saveProductDraft()}
         />
       )}
@@ -8028,16 +8064,69 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 function ProductEditModal({
   draft,
   warehouses,
+  bomRows,
+  importLinks,
   onClose,
   onChange,
+  onBomRowsChange,
   onSave,
 }: {
   draft: Record<string, string>;
   warehouses: WarehouseOption[];
+  bomRows: ProductBomRow[];
+  importLinks: ProductImportLinkRow[];
   onClose: () => void;
   onChange: (key: string, value: string) => void;
+  onBomRowsChange: (rows: ProductBomRow[]) => void;
   onSave: () => void;
 }) {
+  const [componentQuery, setComponentQuery] = useState("");
+  const [componentCandidates, setComponentCandidates] = useState<FnProduct[]>([]);
+
+  useEffect(() => {
+    if (!componentQuery.trim()) {
+      setComponentCandidates([]);
+      return;
+    }
+    let alive = true;
+    const timer = window.setTimeout(async () => {
+      const params = new URLSearchParams({ q: componentQuery.trim(), page: "1", pageSize: "8" });
+      const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (alive) setComponentCandidates(data.products || []);
+    }, 250);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [componentQuery]);
+
+  function addBomComponent(product: FnProduct) {
+    if (!product.id) return;
+    if (product.id === draft.id) return;
+    if (bomRows.some((row) => row.component_product_id === product.id)) return;
+    onBomRowsChange([
+      ...bomRows,
+      {
+        component_product_id: product.id,
+        component_sku: product.product_code || product.sku,
+        component_product_code: product.product_code || product.sku,
+        component_product_name: product.product_name,
+        qty_per_unit: 1,
+      },
+    ]);
+    setComponentQuery("");
+    setComponentCandidates([]);
+  }
+
+  function updateBomQty(index: number, value: string) {
+    onBomRowsChange(bomRows.map((row, rowIndex) => rowIndex === index ? { ...row, qty_per_unit: Number(value) || 0 } : row));
+  }
+
+  function removeBomComponent(index: number) {
+    onBomRowsChange(bomRows.filter((_, rowIndex) => rowIndex !== index));
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
       <div className="w-full max-w-3xl rounded-lg bg-white p-5 shadow-2xl">
@@ -8066,6 +8155,60 @@ function ProductEditModal({
               </label>
             ))}
             {!warehouses.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">등록된 창고가 없습니다. 먼저 창고관리에서 창고를 등록해 주세요.</div>}
+          </div>
+        </div>
+        <div className="mt-5 rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-slate-700">BOM 관리</div>
+              <p className="mt-1 text-xs font-bold text-slate-500">세트 판매품이면 실제 차감될 구성 품목과 수량을 지정합니다.</p>
+            </div>
+            <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-black text-emerald-700">{bomRows.length}개 구성</span>
+          </div>
+          <input
+            className="field-input mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={componentQuery}
+            onChange={(event) => setComponentQuery(event.target.value)}
+            placeholder="구성품 품목코드 / 품목명 검색"
+          />
+          {!!componentCandidates.length && (
+            <div className="mb-3 max-h-36 overflow-auto rounded-md border border-slate-200">
+              {componentCandidates.map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  onClick={() => addBomComponent(product)}
+                  className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm hover:bg-orange-50"
+                >
+                  <span className="font-black">{product.product_code || product.sku}</span>
+                  <span className="flex-1 truncate font-bold text-slate-600">{product.product_name}</span>
+                  <span className="text-xs font-black text-orange-600">추가</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="space-y-2">
+            {bomRows.map((row, index) => (
+              <div key={`${row.component_product_id}-${index}`} className="grid items-center gap-2 rounded-md bg-slate-50 p-2 md:grid-cols-[120px_1fr_90px_64px]">
+                <div className="text-sm font-black">{row.component_product_code || row.component_sku}</div>
+                <div className="truncate text-sm font-bold text-slate-600">{row.component_product_name || "-"}</div>
+                <input className="rounded-md border border-slate-200 px-2 py-1 text-right text-sm font-bold" type="number" min="0" step="1" value={row.qty_per_unit || ""} onChange={(event) => updateBomQty(index, event.target.value)} />
+                <button type="button" onClick={() => removeBomComponent(index)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
+              </div>
+            ))}
+            {!bomRows.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">BOM 구성품이 없습니다.</div>}
+          </div>
+        </div>
+        <div className="mt-5 rounded-md border border-slate-200 p-4">
+          <div className="mb-3 text-sm font-black text-slate-700">수입관리 연동</div>
+          <div className="space-y-2">
+            {importLinks.map((link, index) => (
+              <div key={`${link.import_product_id}-${index}`} className="rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-800">
+                {link.import_product_name || `수입상품 ${link.import_product_id || ""}`}
+                {link.import_option_name ? ` / ${link.import_option_name}` : ""}
+              </div>
+            ))}
+            {!importLinks.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">연동된 수입관리 상품이 없습니다.</div>}
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">

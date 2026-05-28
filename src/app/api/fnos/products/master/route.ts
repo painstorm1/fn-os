@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
+import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -55,13 +55,37 @@ async function inventoryRows() {
   return selectRows<AnyRecord>("inventory_current", { order: "updated_at.desc", limit: 10000 }).catch(() => []);
 }
 
+async function bomRows() {
+  return selectRows<AnyRecord>("product_boms", { order: "created_at.asc", limit: 5000 }).catch(() => []);
+}
+
+async function bomItemRows() {
+  return selectRows<AnyRecord>("product_bom_items", { order: "created_at.asc", limit: 10000 }).catch(() => []);
+}
+
+async function importLinkRows() {
+  return selectRows<AnyRecord>("import_product_sku_links", { order: "created_at.asc", limit: 10000 }).catch(() => []);
+}
+
+async function importProductRows() {
+  return selectRows<AnyRecord>("import_erp_products", { order: "id.asc", limit: 5000 }).catch(() => []);
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!hasDbConfig()) return NextResponse.json({ ok: true, products: [], total: 0, page: 1, pageSize: 20, warehouses: [] });
     const query = text(request.nextUrl.searchParams.get("q")).toLowerCase();
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
-    const [products, warehouses, inventory] = await Promise.all([productRows(), warehouseRows(), inventoryRows()]);
+    const [products, warehouses, inventory, boms, bomItems, importLinks, importProducts] = await Promise.all([
+      productRows(),
+      warehouseRows(),
+      inventoryRows(),
+      bomRows(),
+      bomItemRows(),
+      importLinkRows(),
+      importProductRows(),
+    ]);
 
     const inventoryByProduct = new Map<string, AnyRecord[]>();
     const inventoryByCode = new Map<string, AnyRecord[]>();
@@ -70,6 +94,25 @@ export async function GET(request: NextRequest) {
       const code = text(row.prod_cd || row.sku);
       if (productId) inventoryByProduct.set(productId, [...(inventoryByProduct.get(productId) || []), row]);
       if (code) inventoryByCode.set(code, [...(inventoryByCode.get(code) || []), row]);
+    });
+    const productById = new Map(products.map((row) => [text(row.id), row]));
+    const bomByProduct = new Map<string, AnyRecord>();
+    boms.forEach((row) => {
+      const key = text(row.parent_product_id);
+      if (key && !bomByProduct.has(key)) bomByProduct.set(key, row);
+    });
+    const bomItemsByBom = new Map<string, AnyRecord[]>();
+    bomItems.forEach((row) => {
+      const key = text(row.bom_id);
+      if (!key) return;
+      bomItemsByBom.set(key, [...(bomItemsByBom.get(key) || []), row]);
+    });
+    const importProductById = new Map(importProducts.map((row) => [text(row.id), row]));
+    const importLinksByProduct = new Map<string, AnyRecord[]>();
+    importLinks.forEach((row) => {
+      const key = text(row.product_id);
+      if (!key) return;
+      importLinksByProduct.set(key, [...(importLinksByProduct.get(key) || []), row]);
     });
 
     const filtered = products.filter((row) => {
@@ -82,6 +125,9 @@ export async function GET(request: NextRequest) {
       const stockRows = inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
       const inventoryList = stockRows.map(normalizeInventory);
       const currentStock = inventoryList.reduce((sum, item) => sum + item.qty, 0);
+      const bom = bomByProduct.get(text(row.id));
+      const componentRows = bom ? bomItemsByBom.get(text(bom.id)) || [] : [];
+      const importRows = importLinksByProduct.get(text(row.id)) || [];
       return {
         id: text(row.id),
         product_code: code,
@@ -90,6 +136,29 @@ export async function GET(request: NextRequest) {
         standard_price: numberValue(row.standard_price ?? row.out_price),
         current_stock: currentStock,
         inventory: inventoryList,
+        bom: componentRows.map((item) => {
+          const component = productById.get(text(item.component_product_id));
+          return {
+            id: text(item.id),
+            bom_id: text(item.bom_id),
+            component_product_id: text(item.component_product_id),
+            component_sku: text(item.component_sku || productCode(component || {})),
+            component_product_code: productCode(component || {}) || text(item.component_sku),
+            component_product_name: productName(component || {}),
+            qty_per_unit: numberValue(item.qty_per_unit),
+          };
+        }),
+        import_links: importRows.map((item) => {
+          const importProduct = importProductById.get(text(item.import_product_id));
+          return {
+            id: text(item.id),
+            import_product_id: text(item.import_product_id),
+            import_product_name: text(importProduct?.name || importProduct?.product_name || importProduct?.sku || item.import_product_id),
+            import_option_name: text(item.import_option_name || item.import_option_key || item.match_group_label || item.variant_label),
+            default_qty: numberValue(item.default_qty),
+            default_ratio: numberValue(item.default_ratio) || 1,
+          };
+        }),
         raw: row,
       };
     });
@@ -158,6 +227,7 @@ export async function POST(request: NextRequest) {
     const warehouseById = new Map(warehouses.map((row) => [text(row.id), row]));
     const warehouseByCode = new Map(warehouses.map((row) => [warehouseCode(row), row]));
     const inventory = Array.isArray(body.inventory) ? body.inventory as AnyRecord[] : [];
+    const bom = Array.isArray(body.bom) ? body.bom as AnyRecord[] : [];
 
     for (const item of inventory) {
       const whCode = text(item.warehouse_code || item.wh_cd);
@@ -202,6 +272,40 @@ export async function POST(request: NextRequest) {
           memo: "품목관리 재고 직접수정",
           created_at: now,
         }).catch(() => null);
+      }
+    }
+
+    if (Array.isArray(body.bom)) {
+      const existingBoms = await selectRows<AnyRecord>("product_boms", { parent_product_id: `eq.${productId}`, limit: 100 }).catch(() => []);
+      for (const existingBom of existingBoms) {
+        await deleteRows("product_bom_items", { bom_id: `eq.${existingBom.id}` }).catch(() => []);
+      }
+      await deleteRows("product_boms", { parent_product_id: `eq.${productId}` }).catch(() => []);
+      const normalizedBom = bom
+        .map((item) => ({
+          component_product_id: text(item.component_product_id || item.product_id),
+          component_sku: text(item.component_sku || item.product_code || item.sku),
+          qty_per_unit: numberValue(item.qty_per_unit || item.qty),
+        }))
+        .filter((item) => item.component_product_id && item.qty_per_unit > 0);
+      if (normalizedBom.length) {
+        const [savedBom] = await insertRows<AnyRecord>("product_boms", {
+          parent_product_id: productId,
+          bom_name: `${name} BOM`,
+          bom_type: "set",
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        });
+        await insertRows("product_bom_items", normalizedBom.map((item) => ({
+          bom_id: savedBom.id,
+          component_product_id: item.component_product_id,
+          component_sku: item.component_sku,
+          qty_per_unit: item.qty_per_unit,
+          is_required: true,
+          created_at: now,
+          updated_at: now,
+        })));
       }
     }
 
