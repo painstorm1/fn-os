@@ -1188,19 +1188,6 @@ function krw(value?: number) {
   return `₩${Math.round(value || 0).toLocaleString("ko-KR")}`;
 }
 
-function compactKrw(value?: number) {
-  const rounded = Math.round(value || 0);
-  if (!rounded) return "₩0";
-  const abs = Math.abs(rounded);
-  if (abs >= 100_000_000) return `₩${Math.round(rounded / 100_000_000)}억`;
-  if (abs >= 10_000) return `₩${Math.round(rounded / 10_000)}만`;
-  return krw(rounded);
-}
-
-function compactPercent(value?: number) {
-  return `${Math.round(value || 0).toLocaleString("ko-KR")}%`;
-}
-
 function fileSize(value?: number) {
   const bytes = Number(value || 0);
   if (!bytes) return "-";
@@ -8451,9 +8438,8 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
               </span>
               <span className="shrink-0 font-black text-slate-950">{adPercent(row.roas)}</span>
             </div>
-            <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-500">
-              <span>광고비</span>
-              <span className="text-orange-600">{krw(row.cost)}</span>
+            <div className="flex justify-end text-sm font-black text-orange-600">
+              <span>{krw(row.cost)}</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
               <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
@@ -8526,6 +8512,7 @@ function adMonthlyRowsForRange(rows: AdsMetricRow[], from: string, to: string) {
 }
 
 function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; to: string }) {
+  const [activePointKey, setActivePointKey] = useState<string | null>(null);
   const range = adChartRange(from, to);
   const points = range.mode === "month" ? adMonthlyRowsForRange(rows, range.from, range.to) : adDailyRowsForRange(rows, range.from, range.to);
   const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
@@ -8574,28 +8561,44 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
                 {points.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
-              {chartPoints.map(({ row, x, costY, roasY }, index) => (
-                <div key={`ad-hover-point-${String(row.date)}-${index}`}>
+              {chartPoints.map(({ row, x, costY, roasY }, index) => {
+                const pointKey = `${String(row.date)}-${index}`;
+                const tooltipTop = Math.max(8, Math.min(costY, roasY) - 8);
+                const tooltipLeft = Math.min(82, Math.max(18, x));
+                const isActive = activePointKey === pointKey;
+                return (
+                <div key={`ad-hover-point-${String(row.date)}-${index}`} className="group">
                   {[
-                    { type: "광고비", y: costY, color: "bg-orange-500", value: krw(adNumber(row.cost)) },
-                    { type: "ROAS", y: roasY, color: "bg-slate-600", value: adPercent(adNumber(row.roas)) },
+                    { y: costY, color: "bg-orange-500" },
+                    { y: roasY, color: "bg-slate-600" },
                   ].map((point) => (
-                    <div key={`${String(row.date)}-${point.type}`} className="group absolute z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2" style={{ left: `${x}%`, top: `${point.y}%` }}>
+                    <button
+                      key={`${String(row.date)}-${point.color}`}
+                      type="button"
+                      aria-label={`${String(row.date)} 광고 지표`}
+                      onClick={() => setActivePointKey((current) => current === pointKey ? null : pointKey)}
+                      className="absolute z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                      style={{ left: `${x}%`, top: `${point.y}%` }}
+                    >
                       <span className={`absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-1 ring-white`} />
-                      <span className="pointer-events-none absolute bottom-4 left-1/2 hidden min-w-max -translate-x-1/2 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-black text-slate-700 shadow-lg group-hover:block">
-                        {String(row.date)} · {point.type} {point.value}
-                      </span>
-                    </div>
+                    </button>
                   ))}
+                  <div
+                    className={`pointer-events-none absolute z-30 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-3 text-sm font-black text-slate-800 shadow-xl ${isActive ? "block" : "hidden group-hover:block"}`}
+                    style={{ left: `${tooltipLeft}%`, top: `${tooltipTop}%` }}
+                  >
+                    <p className="whitespace-nowrap text-slate-500">{String(row.date)}</p>
+                    <p className="mt-2 flex justify-between gap-3 whitespace-nowrap"><span>ROAS</span><span>{adPercent(adNumber(row.roas))}</span></p>
+                    <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>사용금액</span><span>{krw(adNumber(row.cost))}</span></p>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
               {points.map((row, index) => (
-                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-[11px]">
-                  <p className="truncate font-black text-slate-500">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
-                  <p className="mt-0.5 truncate font-black text-orange-600">{compactKrw(adNumber(row.cost))}</p>
-                  <p className="mt-0.5 truncate font-black text-slate-700">{compactPercent(adNumber(row.roas))}</p>
+                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-xs">
+                  <p className="truncate font-black text-slate-600">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
                 </div>
               ))}
             </div>
