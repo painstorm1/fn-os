@@ -8454,21 +8454,6 @@ function AdsRightPanel() {
           <button type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full rounded-md bg-slate-950 text-xs font-black text-white">조회</button>
         </div>
       </ToolSection>
-      <ToolSection title="광고 핵심 지표" defaultOpen showChevron={false}>
-        <div className="space-y-3">
-          {["어제", "최근 1주일", "최근 30일"].map((label) => {
-            const total = summaries[label]?.total || {};
-            return (
-              <div key={label} className="rounded-md border border-slate-200 bg-white p-3">
-                <p className="text-xs font-black text-slate-500">{label}</p>
-                <p className="mt-2 text-lg font-black text-slate-950">{krw(adNumber(total.cost))}</p>
-                <p className="mt-1 text-xs font-bold text-orange-600">ROAS {adPercent(total.roas)} · 구매 {adNumber(total.conversions).toLocaleString("ko-KR")}건</p>
-              </div>
-            );
-          })}
-        </div>
-        {Object.values(summaries).some((item) => item.ok === false) && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">광고 요약 조회 실패</div>}
-      </ToolSection>
       <ToolSection title="분석 기준" showChevron={false}>
         <div className="space-y-2 text-xs font-bold text-slate-600">
           <p className="rounded-md bg-slate-50 p-3">먼저 ROAS와 광고비 급증을 보고, 그 다음 SKU별 재고/순이익을 확인합니다.</p>
