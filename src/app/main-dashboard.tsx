@@ -3,14 +3,13 @@
 import { useEffect, useState } from "react";
 
 type Row = Record<string, unknown>;
-type Point = { date?: string; label?: string; value?: number };
+type Point = { date?: string; label?: string; month?: string; value?: number };
 
 type DashboardSummary = {
   ok?: boolean;
   error?: string;
   today?: string;
-  last_collected_date?: string;
-  last_collected_items?: Row[];
+  collection_dates?: { orders?: string; ads?: string; accounting?: string };
   sales_label?: string;
   sales_latest_date?: string;
   sales_latest_amount?: number;
@@ -18,9 +17,7 @@ type DashboardSummary = {
   month_sales?: number;
   sales_daily?: Point[];
   order_count?: number;
-  order_latest_date?: string;
   inventory_risk_count?: number;
-  inventory_risk_items?: Row[];
   inquiry_channels?: Row[];
   ad_label?: string;
   ad_latest_date?: string;
@@ -36,6 +33,7 @@ type DashboardSummary = {
   upcoming_fixed_costs?: Row[];
   import_recent_orders?: Row[];
   import_six_month_amount?: number;
+  import_monthly?: Point[];
 };
 
 function n(value: unknown) {
@@ -62,6 +60,10 @@ function amountFrom(row: Row) {
   return row.balance_amount ?? row.amount ?? row.total_amount ?? 0;
 }
 
+function orderAmount(row: Row) {
+  return row.total_amount ?? row.amount ?? row.actual_payment_total_krw ?? 0;
+}
+
 function titleFrom(row: Row) {
   return String(row.display_title || row.order_no || row.order_code || row.product_name || row.sku || row.memo || "-");
 }
@@ -70,15 +72,21 @@ function subFrom(row: Row) {
   return String(row.order_date || row.expected_inbound_date || row.status || row.factory_name || row.customer_name || "").slice(0, 16);
 }
 
-function MiniBars({ points, tone = "orange" }: { points?: Point[]; tone?: "orange" | "green" | "rose" }) {
-  const rows: Point[] = points?.length ? points : Array.from({ length: 14 }, (_, index) => ({ label: String(index + 1), value: 0 }));
+function importOrderHref(row: Row) {
+  const id = row.id;
+  if (id === undefined || id === null || id === "") return "/?menu=import&section=%2Forders";
+  return `/?menu=import&section=${encodeURIComponent(`/orders/${id}/edit`)}`;
+}
+
+function MiniBars({ points, tone = "orange", height = "h-14" }: { points?: Point[]; tone?: "orange" | "green" | "rose"; height?: string }) {
+  const rows: Point[] = points?.length ? points : Array.from({ length: 6 }, (_, index) => ({ label: String(index + 1), value: 0 }));
   const max = Math.max(...rows.map((point) => n(point.value)), 1);
   const color = tone === "green" ? "bg-emerald-500" : tone === "rose" ? "bg-rose-500" : "bg-orange-500";
 
   return (
-    <div className="flex h-14 items-end gap-1.5">
+    <div className={`flex ${height} items-end gap-1.5`}>
       {rows.map((point, index) => (
-        <div key={`${point.date || point.label || index}`} className="flex flex-1 items-end">
+        <div key={`${point.date || point.month || point.label || index}`} className="flex flex-1 items-end">
           <div className={`w-full rounded-t-sm ${color} opacity-85`} style={{ height: `${Math.max(7, (n(point.value) / max) * 100)}%` }} />
         </div>
       ))}
@@ -103,6 +111,15 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
   );
 }
 
+function CollectionDate({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="min-w-[116px] text-left">
+      <p className="text-[11px] font-black text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-black text-slate-900">{dateText(value)}</p>
+    </div>
+  );
+}
+
 function Panel({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`rounded-md border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
@@ -118,13 +135,13 @@ function Panel({ title, subtitle, children, className = "" }: { title: string; s
 function ImportOrderList({ rows }: { rows: Row[] }) {
   if (!rows.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">수입 발주 데이터가 없습니다.</p>;
   return (
-    <div className="grid gap-2 lg:grid-cols-5">
-      {rows.slice(0, 5).map((row, index) => (
-        <div key={index} className="min-w-0 rounded-md bg-slate-50 px-3 py-2">
-          <p className="truncate text-xs font-black text-slate-800">{titleFrom(row)}</p>
+    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+      {rows.slice(0, 8).map((row, index) => (
+        <a key={`${row.id || index}`} href={importOrderHref(row)} className="group min-w-0 rounded-md bg-slate-50 px-3 py-2 transition hover:bg-orange-50">
+          <p className="truncate text-xs font-black text-slate-800 group-hover:text-orange-700">{titleFrom(row)}</p>
           <p className="mt-1 truncate text-[11px] font-bold text-slate-500">{subFrom(row) || "발주 정보"}</p>
-          <p className="mt-2 text-sm font-black text-orange-600">{krw(row.total_amount ?? row.amount ?? row.actual_payment_total_krw)}</p>
-        </div>
+          <p className="mt-2 text-sm font-black text-orange-600">{krw(orderAmount(row))}</p>
+        </a>
       ))}
     </div>
   );
@@ -166,7 +183,6 @@ export default function MainDashboard() {
     };
   }, []);
 
-  const collected = summary?.last_collected_items || [];
   const fixedCosts = summary?.upcoming_fixed_costs || [];
   const importOrders = summary?.import_recent_orders || [];
   const fixedCostTotal = fixedCosts.reduce((total, row) => total + n(amountFrom(row)), 0);
@@ -174,22 +190,17 @@ export default function MainDashboard() {
 
   return (
     <div className="space-y-3">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-3">
+      <header className="flex flex-wrap items-start justify-between gap-6 border-b border-slate-200 pb-4">
         <div>
-          <h1 className="text-3xl font-black tracking-normal text-slate-950">FN OS</h1>
+          <h1 className="text-5xl font-black tracking-normal text-slate-950">FN OS</h1>
+          <p className="mt-2 text-2xl font-black text-slate-700">{dateText(summary?.today)}</p>
           {loading && <p className="mt-1 text-xs font-bold text-slate-400">대시보드 데이터를 불러오는 중입니다.</p>}
           {summary?.ok === false && <p className="mt-1 text-xs font-bold text-rose-600">{summary.error}</p>}
         </div>
-        <div className="min-w-[260px] text-right">
-          <p className="text-xs font-black text-slate-500">오늘 {dateText(summary?.today)}</p>
-          <p className="mt-1 text-sm font-black text-slate-950">최근 수집 {dateText(summary?.last_collected_date)}</p>
-          <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-            {collected.map((item, index) => (
-              <span key={`${String(item.label)}-${index}`} className="rounded bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-600">
-                {String(item.label || "-")} {dateText(item.date)}
-              </span>
-            ))}
-          </div>
+        <div className="grid grid-cols-3 gap-5 pt-2">
+          <CollectionDate label="주문수집" value={summary?.collection_dates?.orders} />
+          <CollectionDate label="광고수집" value={summary?.collection_dates?.ads} />
+          <CollectionDate label="회계수집" value={summary?.collection_dates?.accounting} />
         </div>
       </header>
 
@@ -245,12 +256,22 @@ export default function MainDashboard() {
           </div>
         </Panel>
 
-        <Panel title="수입관리" subtitle="최근 6개월 발주금액과 최근 발주목록" className="xl:col-span-3">
-          <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <Panel title="수입관리" subtitle="발주목록을 클릭하면 해당 발주 빠른수정 화면으로 이동합니다." className="xl:col-span-3">
+          <div className="grid gap-4 xl:grid-cols-[280px_220px_minmax(0,1fr)]">
             <div className="rounded-md bg-orange-50 p-4">
               <p className="text-xs font-black text-orange-700">최근 6개월 발주금액</p>
               <p className="mt-2 text-2xl font-black text-orange-600">{krw(summary?.import_six_month_amount)}</p>
-              <p className="mt-1 text-xs font-bold text-orange-700/70">최근 발주 {importOrders.length.toLocaleString("ko-KR")}건 표시</p>
+              <p className="mt-1 text-xs font-bold text-orange-700/70">최근 발주 {importOrders.length.toLocaleString("ko-KR")}건</p>
+            </div>
+            <div className="rounded-md bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between text-[11px] font-black text-slate-500">
+                <span>월별 발주금액</span>
+                <span>6개월</span>
+              </div>
+              <MiniBars points={summary?.import_monthly} tone="orange" height="h-20" />
+              <div className="mt-2 grid grid-cols-6 gap-1 text-center text-[10px] font-black text-slate-400">
+                {(summary?.import_monthly || []).map((item) => <span key={item.month || item.label}>{String(item.label || "").slice(5)}</span>)}
+              </div>
             </div>
             <ImportOrderList rows={importOrders} />
           </div>

@@ -74,11 +74,32 @@ function compactRange(days: number) {
   });
 }
 
+function monthRange(months: number) {
+  const base = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  base.setDate(1);
+  return Array.from({ length: months }, (_, index) => {
+    const current = new Date(base);
+    current.setMonth(base.getMonth() - months + 1 + index);
+    const month = `${current.getFullYear()}${String(current.getMonth() + 1).padStart(2, "0")}`;
+    return { month, label: `${current.getFullYear()}.${String(current.getMonth() + 1).padStart(2, "0")}` };
+  });
+}
+
 function dailySeries(rows: Row[], days: number, pickDate: (row: Row) => unknown, pickAmount: (row: Row) => unknown) {
   return compactRange(days).map((day) => ({
     ...day,
     value: sum(
       rows.filter((row) => dateKey(pickDate(row)) === day.key),
+      pickAmount,
+    ),
+  }));
+}
+
+function monthlySeries(rows: Row[], months: number, pickDate: (row: Row) => unknown, pickAmount: (row: Row) => unknown) {
+  return monthRange(months).map((item) => ({
+    ...item,
+    value: sum(
+      rows.filter((row) => dateKey(pickDate(row)).startsWith(item.month)),
       pickAmount,
     ),
   }));
@@ -95,7 +116,8 @@ export async function mainDashboardSummary() {
     expenses,
     legacyExpenses,
     payables,
-    importOrders,
+    importPurchaseOrders,
+    importErpOrders,
   ] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
     optionalRows("orders", { order: "created_at.desc", limit: 700 }),
@@ -107,6 +129,7 @@ export async function mainDashboardSummary() {
     optionalRows("expense_entries", { order: "expense_date.desc", limit: 500 }),
     optionalRows("customer_payables", { order: "due_date.asc", limit: 100 }),
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
+    optionalRows("import_erp_orders", { order: "created_at.desc", limit: 120 }),
   ]);
 
   const today = kstDate();
@@ -126,7 +149,16 @@ export async function mainDashboardSummary() {
   const adSpend = (row: Row) => row.cost ?? row.spend_amount ?? row.spend;
   const expenseRows = expenses.length ? expenses : legacyExpenses;
   const expenseDate = (row: Row) => row.expense_date ?? row.created_at;
+  const importOrders = importPurchaseOrders.length ? importPurchaseOrders : importErpOrders;
   const importDate = (row: Row) => row.order_date ?? row.expected_inbound_date ?? row.created_at;
+  const importAmount = (row: Row) =>
+    row.total_amount ??
+    row.amount ??
+    row.actual_payment_total_krw ??
+    row.actual_payment_total ??
+    row.actual_payment_usd ??
+    row.item_total ??
+    0;
 
   const latestSalesDate = latestDate(sales, salesDate);
   const latestAdDate = latestDate(adRows, adDate);
@@ -170,6 +202,11 @@ export async function mainDashboardSummary() {
   return {
     title: "FN OS",
     today: iso(today),
+    collection_dates: {
+      orders: iso(latestOrderDate),
+      ads: iso(latestAdDate),
+      accounting: iso(latestExpenseDate),
+    },
     last_collected_date: collectedItems.map((row) => text((row as Row).date)).sort().at(-1) || "",
     last_collected_items: collectedItems,
     sales_label: metricTitle("매출", latestSalesDate, today, yesterday),
@@ -197,7 +234,8 @@ export async function mainDashboardSummary() {
       : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
     bank_balance: null,
     upcoming_fixed_costs: upcomingFixedCosts.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
-    import_recent_orders: importOrders.slice(0, 5).map((row) => ({ ...row, display_title: rowTitle(row) })),
-    import_six_month_amount: sum(importSixMonthRows, (row) => row.total_amount ?? row.amount ?? row.actual_payment_total_krw),
+    import_recent_orders: importOrders.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
+    import_six_month_amount: sum(importSixMonthRows, importAmount),
+    import_monthly: monthlySeries(importOrders, 6, importDate, importAmount),
   };
 }
