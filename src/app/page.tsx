@@ -2248,10 +2248,10 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
         {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1280px] text-xs">
+        <table className="min-w-[1120px] text-xs">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              {["옵션명", "수량", "상품단가", "원가배분%", "중국비용/개", "결제차액/개", "한국비용/개", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"].map((head) => (
+              {["옵션명", "수량", "상품단가", "원가배분%", "부대비용/개", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"].map((head) => (
                 <th key={head} className="border-b border-r border-slate-200 px-2 py-2 text-left font-black last:border-r-0">{head}</th>
               ))}
             </tr>
@@ -2273,22 +2273,19 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
-                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
-                    <td className="border-r border-slate-200 px-2 py-2 text-right text-slate-300">-</td>
                     <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
                     <td colSpan={6} className="px-2 py-2 text-center font-bold text-slate-400">부자재 전용 원가 참고</td>
                   </tr>
                 );
               }
+              const unitExtraCost = Number(row.unit_china_extra_cost || 0) + Number(row.unit_payment_adjustment || 0) + Number(row.unit_extra_cost || 0);
               return (
                 <tr key={row.order_item_id || `${row.option_name}-${row.product_name}`} className="odd:bg-white even:bg-slate-50/50">
                   <td className="border-r border-slate-200 px-2 py-2 font-bold">{row.option_name || row.product_name || "-"}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.quantity || 0).toLocaleString("ko-KR")}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{Number(row.unit_price || 0).toLocaleString("ko-KR")} {row.item_currency}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{fmtPct(Number(row.cost_ratio || 0) * 100)}</td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.unit_china_extra_cost || 0)}</td>
-                  <td className={`border-r border-slate-200 px-2 py-2 text-right ${Number(row.unit_payment_adjustment || 0) > 0 ? "text-rose-600" : Number(row.unit_payment_adjustment || 0) < 0 ? "text-emerald-600" : ""}`}>{krw(row.unit_payment_adjustment || 0)}</td>
-                  <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.unit_extra_cost || 0)}</td>
+                  <td className={`border-r border-slate-200 px-2 py-2 text-right ${unitExtraCost < 0 ? "text-emerald-600" : ""}`}>{krw(unitExtraCost)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="border-r border-slate-200 px-2 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
                   <td className="w-[96px] border-r border-slate-200 px-1.5 py-1"><input className="h-8 w-full rounded border border-slate-200 px-2 text-right outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
@@ -2301,7 +2298,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
               );
             })}
             {!rows.length && (
-              <tr><td colSpan={15} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
+              <tr><td colSpan={13} className="px-3 py-8 text-center font-bold text-slate-500">상품 속성의 제품 라인이 없습니다.</td></tr>
             )}
           </tbody>
         </table>
