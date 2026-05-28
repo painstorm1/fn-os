@@ -201,7 +201,7 @@ function koreaExtraCost(order: AnyRecord) {
     numberValue(order.other_cost);
 }
 
-function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materialUnitCosts = new Map<number, number>()) {
+function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const totals = productTotals(order, lines, rates);
   const productBaseTotal = totals.productWon;
@@ -233,8 +233,6 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
     const allocatedPaymentDelta = paymentDelta * costRatio;
     const allocatedSupplierPaymentWon = supplierPaymentTotal * costRatio;
     const allocatedKoreaExtraWon = koreaExtra * costRatio;
-    const materialUnitCost = excludeFromAllocation ? 0 : numberValue(materialUnitCosts.get(Number(line.product_id)));
-    const allocatedUnitCost = qty ? (allocatedSupplierPaymentWon + allocatedKoreaExtraWon) / qty : 0;
     return {
       order_item_id: line.id,
       product_id: line.product_id,
@@ -249,9 +247,9 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
       unit_china_extra_cost: qty ? allocatedChinaExtraWon / qty : 0,
       unit_payment_adjustment: qty ? allocatedPaymentDelta / qty : 0,
       unit_extra_cost: qty ? allocatedKoreaExtraWon / qty : 0,
-      material_unit_cost: materialUnitCost,
+      material_unit_cost: 0,
       base_unit_cost: qty ? allocatedProductWon / qty : 0,
-      estimated_unit_cost: allocatedUnitCost + materialUnitCost,
+      estimated_unit_cost: qty ? (allocatedSupplierPaymentWon + allocatedKoreaExtraWon) / qty : 0,
       coupang_margin: { amount: null, pct: null },
       naver_free_margin: { amount: null, pct: null },
       naver_cod_margin: { amount: null, pct: null },
@@ -271,27 +269,6 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
     total_won: totalWon,
     total_qty: totalQty,
   };
-}
-
-async function materialUnitCostsForProducts(productIds: Array<number | string>) {
-  const ids = Array.from(new Set(productIds.map(Number).filter((id) => Number.isFinite(id) && id > 0)));
-  const map = new Map<number, number>();
-  if (!ids.length) return map;
-  const rows = await db(
-    `select pm.product_id,
-            coalesce(pm.quantity_per_unit, pm.qty_per_product, 1) as qty_per_unit,
-            coalesce(p.material_unit_cost, p.material_cost, 0) as material_unit_cost
-       from ${q(TABLES.productMaterials)} pm
-       left join ${q(TABLES.products)} p on p.id = pm.material_id
-      where pm.product_id = any($1::bigint[])`,
-    [ids],
-  );
-  for (const row of rows) {
-    const productId = Number(row.product_id);
-    const cost = numberValue(row.qty_per_unit) * numberValue(row.material_unit_cost);
-    map.set(productId, (map.get(productId) || 0) + cost);
-  }
-  return map;
 }
 
 async function materialInfoForProducts(productIds: Array<number | string>) {
@@ -645,7 +622,6 @@ async function orderDetail(id: number) {
   const lines = (await linesByOrder([id])).get(String(id)) || [];
   const attachments = await db(`select * from ${q(TABLES.attachments)} where order_id=$1 order by uploaded_at desc nulls last, id desc`, [id]);
   const rates = await ratesMap();
-  const materialUnitCosts = await materialUnitCostsForProducts(lines.map((line) => line.product_id));
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const itemTotal = lines.reduce((sum, line) => sum + numberValue(line.quantity) * numberValue(line.unit_price), 0);
   return {
@@ -657,7 +633,7 @@ async function orderDetail(id: number) {
     total_qty: totalQty,
     item_total: itemTotal,
     total_won: orderTotalWon(order, lines, rates),
-    cost_grid: costGrid(order, lines, rates, materialUnitCosts),
+    cost_grid: costGrid(order, lines, rates),
     self_total_won: orderTotalWon(order, lines, rates),
     native_totals: productTotals(order, lines, rates).nativeTotals,
     product_won: productTotals(order, lines, rates).productWon,
