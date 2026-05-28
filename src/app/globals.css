@@ -1,3 +1,4 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css");
 @import "tailwindcss";
 
 :root {
@@ -8,14 +9,17 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Noto Sans KR", "Pretendard", "Apple SD Gothic Neo", Arial, Helvetica, sans-serif;
+  --font-sans: "Pretendard Variable", "Pretendard", "Inter", "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", Arial, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "Noto Sans KR", "Pretendard", "Apple SD Gothic Neo", Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  letter-spacing: 0;
+  text-rendering: optimizeLegibility;
 }
 
 a {
