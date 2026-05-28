@@ -216,9 +216,17 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord) {
 async function materialInfoForProducts(productIds: Array<number | string>) {
   if (!productIds.length) return new Map<number, AnyRecord[]>();
   const rows = await db(
-    `select pm.*, p.name as material_name, p.material_cost, p.material_unit_cost, p.material_stock_adjust, p.material_initial_qty
+    `with movement_summary as (
+       select material_id, coalesce(sum(qty), 0) as movement_qty
+         from ${q(TABLES.materialMovements)}
+        group by material_id
+     )
+     select pm.*, p.name as material_name, p.material_cost, p.material_unit_cost, p.material_stock_adjust, p.material_initial_qty,
+            coalesce(ms.movement_qty, 0) as material_movement_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
        from ${q(TABLES.productMaterials)} pm
        left join ${q(TABLES.products)} p on p.id = pm.material_id
+       left join movement_summary ms on ms.material_id = p.id
       where pm.product_id = any($1::bigint[])`,
     [productIds.map(Number)],
   );
@@ -227,6 +235,23 @@ async function materialInfoForProducts(productIds: Array<number | string>) {
     const key = Number(row.product_id);
     map.set(key, [...(map.get(key) || []), row]);
   }
+  return map;
+}
+
+async function materialStats(materialIds: Array<number | string>) {
+  const map = new Map<number, AnyRecord>();
+  if (!materialIds.length) return map;
+  const rows = await db(
+    `select p.id,
+            coalesce(sum(m.qty), 0) as movement_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(sum(m.qty), 0) as material_stock
+       from ${q(TABLES.products)} p
+       left join ${q(TABLES.materialMovements)} m on m.material_id = p.id
+      where p.id = any($1::bigint[])
+      group by p.id, p.material_initial_qty`,
+    [materialIds.map(Number)],
+  );
+  for (const row of rows) map.set(Number(row.id), row);
   return map;
 }
 
@@ -252,11 +277,16 @@ async function attachProductInfo(products: AnyRecord[]): Promise<AnyRecord[]> {
   const materialIds = products.filter((item) => text(item.item_type).toUpperCase() === "MATERIAL").map((item) => item.id);
   const materials = await materialInfoForProducts(productIds);
   const linkedProducts = await linkedProductsForMaterials(materialIds);
+  const stats = await materialStats(materialIds);
   return products.map((product) => ({
     ...product,
     materials: materials.get(Number(product.id)) || [],
     linked_products: linkedProducts.get(Number(product.id)) || [],
-    material_stock: numberValue(product.material_initial_qty) + numberValue(product.material_stock_adjust),
+    material_stock: text(product.item_type).toUpperCase() === "MATERIAL"
+      ? numberValue(stats.get(Number(product.id))?.material_stock)
+      : numberValue(product.material_initial_qty) + numberValue(product.material_stock_adjust),
+    material_movement_qty: numberValue(stats.get(Number(product.id))?.movement_qty),
+    material_display_cost: numberValue(product.material_unit_cost) || numberValue(product.material_cost),
   }));
 }
 

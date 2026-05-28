@@ -715,6 +715,7 @@ type ImportProduct = {
   item_type?: string;
   material_cost?: number;
   material_unit_cost?: number;
+  material_display_cost?: number;
   material_safe_qty?: number;
   material_initial_qty?: number;
   material_note?: string;
@@ -2394,7 +2395,7 @@ function NativeProducts() {
               {isMaterial(product) ? (
                 <div className="mt-2 grid gap-1 text-sm">
                   <p className="font-black text-orange-600">재고 {Number(product.material_stock || 0).toLocaleString("ko-KR")}개</p>
-                  <p className="text-xs font-bold text-slate-500">원가 {krw(product.material_cost || 0)}</p>
+                  <p className="text-xs font-bold text-slate-500">원가 {krw(product.material_unit_cost || product.material_display_cost || product.material_cost || 0)}</p>
                 </div>
               ) : (
                 <div className="mt-2 grid gap-1 text-sm">
@@ -2907,7 +2908,7 @@ function NativeProductForm({ id }: { id?: number }) {
       if (prev.some((item) => item.material_id === material.id)) {
         return prev.filter((item) => item.material_id !== material.id);
       }
-      return [...prev, { material_id: material.id, material_name: material.name, quantity_per_unit: 1, material_stock: material.material_stock || 0, material_cost: material.material_cost || 0 }];
+      return [...prev, { material_id: material.id, material_name: material.name, quantity_per_unit: 1, material_stock: material.material_stock || 0, material_cost: material.material_unit_cost || material.material_display_cost || material.material_cost || 0 }];
     });
   }
 
@@ -3139,7 +3140,7 @@ function NativeProductForm({ id }: { id?: number }) {
               ) : null}
               {itemType === "MATERIAL" ? (
                 <>
-                  <Field label="재고 설정"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_stock ?? product?.material_initial_qty ?? product?.material_stock_adjust ?? 0} /></Field>
+                  <Field label="초기재고"><input className="field-input" type="number" step="1" name="material_initial_qty" defaultValue={product?.material_initial_qty ?? 0} /></Field>
                 </>
               ) : null}
             </div>
