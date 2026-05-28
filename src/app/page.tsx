@@ -7783,16 +7783,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     };
   }
 
-  function filterProductsByRelation(rows: FnProduct[], filter: ProductRelationFilter) {
-    if (filter === "bom") return rows.filter((product) => (product.bom || []).length > 0);
-    if (filter === "import") return rows.filter((product) => (product.import_links || []).length > 0);
-    return rows.filter((product) => !(product.bom || []).length);
-  }
-
   async function loadProducts(nextPage = page, nextQuery = query, nextFilter = relationFilter) {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: "1", pageSize: "5000" });
+      const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize), relation: nextFilter });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
@@ -7800,11 +7794,9 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         setProductMessage(data.error || "품목 조회 실패");
         return;
       }
-      const nextProducts = filterProductsByRelation(data.products || [], nextFilter);
-      const start = (nextPage - 1) * pageSize;
-      setProducts(nextProducts.slice(start, start + pageSize));
+      setProducts(data.products || []);
       setWarehouses(data.warehouses || []);
-      setTotal(nextProducts.length);
+      setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
     }
@@ -8821,11 +8813,11 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
   return (
     <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-base font-black">채널별 현황</h2>
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 space-y-2.5">
         {orderedRows.map((row) => (
-          <div key={`ad-channel-status-${row.channel}`} className="space-y-1">
-            <div className="grid grid-cols-[minmax(76px,1fr)_auto_auto] items-center gap-1.5 text-xs">
-              <span className="flex min-w-0 items-center gap-1 font-black text-slate-700">
+          <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
+            <div className="grid grid-cols-[minmax(82px,1fr)_auto_auto] items-center gap-2 text-sm">
+              <span className="flex min-w-0 items-center gap-1.5 font-black text-slate-700">
                 <AdChannelLogo channel={row.channel} />
                 <span className="truncate">{row.label}</span>
               </span>

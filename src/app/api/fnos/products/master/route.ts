@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
   try {
     if (!hasDbConfig()) return NextResponse.json({ ok: true, products: [], total: 0, page: 1, pageSize: 20, warehouses: [] });
     const query = text(request.nextUrl.searchParams.get("q")).toLowerCase();
+    const relation = text(request.nextUrl.searchParams.get("relation"));
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
     const [products, warehouses, inventory, boms, bomItems, importLinks, importProducts] = await Promise.all([
@@ -115,12 +116,7 @@ export async function GET(request: NextRequest) {
       importLinksByProduct.set(key, [...(importLinksByProduct.get(key) || []), row]);
     });
 
-    const filtered = products.filter((row) => {
-      if (!query) return true;
-      return [productCode(row), productName(row)].some((value) => value.toLowerCase().includes(query));
-    });
-    const offset = (page - 1) * pageSize;
-    const pageRows = filtered.slice(offset, offset + pageSize).map((row) => {
+    const normalizedProducts = products.map((row) => {
       const code = productCode(row);
       const stockRows = inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
       const inventoryList = stockRows.map(normalizeInventory);
@@ -128,6 +124,29 @@ export async function GET(request: NextRequest) {
       const bom = bomByProduct.get(text(row.id));
       const componentRows = bom ? bomItemsByBom.get(text(bom.id)) || [] : [];
       const importRows = importLinksByProduct.get(text(row.id)) || [];
+      const mappedBom = componentRows.map((item) => {
+        const component = productById.get(text(item.component_product_id));
+        return {
+          id: text(item.id),
+          bom_id: text(item.bom_id),
+          component_product_id: text(item.component_product_id),
+          component_sku: text(item.component_sku || productCode(component || {})),
+          component_product_code: productCode(component || {}) || text(item.component_sku),
+          component_product_name: productName(component || {}),
+          qty_per_unit: numberValue(item.qty_per_unit),
+        };
+      });
+      const mappedImportLinks = importRows.map((item) => {
+        const importProduct = importProductById.get(text(item.import_product_id));
+        return {
+          id: text(item.id),
+          import_product_id: text(item.import_product_id),
+          import_product_name: text(importProduct?.name || importProduct?.product_name || importProduct?.sku || item.import_product_id),
+          import_option_name: text(item.import_option_name || item.import_option_key || item.match_group_label || item.variant_label),
+          default_qty: numberValue(item.default_qty),
+          default_ratio: numberValue(item.default_ratio) || 1,
+        };
+      });
       return {
         id: text(row.id),
         product_code: code,
@@ -136,32 +155,25 @@ export async function GET(request: NextRequest) {
         standard_price: numberValue(row.standard_price ?? row.out_price),
         current_stock: currentStock,
         inventory: inventoryList,
-        bom: componentRows.map((item) => {
-          const component = productById.get(text(item.component_product_id));
-          return {
-            id: text(item.id),
-            bom_id: text(item.bom_id),
-            component_product_id: text(item.component_product_id),
-            component_sku: text(item.component_sku || productCode(component || {})),
-            component_product_code: productCode(component || {}) || text(item.component_sku),
-            component_product_name: productName(component || {}),
-            qty_per_unit: numberValue(item.qty_per_unit),
-          };
-        }),
-        import_links: importRows.map((item) => {
-          const importProduct = importProductById.get(text(item.import_product_id));
-          return {
-            id: text(item.id),
-            import_product_id: text(item.import_product_id),
-            import_product_name: text(importProduct?.name || importProduct?.product_name || importProduct?.sku || item.import_product_id),
-            import_option_name: text(item.import_option_name || item.import_option_key || item.match_group_label || item.variant_label),
-            default_qty: numberValue(item.default_qty),
-            default_ratio: numberValue(item.default_ratio) || 1,
-          };
-        }),
+        bom: mappedBom,
+        import_links: mappedImportLinks,
         raw: row,
       };
     });
+    const filtered = normalizedProducts.filter((row) => {
+      if (relation === "bom" && !row.bom.length) return false;
+      if (relation === "import" && !row.import_links.length) return false;
+      if (relation === "plain" && row.bom.length) return false;
+      if (!query) return true;
+      return [
+        row.product_code,
+        row.product_name,
+        ...row.bom.flatMap((item) => [item.component_product_code, item.component_sku, item.component_product_name]),
+        ...row.import_links.flatMap((item) => [item.import_product_name, item.import_option_name]),
+      ].some((value) => text(value).toLowerCase().includes(query));
+    });
+    const offset = (page - 1) * pageSize;
+    const pageRows = filtered.slice(offset, offset + pageSize);
 
     return NextResponse.json({
       ok: true,
