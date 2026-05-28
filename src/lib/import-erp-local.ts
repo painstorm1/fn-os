@@ -226,13 +226,22 @@ async function materialInfoForProducts(productIds: Array<number | string>) {
        select material_id, coalesce(sum(qty), 0) as movement_qty
          from ${q(TABLES.materialMovements)}
         group by material_id
+     ),
+     incoming_summary as (
+       select i.product_id as material_id, coalesce(sum(i.quantity), 0) as incoming_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.products)} mp on mp.id = i.product_id
+        where upper(coalesce(mp.item_type, '')) = 'MATERIAL'
+        group by i.product_id
      )
      select pm.*, p.name as material_name, p.material_cost, p.material_unit_cost, p.material_stock_adjust, p.material_initial_qty,
             coalesce(ms.movement_qty, 0) as material_movement_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
+            coalesce(inc.incoming_qty, 0) as material_incoming_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
        from ${q(TABLES.productMaterials)} pm
        left join ${q(TABLES.products)} p on p.id = pm.material_id
        left join movement_summary ms on ms.material_id = p.id
+       left join incoming_summary inc on inc.material_id = p.id
       where pm.product_id = any($1::bigint[])`,
     [productIds.map(Number)],
   );
@@ -248,13 +257,28 @@ async function materialStats(materialIds: Array<number | string>) {
   const map = new Map<number, AnyRecord>();
   if (!materialIds.length) return map;
   const rows = await db(
-    `select p.id,
-            coalesce(sum(m.qty), 0) as movement_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(sum(m.qty), 0) as material_stock
+    `with movement_summary as (
+       select material_id, coalesce(sum(qty), 0) as movement_qty
+         from ${q(TABLES.materialMovements)}
+        where material_id = any($1::bigint[])
+        group by material_id
+     ),
+     incoming_summary as (
+       select i.product_id as material_id, coalesce(sum(i.quantity), 0) as incoming_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.products)} mp on mp.id = i.product_id
+        where i.product_id = any($1::bigint[])
+          and upper(coalesce(mp.item_type, '')) = 'MATERIAL'
+        group by i.product_id
+     )
+     select p.id,
+            coalesce(ms.movement_qty, 0) as movement_qty,
+            coalesce(inc.incoming_qty, 0) as incoming_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
        from ${q(TABLES.products)} p
-       left join ${q(TABLES.materialMovements)} m on m.material_id = p.id
-      where p.id = any($1::bigint[])
-      group by p.id, p.material_initial_qty`,
+       left join movement_summary ms on ms.material_id = p.id
+       left join incoming_summary inc on inc.material_id = p.id
+      where p.id = any($1::bigint[])`,
     [materialIds.map(Number)],
   );
   for (const row of rows) map.set(Number(row.id), row);
