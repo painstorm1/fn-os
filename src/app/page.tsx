@@ -2643,23 +2643,20 @@ function NativeProductDetail({ id }: { id: number }) {
               <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                 <div>
                   <h3 className="font-black">옵션/연동 SKU</h3>
-                  <p className="mt-1 text-xs font-bold text-slate-500">연동 SKU {skuLinks.length.toLocaleString("ko-KR")}개 · 대표 SKU: {fnProductSku((skuLinks.find((link) => link.is_primary) || skuLinks[0])?.product)}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">연동 SKU {skuLinks.length.toLocaleString("ko-KR")}개</p>
                 </div>
                 <Link className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-600" href={importHref(`/products/${id}/edit`)}>SKU 추가</Link>
               </div>
               <div className="overflow-x-auto p-4">
-                <table className="w-full min-w-[840px] text-sm">
+                <table className="w-full min-w-[680px] text-sm">
                   <thead className="border-b border-slate-200 text-xs text-slate-500">
                     <tr>
-                      <th className="py-2 text-left">이미지</th>
                       <th className="py-2 text-left">수입 옵션</th>
                       <th className="py-2 text-left">SKU</th>
                       <th className="py-2 text-left">품목명</th>
                       <th className="py-2 text-left">옵션</th>
                       <th className="py-2 text-right">현재재고</th>
                       <th className="py-2 text-right">가용재고</th>
-                      <th className="py-2 text-right">기본 배분비율</th>
-                      <th className="py-2 text-center">상태</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2667,15 +2664,12 @@ function NativeProductDetail({ id }: { id: number }) {
                       const fnProduct = link.product;
                       return (
                         <tr key={link.product_id} className="border-b border-slate-100">
-                          <td className="py-2"><div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}</div></td>
                           <td className="py-2 font-bold text-orange-700">{linkOptionName(link) || "기본"}</td>
                           <td className="py-2 font-black">{fnProductSku(fnProduct)}</td>
                           <td className="py-2">{fnProductName(fnProduct)}</td>
                           <td className="py-2">{fnProductOption(fnProduct)}</td>
                           <td className="py-2 text-right">{Number(fnProduct?.current_stock || 0).toLocaleString("ko-KR")}</td>
                           <td className="py-2 text-right">{Number(fnProduct?.available_stock || 0).toLocaleString("ko-KR")}</td>
-                          <td className="py-2 text-right">{Number(link.default_ratio || 1).toLocaleString("ko-KR")}</td>
-                          <td className="py-2 text-center"><StatusPill status={link.is_primary ? "대표" : "연결"} /></td>
                         </tr>
                       );
                     })}
@@ -3381,22 +3375,17 @@ function NativeProductForm({ id }: { id?: number }) {
                         </div>
                         <div className="grid gap-2">
                           {groupLinks.map((link) => {
-                            const index = fnSkuLinks.findIndex((item) => item.product_id === link.product_id && linkOptionName(item) === linkOptionName(link));
                             const fnProduct = link.product;
+                            const variant = linkVariantLabel(link);
                             return (
-                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_76px_92px_92px_88px]">
-                                <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
-                                  {fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}
-                                </div>
+                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm md:grid-cols-[1.4fr_110px_1fr_88px]">
                                 <div className="min-w-0">
                                   <p className="truncate font-black">{fnProductName(fnProduct)}</p>
-                                  <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · {fnProductOption(fnProduct)}</p>
+                                  <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)}</p>
                                 </div>
-                                <input className="field-input h-8" title="품목 구분명" placeholder="블랙" value={linkVariantLabel(link)} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, variant_label: event.target.value } : item))} />
-                                <input className="field-input h-8 text-right" title="기본 수량" type="number" min="0" step="0.01" value={link.default_qty || 0} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_qty: Number(event.target.value || 0) } : item))} />
-                                <input className="field-input h-8 text-right" title="배분 비율" type="number" min="0" step="0.01" value={link.default_ratio || 1} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_ratio: Number(event.target.value || 0) || 1 } : item))} />
-                                <label className="flex items-center justify-center gap-1 text-xs font-black text-slate-600"><input type="radio" checked={Boolean(link.is_primary)} onChange={() => setFnSkuLinks((prev) => prev.map((item, itemIndex) => ({ ...item, is_primary: itemIndex === index })))} /> 대표</label>
-                                <button type="button" className="h-8 rounded-md border border-rose-200 text-xs font-black text-rose-600" onClick={() => setFnSkuLinks((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>연결 해제</button>
+                                <span className="truncate text-xs font-black text-slate-500">{variant || fnProductOption(fnProduct)}</span>
+                                <span className="truncate text-xs font-bold text-slate-400">수량은 입고 반영 시 입력</span>
+                                <button type="button" className="h-8 rounded-md border border-rose-200 text-xs font-black text-rose-600" onClick={() => setFnSkuLinks((prev) => prev.filter((item) => !(item.product_id === link.product_id && linkOptionName(item) === linkOptionName(link))))}>연결 해제</button>
                               </div>
                             );
                           })}
