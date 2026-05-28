@@ -1188,6 +1188,19 @@ function krw(value?: number) {
   return `₩${Math.round(value || 0).toLocaleString("ko-KR")}`;
 }
 
+function compactKrw(value?: number) {
+  const rounded = Math.round(value || 0);
+  if (!rounded) return "₩0";
+  const abs = Math.abs(rounded);
+  if (abs >= 100_000_000) return `₩${Math.round(rounded / 100_000_000)}억`;
+  if (abs >= 10_000) return `₩${Math.round(rounded / 10_000)}만`;
+  return krw(rounded);
+}
+
+function compactPercent(value?: number) {
+  return `${Math.round(value || 0).toLocaleString("ko-KR")}%`;
+}
+
 function fileSize(value?: number) {
   const bytes = Number(value || 0);
   if (!bytes) return "-";
@@ -8426,23 +8439,23 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
     });
   const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-base font-black">채널별 현황</h2>
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 space-y-2.5">
         {orderedRows.map((row) => (
           <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
-            <div className="flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <span className="flex min-w-0 items-center gap-1.5 font-black text-slate-700">
                 <AdChannelLogo channel={row.channel} />
                 <span className="truncate">{row.label}</span>
               </span>
               <span className="shrink-0 font-black text-slate-950">{adPercent(row.roas)}</span>
             </div>
-            <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500">
+            <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-500">
               <span>광고비</span>
               <span className="text-orange-600">{krw(row.cost)}</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
               <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
             </div>
           </div>
@@ -8518,7 +8531,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
   const maxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 1);
   const chartPoints = points.map((row, index) => {
-    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
+    const x = points.length <= 1 ? 50 : 8 + (index / (points.length - 1)) * 84;
     const costY = 92 - (adNumber(row.cost) / maxCost) * 72;
     const roasY = 92 - (adNumber(row.roas) / maxRoas) * 72;
     return { row, x, costY, roasY };
@@ -8542,13 +8555,13 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
           <span className="text-slate-400">{range.title}</span>
         </div>
       </div>
-      <div className="mt-4 rounded-md bg-slate-50 p-3">
+      <div className="mt-4 rounded-md bg-slate-50 px-4 py-3">
         {points.length ? (
           <>
-            <div className="relative h-40">
+            <div className="relative h-44">
               <div className="pointer-events-none absolute inset-0 z-10">
                 {axisTicks.map((tick) => (
-                  <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between px-1 text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
+                  <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
                     <span className="rounded bg-slate-50/80 px-1 text-orange-500/60">{krw(tick.cost)}</span>
                     <span className="rounded bg-slate-50/80 px-1 text-slate-500/60">{adPercent(tick.roas)}</span>
                   </div>
@@ -8579,10 +8592,10 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
             </div>
             <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
               {points.map((row, index) => (
-                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 rounded bg-white px-1 py-1 text-center text-[10px]">
+                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-[11px]">
                   <p className="truncate font-black text-slate-500">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
-                  <p className="mt-0.5 truncate font-black text-orange-600">{krw(adNumber(row.cost))}</p>
-                  <p className="mt-0.5 truncate font-black text-slate-700">{adPercent(adNumber(row.roas))}</p>
+                  <p className="mt-0.5 truncate font-black text-orange-600">{compactKrw(adNumber(row.cost))}</p>
+                  <p className="mt-0.5 truncate font-black text-slate-700">{compactPercent(adNumber(row.roas))}</p>
                 </div>
               ))}
             </div>
@@ -8881,7 +8894,7 @@ function AdsAnalysisWorkspace() {
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+      <section className="grid gap-4 xl:grid-cols-[1.65fr_0.75fr]">
         <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
         <AdsChannelStatus rows={channels} selectedChannels={selectedAdChannels} />
       </section>
