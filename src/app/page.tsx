@@ -1968,6 +1968,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     setSaving(false);
     if (res.ok && next.ok) {
       invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
@@ -1984,6 +1986,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
       invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
@@ -2815,9 +2819,6 @@ function NativeProductForm({ id }: { id?: number }) {
   const [productLinkQuery, setProductLinkQuery] = useState("");
   const [fnProductPickerOpen, setFnProductPickerOpen] = useState(false);
   const [fnSkuLinks, setFnSkuLinks] = useState<ImportSkuLink[]>([]);
-  const [movementQty, setMovementQty] = useState("");
-  const [movementMemo, setMovementMemo] = useState("");
-  const [movementSaving, setMovementSaving] = useState(false);
 
   useEscapeToClose(productLinkOpen, () => setProductLinkOpen(false));
   useEscapeToClose(fnProductPickerOpen, () => setFnProductPickerOpen(false));
@@ -2930,41 +2931,6 @@ function NativeProductForm({ id }: { id?: number }) {
 
   function setLinkedProductQty(productId: number, value: string) {
     setLinkedProducts((prev) => prev.map((item) => item.product_id === productId ? { ...item, quantity_per_unit: Number(value || 0) || 1, qty_per_product: Number(value || 0) || 1 } : item));
-  }
-
-  async function saveMaterialMovement() {
-    if (!id || itemType !== "MATERIAL") return;
-    const qty = Number(movementQty || 0);
-    if (!qty) {
-      setError("재고 이동 수량을 입력해 주세요. 공장 잔량 차감은 -100처럼 입력하면 됩니다.");
-      return;
-    }
-    setMovementSaving(true);
-    setError("");
-    try {
-      const res = await fetch(apiUrl(`/api/fnos/materials/${id}/movements`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          qty,
-          unit_cost: product?.material_unit_cost || product?.material_display_cost || product?.material_cost || 0,
-          movement_type: qty > 0 ? "IN" : "ADJUST",
-          memo: movementMemo || (qty > 0 ? "부자재 추가 입고" : "부자재 별도 출고/사용"),
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.ok === false) throw new Error(json.error || "재고 이동 저장에 실패했습니다.");
-      if (json.product) setProduct(json.product);
-      setMovementQty("");
-      setMovementMemo("");
-      invalidateApiCache("/api/fnos/products");
-      invalidateApiCache("/api/fnos/form-data");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "재고 이동 저장에 실패했습니다.");
-    } finally {
-      setMovementSaving(false);
-    }
   }
 
   useEffect(() => {
@@ -3217,24 +3183,6 @@ function NativeProductForm({ id }: { id?: number }) {
               <div className="grid items-start gap-3 md:grid-cols-1">
                 <Field label="배송주소"><input className="field-input" name="shipping_address" defaultValue={product?.shipping_address || ""} /></Field>
               </div>
-            )}
-            {id && itemType === "MATERIAL" && (
-              <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-black">부자재 재고 이동</h3>
-                    <p className="mt-1 text-xs font-bold text-slate-500">현재고 {Number(product?.material_stock || 0).toLocaleString("ko-KR")}개 · 원가 {krw(product?.material_unit_cost || product?.material_display_cost || product?.material_cost || 0)}</p>
-                  </div>
-                  <span className="text-xs font-bold text-slate-500">예: 별도 수령/출고는 -100</span>
-                </div>
-                <div className="grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                  <input className="field-input text-right" type="number" step="1" value={movementQty} onChange={(event) => setMovementQty(event.target.value)} placeholder="-100" />
-                  <input className="field-input" value={movementMemo} onChange={(event) => setMovementMemo(event.target.value)} placeholder="예: 제품과 함께 박스 100개 별도 수령" />
-                  <button type="button" className="h-[38px] rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50" onClick={saveMaterialMovement} disabled={movementSaving}>
-                    {movementSaving ? "저장 중..." : "이동 저장"}
-                  </button>
-                </div>
-              </section>
             )}
             <div className={`grid items-start gap-3 ${itemType === "MATERIAL" ? "md:grid-cols-1" : "md:grid-cols-[2fr_.8fr_.8fr_.8fr]"}`}>
               <Field label="상품 URL">
@@ -3815,6 +3763,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
 
   function addProduct(product: ImportProduct) {
     const selectedOption = catalogOptions[product.id] || optionsFor(product)[0] || "";
+    const productIsMaterial = isMaterial(product);
     const nextLine: OrderLine = {
       product_id: String(product.id),
       product_name: product.name || "",
@@ -3822,7 +3771,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       quantity: "1",
       unit_price: product.std_price ? String(product.std_price) : "",
       item_currency: product.currency || "CNY",
-      line_note: "",
+      line_note: productIsMaterial ? "재고이동: " : "",
       image_path: product.image_path || "",
       item_type: product.item_type || "",
       materials: product.materials || [],
@@ -4025,7 +3974,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     ) : line.materials?.length ? (
                       <p className={`text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
                     ) : null}
-                    <input className="field-input xl:col-start-7 xl:row-start-1" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
+                    <input className="field-input xl:col-start-7 xl:row-start-1" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder={String(line.item_type || "").toUpperCase() === "MATERIAL" ? "재고이동: 수량입력" : "비고"} />
                     <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40 xl:col-start-8 xl:row-start-1" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
                   </div>
                 );

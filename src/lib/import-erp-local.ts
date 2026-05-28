@@ -481,25 +481,31 @@ async function saveProductMaterials(productId: number, itemType: string, materia
   }
 }
 
-async function saveMaterialMovement(request: NextRequest, materialId: number) {
-  const body = await request.json().catch(() => ({}));
-  const qty = numberValue(body.qty);
-  if (!qty) return json({ ok: false, error: "수량을 입력해 주세요." }, 400);
+function materialMovementQtyFromNote(note: unknown) {
+  const raw = text(note);
+  const match = raw.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return 0;
+  const qty = numberValue(match[0]);
+  if (!qty) return 0;
+  return qty > 0 ? -qty : qty;
+}
+
+async function insertOrderMaterialMovement(orderId: number, orderItemId: number, product: AnyRecord, lineNote: unknown) {
+  const qty = materialMovementQtyFromNote(lineNote);
+  if (!qty) return;
   const row = {
     id: await nextId(TABLES.materialMovements),
-    material_id: materialId,
-    order_id: text(body.order_id) ? Number(body.order_id) : null,
-    order_item_id: text(body.order_item_id) ? Number(body.order_item_id) : null,
-    movement_type: text(body.movement_type) || (qty > 0 ? "IN" : "ADJUST"),
+    material_id: Number(product.id),
+    order_id: orderId,
+    order_item_id: orderItemId,
+    movement_type: "ORDER_NOTE",
     qty,
-    unit_cost: numberValue(body.unit_cost),
-    memo: text(body.memo) || null,
+    unit_cost: numberValue(product.material_unit_cost) || numberValue(product.material_cost),
+    memo: `주문서 비고 재고이동: ${text(lineNote)}`,
     created_at: nowIso(),
   };
   const keys = Object.keys(row);
   await db(`insert into ${q(TABLES.materialMovements)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
-  const detail = await productDetail(materialId);
-  return json({ ok: true, movement: row, product: detail?.product || { id: materialId } });
 }
 
 async function orderDetail(id: number) {
@@ -579,7 +585,10 @@ async function saveOrder(request: NextRequest, id?: number) {
   if (id) {
     const keys = Object.keys(values);
     await db(`update ${q(TABLES.orders)} set ${keys.map((key, index) => `${q(key)}=$${index + 1}`).join(", ")} where id=$${keys.length + 1}`, [...Object.values(values), id]);
-    if (shouldReplaceItems) await db(`delete from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
+    if (shouldReplaceItems) {
+      await db(`delete from ${q(TABLES.materialMovements)} where order_id=$1`, [id]);
+      await db(`delete from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
+    }
   } else {
     values.id = savedId;
     values.created_at = nowIso();
@@ -587,9 +596,16 @@ async function saveOrder(request: NextRequest, id?: number) {
     await db(`insert into ${q(TABLES.orders)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(values));
   }
   let sortOrder = 0;
-  for (const line of (shouldReplaceItems ? body.items : [])) {
+  const incomingLines = shouldReplaceItems ? body.items : [];
+  const productIds = [...new Set(incomingLines.map((line: AnyRecord) => Number(line.product_id)).filter(Boolean))];
+  const productRows = productIds.length
+    ? await db(`select id, item_type, material_unit_cost, material_cost from ${q(TABLES.products)} where id = any($1::bigint[])`, [productIds])
+    : [];
+  const productMap = new Map(productRows.map((product) => [Number(product.id), product]));
+  for (const line of incomingLines) {
+    const orderItemId = await nextId(TABLES.orderItems);
     const row = {
-      id: await nextId(TABLES.orderItems),
+      id: orderItemId,
       order_id: savedId,
       product_id: text(line.product_id) ? Number(line.product_id) : null,
       product_name: text(line.product_name),
@@ -603,6 +619,10 @@ async function saveOrder(request: NextRequest, id?: number) {
     };
     const keys = Object.keys(row);
     await db(`insert into ${q(TABLES.orderItems)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
+    const product = row.product_id ? productMap.get(Number(row.product_id)) : null;
+    if (product && text(product.item_type).toUpperCase() === "MATERIAL") {
+      await insertOrderMaterialMovement(savedId, orderItemId, product, row.line_note);
+    }
   }
   const detail = await orderDetail(savedId);
   return json(detail || { ok: true, order: { id: savedId }, items: [] });
@@ -708,13 +728,12 @@ async function handleMutation(path: string, request: NextRequest) {
     await db(`delete from ${q(TABLES.products)} where id=$1`, [Number(productMatch[1])]);
     return json({ ok: true });
   }
-  const materialMovementMatch = path.match(/^api\/fnos\/materials\/(\d+)\/movements$/);
-  if (materialMovementMatch && request.method === "POST") return saveMaterialMovement(request, Number(materialMovementMatch[1]));
   if (path === "api/fnos/orders" && request.method === "POST") return saveOrder(request);
   const orderMatch = path.match(/^api\/fnos\/orders\/(\d+)$/);
   if (orderMatch && request.method === "PUT") return saveOrder(request, Number(orderMatch[1]));
   if (orderMatch && request.method === "DELETE") {
     const id = Number(orderMatch[1]);
+    await db(`delete from ${q(TABLES.materialMovements)} where order_id=$1`, [id]);
     await db(`delete from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
     await db(`delete from ${q(TABLES.attachments)} where order_id=$1`, [id]);
     await db(`delete from ${q(TABLES.orders)} where parent_order_id=$1`, [id]);
