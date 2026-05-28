@@ -781,15 +781,6 @@ type ProductImportLinkRow = {
 
 type ProductRelationFilter = "plain" | "bom" | "import";
 
-function isUsableWarehouse(warehouse: WarehouseOption) {
-  const code = String(warehouse.warehouse_code || "").trim();
-  const name = String(warehouse.warehouse_name || "").trim();
-  if (!code || !name) return false;
-  if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(code) || /^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(name)) return false;
-  if (/오전|오후|AM|PM/i.test(code) || /오전|오후|AM|PM/i.test(name)) return false;
-  return true;
-}
-
 type ImportSkuLink = {
   id?: string;
   import_product_id?: number;
@@ -7778,18 +7769,17 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
   const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const usableWarehouses = warehouses.filter(isUsableWarehouse);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   function blankDraft() {
     return {
       id: "",
-        product_code: "",
-        product_name: "",
-        cost_price: "",
-        standard_price: "",
-      ...Object.fromEntries(usableWarehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
+      product_code: "",
+      product_name: "",
+      cost_price: "",
+      standard_price: "",
+      ...Object.fromEntries(warehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
     };
   }
 
@@ -7837,7 +7827,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }
 
   function openProduct(product: FnProduct) {
-    const stockValues = Object.fromEntries(usableWarehouses.map((warehouse) => {
+    const stockValues = Object.fromEntries(warehouses.map((warehouse) => {
       const stock = (product.inventory || []).find((item) => item.warehouse_code === warehouse.warehouse_code);
       return [`stock_${warehouse.warehouse_code}`, stock?.qty != null ? String(stock.qty) : ""];
     }));
@@ -7865,7 +7855,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       setProductMessage("품목코드와 품목명은 필수입니다.");
       return;
     }
-    const inventory = usableWarehouses
+    const inventory = warehouses
       .map((warehouse) => ({
         warehouse_id: warehouse.id,
         warehouse_code: warehouse.warehouse_code,
@@ -8159,7 +8149,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       {modalOpen && (
         <ProductEditModal
           draft={draft}
-          warehouses={usableWarehouses}
+          warehouses={warehouses}
           bomRows={bomRows}
           importLinks={importLinks}
           onClose={() => setModalOpen(false)}
@@ -8256,15 +8246,11 @@ function ProductEditModal({
           <div className="grid gap-2 md:grid-cols-2">
             {warehouses.map((warehouse) => (
               <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate">{warehouse.warehouse_code} - {warehouse.warehouse_name}</span>
-                  <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">현재 {Number(draft[`stock_${warehouse.warehouse_code}`] || 0).toLocaleString("ko-KR")}</span>
-                </span>
+                {warehouse.warehouse_name || warehouse.warehouse_code}
                 <input
                   className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold"
                   type="number"
                   value={draft[`stock_${warehouse.warehouse_code}`] || ""}
-                  placeholder="수정 수량"
                   onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, event.target.value)}
                 />
               </label>
@@ -8956,7 +8942,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
         <h2 className="whitespace-nowrap text-base font-black">일별 광고비 / ROAS</h2>
         <div className="flex shrink-0 gap-2.5 text-xs font-black">
           <span className="text-orange-600">광고비</span>
-          <span className="text-emerald-600">ROAS</span>
+          <span className="text-slate-600">ROAS</span>
           <span className="text-slate-400">{range.title}</span>
         </div>
       </div>
@@ -8968,7 +8954,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 {axisTicks.map((tick) => (
                   <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
                     <span className="rounded bg-slate-50/80 px-1 text-orange-500/60">{krw(tick.cost)}</span>
-                    <span className="rounded bg-slate-50/80 px-1 text-emerald-600/70">{adPercent(tick.roas)}</span>
+                    <span className="rounded bg-slate-50/80 px-1 text-slate-500/60">{adPercent(tick.roas)}</span>
                   </div>
                 ))}
               </div>
@@ -8976,8 +8962,8 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
                 <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
                 <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
-                {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
-                {points.length > 1 && <path d={roasPath} fill="none" stroke="#16a34a" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" strokeLinecap="round" strokeLinejoin="round" />}
+                {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+                {points.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
               {chartPoints.map(({ row, x, costY, roasY }, index) => {
                 const pointKey = `${String(row.date)}-${index}`;
@@ -8987,18 +8973,18 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 return (
                 <div key={`ad-hover-point-${String(row.date)}-${index}`} className="group">
                   {[
-                    { y: costY, xOffset: -0.55, color: "bg-orange-500" },
-                    { y: roasY, xOffset: 0.55, color: "bg-emerald-600" },
+                    { y: costY, color: "bg-orange-500" },
+                    { y: roasY, color: "bg-slate-600" },
                   ].map((point) => (
                     <button
                       key={`${String(row.date)}-${point.color}`}
                       type="button"
                       aria-label={`${String(row.date)} 광고 지표`}
                       onClick={() => setActivePointKey((current) => current === pointKey ? null : pointKey)}
-                      className="absolute z-20 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                      style={{ left: `${x + point.xOffset}%`, top: `${point.y}%` }}
+                      className="absolute z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                      style={{ left: `${x}%`, top: `${point.y}%` }}
                     >
-                      <span className={`absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-2 ring-white`} />
+                      <span className={`absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-1 ring-white`} />
                     </button>
                   ))}
                   <div
