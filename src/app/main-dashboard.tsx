@@ -42,14 +42,11 @@ function n(value: unknown) {
 }
 
 function krw(value: unknown) {
-  const amount = Math.round(n(value));
-  if (Math.abs(amount) >= 100_000_000) return `${(amount / 100_000_000).toFixed(1)}억`;
-  if (Math.abs(amount) >= 10_000) return `${Math.round(amount / 10_000).toLocaleString("ko-KR")}만`;
-  return `${amount.toLocaleString("ko-KR")}원`;
+  return `${Math.round(n(value)).toLocaleString("ko-KR")}원`;
 }
 
 function krwLong(value: unknown) {
-  return `${Math.round(n(value)).toLocaleString("ko-KR")}원`;
+  return krw(value);
 }
 
 function dateText(value: unknown) {
@@ -112,7 +109,7 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
   return (
     <div className="min-w-0">
       <p className="truncate text-[11px] font-black text-slate-500">{label}</p>
-      <p className={`mt-1 truncate text-xl font-black ${color}`}>{value}</p>
+      <p className={`mt-1 break-keep text-lg font-black leading-tight ${color}`}>{value}</p>
       {note && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-400">{note}</p>}
     </div>
   );
@@ -265,8 +262,7 @@ export default function MainDashboard() {
             </div>
             <MiniBars points={summary?.ad_daily} tone="green" />
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
-            <Stat label="어제" value={krw(summary?.ad_yesterday_spend)} />
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
             <Stat label="최근 7일" value={krw(summary?.ad_seven_day_spend)} />
             <Stat label="이번달" value={krw(summary?.ad_month_spend)} />
           </div>
