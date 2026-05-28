@@ -518,21 +518,21 @@ export default function ArchiveWorkspace() {
       </div>
 
       <section>
-        <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex shrink-0 items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex shrink-0 items-center gap-2">
             {menuItems.map(([key, label]) => (
-              <button key={key} type="button" onClick={() => openMenu(key)} className={`h-8 rounded-md border px-2 text-xs font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+              <button key={key} type="button" onClick={() => openMenu(key)} className={`h-10 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
               </button>
             ))}
           </div>
           {activeMenu !== "save" && (
-            <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
-              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-8 w-12 whitespace-nowrap rounded-md border px-2 text-xs font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-950 bg-slate-950 text-white"}`}>
+            <div className="grid w-full grid-cols-[56px_minmax(150px,1fr)_104px_104px_104px_56px_104px_12px_104px] items-center gap-2 2xl:ml-auto 2xl:w-[60%]">
+              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-10 whitespace-nowrap rounded-md border px-2 text-sm font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-950 bg-slate-950 text-white"}`}>
                 선택
               </button>
-              <input className="field-input h-8 w-20 min-w-0 rounded-md border border-slate-200 px-2 text-xs" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
-              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.categoryGroup} onChange={(event) => {
+              <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
+              <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.categoryGroup} onChange={(event) => {
                 const group = event.target.value;
                 setFilters({ ...filters, categoryGroup: group, category: "" });
                 setActiveMenu(group ? group as CategoryGroup : "all");
@@ -541,21 +541,21 @@ export default function ArchiveWorkspace() {
                 <option value="">카테고리1</option>
                 {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
               </select>
-              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.category} onChange={(event) => {
+              <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.category} onChange={(event) => {
                 setFilters({ ...filters, category: event.target.value });
                 setActiveSubCategory(event.target.value);
               }}>
                 <option value="">카테고리2</option>
                 {category2Options.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
-              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
+              <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
                 <option value="">소스 전체</option>
                 {sources.map((source) => <option key={source} value={source}>{source}</option>)}
               </select>
-              <span className="shrink-0 text-[10px] font-black text-slate-500">기간선택</span>
-              <input className="field-input h-8 w-[112px] shrink-0 rounded-md border border-slate-200 px-1 text-[11px] font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
-              <span className="shrink-0 text-xs font-black text-slate-400">~</span>
-              <input className="field-input h-8 w-[112px] shrink-0 rounded-md border border-slate-200 px-1 text-[11px] font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
+              <span className="text-xs font-black text-slate-500">기간선택</span>
+              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
+              <span className="text-center text-sm font-black text-slate-400">~</span>
+              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
             </div>
           )}
         </div>
