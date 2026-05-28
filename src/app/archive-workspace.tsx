@@ -10,7 +10,12 @@ type ArchiveItem = {
   source_type?: string;
   content_type?: string;
   summary?: string;
+  description?: string;
   memo?: string;
+  preview_image_url?: string;
+  preview_status?: string;
+  preview_error?: string;
+  preview_generated_at?: string;
   thumbnail_url?: string;
   file_url?: string;
   status?: string;
@@ -263,6 +268,16 @@ export default function ArchiveWorkspace() {
     return result;
   }
 
+  async function requestPreview(id?: string, force = false) {
+    if (!id) return;
+    try {
+      await postJson("/api/fnos/archive/preview", { id, force });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "미리보기 생성 실패");
+    }
+  }
+
   async function runOcr(file: File) {
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker("eng");
@@ -328,7 +343,7 @@ export default function ArchiveWorkspace() {
     setAutoWorking(true);
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
-      await Promise.all(autoDrafts.map((draft) => {
+      const results = await Promise.all(autoDrafts.map((draft) => {
         const payload = {
           ...draft,
           category_id: categoryIdByName.get(draft.category_name) || null,
@@ -345,6 +360,7 @@ export default function ArchiveWorkspace() {
           return result;
         });
       }));
+      void Promise.all(results.map((result) => requestPreview(result?.saved?.id)));
       const savedCount = autoDrafts.length;
       setAutoDrafts([]);
       setAutoText("");
@@ -369,7 +385,8 @@ export default function ArchiveWorkspace() {
     setMessage("링크 저장 중...");
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
-      await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
+      const result = await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
+      void requestPreview(result?.saved?.id);
       setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
       setMessage("링크를 저장했습니다.");
       await refresh();
@@ -391,6 +408,7 @@ export default function ArchiveWorkspace() {
       const res = await fetch("/api/fnos/archive", { method: "POST", body: formData });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
+      void requestPreview(result?.saved?.id);
       setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";
       setMessage("파일을 저장했습니다.");
@@ -573,6 +591,7 @@ export default function ArchiveWorkspace() {
           filters={filters}
           setFilters={setFilters}
           data={data}
+          onRegeneratePreview={requestPreview}
         />
       )}
     </div>
@@ -585,12 +604,14 @@ function ArchiveList({
   filters,
   setFilters,
   data,
+  onRegeneratePreview,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
   filters: { q: string; category: string; source: string; date: string };
   setFilters: (filters: { q: string; category: string; source: string; date: string }) => void;
   data: ArchiveData;
+  onRegeneratePreview: (id?: string, force?: boolean) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -611,11 +632,12 @@ function ArchiveList({
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
+          const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
             <article key={item.id} className="w-full max-w-[300px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex h-24 items-center justify-center bg-slate-100">
-                  {item.thumbnail_url ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <span className="text-xs font-black text-slate-400">미리보기 없음</span>}
+                  {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
               <div className="p-3">
@@ -624,12 +646,45 @@ function ArchiveList({
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
                 </div>
+                {item.preview_status === "failed" && (
+                  <button type="button" onClick={() => onRegeneratePreview(item.id, true)} className="mt-2 h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
+                    미리보기 다시 생성
+                  </button>
+                )}
               </div>
             </article>
           );
         })}
         {!items.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
       </section>
+    </div>
+  );
+}
+
+function ArchivePreviewFallback({ item }: { item: ArchiveItem }) {
+  const status = item.preview_status || "";
+  if (status === "pending") return <span className="text-xs font-black text-slate-500">미리보기 생성 중</span>;
+  if (status === "processing") return <span className="text-xs font-black text-orange-600">미리보기 처리 중</span>;
+  const source = String(item.source_type || "web").toLowerCase();
+  const styles: Record<string, string> = {
+    instagram: "from-pink-500 via-orange-400 to-purple-600 text-white",
+    naver: "from-emerald-500 to-green-600 text-white",
+    smartstore: "from-emerald-500 to-green-600 text-white",
+    taobao: "from-orange-500 to-amber-500 text-white",
+    "1688": "from-orange-500 to-amber-500 text-white",
+    youtube: "from-red-500 to-rose-600 text-white",
+  };
+  const labels: Record<string, string> = {
+    instagram: "INSTAGRAM",
+    naver: "NAVER",
+    smartstore: "NAVER",
+    taobao: "SOURCING",
+    "1688": "SOURCING",
+    youtube: "YOUTUBE",
+  };
+  return (
+    <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${styles[source] || "from-slate-600 to-slate-800 text-white"}`}>
+      <span className="text-xs font-black tracking-wide">{labels[source] || "ARCHIVE"}</span>
     </div>
   );
 }

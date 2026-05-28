@@ -8862,16 +8862,16 @@ function adMetricReportRows(channels: AdsMetricRow[], selectedChannels: string[]
 function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> }) {
   const header = [
     ["총비용", true],
-    ["구매완료\n전환매출액", true],
-    ["ROAS\n(광고 수익률)", true],
-    ["구매완료 건수", true],
-    ["구매당 광고비", true],
-    ["노출수", false],
-    ["클릭수", false],
-    ["CTR\n(클릭률)", true],
-    ["CPM\n(1000회당 노출)", false],
-    ["CPC\n(클릭당 비용)", false],
-    ["구매완료\n전환율", true],
+    ["전환매출", true],
+    ["ROAS", true],
+    ["전환 구매\n건수", true],
+    ["CPA", true],
+    ["노출", false],
+    ["클릭", false],
+    ["CTR", true],
+    ["CPM", false],
+    ["CPC", false],
+    ["CVR", true],
   ] as const;
   const channelRows = rows.filter((row) => row.channel !== "total");
   const cpaValues = channelRows.filter((row) => row.purchases > 0 && row.costPerPurchase > 0).map((row) => row.costPerPurchase);
@@ -8903,20 +8903,20 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   };
   return (
     <div className="overflow-x-hidden">
-      <table className="w-full table-fixed border-collapse text-center text-[11px]">
+      <table className="w-full table-fixed border-collapse text-center text-[11.5px] tabular-nums">
         <colgroup>
+          <col className="w-[10.5%]" />
+          <col className="w-[9.5%]" />
           <col className="w-[11%]" />
-          <col className="w-[7.6%]" />
-          <col className="w-[8.6%]" />
-          <col className="w-[8.2%]" />
-          <col className="w-[6.8%]" />
-          <col className="w-[8.2%]" />
-          <col className="w-[7.4%]" />
-          <col className="w-[6.6%]" />
+          <col className="w-[7.5%]" />
+          <col className="w-[8%]" />
+          <col className="w-[8.8%]" />
+          <col className="w-[8.3%]" />
+          <col className="w-[7.2%]" />
           <col className="w-[7%]" />
-          <col className="w-[10.4%]" />
-          <col className="w-[8.4%]" />
-          <col className="w-[9.8%]" />
+          <col className="w-[7.6%]" />
+          <col className="w-[7.1%]" />
+          <col className="w-[7.5%]" />
         </colgroup>
         <thead>
           <tr>
@@ -8928,7 +8928,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 font-black" : "bg-white"}>
+            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[11px] font-bold" : "bg-white"}>
               <td className="border border-slate-200 bg-inherit px-1.5 py-1.5 text-left font-black">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AdChannelLogo channel={row.channel} />
@@ -8950,6 +8950,9 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
           ))}
         </tbody>
       </table>
+      <p className="mt-2 text-xs font-bold leading-relaxed text-slate-500">
+        약자: ROAS=광고 수익률, CPA=전환 구매당 광고비, CTR=클릭률, CPM=1000회당 노출비용, CPC=클릭당 비용, CVR=전환 구매율
+      </p>
     </div>
   );
 }
@@ -8992,7 +8995,7 @@ function AdsAnalysisWorkspace() {
 
   function exportAdReportCsv() {
     const rows = [
-      ["광고", "총비용", "구매완료 전환매출액", "ROAS(광고 수익률)", "구매완료 건수", "구매당 광고비", "노출수", "클릭수", "CTR(클릭률)", "CPM(1000회당 노출)", "CPC(클릭당 비용)", "구매완료 전환율"],
+      ["광고", "총비용", "전환매출", "ROAS", "전환 구매 건수", "CPA", "노출", "클릭", "CTR", "CPM", "CPC", "CVR"],
       ...reportRows.map((row) => [row.label, Math.round(row.cost), Math.round(row.purchaseValue), `${row.roas.toFixed(1)}%`, row.purchases, Math.round(row.costPerPurchase), row.impressions, row.clicks, `${row.ctr.toFixed(2)}%`, Math.round(row.cpm), Math.round(row.cpc), `${row.purchaseCvr.toFixed(2)}%`]),
     ];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
@@ -9023,11 +9026,11 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
         <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
         <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
-        <AdsMetricCard label="구매완료 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
+        <AdsMetricCard label="전환 구매 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-md border border-slate-200 bg-white px-3 py-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-black">광고 리포트</h2>
           <div className="flex flex-wrap items-center gap-2">
