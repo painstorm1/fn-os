@@ -763,6 +763,13 @@ type ImportSkuLink = {
   import_product_id?: number;
   product_id: string;
   sku?: string;
+  option_name?: string;
+  group_label?: string;
+  import_option_key?: string;
+  import_option_name?: string;
+  match_group_label?: string;
+  variant_label?: string;
+  sort_order?: number;
   default_ratio?: number;
   default_qty?: number;
   is_primary?: boolean;
@@ -829,6 +836,21 @@ function fnProductOption(product?: FnProduct | null) {
 
 function fnProductPrice(product?: FnProduct | null) {
   return Number(product?.cost_price || product?.standard_price || 0);
+}
+
+function importOptionList(value?: string) {
+  return String(value || "")
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function linkOptionName(link?: ImportSkuLink | null) {
+  return String(link?.option_name || link?.import_option_name || link?.import_option_key || "").trim();
+}
+
+function sameImportOption(link: ImportSkuLink, optionName: string) {
+  return linkOptionName(link) === String(optionName || "").trim();
 }
 
 type OrderLine = {
@@ -2602,6 +2624,7 @@ function NativeProductDetail({ id }: { id: number }) {
                   <thead className="border-b border-slate-200 text-xs text-slate-500">
                     <tr>
                       <th className="py-2 text-left">이미지</th>
+                      <th className="py-2 text-left">수입 옵션</th>
                       <th className="py-2 text-left">SKU</th>
                       <th className="py-2 text-left">품목명</th>
                       <th className="py-2 text-left">옵션</th>
@@ -2617,6 +2640,7 @@ function NativeProductDetail({ id }: { id: number }) {
                       return (
                         <tr key={link.product_id} className="border-b border-slate-100">
                           <td className="py-2"><div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}</div></td>
+                          <td className="py-2 font-bold text-orange-700">{linkOptionName(link) || "기본"}</td>
                           <td className="py-2 font-black">{fnProductSku(fnProduct)}</td>
                           <td className="py-2">{fnProductName(fnProduct)}</td>
                           <td className="py-2">{fnProductOption(fnProduct)}</td>
@@ -2745,11 +2769,15 @@ function GptMiniProductBox() {
 function FnProductPickerModal({
   open,
   selected,
+  optionName = "",
+  importProductName = "",
   onClose,
   onApply,
 }: {
   open: boolean;
   selected: ImportSkuLink[];
+  optionName?: string;
+  importProductName?: string;
   onClose: () => void;
   onApply: (links: ImportSkuLink[]) => void;
 }) {
@@ -2759,8 +2787,10 @@ function FnProductPickerModal({
   const [draft, setDraft] = useState<ImportSkuLink[]>(selected);
 
   useEffect(() => {
-    if (open) setDraft(selected);
-  }, [open, selected]);
+    if (!open) return;
+    setDraft(selected);
+    setQuery([importProductName, optionName].filter(Boolean).join(" "));
+  }, [open, selected, importProductName, optionName]);
 
   useEffect(() => {
     if (!open) return;
@@ -2790,6 +2820,12 @@ function FnProductPickerModal({
       return [...prev, {
         product_id: product.id,
         sku: fnProductSku(product),
+        option_name: optionName,
+        group_label: optionName,
+        import_option_key: optionName,
+        import_option_name: optionName,
+        match_group_label: optionName,
+        sort_order: prev.length,
         default_ratio: 1,
         default_qty: 0,
         is_primary: prev.length === 0,
@@ -2806,7 +2842,8 @@ function FnProductPickerModal({
           <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
         </div>
         <div className="grid gap-3 p-5">
-          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU / 품목명 / 옵션 검색" autoFocus />
+          {optionName && <p className="rounded-md bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">연동 옵션: {optionName}</p>}
+          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="품목코드 / 품목명 / 옵션 검색" autoFocus />
           <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
             <table className="w-full min-w-[940px] text-sm">
               <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
@@ -2878,12 +2915,14 @@ function NativeProductForm({ id }: { id?: number }) {
   const [pastedImageDataUrl, setPastedImageDataUrl] = useState("");
   const [imageHint, setImageHint] = useState("");
   const [productUrl, setProductUrl] = useState("");
+  const [optionsText, setOptionsText] = useState("");
   const [itemType, setItemType] = useState<"PRODUCT" | "MATERIAL">("PRODUCT");
   const [linkedMaterials, setLinkedMaterials] = useState<ProductMaterialLink[]>([]);
   const [linkedProducts, setLinkedProducts] = useState<MaterialProductLink[]>([]);
   const [productLinkOpen, setProductLinkOpen] = useState(false);
   const [productLinkQuery, setProductLinkQuery] = useState("");
   const [fnProductPickerOpen, setFnProductPickerOpen] = useState(false);
+  const [fnProductPickerOption, setFnProductPickerOption] = useState("");
   const [fnSkuLinks, setFnSkuLinks] = useState<ImportSkuLink[]>([]);
 
   useEscapeToClose(productLinkOpen, () => setProductLinkOpen(false));
@@ -3007,6 +3046,7 @@ function NativeProductForm({ id }: { id?: number }) {
         if (alive) {
           setProduct(next.product || null);
           setProductUrl(next.product?.product_url || "");
+          setOptionsText(next.product?.options || "");
           setPastedImageDataUrl(/^data:image\//i.test(next.product?.image_path || "") ? (next.product?.image_path || "") : "");
           setItemType(isMaterial(next.product) ? "MATERIAL" : "PRODUCT");
           setLinkedMaterials(next.product?.materials || next.materials || []);
@@ -3046,6 +3086,7 @@ function NativeProductForm({ id }: { id?: number }) {
         const currencySelect = document.querySelector<HTMLSelectElement>('select[name="currency"]');
         if (nameInput && !nameInput.value) nameInput.value = fnProduct.product_name || "";
         if (optionInput && !optionInput.value) optionInput.value = fnProduct.option_name || "";
+        if (!optionsText && fnProduct.option_name) setOptionsText(fnProduct.option_name || "");
         if (priceInput && !priceInput.value && fnProductPrice(fnProduct)) priceInput.value = String(fnProductPrice(fnProduct));
         if (currencySelect && fnProduct.currency) currencySelect.value = fnProduct.currency;
       }, 0);
@@ -3138,6 +3179,9 @@ function NativeProductForm({ id }: { id?: number }) {
     }
   }
 
+  const importOptions = importOptionList(optionsText);
+  const linkGroups = importOptions.length ? importOptions : [""];
+
   return (
     <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입관리 원장에 저장합니다.">
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
@@ -3226,12 +3270,12 @@ function NativeProductForm({ id }: { id?: number }) {
             </div>
             {itemType === "MATERIAL" ? (
               <div className="grid items-start gap-3 md:grid-cols-[2fr_1fr]">
-                <Field label="옵션"><input className="field-input" name="options" placeholder="쉼표로 구분" defaultValue={product?.options || ""} /></Field>
+                <Field label="옵션"><input className="field-input" name="options" placeholder="쉼표로 구분" value={optionsText} onChange={(event) => setOptionsText(event.target.value)} /></Field>
                 <Field label="원가 설정(원)"><input className="field-input" type="number" min="0" step="1" name="material_unit_cost" defaultValue={product?.material_unit_cost ?? product?.material_cost ?? 0} /></Field>
               </div>
             ) : (
               <div className="grid items-start gap-3 md:grid-cols-[2fr_1fr_.7fr]">
-                <Field label="옵션"><input className="field-input" name="options" placeholder="예: 블랙, 화이트, 그레이 / 또는: S, M, L" defaultValue={product?.options || ""} /></Field>
+                <Field label="옵션"><input className="field-input" name="options" placeholder="예: 0.5M, 1.0M, 1.5M / 또는: S, M, L" value={optionsText} onChange={(event) => setOptionsText(event.target.value)} /></Field>
                 <Field label="주공장">
                   <select className="field-input" name="factory_id" defaultValue={product?.factory_id || ""}>
                     <option value="">선택 안함</option>
@@ -3282,28 +3326,55 @@ function NativeProductForm({ id }: { id?: number }) {
             {itemType === "PRODUCT" && (
               <section className="rounded-md border border-slate-200 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-black">연동 SKU 목록</h3>
+                  <h3 className="text-sm font-black">옵션별 FN 품목 연동</h3>
                   <span className="text-xs font-bold text-slate-500">{fnSkuLinks.length.toLocaleString("ko-KR")}개 연결</span>
                 </div>
-                <div className="grid gap-2">
-                  {fnSkuLinks.map((link, index) => {
-                    const fnProduct = link.product;
+                <div className="grid gap-3">
+                  {linkGroups.map((optionName) => {
+                    const groupLinks = optionName ? fnSkuLinks.filter((link) => sameImportOption(link, optionName)) : fnSkuLinks.filter((link) => !linkOptionName(link));
                     return (
-                      <div key={link.product_id} className="grid items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm md:grid-cols-[44px_1fr_92px_92px_88px]">
-                        <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
-                          {fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}
+                      <section key={optionName || "__default"} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-black">{optionName || "기본 옵션"}</p>
+                            <p className="text-xs font-bold text-slate-500">연동 품목 {groupLinks.length.toLocaleString("ko-KR")}개</p>
+                          </div>
+                          <button
+                            type="button"
+                            className="h-8 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700"
+                            onClick={() => {
+                              setFnProductPickerOption(optionName);
+                              setFnProductPickerOpen(true);
+                            }}
+                          >
+                            FN 품목 연결
+                          </button>
                         </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-black">{fnProductName(fnProduct)}</p>
-                          <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · {fnProductOption(fnProduct)}</p>
+                        <div className="grid gap-2">
+                          {groupLinks.map((link) => {
+                            const index = fnSkuLinks.findIndex((item) => item.product_id === link.product_id && linkOptionName(item) === linkOptionName(link));
+                            const fnProduct = link.product;
+                            return (
+                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm md:grid-cols-[44px_1fr_76px_92px_92px_88px]">
+                                <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
+                                  {fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="truncate font-black">{fnProductName(fnProduct)}</p>
+                                  <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · {fnProductOption(fnProduct)}</p>
+                                </div>
+                                <input className="field-input h-8 text-right" title="기본 수량" type="number" min="0" step="0.01" value={link.default_qty || 0} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_qty: Number(event.target.value || 0) } : item))} />
+                                <input className="field-input h-8 text-right" title="배분 비율" type="number" min="0" step="0.01" value={link.default_ratio || 1} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_ratio: Number(event.target.value || 0) || 1 } : item))} />
+                                <label className="flex items-center justify-center gap-1 text-xs font-black text-slate-600"><input type="radio" checked={Boolean(link.is_primary)} onChange={() => setFnSkuLinks((prev) => prev.map((item, itemIndex) => ({ ...item, is_primary: itemIndex === index })))} /> 대표</label>
+                                <button type="button" className="h-8 rounded-md border border-rose-200 text-xs font-black text-rose-600" onClick={() => setFnSkuLinks((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>연결 해제</button>
+                              </div>
+                            );
+                          })}
+                          {!groupLinks.length && <p className="rounded-md bg-white px-3 py-3 text-sm font-bold text-slate-400">이 옵션에 연결된 FN 품목이 없습니다.</p>}
                         </div>
-                        <input className="field-input h-8 text-right" type="number" min="0" step="0.01" value={link.default_ratio || 1} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_ratio: Number(event.target.value || 0) || 1 } : item))} />
-                        <label className="flex items-center justify-center gap-1 text-xs font-black text-slate-600"><input type="radio" checked={Boolean(link.is_primary)} onChange={() => setFnSkuLinks((prev) => prev.map((item, itemIndex) => ({ ...item, is_primary: itemIndex === index })))} /> 대표</label>
-                        <button type="button" className="h-8 rounded-md border border-rose-200 text-xs font-black text-rose-600" onClick={() => setFnSkuLinks((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>연결 해제</button>
-                      </div>
+                      </section>
                     );
                   })}
-                  {!fnSkuLinks.length && <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-400">연동된 FN OS SKU가 없습니다.</p>}
                 </div>
               </section>
             )}
@@ -3395,11 +3466,26 @@ function NativeProductForm({ id }: { id?: number }) {
         )}
         <FnProductPickerModal
           open={fnProductPickerOpen}
-          selected={fnSkuLinks}
+          selected={fnProductPickerOption ? fnSkuLinks.filter((link) => sameImportOption(link, fnProductPickerOption)) : fnSkuLinks.filter((link) => !linkOptionName(link))}
+          optionName={fnProductPickerOption}
+          importProductName={product?.name || ""}
           onClose={() => setFnProductPickerOpen(false)}
           onApply={(links) => {
             const primaryExists = links.some((link) => link.is_primary);
-            setFnSkuLinks(links.map((link, index) => ({ ...link, is_primary: primaryExists ? Boolean(link.is_primary) : index === 0 })));
+            const normalizedLinks = links.map((link, index) => ({
+              ...link,
+              option_name: fnProductPickerOption,
+              group_label: fnProductPickerOption,
+              import_option_key: fnProductPickerOption,
+              import_option_name: fnProductPickerOption,
+              match_group_label: fnProductPickerOption,
+              sort_order: index,
+              is_primary: primaryExists ? Boolean(link.is_primary) : index === 0,
+            }));
+            setFnSkuLinks((prev) => [
+              ...prev.filter((link) => fnProductPickerOption ? !sameImportOption(link, fnProductPickerOption) : Boolean(linkOptionName(link))),
+              ...normalizedLinks,
+            ]);
             const primary = links.find((link) => link.is_primary) || links[0];
             if (primary?.product) {
               if (!product && primary.product.product_name) {
@@ -3409,6 +3495,7 @@ function NativeProductForm({ id }: { id?: number }) {
               if (primary.product.image_url && !previewUrl && !pastedImageDataUrl) setPreviewUrl(primary.product.image_url);
             }
             setFnProductPickerOpen(false);
+            setFnProductPickerOption("");
           }}
         />
         </>
@@ -3423,6 +3510,18 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
   const [allocations, setAllocations] = useState<Record<string, number>>({});
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+
+  function linksForOrderItem(item: ImportOrderItem) {
+    const importProductId = Number(item.product_id || 0);
+    const links = linksByImportProduct[importProductId] || [];
+    const optionValue = String(item.option_value || "").trim();
+    const optionLinks = optionValue ? links.filter((link) => sameImportOption(link, optionValue)) : [];
+    return optionLinks.length ? optionLinks : links.filter((link) => !linkOptionName(link));
+  }
+
+  function allocationKey(item: ImportOrderItem, link: ImportSkuLink) {
+    return `${item.id || item.option_value || item.product_id}:${link.product_id}`;
+  }
 
   useEffect(() => {
     let alive = true;
@@ -3439,11 +3538,19 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
       const nextAllocations: Record<string, number> = {};
       (detail.items || []).forEach((item) => {
         const importProductId = Number(item.product_id || 0);
-        const links = nextLinks[importProductId] || [];
+        const links = (() => {
+          const allLinks = nextLinks[importProductId] || [];
+          const optionValue = String(item.option_value || "").trim();
+          const optionLinks = optionValue ? allLinks.filter((link) => sameImportOption(link, optionValue)) : [];
+          return optionLinks.length ? optionLinks : allLinks.filter((link) => !linkOptionName(link));
+        })();
         const qty = Number(item.quantity || 0);
+        const defaultQtyTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_qty || 0), 0);
         const ratioTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_ratio || 1), 0) || links.length || 1;
         links.forEach((link) => {
-          nextAllocations[`${importProductId}:${link.product_id}`] = Math.round((qty * Number(link.default_ratio || 1) / ratioTotal) * 100) / 100;
+          nextAllocations[allocationKey(item, link)] = defaultQtyTotal > 0
+            ? Math.round((qty * Number(link.default_qty || 0) / defaultQtyTotal) * 100) / 100
+            : Math.round((qty * Number(link.default_ratio || 1) / ratioTotal) * 100) / 100;
         });
       });
       setAllocations(nextAllocations);
@@ -3454,21 +3561,23 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
   }, [detail.items]);
 
   function equalAllocate(importProductId: number, qty: number) {
-    const links = linksByImportProduct[importProductId] || [];
+    const item = (detail.items || []).find((row) => Number(row.product_id || 0) === importProductId);
+    const links = item ? linksForOrderItem(item) : (linksByImportProduct[importProductId] || []);
     if (!links.length) return;
     const perQty = Math.round((qty / links.length) * 100) / 100;
     setAllocations((prev) => ({
       ...prev,
-      ...Object.fromEntries(links.map((link) => [`${importProductId}:${link.product_id}`, perQty])),
+      ...Object.fromEntries(links.map((link) => [allocationKey(item || { product_id: importProductId }, link), perQty])),
     }));
   }
 
   function ratioAllocate(importProductId: number, qty: number) {
-    const links = linksByImportProduct[importProductId] || [];
+    const item = (detail.items || []).find((row) => Number(row.product_id || 0) === importProductId);
+    const links = item ? linksForOrderItem(item) : (linksByImportProduct[importProductId] || []);
     const total = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(link.default_ratio || 1), 0) || 1;
     setAllocations((prev) => ({
       ...prev,
-      ...Object.fromEntries(links.map((link) => [`${importProductId}:${link.product_id}`, Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
+      ...Object.fromEntries(links.map((link) => [allocationKey(item || { product_id: importProductId }, link), Math.round((qty * Number(link.default_ratio || 1) / total) * 100) / 100])),
     }));
   }
 
@@ -3477,12 +3586,15 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
     setMessage("");
     const rows = (detail.items || []).flatMap((item) => {
       const importProductId = Number(item.product_id || 0);
-      return (linksByImportProduct[importProductId] || []).map((link) => ({
+      return linksForOrderItem(item).map((link) => ({
         import_order_id: order.id,
+        import_order_item_id: item.id,
         import_product_id: importProductId,
+        import_option_key: item.option_value || "",
+        import_option_name: item.option_value || "",
         product_id: link.product_id,
         sku: link.sku || link.product?.sku,
-        allocated_qty: allocations[`${importProductId}:${link.product_id}`] || 0,
+        allocated_qty: allocations[allocationKey(item, link)] || 0,
         unit_cost: Number(item.unit_price || 0),
       }));
     }).filter((row) => row.allocated_qty > 0);
@@ -3523,7 +3635,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
         <div className="grid max-h-[70vh] gap-4 overflow-auto p-5">
           {(detail.items || []).map((item) => {
             const importProductId = Number(item.product_id || 0);
-            const links = linksByImportProduct[importProductId] || [];
+            const links = linksForOrderItem(item);
             const qty = Number(item.quantity || 0);
             const allocatedTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(allocations[`${importProductId}:${link.product_id}`] || 0), 0);
             return (
@@ -3540,7 +3652,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
                 </div>
                 <div className="grid gap-2 p-3">
                   {links.map((link) => {
-                    const key = `${importProductId}:${link.product_id}`;
+                    const key = allocationKey(item, link);
                     const fnProduct = link.product;
                     return (
                       <div key={link.product_id} className="grid items-center gap-2 rounded-md bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_120px_120px]">
@@ -3712,6 +3824,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
   const [lines, setLines] = useState<OrderLine[]>([
     { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" },
   ]);
+  const [orderLineLinks, setOrderLineLinks] = useState<Record<string, ImportSkuLink[]>>({});
 
   useEscapeToClose(catalogOpen, () => setCatalogOpen(false));
 
@@ -3776,6 +3889,22 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       alive = false;
     };
   }, [id, copyId]);
+
+  useEffect(() => {
+    let alive = true;
+    const productIds = Array.from(new Set(lines.map((line) => String(line.product_id || "")).filter(Boolean)));
+    Promise.all(productIds.map((productId) => (
+      fetch(`/api/fnos/import-product-links?import_product_id=${productId}`, { cache: "no-store" })
+        .then((res) => res.json())
+        .then((json) => [productId, json.links || []] as const)
+        .catch(() => [productId, []] as const)
+    ))).then((entries) => {
+      if (alive) setOrderLineLinks(Object.fromEntries(entries));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [lines.map((line) => line.product_id).join("|")]);
 
   const blankLine: OrderLine = { product_id: "", product_name: "", option_value: "", quantity: "1", unit_price: "", item_currency: "CNY", line_note: "" };
 
@@ -4020,6 +4149,11 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
             <div className="grid gap-2">
               {lines.map((line, index) => {
                 const subtotal = Number(line.quantity || 0) * Number(line.unit_price || 0);
+                const linkedSkus = (() => {
+                  const links = orderLineLinks[String(line.product_id || "")] || [];
+                  const optionLinks = line.option_value ? links.filter((link) => sameImportOption(link, line.option_value)) : [];
+                  return optionLinks.length ? optionLinks : links.filter((link) => !linkOptionName(link));
+                })();
                 return (
                   <div key={index} className="grid items-start gap-3 border-b border-slate-200 py-3 xl:grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px]">
                     <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
@@ -4040,6 +4174,15 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     ) : line.materials?.length ? (
                       <p className={`text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-2 ${hasMaterialShortage(line.materials, line.quantity) ? "text-rose-600" : "text-slate-500"}`}>부자재: {materialNeedSummary(line.materials, line.quantity)}</p>
                     ) : null}
+                    {linkedSkus.length > 0 && (
+                      <div className="flex flex-wrap gap-1 text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-3">
+                        {linkedSkus.map((link) => (
+                          <span key={`${linkOptionName(link)}:${link.product_id}`} className="rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-orange-700">
+                            {fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <input className="field-input xl:col-start-7 xl:row-start-1" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder={String(line.item_type || "").toUpperCase() === "MATERIAL" ? "재고이동: 수량입력" : "비고"} />
                     <button type="button" className="h-[38px] rounded-md border border-rose-200 text-rose-600 disabled:opacity-40 xl:col-start-8 xl:row-start-1" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
                   </div>
