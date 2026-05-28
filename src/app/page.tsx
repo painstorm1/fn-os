@@ -4471,7 +4471,14 @@ function Panel({ title, subtitle, action, children, className = "" }: { title: s
 }
 
 function StatusPill({ status }: { status?: string }) {
-  return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{status || "-"}</span>;
+  const label = status || "-";
+  const tone = (() => {
+    if (["주문", "1차결제", "2차결제", "결제완료"].includes(label)) return "bg-rose-50 text-rose-700";
+    if (["공장출고", "배대지도착"].includes(label)) return "bg-amber-50 text-amber-700";
+    if (["통관완료", "FN입고", "입고완료"].includes(label)) return "bg-emerald-50 text-emerald-700";
+    return "bg-slate-100 text-slate-600";
+  })();
+  return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${tone}`}>{label}</span>;
 }
 
 type SalesSheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
