@@ -260,10 +260,12 @@ function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
   return (
     <div className="divide-y divide-slate-100">
       {groups.map((group) => (
-        <a key={group.month || group.label} href={monthOrdersHref(group)} className="grid grid-cols-[52px_minmax(0,1fr)_42px] items-baseline gap-2 py-2.5 text-sm transition hover:text-orange-600">
-          <span className="font-black text-slate-950">{monthTitle(group)}</span>
-          <span className="text-right font-black text-orange-600">{krwLong(group.value)}</span>
-          <span className="text-right text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
+        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 px-2 py-2 text-sm transition hover:bg-orange-50/60 hover:text-orange-600">
+          <span className="flex items-baseline gap-2">
+            <span className="min-w-8 font-black text-slate-950">{monthTitle(group)}</span>
+            <span className="text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
+          </span>
+          <span className="text-right text-base font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
         </a>
       ))}
     </div>
