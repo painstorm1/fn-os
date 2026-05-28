@@ -8568,10 +8568,10 @@ function shiftAdDateRange(from: string, to: string, direction: -1 | 1) {
 function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
   const toneClass = tone === "rose" ? "text-rose-600" : tone === "slate" ? "text-slate-600" : "text-orange-600";
   return (
-    <article className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-      <p className="text-xs font-black text-slate-500">{label}</p>
-      <p className="mt-1.5 text-lg font-black text-slate-950">{value}</p>
-      {note && <p className={`mt-1 text-xs font-bold ${toneClass}`}>{note}</p>}
+    <article className="min-h-[82px] rounded-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+      <p className="break-keep text-[13px] font-black leading-tight text-slate-500">{label}</p>
+      <p className="mt-2 text-[22px] font-black leading-none tracking-normal text-slate-950">{value}</p>
+      {note && <p className={`mt-1.5 break-keep text-[12px] font-bold leading-tight ${toneClass}`}>{note}</p>}
     </article>
   );
 }
@@ -9035,7 +9035,7 @@ function AdsAnalysisWorkspace() {
 
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
-      <section className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
+      <section className="grid items-start gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.1fr)]">
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
         <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
         <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
