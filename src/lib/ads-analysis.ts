@@ -111,6 +111,16 @@ async function getUsdKrwRate() {
   const now = Date.now();
   if (cachedUsdKrwRate && now - cachedUsdKrwRate.at < 60_000) return cachedUsdKrwRate.value;
   try {
+    const rows = await selectRows<AnyRecord>("import_erp_fx_rates", { currency: "eq.USD", limit: 1 });
+    const usdRate = numberValue(rows[0]?.rate);
+    if (usdRate > 0) {
+      cachedUsdKrwRate = { value: usdRate, at: now };
+      return usdRate;
+    }
+  } catch {
+    // 환율 테이블이 아직 없으면 수입관리 API와 fallback을 순서대로 사용한다.
+  }
+  try {
     const response = await fetch(`${IMPORT_API_URL.replace(/\/$/, "")}/api/fnos/settings`, {
       cache: "no-store",
       headers: {
