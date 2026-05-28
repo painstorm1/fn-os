@@ -187,16 +187,14 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
 
 function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
   const groups = months || [];
-  if (!groups.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">월별 발주금액이 없습니다.</p>;
+  if (!groups.length) return <p className="py-6 text-center text-sm font-bold text-slate-400">월별 발주금액이 없습니다.</p>;
   return (
-    <div className="space-y-2">
+    <div className="divide-y divide-slate-100">
       {groups.map((group) => (
-        <a key={group.month || group.label} href={monthOrdersHref(group)} className="block rounded-md border border-slate-200 bg-slate-50 px-3 py-3 transition hover:border-orange-200 hover:bg-orange-50">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-black text-slate-950">{monthTitle(group)}</span>
-            <span className="text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
-          </div>
-          <p className="mt-1 text-sm font-black text-orange-600">{krwLong(group.value)}</p>
+        <a key={group.month || group.label} href={monthOrdersHref(group)} className="grid grid-cols-[52px_minmax(0,1fr)_42px] items-baseline gap-2 py-2.5 text-sm transition hover:text-orange-600">
+          <span className="font-black text-slate-950">{monthTitle(group)}</span>
+          <span className="text-right font-black text-orange-600">{krwLong(group.value)}</span>
+          <span className="text-right text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
         </a>
       ))}
     </div>
