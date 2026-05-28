@@ -426,7 +426,6 @@ async function saveProduct(request: NextRequest, id?: number) {
   const imageUrl = text(fields.image_url);
   const values: AnyRecord = {
     ...fields,
-    image_path: imageUrl || null,
     category_id: text(fields.category_id) ? Number(fields.category_id) : null,
     factory_id: text(fields.factory_id) ? Number(fields.factory_id) : null,
     basic_rate: numberValue(fields.basic_rate),
@@ -440,6 +439,7 @@ async function saveProduct(request: NextRequest, id?: number) {
     material_initial_qty: numberValue(fields.material_initial_qty),
     updated_at: nowIso(),
   };
+  if (imageUrl || !id) values.image_path = imageUrl || null;
   delete values.image_url;
 
   const savedId = id || await nextId(TABLES.products);
@@ -479,6 +479,27 @@ async function saveProductMaterials(productId: number, itemType: string, materia
     const keys = Object.keys(row);
     await db(`insert into ${q(TABLES.productMaterials)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
   }
+}
+
+async function saveMaterialMovement(request: NextRequest, materialId: number) {
+  const body = await request.json().catch(() => ({}));
+  const qty = numberValue(body.qty);
+  if (!qty) return json({ ok: false, error: "수량을 입력해 주세요." }, 400);
+  const row = {
+    id: await nextId(TABLES.materialMovements),
+    material_id: materialId,
+    order_id: text(body.order_id) ? Number(body.order_id) : null,
+    order_item_id: text(body.order_item_id) ? Number(body.order_item_id) : null,
+    movement_type: text(body.movement_type) || (qty > 0 ? "IN" : "ADJUST"),
+    qty,
+    unit_cost: numberValue(body.unit_cost),
+    memo: text(body.memo) || null,
+    created_at: nowIso(),
+  };
+  const keys = Object.keys(row);
+  await db(`insert into ${q(TABLES.materialMovements)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
+  const detail = await productDetail(materialId);
+  return json({ ok: true, movement: row, product: detail?.product || { id: materialId } });
 }
 
 async function orderDetail(id: number) {
@@ -687,6 +708,8 @@ async function handleMutation(path: string, request: NextRequest) {
     await db(`delete from ${q(TABLES.products)} where id=$1`, [Number(productMatch[1])]);
     return json({ ok: true });
   }
+  const materialMovementMatch = path.match(/^api\/fnos\/materials\/(\d+)\/movements$/);
+  if (materialMovementMatch && request.method === "POST") return saveMaterialMovement(request, Number(materialMovementMatch[1]));
   if (path === "api/fnos/orders" && request.method === "POST") return saveOrder(request);
   const orderMatch = path.match(/^api\/fnos\/orders\/(\d+)$/);
   if (orderMatch && request.method === "PUT") return saveOrder(request, Number(orderMatch[1]));
