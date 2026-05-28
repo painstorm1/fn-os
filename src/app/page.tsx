@@ -849,6 +849,10 @@ function linkOptionName(link?: ImportSkuLink | null) {
   return String(link?.option_name || link?.import_option_name || link?.import_option_key || "").trim();
 }
 
+function linkVariantLabel(link?: ImportSkuLink | null) {
+  return String(link?.variant_label || link?.memo || "").trim();
+}
+
 function sameImportOption(link: ImportSkuLink, optionName: string) {
   return linkOptionName(link) === String(optionName || "").trim();
 }
@@ -2825,6 +2829,7 @@ function FnProductPickerModal({
         import_option_key: optionName,
         import_option_name: optionName,
         match_group_label: optionName,
+        variant_label: fnProductOption(product) !== "-" ? fnProductOption(product) : fnProductName(product),
         sort_order: prev.length,
         default_ratio: 1,
         default_qty: 0,
@@ -3355,7 +3360,7 @@ function NativeProductForm({ id }: { id?: number }) {
                             const index = fnSkuLinks.findIndex((item) => item.product_id === link.product_id && linkOptionName(item) === linkOptionName(link));
                             const fnProduct = link.product;
                             return (
-                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm md:grid-cols-[44px_1fr_76px_92px_92px_88px]">
+                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_76px_92px_92px_88px]">
                                 <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
                                   {fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}
                                 </div>
@@ -3363,6 +3368,7 @@ function NativeProductForm({ id }: { id?: number }) {
                                   <p className="truncate font-black">{fnProductName(fnProduct)}</p>
                                   <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · {fnProductOption(fnProduct)}</p>
                                 </div>
+                                <input className="field-input h-8" title="품목 구분명" placeholder="블랙" value={linkVariantLabel(link)} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, variant_label: event.target.value } : item))} />
                                 <input className="field-input h-8 text-right" title="기본 수량" type="number" min="0" step="0.01" value={link.default_qty || 0} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_qty: Number(event.target.value || 0) } : item))} />
                                 <input className="field-input h-8 text-right" title="배분 비율" type="number" min="0" step="0.01" value={link.default_ratio || 1} onChange={(event) => setFnSkuLinks((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, default_ratio: Number(event.target.value || 0) || 1 } : item))} />
                                 <label className="flex items-center justify-center gap-1 text-xs font-black text-slate-600"><input type="radio" checked={Boolean(link.is_primary)} onChange={() => setFnSkuLinks((prev) => prev.map((item, itemIndex) => ({ ...item, is_primary: itemIndex === index })))} /> 대표</label>
@@ -4178,7 +4184,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                       <div className="flex flex-wrap gap-1 text-xs font-bold xl:col-span-5 xl:col-start-2 xl:row-start-3">
                         {linkedSkus.map((link) => (
                           <span key={`${linkOptionName(link)}:${link.product_id}`} className="rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-orange-700">
-                            {fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
+                            {linkVariantLabel(link) || fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
                           </span>
                         ))}
                       </div>
