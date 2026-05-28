@@ -7908,9 +7908,18 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     );
   }
 
-  function downloadVisibleProducts() {
+  async function downloadVisibleProducts() {
     const filterLabel = relationFilters.find((filter) => filter.key === relationFilter)?.label || "품목";
-    const rows = products.map((product) => [
+    const params = new URLSearchParams({ page: "1", pageSize: "5000", relation: relationFilter });
+    if (query.trim()) params.set("q", query.trim());
+    const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setProductMessage(data.error || "상품정보 다운로드 대상 조회 실패");
+      return;
+    }
+    const exportProducts = (data.products || []) as FnProduct[];
+    const rows = exportProducts.map((product) => [
       product.product_code || product.sku || "",
       product.product_name || "",
       String(product.cost_price ?? ""),
@@ -7921,7 +7930,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       (product.import_links || []).map((item) => `${item.import_product_name || item.import_product_id}${item.import_option_name ? `/${item.import_option_name}` : ""}`).join(" / "),
     ]);
     void downloadTableXlsx(
-      `FN_OS_품목_${filterLabel}_${todayMmdd()}.xlsx`,
+      `FN_OS_품목_${filterLabel}_${exportProducts.length}건_${todayMmdd()}.xlsx`,
       "품목정보",
       ["품목코드", "품목명", "입고가", "출고가", "현재고", "창고별재고", "BOM구성", "수입연동"],
       rows,
