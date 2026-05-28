@@ -8061,8 +8061,68 @@ function AdsBarList({ title, rows, labelKey, valueKey }: { title: string; rows: 
   );
 }
 
-function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
-  const points = rows.slice(-14);
+function adDailyRowsForRange(rows: AdsMetricRow[], from: string, to: string) {
+  const byDate = new Map(rows.map((row) => [String(row.date || ""), row]));
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  const result: AdsMetricRow[] = [];
+  const cursor = new Date(start);
+  while (!Number.isNaN(cursor.getTime()) && cursor <= end) {
+    const date = adDateInput(cursor);
+    result.push(byDate.get(date) || { date, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0, roas: 0 });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
+function adMonthInput(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function addAdMonths(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + amount);
+  return next;
+}
+
+function adChartRange(from: string, to: string) {
+  const days = adRangeDays(from, to);
+  const end = new Date(`${to}T00:00:00`);
+  if (days <= 7) {
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
+    return { from: adDateInput(start), to, mode: "day" as const, title: "최근 7일" };
+  }
+  if (days <= 30) return { from, to, mode: "day" as const, title: `${days}일` };
+  const start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
+  return { from: adDateInput(start), to, mode: "month" as const, title: "최근 6개월" };
+}
+
+function adMonthlyRowsForRange(rows: AdsMetricRow[], from: string, to: string) {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  const monthly = new Map<string, AdsMetricRow>();
+  for (let i = 0; i < 6; i += 1) {
+    const month = addAdMonths(start, i);
+    const key = adMonthInput(month);
+    monthly.set(key, { date: key, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0, roas: 0 });
+  }
+  rows.forEach((row) => {
+    const date = new Date(`${String(row.date || "").slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(date.getTime()) || date < start || date > end) return;
+    const key = adMonthInput(date);
+    const target = monthly.get(key) || { date: key, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0, roas: 0 };
+    target.cost = adNumber(target.cost) + adNumber(row.cost);
+    target.conversion_value = adNumber(target.conversion_value) + adNumber(row.conversion_value);
+    target.roas = adNumber(target.cost) > 0 ? (adNumber(target.conversion_value) / adNumber(target.cost)) * 100 : 0;
+    monthly.set(key, target);
+  });
+  return Array.from(monthly.values());
+}
+
+function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; to: string }) {
+  const range = adChartRange(from, to);
+  const points = range.mode === "month" ? adMonthlyRowsForRange(rows, range.from, range.to) : adDailyRowsForRange(rows, range.from, range.to);
   const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
   const maxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 1);
   const chartPoints = points.map((row, index) => {
@@ -8071,16 +8131,9 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
     const roasY = 92 - (adNumber(row.roas) / maxRoas) * 72;
     return { row, x, costY, roasY };
   });
-  const costPath = points.map((row, index) => {
-    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
-    const y = 92 - (adNumber(row.cost) / maxCost) * 72;
-    return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }).join(" ");
-  const roasPath = points.map((row, index) => {
-    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
-    const y = 92 - (adNumber(row.roas) / maxRoas) * 72;
-    return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }).join(" ");
+  const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
+  const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
+  const labelColumns = Math.min(points.length || 1, range.mode === "month" ? 6 : 10);
 
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -8089,46 +8142,42 @@ function AdsLineChart({ rows }: { rows: AdsMetricRow[] }) {
         <div className="flex gap-3 text-xs font-black">
           <span className="text-orange-600">광고비</span>
           <span className="text-slate-600">ROAS</span>
+          <span className="text-slate-400">{range.title}</span>
         </div>
       </div>
       <div className="mt-4 rounded-md bg-slate-50 p-3">
         {points.length ? (
           <>
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-52 w-full overflow-visible" role="img" aria-label="일별 광고비와 ROAS 그래프">
-              <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
-              <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
-              <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
-              {chartPoints.map(({ row, x }, index) => {
-                const barHeight = (adNumber(row.cost) / maxCost) * 72;
-                const barWidth = points.length <= 1 ? 10 : Math.min(8, 72 / points.length);
-                return (
-                  <rect
-                    key={`ad-cost-bar-${String(row.date)}-${index}`}
-                    x={x - barWidth / 2}
-                    y={92 - barHeight}
-                    width={barWidth}
-                    height={barHeight}
-                    rx="1"
-                    fill="#fed7aa"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                );
-              })}
-              {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
-              {points.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
+            <div className="relative h-52">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="광고비와 ROAS 그래프">
+                <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
+                <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
+                {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+                {points.length > 1 && <path d={roasPath} fill="none" stroke="#475569" strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />}
+              </svg>
               {chartPoints.map(({ row, x, costY, roasY }, index) => (
-                <g key={`ad-point-${String(row.date)}-${index}`}>
-                  <circle cx={x} cy={costY} r="2.6" fill="#f97316" vectorEffect="non-scaling-stroke" />
-                  <circle cx={x} cy={roasY} r="2.3" fill="#475569" vectorEffect="non-scaling-stroke" />
-                </g>
+                <div key={`ad-hover-point-${String(row.date)}-${index}`}>
+                  {[
+                    { type: "광고비", y: costY, color: "bg-orange-500", value: krw(adNumber(row.cost)) },
+                    { type: "ROAS", y: roasY, color: "bg-slate-600", value: adPercent(adNumber(row.roas)) },
+                  ].map((point) => (
+                    <div key={`${String(row.date)}-${point.type}`} className="group absolute z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2" style={{ left: `${x}%`, top: `${point.y}%` }}>
+                      <span className={`absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-1 ring-white`} />
+                      <span className="pointer-events-none absolute bottom-4 left-1/2 hidden min-w-max -translate-x-1/2 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-black text-slate-700 shadow-lg group-hover:block">
+                        {String(row.date)} · {point.type} {point.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ))}
-            </svg>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {points.slice(-4).map((row, index) => (
-                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="rounded bg-white px-2 py-2 text-xs">
-                  <p className="font-black text-slate-500">{String(row.date || "-")}</p>
-                  <p className="mt-1 font-black text-orange-600">{krw(adNumber(row.cost))}</p>
-                  <p className="mt-0.5 font-black text-slate-700">ROAS {adPercent(adNumber(row.roas))}</p>
+            </div>
+            <div className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
+              {points.map((row, index) => (
+                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 rounded bg-white px-1 py-1.5 text-center text-[11px]">
+                  <p className="truncate font-black text-slate-500">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
+                  <p className="mt-0.5 truncate font-black text-orange-600">{krw(adNumber(row.cost))}</p>
+                  <p className="mt-0.5 truncate font-black text-slate-700">{adPercent(adNumber(row.roas))}</p>
                 </div>
               ))}
             </div>
@@ -8338,16 +8387,28 @@ function AdsAnalysisWorkspace() {
   const dateFrom = searchParams.get("adsFrom") || defaultRange.from;
   const dateTo = searchParams.get("adsTo") || defaultRange.to;
   const [summary, setSummary] = useState<AdsSummary | null>(null);
+  const [chartSummary, setChartSummary] = useState<AdsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
   const loadSummary = () => {
     setLoading(true);
     const params = new URLSearchParams({ from: dateFrom, to: dateTo });
-    fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => setSummary(data))
-      .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "광고 분석 조회 실패" }))
+    const graphRange = adChartRange(dateFrom, dateTo);
+    const graphParams = new URLSearchParams({ from: graphRange.from, to: graphRange.to });
+    Promise.all([
+      fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" }).then((res) => res.json()),
+      fetch(`/api/fnos/ads/summary?${graphParams.toString()}`, { cache: "no-store" }).then((res) => res.json()),
+    ])
+      .then(([data, graphData]) => {
+        setSummary(data);
+        setChartSummary(graphData);
+      })
+      .catch((error) => {
+        const fallback = { ok: false, error: error instanceof Error ? error.message : "광고 분석 조회 실패" };
+        setSummary(fallback);
+        setChartSummary(fallback);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -8372,7 +8433,7 @@ function AdsAnalysisWorkspace() {
   }
 
   const channels = summary?.channels || [];
-  const daily = summary?.daily || [];
+  const daily = chartSummary?.daily || summary?.daily || [];
   const reportRows = adMetricReportRows(channels, selectedAdChannels);
   const mainReport = reportRows[0] || adMetricReportRows([], [])[0];
   const rangeNote = dateFrom === dateTo ? `${dateTo} 기준` : `${dateFrom} ~ ${dateTo}`;
@@ -8397,7 +8458,7 @@ function AdsAnalysisWorkspace() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-        <AdsLineChart rows={daily} />
+        <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
         <AdsBarList title="채널별 ROAS" rows={channels} labelKey="channel" valueKey="roas" />
       </section>
 
