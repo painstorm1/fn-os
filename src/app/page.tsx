@@ -8497,7 +8497,6 @@ function AdsAnalysisWorkspace() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black">광고분석</h1>
-        <p className="mt-1 text-sm font-bold text-slate-500">광고 파일을 업로드하고 선택 기간 기준으로 비용, 구매완료 매출, ROAS, CTR, 구매완료 전환율을 봅니다.</p>
       </div>
 
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
