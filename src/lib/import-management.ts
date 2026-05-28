@@ -126,11 +126,23 @@ async function productsByIds(productIds: string[]) {
   });
 }
 
+async function activeBomParentProductIds() {
+  const rows = await selectRows<AnyRecord>("product_boms", {
+    is_active: "eq.true",
+    limit: 5000,
+  }).catch(() => []);
+  return new Set(rows.map((row) => text(row.parent_product_id)).filter(Boolean));
+}
+
 export async function searchFnProducts(query: string, limit = 80) {
   if (!hasDbConfig()) return [];
   const keywords = text(query).toLowerCase().split(/\s+/).filter(Boolean);
-  const rows = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2500 });
+  const [rows, bomParentIds] = await Promise.all([
+    selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2500 }),
+    activeBomParentProductIds(),
+  ]);
   const matched = rows
+    .filter((row) => !bomParentIds.has(text(row.id)))
     .map((row) => {
       const haystack = [row.product_code, row.sku, row.product_name, row.prod_cd, row.prod_name, row.option_name, row.size_des]
         .map((value) => text(value).toLowerCase())
