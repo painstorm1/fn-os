@@ -1075,6 +1075,16 @@ function isMaterial(product?: ImportProduct | null) {
   return String(product?.item_type || "").toUpperCase() === "MATERIAL";
 }
 
+function isMaterialOrderLine(line: Pick<OrderLine, "item_type">) {
+  return String(line.item_type || "").toUpperCase() === "MATERIAL";
+}
+
+function savableOrderLine(line: OrderLine) {
+  if (!line.product_name) return false;
+  if (isMaterialOrderLine(line)) return true;
+  return Boolean(line.quantity && line.unit_price);
+}
+
 function isMaterialItem(item?: ImportOrderItem | null) {
   return String(item?.item_type || "").toUpperCase() === "MATERIAL";
 }
@@ -3828,7 +3838,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           china_other_note: chinaCosts.otherNote,
           china_cost_currency: chinaCosts.currency,
           ...paymentPayload,
-          items: lines.filter((line) => line.product_name && line.quantity && line.unit_price),
+          items: lines.filter(savableOrderLine),
         }),
       });
       const json = await res.json();
@@ -4138,6 +4148,10 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
       option_value: product?.options?.split(",")[0]?.trim() || "",
       unit_price: product?.std_price ? String(product.std_price) : "",
       item_currency: product?.currency || "CNY",
+      line_note: product && isMaterial(product) ? "재고이동: " : "",
+      image_path: product?.image_path || "",
+      item_type: product?.item_type || "",
+      materials: product?.materials || [],
     });
   }
 
@@ -4152,7 +4166,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
         method: id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ ...payload, items: lines.filter((line) => line.product_name && line.quantity && line.unit_price) }),
+        body: JSON.stringify({ ...payload, items: lines.filter(savableOrderLine) }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "발주 저장에 실패했습니다.");
