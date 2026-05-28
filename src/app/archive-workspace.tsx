@@ -290,6 +290,20 @@ export default function ArchiveWorkspace() {
     }
   }
 
+  async function updateArchiveItems(items: ArchiveItem[]) {
+    try {
+      await Promise.all(items.map(async (item) => {
+        const res = await fetch("/api/fnos/archive", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+        const result = await res.json();
+        if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 수정 실패");
+      }));
+      setMessage(`${items.length.toLocaleString("ko-KR")}개 항목을 수정했습니다.`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "아카이브 수정 실패");
+    }
+  }
+
   async function runOcr(file: File) {
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker("eng");
@@ -605,6 +619,7 @@ export default function ArchiveWorkspace() {
           data={data}
           onRegeneratePreview={requestPreview}
           onUpdateItem={updateArchiveItem}
+          onUpdateItems={updateArchiveItems}
         />
       )}
     </div>
@@ -619,6 +634,7 @@ function ArchiveList({
   data,
   onRegeneratePreview,
   onUpdateItem,
+  onUpdateItems,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
@@ -627,9 +643,13 @@ function ArchiveList({
   data: ArchiveData;
   onRegeneratePreview: (id?: string, force?: boolean) => void;
   onUpdateItem: (item: ArchiveItem) => Promise<void>;
+  onUpdateItems: (items: ArchiveItem[]) => Promise<void>;
 }) {
   const [editingId, setEditingId] = useState("");
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkCategoryName, setBulkCategoryName] = useState("");
+  const selectedItems = items.filter((item) => selectedIds.includes(item.id));
 
   function startEdit(item: ArchiveItem) {
     setEditingId(item.id);
@@ -641,6 +661,18 @@ function ArchiveList({
     await onUpdateItem(editDraft);
     setEditingId("");
     setEditDraft(null);
+  }
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => checked ? Array.from(new Set([...prev, id])) : prev.filter((itemId) => itemId !== id));
+  }
+
+  async function moveSelectedCategory() {
+    const category = data.categories.find((item) => item.category_name === bulkCategoryName);
+    if (!category || !selectedItems.length) return;
+    await onUpdateItems(selectedItems.map((item) => ({ ...item, category_id: category.id })));
+    setSelectedIds([]);
+    setBulkCategoryName("");
   }
 
   return (
@@ -658,13 +690,35 @@ function ArchiveList({
         <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} />
       </section>
 
+      {selectedIds.length > 0 && (
+        <section className="flex flex-wrap items-center gap-2 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
+          <span className="font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개 선택</span>
+          <select className="field-input h-9 min-w-48 rounded-md border border-orange-200 bg-white px-3 text-sm" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
+            <option value="">이동할 카테고리</option>
+            {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
+          </select>
+          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName} className="h-9 rounded-md bg-orange-500 px-3 text-xs font-black text-white disabled:bg-slate-300">
+            카테고리 이동
+          </button>
+          <button type="button" onClick={() => setSelectedIds(items.map((item) => item.id))} className="h-9 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
+            현재 목록 전체 선택
+          </button>
+          <button type="button" onClick={() => setSelectedIds([])} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
+            선택 해제
+          </button>
+        </section>
+      )}
+
       <section className="grid grid-cols-[repeat(auto-fill,minmax(260px,300px))] gap-3">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className="w-full max-w-[300px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+            <article key={item.id} className={`relative w-full max-w-[300px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
+              <label className="absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white/90 shadow-sm">
+                <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
+              </label>
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex h-24 items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
