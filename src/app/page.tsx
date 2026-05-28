@@ -7911,11 +7911,13 @@ function uploadedAdFileKey(item: UploadedAdFile) {
 
 function inferAdSourceKey(fileName: string): AdSourceKey {
   const name = fileName.toLowerCase();
+  if (name.includes("광고그룹")) return "naver-gfa";
+  if (name.includes("쇼핑검색")) return "naver-shopping";
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "coupang";
-  if (name.includes("쇼핑검색") || name.includes("shopping")) return "naver-shopping";
-  if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "naver-adboost";
-  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형")) return "naver-gfa";
   if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("메타")) return "meta-gfa";
+  if (name.includes("캠페인_") || name.startsWith("캠페인") || name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "naver-adboost";
+  if (name.includes("shopping")) return "naver-shopping";
+  if (name.includes("gfa") || name.includes("성과형")) return "naver-gfa";
   if (name.includes("캠페인")) return "naver-adboost";
   if (name.includes("naver") || name.includes("검색") || name.includes("네이버")) return "naver-shopping";
   return "naver-shopping";
@@ -7923,8 +7925,10 @@ function inferAdSourceKey(fileName: string): AdSourceKey {
 
 function adSourceForFile(file: File, index: number, total: number, forcedSource?: AdSourceKey) {
   if (forcedSource) return forcedSource;
+  const inferred = inferAdSourceKey(file.name);
+  if (inferred) return inferred;
   if (total >= adSourceOrder.length && index < adSourceOrder.length) return adSourceOrder[index];
-  return inferAdSourceKey(file.name);
+  return "naver-shopping";
 }
 
 function adNumber(value: unknown) {

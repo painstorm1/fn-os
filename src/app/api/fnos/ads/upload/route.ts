@@ -41,11 +41,13 @@ function reportDateFromFileName(fileName: string) {
 
 function inferAdChannel(fileName: string, index: number, total: number) {
   const name = fileName.toLowerCase();
+  if (name.includes("광고그룹")) return "네이버GFA";
+  if (name.includes("쇼핑검색")) return "네이버쇼핑검색";
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "쿠팡";
-  if (name.includes("쇼핑검색") || name.includes("shopping")) return "네이버쇼핑검색";
-  if (name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "네이버Advoost";
-  if (name.includes("광고그룹") || name.includes("gfa") || name.includes("성과형")) return "네이버GFA";
   if (name.includes("광고-세트") || name.includes("광고 세트") || name.includes("meta") || name.includes("facebook") || name.includes("instagram") || name.includes("메타")) return "메타GFA";
+  if (name.includes("캠페인_") || name.startsWith("캠페인") || name.includes("adboost") || name.includes("advoost") || name.includes("애드부스트")) return "네이버Advoost";
+  if (name.includes("shopping")) return "네이버쇼핑검색";
+  if (name.includes("gfa") || name.includes("성과형")) return "네이버GFA";
   if (name.includes("캠페인")) return "네이버Advoost";
   if (total >= adChannelOrder.length && index < adChannelOrder.length) return adChannelOrder[index];
   return "네이버쇼핑검색";
@@ -67,7 +69,8 @@ export async function POST(request: NextRequest) {
       const groupedRows = new Map<string, Record<string, unknown>[]>();
       const groupedFiles = new Map<string, string[]>();
       for (const [index, file] of files.entries()) {
-        const channel = fileChannels[index] || clean(form.get("channel")) || inferAdChannel(file.name, index, files.length);
+        const inferredChannel = inferAdChannel(file.name, index, files.length);
+        const channel = inferredChannel || fileChannels[index] || clean(form.get("channel")) || "네이버쇼핑검색";
         const reportDate = reportDateFromFileName(file.name);
         const buffer = Buffer.from(await file.arrayBuffer());
         const fileRows = rowsFromWorkbook(buffer).map((row) => ({
