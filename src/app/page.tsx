@@ -1786,7 +1786,13 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
                       void loadOrders();
                       return;
                     }
-                    setDetails((prev) => ({ ...prev, [order.id]: next }));
+                    setDetails((prev) => ({
+                      ...prev,
+                      [order.id]: {
+                        ...next,
+                        items: Array.isArray(next.items) ? next.items : prev[order.id]?.items || [],
+                      },
+                    }));
                     void loadOrders();
                   }} />
                   : <div className="border-b border-slate-200 p-5 text-sm font-bold text-slate-500">상세 불러오는 중...</div>
@@ -1872,7 +1878,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
 
   async function saveQuick() {
     setSaving(true);
-    const payload = {
+    const payload: Record<string, unknown> = {
       factory_id: order.factory_id || "",
       platform: order.platform || "FN_OS",
       currency: order.currency || "CNY",
@@ -1889,7 +1895,9 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       actual_payment_usd_2: actualCurrency === "USD" && isTT ? actualPayment2 : "",
       ...stageValues,
       ...costs,
-      items: (detail.items || []).map((item) => ({
+    };
+    if (Array.isArray(detail.items) && detail.items.length > 0) {
+      payload.items = detail.items.map((item) => ({
         product_id: item.product_id || "",
         product_name: item.product_name || "",
         option_value: item.option_value || "",
@@ -1897,8 +1905,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         unit_price: item.unit_price || "",
         item_currency: item.item_currency || order.currency || "CNY",
         line_note: item.line_note || "",
-      })),
-    };
+      }));
+    }
     const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}`), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

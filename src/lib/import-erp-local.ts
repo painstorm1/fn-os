@@ -462,7 +462,11 @@ async function saveOrder(request: NextRequest, id?: number) {
     values.order_code = text(values.order_code) || await generateOrderCode(dateKey(values.order_date));
   }
   values.updated_at = nowIso();
-  const shouldReplaceItems = Array.isArray(body.items);
+  let shouldReplaceItems = Array.isArray(body.items);
+  if (id && shouldReplaceItems && body.items.length === 0 && !body.allow_empty_items) {
+    const [existing] = await db<{ count: string }>(`select count(*) as count from ${q(TABLES.orderItems)} where order_id=$1`, [id]);
+    if (numberValue(existing?.count) > 0) shouldReplaceItems = false;
+  }
   if (id) {
     const keys = Object.keys(values);
     await db(`update ${q(TABLES.orders)} set ${keys.map((key, index) => `${q(key)}=$${index + 1}`).join(", ")} where id=$${keys.length + 1}`, [...Object.values(values), id]);
@@ -491,7 +495,8 @@ async function saveOrder(request: NextRequest, id?: number) {
     const keys = Object.keys(row);
     await db(`insert into ${q(TABLES.orderItems)} (${keys.map(q).join(", ")}) values (${keys.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
   }
-  return json({ ok: true, order: (await orderDetail(savedId))?.order || { id: savedId } });
+  const detail = await orderDetail(savedId);
+  return json(detail || { ok: true, order: { id: savedId }, items: [] });
 }
 
 async function saveFactory(request: NextRequest, id?: number) {
