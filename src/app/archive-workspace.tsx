@@ -196,6 +196,19 @@ function categoryOptionEntries() {
   return (Object.keys(categoryTree) as CategoryGroup[]).flatMap((group) => categoryTree[group].map((category) => ({ group, category, label: `${group} / ${category}` })));
 }
 
+function normalizeDateInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 8) return "";
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+}
+
+function displayDateInput(value: string) {
+  const normalized = normalizeDateInput(value);
+  if (!normalized) return value;
+  const [year, month, day] = normalized.split("-");
+  return `${year}.${month}.${day}`;
+}
+
 export default function ArchiveWorkspace() {
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>("save");
   const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
@@ -235,8 +248,10 @@ export default function ArchiveWorkspace() {
     if (filters.category && categoryName !== filters.category) return false;
     if (filters.source && item.source_type !== filters.source) return false;
     const createdDate = (item.created_at || "").slice(0, 10);
-    if (filters.dateFrom && createdDate < filters.dateFrom) return false;
-    if (filters.dateTo && createdDate > filters.dateTo) return false;
+    const dateFrom = normalizeDateInput(filters.dateFrom);
+    const dateTo = normalizeDateInput(filters.dateTo);
+    if (dateFrom && createdDate < dateFrom) return false;
+    if (dateTo && createdDate > dateTo) return false;
     return true;
   }), [categoryById, categoryFilteredItems, filters]);
 
@@ -513,8 +528,11 @@ export default function ArchiveWorkspace() {
           </div>
           {activeMenu !== "save" && (
             <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
-              <input className="field-input h-8 w-32 min-w-0 rounded-md border border-slate-200 px-2 text-xs" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
-              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.categoryGroup} onChange={(event) => {
+              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-8 w-12 whitespace-nowrap rounded-md border px-2 text-xs font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-950 bg-slate-950 text-white"}`}>
+                선택
+              </button>
+              <input className="field-input h-8 w-20 min-w-0 rounded-md border border-slate-200 px-2 text-xs" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
+              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.categoryGroup} onChange={(event) => {
                 const group = event.target.value;
                 setFilters({ ...filters, categoryGroup: group, category: "" });
                 setActiveMenu(group ? group as CategoryGroup : "all");
@@ -523,22 +541,21 @@ export default function ArchiveWorkspace() {
                 <option value="">카테고리1</option>
                 {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
               </select>
-              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.category} onChange={(event) => {
+              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.category} onChange={(event) => {
                 setFilters({ ...filters, category: event.target.value });
                 setActiveSubCategory(event.target.value);
               }}>
                 <option value="">카테고리2</option>
                 {category2Options.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
-              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
+              <select className="field-input h-8 w-[4.4rem] min-w-0 rounded-md border border-slate-200 px-1 text-xs" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
                 <option value="">소스 전체</option>
                 {sources.map((source) => <option key={source} value={source}>{source}</option>)}
               </select>
-              <input className="field-input h-8 w-[6.7rem] min-w-0 rounded-md border border-slate-200 px-1 text-[11px]" type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
-              <input className="field-input h-8 w-[6.7rem] min-w-0 rounded-md border border-slate-200 px-1 text-[11px]" type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
-              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-8 w-12 whitespace-nowrap rounded-md border px-2 text-xs font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-                선택
-              </button>
+              <span className="shrink-0 text-[10px] font-black text-slate-500">기간선택</span>
+              <input className="field-input h-8 w-[112px] min-w-0 rounded-md border border-slate-200 px-1 text-[11px] font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
+              <span className="shrink-0 text-xs font-black text-slate-400">~</span>
+              <input className="field-input h-8 w-[112px] min-w-0 rounded-md border border-slate-200 px-1 text-[11px] font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
             </div>
           )}
         </div>
@@ -720,35 +737,35 @@ function ArchiveList({
 
   return (
     <div className="space-y-4">
-      {selectMode && selectedIds.length > 0 && (
-        <section className="flex flex-wrap items-center gap-2 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
+      {selectMode && (
+        <section className="flex items-center gap-2 rounded-md border border-orange-200 bg-orange-50 p-2 text-sm">
           <span className="font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개 선택</span>
-          <select className="field-input h-9 min-w-48 rounded-md border border-orange-200 bg-white px-3 text-sm" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
+          <select className="field-input h-8 min-w-0 flex-1 rounded-md border border-orange-200 bg-white px-3 text-xs" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
             <option value="">이동할 카테고리</option>
             {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
           </select>
-          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName} className="h-9 rounded-md bg-orange-500 px-3 text-xs font-black text-white disabled:bg-slate-300">
+          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName} className="h-8 rounded-md bg-orange-500 px-3 text-xs font-black text-white disabled:bg-slate-300">
             카테고리 이동
           </button>
-          <button type="button" onClick={() => void regenerateSelectedPreviews()} className="h-9 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
+          <button type="button" onClick={() => void regenerateSelectedPreviews()} className="h-8 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
             미리보기 재생성
           </button>
-          <button type="button" onClick={() => setSelectedIds(items.map((item) => item.id))} className="h-9 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
-            현재 목록 전체 선택
+          <button type="button" onClick={() => setSelectedIds(items.map((item) => item.id))} className="h-8 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
+            모두선택
           </button>
-          <button type="button" onClick={() => setSelectedIds([])} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
-            선택 해제
+          <button type="button" onClick={() => setSelectedIds([])} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
+            모두해제
           </button>
         </section>
       )}
 
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(148px,148px))] gap-2">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(151px,151px))] gap-1">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className={`relative min-h-[178px] w-[148px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
+            <article key={item.id} className={`relative min-h-[178px] w-[151px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
               {selectMode && (
                 <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
                   <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
@@ -756,7 +773,7 @@ function ArchiveList({
                 </label>
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
-                <div className="flex h-[92px] w-[148px] items-center justify-center bg-slate-100">
+                <div className="flex h-[96px] w-[151px] items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
