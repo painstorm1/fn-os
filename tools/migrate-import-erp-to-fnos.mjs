@@ -167,9 +167,21 @@ async function upsertRows(target, table, columns, rows) {
   const insertColumns = [...columnNames, "migrated_at"];
   const insertSqlColumns = insertColumns.map(qname).join(", ");
   const updateColumns = columnNames.filter((name) => !conflictColumns.includes(name));
+  const updateSql = updateColumns.map((name) => {
+    if (table === "products" && name === "image_path") {
+      return `${qname(name)} = case
+        when ${qname(targetName)}.${qname(name)} is not null
+         and ${qname(targetName)}.${qname(name)} not like 'data:image/%'
+         and excluded.${qname(name)} like 'data:image/%'
+        then ${qname(targetName)}.${qname(name)}
+        else excluded.${qname(name)}
+      end`;
+    }
+    return `${qname(name)} = excluded.${qname(name)}`;
+  });
   const conflictSql = conflictColumns.length
     ? ` on conflict (${conflictColumns.map(qname).join(", ")}) do update set ${[
-        ...updateColumns.map((name) => `${qname(name)} = excluded.${qname(name)}`),
+        ...updateSql,
         `migrated_at = now()`,
       ].join(", ")}`
     : "";

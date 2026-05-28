@@ -4,6 +4,10 @@ import { uploadStorageFile } from "./fnos-db";
 
 type AnyRecord = QueryResultRow & Record<string, unknown>;
 
+const globalForImportErp = globalThis as typeof globalThis & {
+  __fnosImportErpPool?: pg.Pool;
+};
+
 const DATABASE_URL =
   process.env.DATABASE_URL ||
   process.env.POSTGRES_URL ||
@@ -12,8 +16,20 @@ const DATABASE_URL =
   "";
 
 const pool = DATABASE_URL
-  ? new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  ? globalForImportErp.__fnosImportErpPool ||
+    new pg.Pool({
+      connectionString: DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: Number(process.env.IMPORT_ERP_DB_POOL_MAX || 2),
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 5_000,
+      maxUses: 750,
+    })
   : null;
+
+if (pool && !globalForImportErp.__fnosImportErpPool) {
+  globalForImportErp.__fnosImportErpPool = pool;
+}
 
 const TABLES = {
   categories: "import_erp_categories",
