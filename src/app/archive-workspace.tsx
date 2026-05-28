@@ -645,21 +645,18 @@ function ArchiveList({
   onUpdateItem: (item: ArchiveItem) => Promise<void>;
   onUpdateItems: (items: ArchiveItem[]) => Promise<void>;
 }) {
-  const [editingId, setEditingId] = useState("");
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkCategoryName, setBulkCategoryName] = useState("");
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
 
   function startEdit(item: ArchiveItem) {
-    setEditingId(item.id);
     setEditDraft({ ...item });
   }
 
   async function saveEdit() {
     if (!editDraft) return;
     await onUpdateItem(editDraft);
-    setEditingId("");
     setEditDraft(null);
   }
 
@@ -673,6 +670,11 @@ function ArchiveList({
     await onUpdateItems(selectedItems.map((item) => ({ ...item, category_id: category.id })));
     setSelectedIds([]);
     setBulkCategoryName("");
+  }
+
+  async function regenerateSelectedPreviews() {
+    await Promise.all(selectedItems.map((item) => onRegeneratePreview(item.id, true)));
+    setSelectedIds([]);
   }
 
   return (
@@ -700,6 +702,9 @@ function ArchiveList({
           <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName} className="h-9 rounded-md bg-orange-500 px-3 text-xs font-black text-white disabled:bg-slate-300">
             카테고리 이동
           </button>
+          <button type="button" onClick={() => void regenerateSelectedPreviews()} className="h-9 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
+            미리보기 재생성
+          </button>
           <button type="button" onClick={() => setSelectedIds(items.map((item) => item.id))} className="h-9 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
             현재 목록 전체 선택
           </button>
@@ -709,68 +714,76 @@ function ArchiveList({
         </section>
       )}
 
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(260px,300px))] gap-3">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(250px,250px))] gap-3">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className={`relative w-full max-w-[300px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
-              <label className="absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white/90 shadow-sm">
+            <article key={item.id} className={`relative w-[250px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
+              <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
                 <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
+                선택
               </label>
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
-                <div className="flex h-24 items-center justify-center bg-slate-100">
+                <div className="flex h-[200px] w-[250px] items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
               <div className="p-3">
-                <h2 className="min-w-0 truncate text-sm font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="min-w-0 flex-1 truncate text-sm font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                  <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                      <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                      <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 text-xs font-black">
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
                   <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  <button type="button" onClick={() => startEdit(item)} className="h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
-                    수정
-                  </button>
-                  {!previewUrl && (
-                    <button type="button" onClick={() => onRegeneratePreview(item.id, true)} className="h-7 rounded border border-slate-200 px-2 text-xs font-black text-slate-600 hover:border-orange-300 hover:text-orange-600">
-                      미리보기 재생성
-                    </button>
-                  )}
-                </div>
-                {editingId === item.id && editDraft && (
-                  <div className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
-                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <select className="field-input h-9 rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
-                        <option value="">소스</option>
-                        {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-                      </select>
-                      <select className="field-input h-9 rounded-md border border-slate-200 bg-white px-2 text-xs" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
-                        const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
-                        setEditDraft({ ...editDraft, category_id: category?.id || "" });
-                      }}>
-                        <option value="">카테고리</option>
-                        {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
-                      </select>
-                    </div>
-                    <input className="field-input h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
-                    <textarea className="field-input min-h-16 w-full rounded-md border border-slate-200 bg-white p-2 text-xs" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <button type="button" onClick={() => { setEditingId(""); setEditDraft(null); }} className="h-8 rounded-md border border-slate-200 bg-white text-xs font-black text-slate-600">취소</button>
-                      <button type="button" onClick={() => void saveEdit()} className="h-8 rounded-md bg-orange-500 text-xs font-black text-white">저장</button>
-                    </div>
-                  </div>
-                )}
+                {item.memo && <p className="mt-2 line-clamp-2 text-xs font-bold leading-5 text-slate-500">{item.memo}</p>}
               </div>
             </article>
           );
         })}
         {!items.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
       </section>
+      {editDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-lg rounded-md bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">아카이브 수정</h2>
+              <button type="button" onClick={() => setEditDraft(null)} className="h-8 w-8 rounded border border-slate-200 text-sm font-black text-slate-500">X</button>
+            </div>
+            <div className="space-y-2">
+              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
+              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
+              <div className="grid grid-cols-2 gap-2">
+                <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
+                  <option value="">소스</option>
+                  {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+                </select>
+                <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
+                  const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
+                  setEditDraft({ ...editDraft, category_id: category?.id || "" });
+                }}>
+                  <option value="">카테고리</option>
+                  {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
+                </select>
+              </div>
+              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
+              <textarea className="field-input min-h-24 w-full rounded-md border border-slate-200 bg-white p-3 text-sm" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setEditDraft(null)} className="h-10 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600">취소</button>
+              <button type="button" onClick={() => void saveEdit()} className="h-10 rounded-md bg-orange-500 text-sm font-black text-white">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
