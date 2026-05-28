@@ -5,9 +5,18 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import * as XLSX from "xlsx-js-style";
+import type { CellObject, WorkSheet } from "xlsx-js-style";
 import ArchiveWorkspace from "./archive-workspace";
 import MainDashboard from "./main-dashboard";
+
+type XlsxModule = typeof import("xlsx-js-style");
+
+let xlsxModulePromise: Promise<XlsxModule> | null = null;
+
+function loadXlsxModule() {
+  xlsxModulePromise ||= import("xlsx-js-style");
+  return xlsxModulePromise;
+}
 
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
@@ -919,6 +928,7 @@ type SalesInventorySummary = {
 };
 
 function apiUrl(path: string) {
+  if (path.startsWith("/api/fnos/")) return path;
   return `/api/import-erp${path}`;
 }
 
@@ -5019,13 +5029,13 @@ function exportSheetRowsWithHeaders(name: SalesSheetName, rows: string[][]) {
   return { headers, rows: exportRows };
 }
 
-function setWorksheetFontSize(worksheet: XLSX.WorkSheet, size = 11) {
-  const range = worksheet["!ref"] ? XLSX.utils.decode_range(worksheet["!ref"]) : null;
+function setWorksheetFontSize(xlsx: XlsxModule, worksheet: WorkSheet, size = 11) {
+  const range = worksheet["!ref"] ? xlsx.utils.decode_range(worksheet["!ref"]) : null;
   if (!range) return;
   for (let row = range.s.r; row <= range.e.r; row += 1) {
     for (let col = range.s.c; col <= range.e.c; col += 1) {
-      const address = XLSX.utils.encode_cell({ r: row, c: col });
-      const cell = worksheet[address] as (XLSX.CellObject & { s?: { font?: { name?: string; sz?: number } } }) | undefined;
+      const address = xlsx.utils.encode_cell({ r: row, c: col });
+      const cell = worksheet[address] as (CellObject & { s?: { font?: { name?: string; sz?: number } } }) | undefined;
       if (!cell) continue;
       cell.s = { ...(cell.s || {}), font: { ...(cell.s?.font || {}), name: "맑은 고딕", sz: size } };
     }
@@ -5043,26 +5053,27 @@ function salesExportColumnWidths(headers: string[], rows: Array<Array<string | n
   });
 }
 
-function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetName, string[][]>>) {
-  const workbook = XLSX.utils.book_new();
+async function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetName, string[][]>>) {
+  const xlsx = await loadXlsxModule();
+  const workbook = xlsx.utils.book_new();
   (Object.keys(sheets) as SalesSheetName[]).forEach((name) => {
     const rows = sheets[name] || [];
     const { headers, rows: exportRows } = exportSheetRowsWithHeaders(name, rows);
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...exportRows]);
+    const worksheet = xlsx.utils.aoa_to_sheet([headers, ...exportRows]);
     if (name === "송장출력용") {
       const settlementIndex = headers.indexOf("정산예정금액");
       if (settlementIndex >= 0) {
         for (let rowIndex = 1; rowIndex <= exportRows.length; rowIndex += 1) {
-          const address = XLSX.utils.encode_cell({ r: rowIndex, c: settlementIndex });
+          const address = xlsx.utils.encode_cell({ r: rowIndex, c: settlementIndex });
           if (worksheet[address]?.t === "n") worksheet[address].z = "#,##0";
         }
       }
     }
-    setWorksheetFontSize(worksheet, 11);
+    setWorksheetFontSize(xlsx, worksheet, 11);
     worksheet["!cols"] = salesExportColumnWidths(headers, exportRows);
-    XLSX.utils.book_append_sheet(workbook, worksheet, name);
+    xlsx.utils.book_append_sheet(workbook, worksheet, name);
   });
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+  const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
   const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -5072,20 +5083,21 @@ function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSheetNam
   URL.revokeObjectURL(url);
 }
 
-function tableXlsxBlob(sheetName: string, headers: string[], rows: string[][]) {
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-  setWorksheetFontSize(worksheet, 11);
+function tableXlsxBlob(xlsx: XlsxModule, sheetName: string, headers: string[], rows: string[][]) {
+  const workbook = xlsx.utils.book_new();
+  const worksheet = xlsx.utils.aoa_to_sheet([headers, ...rows]);
+  setWorksheetFontSize(xlsx, worksheet, 11);
   worksheet["!cols"] = headers.map((header, index) => ({
     wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
   }));
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+  xlsx.utils.book_append_sheet(workbook, worksheet, sheetName);
+  const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
   return new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
-function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
-  downloadBlob(fileName, tableXlsxBlob(sheetName, headers, rows));
+async function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
+  const xlsx = await loadXlsxModule();
+  downloadBlob(fileName, tableXlsxBlob(xlsx, sheetName, headers, rows));
 }
 
 function timeLabel() {
@@ -6428,7 +6440,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("전체 엑셀을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, sheets);
+    void downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, sheets);
     setCompletedSalesTasks((prev) => ({ ...prev, exportAll: true }));
     setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
   }
@@ -6442,7 +6454,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("송장출력용을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: sheets.송장출력용 });
+    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: sheets.송장출력용 });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
@@ -6476,11 +6488,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const file = await handle.getFile();
       if (!file.size) return [];
       const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: "array" });
+      const xlsx = await loadXlsxModule();
+      const workbook = xlsx.read(data, { type: "array" });
       const firstSheetName = workbook.SheetNames[0];
       if (!firstSheetName) return [];
       const worksheet = workbook.Sheets[firstSheetName];
-      const rawRows = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, blankrows: false, defval: "" });
+      const rawRows = xlsx.utils.sheet_to_json<string[]>(worksheet, { header: 1, blankrows: false, defval: "" });
       if (!rawRows.length) return [];
       const [firstRow, ...bodyRows] = rawRows.map((row) => headers.map((_, index) => String(row[index] ?? "")));
       const hasHeader = headers.every((header, index) => String(firstRow[index] || "").trim() === header);
@@ -6510,7 +6523,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function saveDirectShippingWorkbook(partner: DirectShippingPartner, headers: string[], rows: string[][]) {
     const fileName = `${todayMmdd()}_${partner}직송.xlsx`;
-    downloadBlob(fileName, tableXlsxBlob(`${partner}직송`, headers, rows));
+    await downloadTableXlsx(fileName, `${partner}직송`, headers, rows);
     return rows;
   }
 
@@ -7330,10 +7343,11 @@ function masterTemplate(tab: MasterTabKey) {
 
 async function readXlsxObjects(file: File) {
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+  const xlsx = await loadXlsxModule();
+  const workbook = xlsx.read(buffer, { type: "array", cellDates: false });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false });
+  return xlsx.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false });
 }
 
 function MasterManagementPanel({
@@ -7438,7 +7452,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
   }
 
   function downloadTemplate() {
-    downloadTableXlsx(`FN_OS_${config.title}_업로드_서식.xlsx`, `${config.title}업로드`, config.templateHeaders, [config.sampleRow]);
+    void downloadTableXlsx(`FN_OS_${config.title}_업로드_서식.xlsx`, `${config.title}업로드`, config.templateHeaders, [config.sampleRow]);
   }
 
   async function saveRows(rows: Record<string, unknown>[]) {
@@ -8829,11 +8843,12 @@ function AccountingWorkspace() {
     loadSummary();
   }
 
-  function exportExpenses() {
-    const sheet = XLSX.utils.json_to_sheet(filteredExpenses);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "expenses");
-    XLSX.writeFile(book, `FN_OS_비용_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  async function exportExpenses() {
+    const xlsx = await loadXlsxModule();
+    const sheet = xlsx.utils.json_to_sheet(filteredExpenses);
+    const book = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(book, sheet, "expenses");
+    xlsx.writeFile(book, `FN_OS_비용_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   const categories = summary?.categories || [];

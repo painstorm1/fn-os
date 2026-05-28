@@ -112,6 +112,29 @@ function conflictColumnsFor(table, columns) {
   return [];
 }
 
+const INDEX_COLUMNS = {
+  orders: [
+    ["order_date"],
+    ["status"],
+    ["factory_id"],
+  ],
+  order_items: [
+    ["order_id"],
+    ["product_id"],
+  ],
+  attachments: [
+    ["order_id"],
+  ],
+  product_materials: [
+    ["product_id"],
+    ["material_id"],
+  ],
+  material_movements: [
+    ["material_id"],
+    ["movement_date"],
+  ],
+};
+
 async function dedupeTargetRows(target, targetName, conflictColumns, columns) {
   if (!conflictColumns.length) return;
   const partition = conflictColumns.map(qname).join(", ");
@@ -150,6 +173,19 @@ async function ensureTargetTable(target, table, columns) {
   if (conflictColumns.length) {
     await dedupeTargetRows(target, targetName, conflictColumns, columns);
     await target.query(`create unique index if not exists ${qname(`${targetName}_${conflictColumns.join("_")}_uidx`)} on ${qname(targetName)} (${conflictColumns.map(qname).join(", ")})`);
+  }
+  await ensureTargetIndexes(target, table, columns);
+}
+
+async function ensureTargetIndexes(target, table, columns) {
+  const targetName = targetTableName(table);
+  const availableColumns = new Set(columns.map((column) => column.column_name));
+  for (const indexColumns of INDEX_COLUMNS[table] || []) {
+    if (!indexColumns.every((column) => availableColumns.has(column))) continue;
+    const indexName = `${targetName}_${indexColumns.join("_")}_idx`;
+    await target.query(
+      `create index if not exists ${qname(indexName)} on ${qname(targetName)} (${indexColumns.map(qname).join(", ")})`,
+    );
   }
 }
 
