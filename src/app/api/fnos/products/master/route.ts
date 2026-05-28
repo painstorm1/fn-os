@@ -24,6 +24,22 @@ function productName(row: AnyRecord) {
   return text(row.product_name || row.prod_name);
 }
 
+function compactSearchText(value: unknown) {
+  return text(value).toLowerCase().replace(/[\s_\-()[\]{}]/g, "");
+}
+
+function matchesSearchTokens(values: unknown[], tokens: string[]) {
+  if (!tokens.length) return true;
+  const haystacks = values.map((value) => ({
+    normal: text(value).toLowerCase(),
+    compact: compactSearchText(value),
+  }));
+  return tokens.every((token) => {
+    const compactToken = compactSearchText(token);
+    return haystacks.some((haystack) => haystack.normal.includes(token) || (compactToken && haystack.compact.includes(compactToken)));
+  });
+}
+
 function warehouseCode(row: AnyRecord) {
   return text(row.warehouse_code || row.wh_cd);
 }
@@ -75,7 +91,9 @@ export async function GET(request: NextRequest) {
   try {
     if (!hasDbConfig()) return NextResponse.json({ ok: true, products: [], total: 0, page: 1, pageSize: 20, warehouses: [] });
     const query = text(request.nextUrl.searchParams.get("q")).toLowerCase();
+    const queryTokens = query.split(/\s+/).filter(Boolean);
     const relation = text(request.nextUrl.searchParams.get("relation"));
+    const excludeBom = text(request.nextUrl.searchParams.get("excludeBom")).toLowerCase() === "true";
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
     const [products, warehouses, inventory, boms, bomItems, importLinks, importProducts] = await Promise.all([
@@ -164,13 +182,13 @@ export async function GET(request: NextRequest) {
       if (relation === "bom" && !row.bom.length) return false;
       if (relation === "import" && !row.import_links.length) return false;
       if (relation === "plain" && row.bom.length) return false;
-      if (!query) return true;
-      return [
+      if (excludeBom && row.bom.length) return false;
+      return matchesSearchTokens([
         row.product_code,
         row.product_name,
         ...row.bom.flatMap((item) => [item.component_product_code, item.component_sku, item.component_product_name]),
         ...row.import_links.flatMap((item) => [item.import_product_name, item.import_option_name]),
-      ].some((value) => text(value).toLowerCase().includes(query));
+      ], queryTokens);
     });
     const offset = (page - 1) * pageSize;
     const pageRows = filtered.slice(offset, offset + pageSize);

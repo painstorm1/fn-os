@@ -8210,16 +8210,20 @@ function ProductEditModal({
     }
     let alive = true;
     const timer = window.setTimeout(async () => {
-      const params = new URLSearchParams({ q: componentQuery.trim(), page: "1", pageSize: "8" });
+      const params = new URLSearchParams({ q: componentQuery.trim(), page: "1", pageSize: "20", excludeBom: "true" });
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
-      if (alive) setComponentCandidates(data.products || []);
+      if (alive) {
+        setComponentCandidates((data.products || []).filter((product: FnProduct) => (
+          product.id !== draft.id && !bomRows.some((row) => row.component_product_id === product.id)
+        )));
+      }
     }, 250);
     return () => {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [componentQuery]);
+  }, [componentQuery, draft.id, bomRows]);
 
   function addBomComponent(product: FnProduct) {
     if (!product.id) return;
