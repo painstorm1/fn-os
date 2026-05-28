@@ -7580,7 +7580,7 @@ function MasterManagementPanel({
   );
 }
 
-function ProductManagementPanel({ message, setMessage }: { message: string; setMessage: (value: string) => void }) {
+function ProductManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
   const [products, setProducts] = useState<FnProduct[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   const [query, setQuery] = useState("");
@@ -7588,6 +7588,7 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [productMessage, setProductMessage] = useState("");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 20;
@@ -7612,7 +7613,7 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        setMessage(data.error || "품목 조회 실패");
+        setProductMessage(data.error || "품목 조회 실패");
         return;
       }
       setProducts(data.products || []);
@@ -7669,7 +7670,7 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
     const productCode = String(draft.product_code || "").trim();
     const productName = String(draft.product_name || "").trim();
     if (!productCode || !productName) {
-      setMessage("품목코드와 품목명은 필수입니다.");
+      setProductMessage("품목코드와 품목명은 필수입니다.");
       return;
     }
     const inventory = warehouses
@@ -7696,10 +7697,11 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      setMessage(data.error || "품목 저장 실패");
+      setProductMessage(data.error || "품목 저장 실패");
       return;
     }
-    setMessage(`품목 저장 완료: ${productCode}`);
+    setProductMessage(`품목 저장 완료: ${productCode}`);
+    setMessage("");
     setModalOpen(false);
     await loadProducts(page, query);
   }
@@ -7764,7 +7766,8 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
       });
       if (res.ok) saved += 1;
     }
-    setMessage(`엑셀 등록 완료: 저장 ${saved}건 / 스킵 ${skipped}건`);
+    setProductMessage(`엑셀 등록 완료: 저장 ${saved}건 / 스킵 ${skipped}건`);
+    setMessage("");
     await loadProducts(1, query);
     setPage(1);
   }
@@ -7847,7 +7850,7 @@ function ProductManagementPanel({ message, setMessage }: { message: string; setM
             </button>
           ))}
         </div>
-        {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+        {productMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{productMessage}</div>}
       </Panel>
 
       {modalOpen && (
