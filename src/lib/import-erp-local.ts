@@ -141,7 +141,7 @@ async function ratesMap() {
 
 function lineRate(order: AnyRecord, line: AnyRecord, rates: AnyRecord) {
   const currency = text(line.item_currency || order.currency || "CNY");
-  return numberValue(line.item_fx_rate) || numberValue(rates[currency]) || numberValue(order.fx_rate) || 1;
+  return numberValue(rates[currency]) || numberValue(line.item_fx_rate) || numberValue(order.fx_rate) || 1;
 }
 
 function actualPaymentKrw(order: AnyRecord, rates: AnyRecord) {
@@ -694,11 +694,13 @@ async function saveOrder(request: NextRequest, id?: number) {
     ? await db(`select id, item_type, material_unit_cost, material_cost from ${q(TABLES.products)} where id = any($1::bigint[])`, [productIds])
     : [];
   const productMap = new Map(productRows.map((product) => [Number(product.id), product]));
+  const currentRates = shouldReplaceItems ? await ratesMap() : {};
   const orderItemIds = await nextIds(TABLES.orderItems, incomingLines.length);
   const itemRows: AnyRecord[] = [];
   const movementRows: AnyRecord[] = [];
   for (const [index, line] of incomingLines.entries()) {
     const orderItemId = orderItemIds[index];
+    const itemCurrency = text(line.item_currency) || text(values.currency) || "CNY";
     const row: AnyRecord = {
       id: orderItemId,
       order_id: savedId,
@@ -707,8 +709,8 @@ async function saveOrder(request: NextRequest, id?: number) {
       option_value: text(line.option_value),
       quantity: numberValue(line.quantity),
       unit_price: numberValue(line.unit_price),
-      item_currency: text(line.item_currency) || text(values.currency) || "CNY",
-      item_fx_rate: numberValue(line.item_fx_rate || values.fx_rate),
+      item_currency: itemCurrency,
+      item_fx_rate: numberValue(currentRates[itemCurrency]) || numberValue(line.item_fx_rate) || numberValue(values.fx_rate),
       line_note: text(line.line_note) || null,
       sort_order: sortOrder++,
     };
