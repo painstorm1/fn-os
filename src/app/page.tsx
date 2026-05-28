@@ -2,12 +2,18 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
-import ArchiveWorkspace from "./archive-workspace";
-import MainDashboard from "./main-dashboard";
+
+const MainDashboard = dynamic(() => import("./main-dashboard"), {
+  loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
+});
+const ArchiveWorkspace = dynamic(() => import("./archive-workspace"), {
+  loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">아카이브를 불러오는 중...</div>,
+});
 
 type XlsxModule = typeof import("xlsx-js-style");
 
@@ -988,14 +994,50 @@ function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   return promise;
 }
 
+function browserCacheKey(path: string) {
+  return `fnos-api-cache:${apiUrl(path)}`;
+}
+
+function readBrowserCache<T>(path: string, maxAge = 5 * 60_000): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(browserCacheKey(path));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { at?: number; data?: T };
+    if (!parsed?.at || Date.now() - parsed.at > maxAge) return null;
+    return parsed.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBrowserCache(path: string, data: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(browserCacheKey(path), JSON.stringify({ at: Date.now(), data }));
+  } catch {
+    // Cache is only a speed hint; storage can fail in private or quota-limited sessions.
+  }
+}
+
 function invalidateApiCache(match?: string) {
   if (!match) {
     apiCache.clear();
+    if (typeof window !== "undefined") {
+      for (const key of Object.keys(window.sessionStorage)) {
+        if (key.startsWith("fnos-api-cache:")) window.sessionStorage.removeItem(key);
+      }
+    }
     return;
   }
   const needle = apiUrl(match);
   for (const key of Array.from(apiCache.keys())) {
     if (key.includes(needle) || key.includes(match)) apiCache.delete(key);
+  }
+  if (typeof window !== "undefined") {
+    for (const key of Object.keys(window.sessionStorage)) {
+      if (key.includes(needle) || key.includes(match)) window.sessionStorage.removeItem(key);
+    }
   }
 }
 
@@ -1673,11 +1715,19 @@ function NativeOrders({ initialOpenOrderId = null }: { initialOpenOrderId?: numb
     if (nextFilters.dateTo) params.set("date_to", nextFilters.dateTo);
     const path = `/api/fnos/orders${params.toString() ? `?${params.toString()}` : ""}`;
     const data = await cachedJson<{ orders?: ImportOrder[] }>(path, 30_000);
-    setOrders(data.orders || []);
+    const nextOrders = data.orders || [];
+    setOrders(nextOrders);
+    writeBrowserCache(path, nextOrders);
   }
 
   useEffect(() => {
     let alive = true;
+    const defaultPath = "/api/fnos/orders";
+    const cachedOrders = readBrowserCache<ImportOrder[]>(defaultPath);
+    if (cachedOrders?.length) {
+      setOrders(cachedOrders);
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadOrders().finally(() => {
       if (alive) setLoading(false);
@@ -2286,21 +2336,17 @@ function NativeProducts() {
 
   useEffect(() => {
     let alive = true;
-    try {
-      const cached = sessionStorage.getItem("fnos-products-cache");
-      if (cached) {
-        setProducts(JSON.parse(cached));
-        setLoading(false);
-      }
-    } catch {
-      // Cache is only a speed hint; ignore invalid data.
+    const cachedProducts = readBrowserCache<ImportProduct[]>("/api/fnos/products");
+    if (cachedProducts?.length) {
+      setProducts(cachedProducts);
+      setLoading(false);
     }
     cachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", 60_000)
       .then((data) => {
         if (!alive) return;
         const nextProducts = data.products || [];
         setProducts(nextProducts);
-        sessionStorage.setItem("fnos-products-cache", JSON.stringify(nextProducts));
+        writeBrowserCache("/api/fnos/products", nextProducts);
       })
       .finally(() => {
         if (alive) setLoading(false);
