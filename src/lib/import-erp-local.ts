@@ -57,6 +57,35 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function hasMeaningfulDate(value: unknown) {
+  return Boolean(text(value));
+}
+
+function isBrokenStatus(value: unknown) {
+  const status = text(value);
+  return !status || /^\?+$/.test(status) || status.includes(String.fromCharCode(0xfffd));
+}
+
+function inferredOrderStatus(values: AnyRecord) {
+  if (hasMeaningfulDate(values.fn_arrived)) return "\uc785\uace0\uc644\ub8cc";
+  if (hasMeaningfulDate(values.customs_cleared)) return "\ud1b5\uad00\uc644\ub8cc";
+  if (hasMeaningfulDate(values.badaeji_arrived)) return "\ubc30\ub300\uc9c0\ub3c4\ucc29";
+  if (hasMeaningfulDate(values.factory_ship_date)) return "\uacf5\uc7a5\ucd9c\uace0";
+  if (hasMeaningfulDate(values.paid_date)) return isTTPaymentText(values.payment_method) ? "2\ucc28\uacb0\uc81c" : "\uacb0\uc81c\uc644\ub8cc";
+  if (hasMeaningfulDate(values.first_payment_date)) return "1\ucc28\uacb0\uc81c";
+  if (hasMeaningfulDate(values.order_date)) return "\uc8fc\ubb38";
+  return "\ud604\ud669";
+}
+
+function normalizeOrderStatus(value: unknown, values: AnyRecord) {
+  return isBrokenStatus(value) ? inferredOrderStatus(values) : text(value);
+}
+
+function isTTPaymentText(value: unknown) {
+  const payment = text(value).toUpperCase();
+  return payment.includes("T/T") || payment.includes("TT");
+}
+
 function dateKey(value: unknown) {
   return text(value).slice(0, 10);
 }
@@ -89,14 +118,19 @@ async function db<T extends QueryResultRow = AnyRecord>(sql: string, params: unk
   return result.rows;
 }
 
+let ratesCache: { at: number; data: AnyRecord } | null = null;
+
 async function nextId(table: string) {
   const [row] = await db<{ id: string }>(`select coalesce(max(id), 0) + 1 as id from ${q(table)}`);
   return Number(row.id);
 }
 
 async function ratesMap() {
+  if (ratesCache && Date.now() - ratesCache.at < 30_000) return ratesCache.data;
   const rows = await db(`select * from ${q(TABLES.rates)} order by currency`);
-  return Object.fromEntries(rows.map((row) => [row.currency, numberValue(row.rate)]));
+  const data = Object.fromEntries(rows.map((row) => [row.currency, numberValue(row.rate)]));
+  ratesCache = { at: Date.now(), data };
+  return data;
 }
 
 function lineRate(order: AnyRecord, line: AnyRecord, rates: AnyRecord) {
@@ -242,25 +276,45 @@ async function orderRows(filters: { q?: string; dateFrom?: string; dateTo?: stri
     where.push(`o.order_date <= $${params.length}`);
   }
   const rows = await db(
-    `select o.*, f.name as factory_name,
+    `with filtered_orders as (
+       select o.*, f.name as factory_name
+         from ${q(TABLES.orders)} o
+         left join ${q(TABLES.factories)} f on f.id=o.factory_id
+        ${where.length ? `where ${where.join(" and ")}` : ""}
+        order by o.order_date desc nulls last, o.id desc
+        limit 500
+     ),
+     item_summary as (
+       select order_id, count(*) as line_count, sum(quantity) as total_qty, sum(quantity * unit_price) as item_total
+         from ${q(TABLES.orderItems)}
+        where order_id in (select id from filtered_orders)
+        group by order_id
+     ),
+     attachment_summary as (
+       select order_id, count(*) as attachment_count
+         from ${q(TABLES.attachments)}
+        where order_id in (select id from filtered_orders)
+        group by order_id
+     )
+     select o.*,
             coalesce(items.line_count, 0) as line_count,
             coalesce(items.total_qty, 0) as total_qty,
             coalesce(items.item_total, 0) as item_total,
             coalesce(att.attachment_count, 0) as attachment_count,
             (select i.product_name from ${q(TABLES.orderItems)} i where i.order_id=o.id order by sort_order, id limit 1) as repr_product,
             (select p.image_path from ${q(TABLES.orderItems)} i left join ${q(TABLES.products)} p on p.id=i.product_id where i.order_id=o.id order by i.sort_order, i.id limit 1) as repr_image
-       from ${q(TABLES.orders)} o
-       left join ${q(TABLES.factories)} f on f.id=o.factory_id
-       left join (select order_id, count(*) as line_count, sum(quantity) as total_qty, sum(quantity * unit_price) as item_total from ${q(TABLES.orderItems)} group by order_id) items on items.order_id=o.id
-       left join (select order_id, count(*) as attachment_count from ${q(TABLES.attachments)} group by order_id) att on att.order_id=o.id
-      ${where.length ? `where ${where.join(" and ")}` : ""}
-      order by o.order_date desc nulls last, o.id desc
-      limit 500`,
+       from filtered_orders o
+       left join item_summary items on items.order_id=o.id
+       left join attachment_summary att on att.order_id=o.id
+      order by o.order_date desc nulls last, o.id desc`,
     params,
   );
   const rates = await ratesMap();
   const lineMap = await linesByOrder(rows.map((row) => row.id));
-  return rows.map((row) => ({ ...row, total_won: orderTotalWon(row, lineMap.get(String(row.id)) || [], rates) }));
+  return rows.map((row) => {
+    const normalized = { ...row, status: normalizeOrderStatus(row.status, row) };
+    return { ...normalized, total_won: orderTotalWon(normalized, lineMap.get(String(row.id)) || [], rates) };
+  });
 }
 
 async function linesByOrder(orderIds: Array<number | string>) {
@@ -406,6 +460,7 @@ async function orderDetail(id: number) {
     [id],
   );
   if (!order) return null;
+  order.status = normalizeOrderStatus(order.status, order);
   const lines = (await linesByOrder([id])).get(String(id)) || [];
   const attachments = await db(`select * from ${q(TABLES.attachments)} where order_id=$1 order by uploaded_at desc nulls last, id desc`, [id]);
   const rates = await ratesMap();
@@ -460,6 +515,9 @@ async function saveOrder(request: NextRequest, id?: number) {
   }
   if (!id || "order_code" in values) {
     values.order_code = text(values.order_code) || await generateOrderCode(dateKey(values.order_date));
+  }
+  if ("status" in values || "fn_arrived" in values || "customs_cleared" in values || "badaeji_arrived" in values || "factory_ship_date" in values || "paid_date" in values || "first_payment_date" in values || "order_date" in values) {
+    values.status = normalizeOrderStatus(values.status, { ...body, ...values });
   }
   values.updated_at = nowIso();
   let shouldReplaceItems = Array.isArray(body.items);
