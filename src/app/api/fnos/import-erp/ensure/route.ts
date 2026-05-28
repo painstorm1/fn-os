@@ -18,6 +18,10 @@ const IMPORT_ERP_DIR = process.env.IMPORT_ERP_DIR || path.resolve(process.cwd(),
 const IMPORT_ERP_PYTHON = process.env.IMPORT_ERP_PYTHON || "python";
 const LOCAL_ORIGIN = process.env.FN_OS_ORIGIN || "http://127.0.0.1:3000";
 
+function usesLocalImportErp() {
+  return process.env.IMPORT_ERP_SOURCE !== "external";
+}
+
 function importErpEnv() {
   const {
     DATABASE_URL,
@@ -73,6 +77,10 @@ async function waitForImportErp(timeoutMs = 10_000) {
 }
 
 export async function POST() {
+  if (usesLocalImportErp()) {
+    return NextResponse.json({ ok: true, status: "integrated", url: "fnos-db" });
+  }
+
   if (await pingImportErp()) {
     return NextResponse.json({ ok: true, status: "running", url: IMPORT_API_URL });
   }
@@ -111,6 +119,10 @@ export async function POST() {
 }
 
 export async function GET() {
+  if (usesLocalImportErp()) {
+    return NextResponse.json({ ok: true, status: "integrated", url: "fnos-db" });
+  }
+
   const running = await pingImportErp();
   return NextResponse.json({ ok: running, status: running ? "running" : "stopped", url: IMPORT_API_URL });
 }

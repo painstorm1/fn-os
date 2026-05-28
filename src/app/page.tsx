@@ -922,6 +922,10 @@ function apiUrl(path: string) {
   return `/api/import-erp${path}`;
 }
 
+function needsImportErpServer(path: string) {
+  return !path.startsWith("/api/fnos/");
+}
+
 type CacheEntry<T> = {
   at: number;
   data?: T;
@@ -956,8 +960,7 @@ function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   const cached = apiCache.get(key) as CacheEntry<T> | undefined;
   if (cached?.data !== undefined && now - cached.at < ttl) return Promise.resolve(cached.data);
   if (cached?.promise) return cached.promise;
-  const promise = ensureImportErpServer()
-    .catch(() => undefined)
+  const promise = (needsImportErpServer(path) ? ensureImportErpServer().catch(() => undefined) : Promise.resolve())
     .then(() => fetch(key, { credentials: "include", cache: "no-store" }))
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -987,8 +990,6 @@ function invalidateApiCache(match?: string) {
 }
 
 function warmImportCache(section?: string) {
-  void ensureImportErpServer().catch(() => undefined);
-  void cachedJson("/api/fnos/form-data", 60_000).catch(() => undefined);
   if (!section || section === "/orders") {
     void cachedJson("/api/fnos/orders", 30_000).catch(() => undefined);
   }
@@ -997,6 +998,9 @@ function warmImportCache(section?: string) {
   }
   if (!section || section === "/settings") {
     void cachedJson("/api/fnos/settings", 60_000).catch(() => undefined);
+  }
+  if (section?.startsWith("/orders/new") || section?.startsWith("/products/new")) {
+    void cachedJson("/api/fnos/form-data", 60_000).catch(() => undefined);
   }
 }
 
@@ -1446,7 +1450,9 @@ function NativeImportWorkspace({ path }: { path: string }) {
   const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
   const productMatch = basePath.match(/^\/products\/(\d+)/);
   useEffect(() => {
-    void ensureImportErpServer().catch(() => undefined);
+    if (!basePath.startsWith("/orders") && !basePath.startsWith("/products") && !basePath.startsWith("/settings")) {
+      void ensureImportErpServer().catch(() => undefined);
+    }
   }, [basePath]);
   if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
   if (basePath.startsWith("/products/new")) return <NativeProductForm />;
