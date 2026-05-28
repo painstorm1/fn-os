@@ -781,6 +781,15 @@ type ProductImportLinkRow = {
 
 type ProductRelationFilter = "plain" | "bom" | "import";
 
+function isUsableWarehouse(warehouse: WarehouseOption) {
+  const code = String(warehouse.warehouse_code || "").trim();
+  const name = String(warehouse.warehouse_name || "").trim();
+  if (!code || !name) return false;
+  if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(code) || /^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(name)) return false;
+  if (/오전|오후|AM|PM/i.test(code) || /오전|오후|AM|PM/i.test(name)) return false;
+  return true;
+}
+
 type ImportSkuLink = {
   id?: string;
   import_product_id?: number;
@@ -7769,6 +7778,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
   const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const usableWarehouses = warehouses.filter(isUsableWarehouse);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -7779,7 +7789,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       product_name: "",
       cost_price: "",
       standard_price: "",
-      ...Object.fromEntries(warehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
+      ...Object.fromEntries(usableWarehouses.map((warehouse) => [`stock_${warehouse.warehouse_code}`, ""])),
     };
   }
 
@@ -7827,7 +7837,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }
 
   function openProduct(product: FnProduct) {
-    const stockValues = Object.fromEntries(warehouses.map((warehouse) => {
+    const stockValues = Object.fromEntries(usableWarehouses.map((warehouse) => {
       const stock = (product.inventory || []).find((item) => item.warehouse_code === warehouse.warehouse_code);
       return [`stock_${warehouse.warehouse_code}`, stock?.qty != null ? String(stock.qty) : ""];
     }));
@@ -7855,7 +7865,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       setProductMessage("품목코드와 품목명은 필수입니다.");
       return;
     }
-    const inventory = warehouses
+    const inventory = usableWarehouses
       .map((warehouse) => ({
         warehouse_id: warehouse.id,
         warehouse_code: warehouse.warehouse_code,
@@ -8149,7 +8159,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       {modalOpen && (
         <ProductEditModal
           draft={draft}
-          warehouses={warehouses}
+          warehouses={usableWarehouses}
           bomRows={bomRows}
           importLinks={importLinks}
           onClose={() => setModalOpen(false)}
@@ -8246,11 +8256,15 @@ function ProductEditModal({
           <div className="grid gap-2 md:grid-cols-2">
             {warehouses.map((warehouse) => (
               <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
-                {warehouse.warehouse_name || warehouse.warehouse_code}
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate">{warehouse.warehouse_code} - {warehouse.warehouse_name}</span>
+                  <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">현재 {Number(draft[`stock_${warehouse.warehouse_code}`] || 0).toLocaleString("ko-KR")}</span>
+                </span>
                 <input
                   className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold"
                   type="number"
                   value={draft[`stock_${warehouse.warehouse_code}`] || ""}
+                  placeholder="수정 수량"
                   onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, event.target.value)}
                 />
               </label>
