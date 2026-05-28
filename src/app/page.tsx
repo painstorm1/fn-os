@@ -781,6 +781,10 @@ type ProductImportLinkRow = {
 
 type ProductRelationFilter = "plain" | "bom" | "import";
 
+function sortWarehousesByCode(a: WarehouseOption, b: WarehouseOption) {
+  return String(a.warehouse_code || "").localeCompare(String(b.warehouse_code || ""), "ko-KR", { numeric: true });
+}
+
 function isUsableWarehouse(warehouse: WarehouseOption) {
   const code = String(warehouse.warehouse_code || "").trim();
   const name = String(warehouse.warehouse_name || "").trim();
@@ -7778,7 +7782,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
   const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const usableWarehouses = warehouses.filter(isUsableWarehouse);
+  const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
