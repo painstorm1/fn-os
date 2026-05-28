@@ -27,6 +27,7 @@ type ArchiveTag = { id: string; tag_name: string };
 type ArchiveItemTag = { archive_item_id?: string; tag_id?: string };
 type ArchiveLink = { id: string; archive_item_id?: string; linked_type?: string; linked_id?: string };
 type ArchiveData = { items: ArchiveItem[]; categories: ArchiveCategory[]; tags: ArchiveTag[]; itemTags: ArchiveItemTag[]; links: ArchiveLink[] };
+type ArchiveFilters = { q: string; categoryGroup: string; category: string; source: string; dateFrom: string; dateTo: string };
 type AutoArchiveDraft = {
   url: string;
   title: string;
@@ -200,6 +201,7 @@ export default function ArchiveWorkspace() {
   const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
   const [manualType, setManualType] = useState<"link" | "file">("link");
   const [activeSubCategory, setActiveSubCategory] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -207,7 +209,7 @@ export default function ArchiveWorkspace() {
   const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
   const [autoImagePreview, setAutoImagePreview] = useState("");
   const [autoWorking, setAutoWorking] = useState(false);
-  const [filters, setFilters] = useState({ q: "", category: "", source: "", date: "" });
+  const [filters, setFilters] = useState<ArchiveFilters>({ q: "", categoryGroup: "", category: "", source: "", dateFrom: "", dateTo: "" });
   const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
   const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -218,19 +220,23 @@ export default function ArchiveWorkspace() {
   const categoryIdByName = useMemo(() => new Map(data.categories.map((category) => [category.category_name, category.id])), [data.categories]);
 
   const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
+    if (filters.categoryGroup) return true;
     if (activeMenu === "all" || activeMenu === "save") return true;
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
     const allowed = activeSubCategory ? [activeSubCategory] : categoryNamesForGroup(activeMenu);
     return allowed.includes(categoryName);
-  }), [activeMenu, activeSubCategory, categoryById, data.items]);
+  }), [activeMenu, activeSubCategory, categoryById, data.items, filters.categoryGroup]);
 
   const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
     const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
+    if (filters.categoryGroup && categoryGroupOf(categoryName) !== filters.categoryGroup) return false;
     if (filters.category && categoryName !== filters.category) return false;
     if (filters.source && item.source_type !== filters.source) return false;
-    if (filters.date && !(item.created_at || "").startsWith(filters.date)) return false;
+    const createdDate = (item.created_at || "").slice(0, 10);
+    if (filters.dateFrom && createdDate < filters.dateFrom) return false;
+    if (filters.dateTo && createdDate > filters.dateTo) return false;
     return true;
   }), [categoryById, categoryFilteredItems, filters]);
 
@@ -260,6 +266,13 @@ export default function ArchiveWorkspace() {
       if (autoImagePreview) URL.revokeObjectURL(autoImagePreview);
     };
   }, [autoImagePreview]);
+
+  useEffect(() => {
+    if (!message) return;
+    const shouldPopup = /(실패|선택|입력|없습니다)/.test(message) && !message.includes("미리보기를 생성할 URL");
+    if (shouldPopup) window.alert(message);
+    setMessage("");
+  }, [message]);
 
   async function postJson(url: string, body: Record<string, unknown>) {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -448,6 +461,11 @@ export default function ArchiveWorkspace() {
     setActiveMenu(menu);
     setActiveSubCategory("");
     if (menu === "save") setSaveMode("auto");
+    if (menu === "all" || menu === "save") {
+      setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+    } else {
+      setFilters((prev) => ({ ...prev, categoryGroup: menu, category: "" }));
+    }
   }
 
   const menuItems: Array<[ActiveMenu, string]> = [
@@ -473,6 +491,10 @@ export default function ArchiveWorkspace() {
     return groupCount(menu);
   }
 
+  const category2Options = filters.categoryGroup && categoryTree[filters.categoryGroup as CategoryGroup]
+    ? categoryTree[filters.categoryGroup as CategoryGroup]
+    : categoryOptionEntries().map((entry) => entry.category);
+
   return (
     <div className="space-y-4" onPaste={activeMenu === "save" && saveMode === "auto" ? onPasteAuto : undefined}>
       <div>
@@ -481,28 +503,46 @@ export default function ArchiveWorkspace() {
       </div>
 
       <section>
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-          {menuItems.map(([key, label]) => (
-            <button key={key} type="button" onClick={() => openMenu(key)} className={`h-9 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-              {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
-            </button>
-          ))}
-          {loading && <span className="text-xs font-bold text-orange-600">불러오는 중</span>}
+        <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex shrink-0 items-center gap-1">
+            {menuItems.map(([key, label]) => (
+              <button key={key} type="button" onClick={() => openMenu(key)} className={`h-8 rounded-md border px-2 text-xs font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+                {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
+              </button>
+            ))}
+          </div>
+          {activeMenu !== "save" && (
+            <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
+              <input className="field-input h-8 w-32 min-w-0 rounded-md border border-slate-200 px-2 text-xs" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
+              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.categoryGroup} onChange={(event) => {
+                const group = event.target.value;
+                setFilters({ ...filters, categoryGroup: group, category: "" });
+                setActiveMenu(group ? group as CategoryGroup : "all");
+                setActiveSubCategory("");
+              }}>
+                <option value="">카테고리1</option>
+                {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
+              </select>
+              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.category} onChange={(event) => {
+                setFilters({ ...filters, category: event.target.value });
+                setActiveSubCategory(event.target.value);
+              }}>
+                <option value="">카테고리2</option>
+                {category2Options.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <select className="field-input h-8 w-24 min-w-0 rounded-md border border-slate-200 px-2 text-xs" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
+                <option value="">소스 전체</option>
+                {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+              </select>
+              <input className="field-input h-8 w-[6.7rem] min-w-0 rounded-md border border-slate-200 px-1 text-[11px]" type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
+              <input className="field-input h-8 w-[6.7rem] min-w-0 rounded-md border border-slate-200 px-1 text-[11px]" type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
+              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-8 w-12 whitespace-nowrap rounded-md border px-2 text-xs font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+                선택
+              </button>
+            </div>
+          )}
         </div>
       </section>
-
-      {message && <div className="rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-black text-orange-700">{message}</div>}
-
-      {(activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
-        <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-          <button type="button" onClick={() => setActiveSubCategory("")} className={`h-8 rounded-md px-3 text-xs font-black ${!activeSubCategory ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>전체</button>
-          {categoryTree[activeMenu].map((category) => (
-            <button key={category} type="button" onClick={() => setActiveSubCategory(category)} className={`h-8 rounded-md px-3 text-xs font-black ${activeSubCategory === category ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}>
-              {category} {categoryCount(category)}
-            </button>
-          ))}
-        </div>
-      )}
 
       {activeMenu === "save" && (
         <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
@@ -614,8 +654,7 @@ export default function ArchiveWorkspace() {
         <ArchiveList
           items={filteredItems}
           categoryById={categoryById}
-          filters={filters}
-          setFilters={setFilters}
+          selectMode={selectMode}
           data={data}
           onRegeneratePreview={requestPreview}
           onUpdateItem={updateArchiveItem}
@@ -629,8 +668,7 @@ export default function ArchiveWorkspace() {
 function ArchiveList({
   items,
   categoryById,
-  filters,
-  setFilters,
+  selectMode,
   data,
   onRegeneratePreview,
   onUpdateItem,
@@ -638,8 +676,7 @@ function ArchiveList({
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
-  filters: { q: string; category: string; source: string; date: string };
-  setFilters: (filters: { q: string; category: string; source: string; date: string }) => void;
+  selectMode: boolean;
   data: ArchiveData;
   onRegeneratePreview: (id?: string, force?: boolean) => void;
   onUpdateItem: (item: ArchiveItem) => Promise<void>;
@@ -677,22 +714,13 @@ function ArchiveList({
     setSelectedIds([]);
   }
 
+  useEffect(() => {
+    if (!selectMode) setSelectedIds([]);
+  }, [selectMode]);
+
   return (
     <div className="space-y-4">
-      <section className="grid gap-2 rounded-md border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
-        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
-        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })}>
-          <option value="">카테고리 전체</option>
-          {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
-        </select>
-        <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={filters.source} onChange={(event) => setFilters({ ...filters, source: event.target.value })}>
-          <option value="">소스 전체</option>
-          {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-        </select>
-        <input className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} />
-      </section>
-
-      {selectedIds.length > 0 && (
+      {selectMode && selectedIds.length > 0 && (
         <section className="flex flex-wrap items-center gap-2 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
           <span className="font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개 선택</span>
           <select className="field-input h-9 min-w-48 rounded-md border border-orange-200 bg-white px-3 text-sm" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
@@ -721,10 +749,12 @@ function ArchiveList({
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
             <article key={item.id} className={`relative w-[250px] overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
-              <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
-                <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
-                선택
-              </label>
+              {selectMode && (
+                <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
+                  <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
+                  선택
+                </label>
+              )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex h-[200px] w-[250px] items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
@@ -789,9 +819,6 @@ function ArchiveList({
 }
 
 function ArchivePreviewFallback({ item }: { item: ArchiveItem }) {
-  const status = item.preview_status || "";
-  if (status === "pending") return <span className="text-xs font-black text-slate-500">미리보기 생성 중</span>;
-  if (status === "processing") return <span className="text-xs font-black text-orange-600">미리보기 처리 중</span>;
   const source = String(item.source_type || "web").toLowerCase();
   const styles: Record<string, string> = {
     instagram: "from-pink-500 via-orange-400 to-purple-600 text-white",
