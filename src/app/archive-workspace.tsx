@@ -50,6 +50,7 @@ type AutoArchiveDraft = {
   content_type: string;
   category_group: CategoryGroup;
   category_name: string;
+  warning?: string;
 };
 
 type CategoryGroup = "교육" | "업무" | "개인";
@@ -483,8 +484,9 @@ export default function ArchiveWorkspace() {
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
       const results = await Promise.all(autoDrafts.map((draft) => {
+        const { warning: _warning, ...saveDraft } = draft;
         const payload = {
-          ...draft,
+          ...saveDraft,
           category_id: categoryIdByName.get(draft.category_name) || null,
           tags: "",
           status: "active",
@@ -750,6 +752,11 @@ export default function ArchiveWorkspace() {
                     </select>
                   </div>
                   <a className="mt-2 block truncate text-sm font-black text-orange-600" href={draft.url} target="_blank" rel="noreferrer">{draft.url}</a>
+                  {draft.warning && (
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
+                      {draft.warning}
+                    </div>
+                  )}
                   <input className="field-input mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.memo} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, memo: event.target.value } : item))} />
                 </div>
               ))}

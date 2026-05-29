@@ -19,6 +19,7 @@ type ArchiveAiDraft = {
   content_type: string;
   category_group: CategoryGroup;
   category_name: string;
+  warning?: string;
 };
 type DraftMetadata = ArchiveAiDraft & { og_title?: string; og_description?: string };
 
@@ -58,6 +59,17 @@ function titleFromMetadata(value: string) {
     .trim();
   if (!cleaned || /^instagram$/i.test(cleaned)) return "";
   return shortTitle(cleaned, cleaned);
+}
+
+function unavailableReason(sourceType: string, title = "", description = "") {
+  const text = `${title} ${description}`.toLowerCase();
+  if (/sorry|isn't available|not found|page not found|private|login|log in|removed|deleted|사용할 수 없|페이지를 찾|삭제|비공개|로그인/.test(text)) {
+    return "삭제/비공개/로그인 필요 콘텐츠일 수 있습니다.";
+  }
+  if ((sourceType === "instagram" || sourceType === "youtube") && (!title || /^instagram$|^youtube$/i.test(title)) && !description) {
+    return "본문 정보를 읽지 못했습니다. 삭제/비공개/로그인 필요 콘텐츠일 수 있습니다.";
+  }
+  return "";
 }
 
 function normalizeUrl(url: string) {
@@ -108,6 +120,7 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
       categoryName = "광고소재";
     }
     const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
+    const warning = String(item.warning || "").trim();
     return [{
       url,
       title: shortTitle(String(item.title || ""), sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url)),
@@ -116,6 +129,7 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
       content_type: String(sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : item.content_type || "link"),
       category_group: group,
       category_name: categoryName,
+      ...(warning ? { warning } : {}),
     }];
   });
   return drafts.length ? drafts : fallbackDrafts(fallbackText);
@@ -133,17 +147,28 @@ async function attachMetadata(drafts: ArchiveAiDraft[]) {
     try {
       const metadata = await withTimeout(fetchOpenGraph(draft.url), 7000);
       const metadataTitle = titleFromMetadata(metadata.title || "");
+      const warning = unavailableReason(draft.source_type, metadataTitle || metadata.title, metadata.description);
       return {
         ...draft,
-        title: metadataTitle || draft.title,
+        title: warning && !metadataTitle ? "접근불가 콘텐츠" : metadataTitle || draft.title,
         memo: draft.memo,
+        ...(warning ? { warning } : {}),
         og_title: metadata.title || "",
         og_description: metadata.description || "",
       };
     } catch {
-      return draft;
+      const warning = unavailableReason(draft.source_type);
+      return warning ? { ...draft, title: "접근불가 콘텐츠", warning } : draft;
     }
   }));
+}
+
+function mergeWarnings(refined: ArchiveAiDraft[], metadataDrafts: DraftMetadata[]) {
+  const warningByUrl = new Map(metadataDrafts.map((draft) => [draft.url, draft.warning || ""]));
+  return refined.map((draft) => {
+    const warning = warningByUrl.get(draft.url);
+    return warning ? { ...draft, warning } : draft;
+  });
 }
 
 async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMetadata[], visibleText: string) {
@@ -170,11 +195,12 @@ async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMe
               "제목 기준: 피드 본문/OG 설명/보이는 주변 문구의 첫 의미 단락을 우선하고, 단순히 '인스타 릴 영상1'처럼 번호 붙이지 마.",
               "상품/광고/상세페이지/교육/개인 주제를 파악해서 8~14자 내외의 한국어 제목으로 축약해.",
               "memo는 사용자가 직접 남긴 의미 있는 메모만 유지해. likes/comments/view/date/time 숫자는 버려.",
+              "warning이 있으면 그대로 유지해. warning이 있으면 제목을 접근 불가 상태가 드러나게 짧게 정리해.",
               `허용 category_group/category_name: ${JSON.stringify(categoryTree)}`,
               "instagram/youtube 링크는 명확한 교육/개인 단서가 없으면 기본 업무/광고소재로 분류해.",
               `이미지/스크린샷에서 읽은 원문: ${visibleText}`,
               `후보와 OG 메타데이터: ${JSON.stringify(drafts)}`,
-              '반환 형식: {"drafts":[{"url":"","title":"","memo":"","source_type":"","content_type":"","category_group":"","category_name":""}]}',
+              '반환 형식: {"drafts":[{"url":"","title":"","memo":"","source_type":"","content_type":"","category_group":"","category_name":"","warning":""}]}',
             ].join("\n"),
           }],
         }],
@@ -256,7 +282,7 @@ export async function POST(request: NextRequest) {
     const parsed = JSON.parse(output || "{}") as Record<string, unknown>;
     const visibleText = String(parsed.text || text);
     const drafts = await attachMetadata(sanitizeDrafts(parsed, text));
-    const refinedDrafts = await refineDraftsWithAi(apiKey, model, drafts, visibleText);
+    const refinedDrafts = mergeWarnings(await refineDraftsWithAi(apiKey, model, drafts, visibleText), drafts);
     return NextResponse.json({ ok: true, text: visibleText, drafts: refinedDrafts });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "AI 이미지 정리 실패" }, { status: 500 });
