@@ -7,7 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
-import { ActionButton, Card, EmptyState, FilterBar, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
+import { ActionButton, Card, EmptyState, FilterBar, KpiCard, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -9984,9 +9984,9 @@ function AdsRightPanel() {
             }`}>파일 선택</span>
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
           </label>
-          <button type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-9 w-full rounded-md bg-orange-500 text-sm font-black text-white disabled:bg-slate-300">
+          <ActionButton type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-9 w-full">
             {uploading ? "생성 중" : `데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
-          </button>
+          </ActionButton>
           {message && <p className="rounded-md bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">{message}</p>}
           {!!uploadedAdFiles.length && (
             <div className="max-h-32 space-y-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
@@ -10045,7 +10045,7 @@ function AdsRightPanel() {
               className="field-input h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold"
             />
           </div>
-          <button type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full rounded-md bg-slate-950 text-xs font-black text-white">조회</button>
+          <ActionButton type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full text-xs">조회</ActionButton>
         </div>
       </ToolSection>
       <ToolSection title="분석 기준" showChevron={false}>
@@ -10063,14 +10063,14 @@ function AdsRightPanel() {
             <div key={String(row.id || index)} className="rounded-md border border-slate-200 bg-white p-2 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate font-black text-slate-700">{String(row.channel || "-")}</span>
-                <span className="font-black text-orange-600">{String(row.status || "-")}</span>
+                <StatusBadge tone={String(row.status || "").includes("SAVED") ? "success" : String(row.status || "").includes("REPLACED") ? "warning" : "muted"}>{String(row.status || "-")}</StatusBadge>
               </div>
               <p className="mt-1 font-bold text-slate-400">업로드 {adUploadDateLabel(row.uploaded_at)}</p>
               <p className="mt-1 truncate font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
               <p className="mt-1 font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(row.fail_count).toLocaleString("ko-KR")}</p>
             </div>
           ))}
-          {!recentBatches.length && <p className="rounded-md bg-slate-50 px-3 py-5 text-center text-xs font-bold text-slate-400">업로드 내역 없음</p>}
+          {!recentBatches.length && <EmptyState title="업로드 내역 없음" className="min-h-24 py-5" />}
         </div>
       </ToolSection>
     </aside>
