@@ -1703,7 +1703,7 @@ function NativeImportWorkspace({ path }: { path: string }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title={`수입관리 -> ${activeSubMenu?.label || "발주"}`}
+        title={activeSubMenu?.label || "발주"}
         description={descriptionByPath[activeImportPath]}
       />
       {content}
