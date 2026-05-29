@@ -9185,14 +9185,14 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
     ["총비용", true],
     ["전환매출", true],
     ["ROAS", true],
-    ["전환 구매\n건수", true],
+    ["전환\n건수", true],
+    ["CVR", true],
     ["CPA", true],
+    ["CTR", true],
     ["노출", false],
     ["클릭", false],
-    ["CTR", true],
-    ["CPM", false],
     ["CPC", false],
-    ["CVR", true],
+    ["CPM", false],
   ] as const;
   const channelRows = rows.filter((row) => row.channel !== "total");
   const cpaValues = channelRows.filter((row) => row.purchases > 0 && row.costPerPurchase > 0).map((row) => row.costPerPurchase);
@@ -9223,50 +9223,50 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
     return "";
   };
   return (
-    <div className="overflow-x-hidden">
-      <table className="w-full table-fixed border-collapse text-center text-[11.5px] tabular-nums">
+    <div className="overflow-x-auto pb-1">
+      <table className="min-w-[1080px] table-fixed border-collapse text-center text-[12.5px] tabular-nums">
         <colgroup>
-          <col className="w-[10.5%]" />
-          <col className="w-[9.5%]" />
-          <col className="w-[11%]" />
+          <col className="w-[12%]" />
+          <col className="w-[9.3%]" />
+          <col className="w-[10.2%]" />
+          <col className="w-[8.4%]" />
           <col className="w-[7.5%]" />
-          <col className="w-[8%]" />
-          <col className="w-[8.8%]" />
-          <col className="w-[8.3%]" />
-          <col className="w-[7.2%]" />
-          <col className="w-[7%]" />
-          <col className="w-[7.6%]" />
-          <col className="w-[7.1%]" />
+          <col className="w-[7.7%]" />
+          <col className="w-[9.2%]" />
           <col className="w-[7.5%]" />
+          <col className="w-[8.2%]" />
+          <col className="w-[7.3%]" />
+          <col className="w-[6.6%]" />
+          <col className="w-[6.1%]" />
         </colgroup>
         <thead>
           <tr>
-            <th className="border border-slate-200 bg-white px-2 py-1.5 text-left font-black">광고</th>
+            <th className="border border-slate-200 bg-white px-2.5 py-2 text-left font-black">광고</th>
             {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1 py-1.5 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1.5 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[11px] font-bold" : "bg-white"}>
-              <td className="border border-slate-200 bg-inherit px-1.5 py-1.5 text-left font-black">
+            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[12px] font-bold" : "bg-white"}>
+              <td className="border border-slate-200 bg-inherit px-2 py-2 text-left font-black">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AdChannelLogo channel={row.channel} />
                   <span className="truncate">{row.label}</span>
                 </span>
               </td>
-              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cost)}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{krw(row.purchaseValue)}</td>
-              <td className={`border border-slate-200 px-1 py-1.5 text-xs font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{row.impressions.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cpm)}</td>
-              <td className="border border-slate-200 px-1 py-1.5">{krw(row.cpc)}</td>
-              <td className={`border border-slate-200 px-1 py-1.5 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cost)}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{krw(row.purchaseValue)}</td>
+              <td className={`border border-slate-200 px-1.5 py-2 text-[13px] font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
+              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
+              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
+              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpc)}</td>
+              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpm)}</td>
             </tr>
           ))}
         </tbody>
@@ -9316,8 +9316,8 @@ function AdsAnalysisWorkspace() {
 
   function exportAdReportCsv() {
     const rows = [
-      ["광고", "총비용", "전환매출", "ROAS", "전환 구매 건수", "CPA", "노출", "클릭", "CTR", "CPM", "CPC", "CVR"],
-      ...reportRows.map((row) => [row.label, Math.round(row.cost), Math.round(row.purchaseValue), `${row.roas.toFixed(1)}%`, row.purchases, Math.round(row.costPerPurchase), row.impressions, row.clicks, `${row.ctr.toFixed(2)}%`, Math.round(row.cpm), Math.round(row.cpc), `${row.purchaseCvr.toFixed(2)}%`]),
+      ["광고", "총비용", "전환매출", "ROAS", "전환 건수", "CVR", "CPA", "CTR", "노출", "클릭", "CPC", "CPM"],
+      ...reportRows.map((row) => [row.label, Math.round(row.cost), Math.round(row.purchaseValue), `${row.roas.toFixed(1)}%`, row.purchases, `${row.purchaseCvr.toFixed(2)}%`, Math.round(row.costPerPurchase), `${row.ctr.toFixed(2)}%`, row.impressions, row.clicks, Math.round(row.cpc), Math.round(row.cpm)]),
     ];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
