@@ -9591,10 +9591,14 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
         cost: adNumber(row.cost),
         roas: adNumber(row.roas),
       };
-    })
-    .sort((a, b) => b.roas - a.roas);
+    });
   const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
   const barOpacityByRank = ["1", "0.78", "0.62", "0.46", "0.3"];
+  const barOpacityByChannel = new Map(
+    [...orderedRows]
+      .sort((a, b) => b.roas - a.roas)
+      .map((row, index) => [row.channel, barOpacityByRank[index] || "0.3"]),
+  );
   return (
     <Card className="p-4">
       <SectionHeader title="채널별 현황" className="mb-3" />
@@ -9610,7 +9614,7 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
               <span className="shrink-0 font-black text-gray-950">{krw(row.cost)}</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-              <div className="h-full rounded-full bg-[#ff6a00]" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%`, opacity: barOpacityByRank[index] || "0.3" }} />
+              <div className="h-full rounded-full bg-[#ff6a00]" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%`, opacity: barOpacityByChannel.get(row.channel) || "0.3" }} />
             </div>
           </div>
         ))}
