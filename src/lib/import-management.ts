@@ -72,6 +72,16 @@ function productImage(row: AnyRecord) {
   return text(row.image_url || row.image_path);
 }
 
+function productKind(row: AnyRecord) {
+  const explicitKind = text(row.product_kind || row.item_kind || row.product_type || row.category_type).toLowerCase();
+  const value = `${productSku(row)} ${productName(row)} ${text(row.product_code || row.prod_cd)}`.toUpperCase();
+  if (explicitKind === "rg" || explicitKind.includes("rocket") || explicitKind.includes("로켓")) return "rg";
+  if (explicitKind === "set" || explicitKind.includes("세트")) return "set";
+  if (/\[RG[\]\}]/.test(value)) return "rg";
+  if (/\[NG[\]\}]/.test(value)) return "set";
+  return "plain";
+}
+
 function productCost(row: AnyRecord) {
   return numberValue(row.cost_price ?? row.in_price ?? row.standard_price ?? row.out_price);
 }
@@ -143,6 +153,7 @@ export async function searchFnProducts(query: string, limit = 80) {
   ]);
   const matched = rows
     .filter((row) => !bomParentIds.has(text(row.id)))
+    .filter((row) => productKind(row) === "plain")
     .map((row) => {
       const haystack = [row.product_code, row.sku, row.product_name, row.prod_cd, row.prod_name, row.option_name, row.size_des]
         .map((value) => text(value).toLowerCase())

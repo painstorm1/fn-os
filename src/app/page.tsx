@@ -2869,7 +2869,10 @@ function FnProductPickerModal({
   const selectedIds = new Set(draft.map((item) => item.product_id));
   function toggle(product: FnProduct) {
     setDraft((prev) => {
-      if (prev.some((item) => item.product_id === product.id)) return prev.filter((item) => item.product_id !== product.id);
+      if (prev.some((item) => item.product_id === product.id)) {
+        window.alert("이미 연동된 상품이 있습니다.");
+        return prev;
+      }
       return [...prev, {
         product_id: product.id,
         sku: fnProductSku(product),
