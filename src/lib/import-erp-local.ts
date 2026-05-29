@@ -935,8 +935,69 @@ async function handleMutation(path: string, request: NextRequest) {
   return null;
 }
 
+async function handleGptMiniHs(request: NextRequest) {
+  if (request.method !== "POST") return json({ ok: false, error: "지원하지 않는 요청입니다." }, 405);
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return json({ ok: false, error: "OPENAI_API_KEY가 설정되어 있지 않습니다." }, 503);
+
+  const body = await request.json().catch(() => ({}));
+  const productName = text(body.product_name || body.productName || body.name);
+  if (!productName) return json({ ok: false, error: "제품명을 입력해 주세요." }, 400);
+
+  const model = process.env.GPTMINI_AI_MODEL || process.env.ARCHIVE_AI_MODEL || "gpt-4.1-mini";
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You help a Korean import manager estimate HS codes and tariff/VAT notes. Reply in Korean, concise, and include uncertainty. Do not invent a definitive customs ruling.",
+        },
+        {
+          role: "user",
+          content: `제품명: ${productName}\n가능성이 높은 HS 코드, 기본 관세율, FTA 적용 확인 포인트를 짧게 정리해줘.`,
+        },
+      ],
+      temperature: 0.2,
+      max_output_tokens: 700,
+    }),
+    cache: "no-store",
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = text(data.error?.message || data.error) || "GPTmini 호출 실패";
+    return json({ ok: false, error: message }, res.status);
+  }
+
+  const outputText = text(data.output_text) ||
+    (Array.isArray(data.output)
+      ? data.output
+          .flatMap((item: AnyRecord) => Array.isArray(item.content) ? item.content : [])
+          .map((item: AnyRecord) => text(item.text))
+          .filter(Boolean)
+          .join("\n")
+      : "");
+
+  return json({ ok: true, answer: outputText || "응답을 받았지만 표시할 내용이 없습니다.", model });
+}
+
 export async function handleLocalImportErp(request: NextRequest, pathParts: string[]) {
   const path = pathParts.join("/");
+  if (path === "api/gptmini/hs") {
+    try {
+      return await handleGptMiniHs(request);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "GPTmini 처리 중 오류가 발생했습니다.";
+      return json({ ok: false, error: message }, 500);
+    }
+  }
   if (!path.startsWith("api/fnos/")) return null;
   try {
     if (request.method === "GET") return await handleGet(path, request);
