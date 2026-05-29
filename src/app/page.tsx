@@ -2019,16 +2019,14 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
   const title = order.order_code || order.repr_product || `발주 ${order.id}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-8">
-      <ModalShell className="max-h-[90vh] w-full max-w-4xl overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <div>
-            <h2 className="text-lg font-black">첨부파일 - {title}</h2>
-            <p className="mt-1 text-xs font-bold text-slate-500">견적서, 송금증, 인보이스, 사진 자료를 발주건 안에 보관합니다.</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
-        </div>
-        <div className="max-h-[calc(90vh-76px)] overflow-y-auto p-5">
+    <SelectionModal
+      title={`첨부파일 - ${title}`}
+      description="견적서, 송금증, 인보이스, 사진 자료를 발주건 안에 보관합니다."
+      onClose={onClose}
+      size="xl"
+      className="max-h-[90vh] overflow-hidden"
+    >
+        <div className="max-h-[calc(90vh-150px)] overflow-y-auto">
           <div
             onDragOver={(event) => {
               event.preventDefault();
@@ -2049,8 +2047,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
                   className="hidden"
                 />
               </label>
-              <input value={note} onChange={(event) => setNote(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" placeholder="메모" />
-              <button type="button" onClick={uploadAttachment} disabled={uploading} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{uploading ? "업로드 중" : "업로드"}</button>
+              <input value={note} onChange={(event) => setNote(event.target.value)} className={modalInputClass} placeholder="메모" />
+              <ActionButton type="button" onClick={uploadAttachment} disabled={uploading}>{uploading ? "업로드 중" : "업로드"}</ActionButton>
             </div>
             <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm font-bold text-slate-500">
               파일을 여기로 끌어다 놓거나, 파일 선택 버튼으로 여러 개를 한 번에 선택하세요.
@@ -2087,8 +2085,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
                 <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
                 <span className="break-all text-slate-600">{item.note || "-"}</span>
                 <span className="flex justify-center gap-2 text-center">
-                  <button type="button" onClick={() => openAttachment(item)} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700">열기</button>
-                  <button type="button" onClick={() => deleteAttachment(item)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
+                  <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openAttachment(item)}>열기</ActionButton>
+                  <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50" onClick={() => deleteAttachment(item)}>삭제</ActionButton>
                 </span>
               </div>
             )) : (
@@ -2096,8 +2094,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             )}
           </div>
         </div>
-      </ModalShell>
-    </div>
+    </SelectionModal>
   );
 }
 
@@ -3167,18 +3164,26 @@ function FnProductPickerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
-      <ModalShell className="w-full max-w-6xl p-0">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <h3 className="text-lg font-black">FN 상품에서 찾기</h3>
-          <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
+    <SelectionModal
+      title="FN 상품에서 찾기"
+      onClose={onClose}
+      size="full"
+      footer={
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="text-sm font-semibold text-gray-500">선택 {draft.length.toLocaleString("ko-KR")}개</span>
+          <div className="flex gap-2">
+            <ActionButton type="button" variant="secondary" onClick={onClose}>취소</ActionButton>
+            <ActionButton type="button" onClick={() => onApply(draft)}>반영</ActionButton>
+          </div>
         </div>
-        <div className="grid gap-3 p-5">
+      }
+    >
+        <div className="grid gap-3">
           {optionName && <p className="rounded-md bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">연동 옵션: {optionName}</p>}
-          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="품목코드 / 품목명 / 옵션 검색" autoFocus />
-          <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
+          <input className={modalInputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="품목코드 / 품목명 / 옵션 검색" autoFocus />
+          <div className="max-h-[58vh] overflow-auto rounded-xl border border-gray-200">
             <table className="w-full min-w-[940px] text-sm">
-              <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+              <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="py-2 text-left">이미지</th>
                   <th className="py-2 text-left">SKU</th>
@@ -3194,7 +3199,7 @@ function FnProductPickerModal({
                 {products.map((product) => {
                   const checked = selectedIds.has(product.id);
                   return (
-                    <tr key={product.id} className="border-b border-slate-100">
+                    <tr key={product.id} className="border-b border-gray-100 hover:bg-orange-50/40">
                       <td className="py-2">
                         <div className="h-11 w-11 overflow-hidden rounded-md bg-slate-100">
                           {product.image_url && <img src={product.image_url} alt="" className="h-full w-full object-cover" />}
@@ -3207,7 +3212,7 @@ function FnProductPickerModal({
                       <td className="py-2 text-right">{Number(product.available_stock || 0).toLocaleString("ko-KR")}</td>
                       <td className="py-2 text-right">{krw(fnProductPrice(product))}</td>
                       <td className="py-2 text-center">
-                        <button type="button" className={`h-8 rounded-md px-3 text-xs font-black ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-orange-500 text-white"}`} onClick={() => toggle(product)}>
+                        <button type="button" className={`h-8 rounded-lg px-3 text-xs font-black transition ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-[#ff6a00] text-white hover:bg-[#ea580c]"}`} onClick={() => toggle(product)}>
                           {checked ? "선택됨" : "추가"}
                         </button>
                       </td>
@@ -3222,16 +3227,8 @@ function FnProductPickerModal({
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-bold text-slate-500">선택 {draft.length.toLocaleString("ko-KR")}개</span>
-            <div className="flex gap-2">
-              <button type="button" className="h-10 rounded-md border border-slate-300 px-5 text-sm font-bold" onClick={onClose}>취소</button>
-              <button type="button" className="h-10 rounded-md bg-slate-950 px-5 text-sm font-black text-white" onClick={() => onApply(draft)}>반영</button>
-            </div>
-          </div>
         </div>
-      </ModalShell>
-    </div>
+    </SelectionModal>
   );
 }
 
@@ -3759,15 +3756,15 @@ function NativeProductForm({ id }: { id?: number }) {
           </div>
         </form>
         {productLinkOpen && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
-            <ModalShell className="w-full max-w-4xl p-0">
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <h3 className="text-lg font-black">상품 선택</h3>
-                <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={() => setProductLinkOpen(false)}>×</button>
-              </div>
-              <div className="grid gap-3 p-5">
-                <input className="field-input" value={productLinkQuery} onChange={(event) => setProductLinkQuery(event.target.value)} placeholder="제품명 검색" />
-                <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
+          <SelectionModal
+            title="상품 선택"
+            onClose={() => setProductLinkOpen(false)}
+            size="xl"
+            footer={<ActionButton type="button" onClick={() => setProductLinkOpen(false)}>완료</ActionButton>}
+          >
+              <div className="grid gap-3">
+                <input className={modalInputClass} value={productLinkQuery} onChange={(event) => setProductLinkQuery(event.target.value)} placeholder="제품명 검색" />
+                <div className="max-h-[58vh] overflow-auto rounded-xl border border-gray-200">
                   {(data?.products || [])
                     .filter((item) => !isMaterial(item) && item.id !== id)
                     .filter((item) => !productLinkQuery.trim() || item.name.toLowerCase().includes(productLinkQuery.trim().toLowerCase()))
@@ -3775,7 +3772,7 @@ function NativeProductForm({ id }: { id?: number }) {
                       const checked = linkedProducts.some((link) => link.product_id === item.id);
                       const linked = linkedProducts.find((link) => link.product_id === item.id);
                       return (
-                        <div key={item.id} className="grid grid-cols-[72px_1fr_120px_96px] items-center gap-3 border-b border-slate-200 p-3 last:border-b-0">
+                        <div key={item.id} className="grid grid-cols-[72px_1fr_120px_96px] items-center gap-3 border-b border-gray-100 p-3 last:border-b-0 hover:bg-orange-50/40">
                           <div className="h-14 w-14 overflow-hidden rounded-md bg-slate-100">
                             {item.image_path && <img src={assetUrl(item.image_path)} alt={item.name} className="h-full w-full object-cover" />}
                           </div>
@@ -3783,20 +3780,16 @@ function NativeProductForm({ id }: { id?: number }) {
                             <p className="font-black">{item.name}</p>
                             <p className="text-xs font-bold text-slate-500">{item.factory_name || "-"}</p>
                           </div>
-                          <input className="field-input h-9 text-right" type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
-                          <button type="button" className={`h-9 rounded-md px-4 text-sm font-black ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-orange-500 text-white"}`} onClick={() => toggleLinkedProduct(item)}>
+                          <input className={`${modalInputClass} h-9 text-right`} type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
+                          <button type="button" className={`h-9 rounded-lg px-4 text-sm font-black transition ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-[#ff6a00] text-white hover:bg-[#ea580c]"}`} onClick={() => toggleLinkedProduct(item)}>
                             {checked ? "선택됨" : "추가"}
                           </button>
                         </div>
                       );
                     })}
                 </div>
-                <div className="flex justify-end">
-                  <button type="button" className="h-10 rounded-md bg-slate-950 px-5 text-sm font-black text-white" onClick={() => setProductLinkOpen(false)}>완료</button>
-                </div>
               </div>
-            </ModalShell>
-          </div>
+          </SelectionModal>
         )}
         <FnProductPickerModal
           open={fnProductPickerOpen}
@@ -3970,32 +3963,35 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
-      <ModalShell className="w-full max-w-6xl p-0">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <div>
-            <h3 className="text-lg font-black">SKU별 수량 배분</h3>
-            <p className="mt-1 text-sm font-bold text-slate-500">purchase_date = {order.fn_arrived || "FN입고일 없음"}</p>
-          </div>
-          <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
-        </div>
-        <div className="grid max-h-[70vh] gap-4 overflow-auto p-5">
+    <SelectionModal
+      title="SKU별 수량 배분"
+      description={`purchase_date = ${order.fn_arrived || "FN입고일 없음"}`}
+      onClose={onClose}
+      size="full"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>나중에</ActionButton>
+          <ActionButton type="button" disabled={saving} onClick={saveReceipt}>{saving ? "생성 중..." : "구매/입고 생성"}</ActionButton>
+        </>
+      }
+    >
+        <div className="grid max-h-[70vh] gap-4 overflow-auto">
           {(detail.items || []).map((item) => {
             const importProductId = Number(item.product_id || 0);
             const links = linksForOrderItem(item);
             const qty = Number(item.quantity || 0);
             const allocatedTotal = links.reduce((sum: number, link: ImportSkuLink) => sum + Number(allocations[allocationKey(item, link)] || 0), 0);
             return (
-              <section key={item.id || importProductId} className="rounded-md border border-slate-200">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <section key={item.id || importProductId} className="rounded-xl border border-gray-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
                   <div>
                     <b>{item.product_name || "-"}</b>
                     {item.option_value && <span className="ml-2 rounded bg-white px-2 py-1 text-xs font-black text-slate-500">{item.option_value}</span>}
                     <span className="ml-3 text-sm font-bold text-slate-500">수입 수량 {qty.toLocaleString("ko-KR")} / 배분 {allocatedTotal.toLocaleString("ko-KR")}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" className="h-8 rounded-md border border-slate-300 px-3 text-xs font-black" onClick={() => equalAllocate(item, qty)}>동일 수량</button>
-                    <button type="button" className="h-8 rounded-md border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-600" onClick={() => ratioAllocate(item, qty)}>기본 비율</button>
+                    <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => equalAllocate(item, qty)}>동일 수량</ActionButton>
+                    <ActionButton type="button" variant="secondary" className="h-8 border-orange-200 bg-orange-50 px-3 text-xs text-orange-700 hover:bg-orange-100" onClick={() => ratioAllocate(item, qty)}>기본 비율</ActionButton>
                   </div>
                 </div>
                 <div className="grid gap-2 p-3">
@@ -4003,14 +3999,14 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
                     const key = allocationKey(item, link);
                     const fnProduct = link.product;
                     return (
-                      <div key={link.product_id} className="grid items-center gap-2 rounded-md bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_120px_120px]">
+                      <div key={link.product_id} className="grid items-center gap-2 rounded-lg bg-white p-2 text-sm md:grid-cols-[44px_1fr_100px_120px_120px]">
                         <div className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">{fnProduct?.image_url && <img src={fnProduct.image_url} alt="" className="h-full w-full object-cover" />}</div>
                         <div>
                           <p className="font-black">{fnProductName(fnProduct)}</p>
                           <p className="text-xs font-bold text-slate-500">{fnProductSku(fnProduct)} · 재고 {Number(fnProduct?.available_stock || 0).toLocaleString("ko-KR")}</p>
                         </div>
                         <span className="text-right text-xs font-bold text-slate-500">비율 {Number(link.default_ratio || 1)}</span>
-                        <input className="field-input h-9 text-right" type="number" min="0" step="0.01" value={allocations[key] || 0} onChange={(event) => setAllocations((prev) => ({ ...prev, [key]: Number(event.target.value || 0) }))} />
+                        <input className={`${modalInputClass} h-9 text-right`} type="number" min="0" step="0.01" value={allocations[key] || 0} onChange={(event) => setAllocations((prev) => ({ ...prev, [key]: Number(event.target.value || 0) }))} />
                         <span className="text-right font-black">{krw(receiptUnitCost(item))}</span>
                       </div>
                     );
@@ -4021,13 +4017,8 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
             );
           })}
           {message && <p className="rounded-md bg-orange-50 px-3 py-3 text-sm font-black text-orange-600">{message}</p>}
-          <div className="flex justify-end gap-2">
-            <button type="button" className="h-10 rounded-md border border-slate-300 px-5 text-sm font-bold" onClick={onClose}>나중에</button>
-            <button type="button" className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving} onClick={saveReceipt}>{saving ? "생성 중..." : "구매/입고 생성"}</button>
-          </div>
         </div>
-      </ModalShell>
-    </div>
+    </SelectionModal>
   );
 }
 
