@@ -83,6 +83,7 @@ create table if not exists products (
   product_name text,
   option_name text,
   product_type text,
+  product_attribute text not null default 'plain',
   category text,
   barcode text,
   image_url text,
@@ -110,6 +111,7 @@ alter table products add column if not exists sku text;
 alter table products add column if not exists product_name text;
 alter table products add column if not exists option_name text;
 alter table products add column if not exists product_type text;
+alter table products add column if not exists product_attribute text not null default 'plain';
 alter table products add column if not exists category text;
 alter table products add column if not exists image_url text;
 alter table products add column if not exists standard_price double precision default 0;
@@ -124,6 +126,22 @@ alter table products add column if not exists prod_type text;
 alter table products add column if not exists unit text;
 alter table products add column if not exists in_price double precision;
 alter table products add column if not exists out_price double precision;
+
+alter table products alter column product_attribute set default 'plain';
+
+update products
+set product_attribute = case
+  when upper(coalesce(product_name, '') || ' ' || coalesce(product_code, '') || ' ' || coalesce(prod_name, '') || ' ' || coalesce(prod_cd, '')) ~ '\[RG[\]\}]'
+    then 'rg'
+  when upper(coalesce(product_name, '') || ' ' || coalesce(product_code, '') || ' ' || coalesce(prod_name, '') || ' ' || coalesce(prod_cd, '')) ~ '\[NG[\]\}]'
+    then 'set'
+  else 'plain'
+end;
+
+alter table products alter column product_attribute set not null;
+alter table products drop constraint if exists products_product_attribute_check;
+alter table products add constraint products_product_attribute_check check (product_attribute in ('plain', 'set', 'rg'));
+create index if not exists idx_products_product_attribute on products(product_attribute);
 
 create table if not exists product_boms (
   id uuid primary key default gen_random_uuid(),
