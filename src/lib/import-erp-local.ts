@@ -956,12 +956,25 @@ async function handleGptMiniHs(request: NextRequest) {
       input: [
         {
           role: "system",
-          content:
-            "You help a Korean import manager estimate HS codes and tariff/VAT notes. Reply in Korean, concise, and include uncertainty. Do not invent a definitive customs ruling.",
+          content: [
+            {
+              type: "input_text",
+              text: "You help a Korean import manager estimate HS codes and tariff/VAT notes. Reply in Korean, concise, and include uncertainty. Do not invent a definitive customs ruling.",
+            },
+          ],
         },
         {
           role: "user",
-          content: `제품명: ${productName}\n가능성이 높은 HS 코드, 기본 관세율, FTA 적용 확인 포인트를 짧게 정리해줘.`,
+          content: [
+            {
+              type: "input_text",
+              text: [
+                `제품명: ${productName}`,
+                "위 제품명은 실제 사용자가 입력한 제품명이다.",
+                "가능성이 높은 HS 코드, 기본 관세율, FTA 적용 확인 포인트를 짧게 정리해줘.",
+              ].join("\n"),
+            },
+          ],
         },
       ],
       temperature: 0.2,
