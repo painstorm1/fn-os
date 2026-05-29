@@ -72,6 +72,23 @@ function unavailableReason(sourceType: string, title = "", description = "") {
   return "";
 }
 
+function inferEducationalCategory(text: string): { group: CategoryGroup; categoryName: string } | null {
+  const value = text.toLowerCase();
+  if (/photoshop|포토샵|psd|합성|보정|누끼|목업|mockup|자막|색조합|컬러팔레트|color palette|튜토리얼|tutorial|강좌|팁|tip/.test(value)) {
+    return { group: "교육", categoryName: "포토샵" };
+  }
+  if (/illustrator|일러스트|로고|logo|벡터|vector|아이콘|icon|브랜딩|branding/.test(value)) {
+    return { group: "교육", categoryName: "일러스트" };
+  }
+  if (/\bai\b|chatgpt|gpt|midjourney|미드저니|프롬프트|prompt|자동화/.test(value)) {
+    return { group: "교육", categoryName: "AI" };
+  }
+  if (/english|영어|회화|voca|grammar|토익/.test(value)) {
+    return { group: "교육", categoryName: "영어" };
+  }
+  return null;
+}
+
 function normalizeUrl(url: string) {
   return url
     .trim()
@@ -91,14 +108,15 @@ function fallbackDrafts(text: string): ArchiveAiDraft[] {
     if (seen.has(url)) return [];
     seen.add(url);
     const sourceType = sourceFromUrl(url);
+    const education = inferEducationalCategory(`${compactText} ${url}`);
     return [{
       url,
       title: shortTitle(sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url), sourceType),
       memo: "",
       source_type: sourceType,
       content_type: sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : "link",
-      category_group: "업무",
-      category_name: sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법",
+      category_group: education?.group || "업무",
+      category_name: education?.categoryName || (sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법"),
     }];
   });
 }
@@ -115,11 +133,16 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
     let group = validGroups.includes(item.category_group as CategoryGroup) ? item.category_group as CategoryGroup : "업무";
     let categoryOptions = categoryTree[group];
     let categoryName = categoryOptions.includes(String(item.category_name || "")) ? String(item.category_name) : categoryOptions[0];
-    if ((sourceType === "instagram" || sourceType === "youtube") && group === "개인" && categoryName === "기타") {
+    const title = String(item.title || "");
+    const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
+    const education = inferEducationalCategory(`${title} ${memo} ${fallbackText} ${url}`);
+    if (education) {
+      group = education.group;
+      categoryName = education.categoryName;
+    } else if ((sourceType === "instagram" || sourceType === "youtube") && group === "개인" && categoryName === "기타") {
       group = "업무";
       categoryName = "광고소재";
     }
-    const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
     const warning = String(item.warning || "").trim();
     return [{
       url,
@@ -148,10 +171,12 @@ async function attachMetadata(drafts: ArchiveAiDraft[]) {
       const metadata = await withTimeout(fetchOpenGraph(draft.url), 7000);
       const metadataTitle = titleFromMetadata(metadata.title || "");
       const warning = unavailableReason(draft.source_type, metadataTitle || metadata.title, metadata.description);
+      const education = inferEducationalCategory(`${metadata.title} ${metadata.description} ${draft.title} ${draft.memo}`);
       return {
         ...draft,
         title: warning && !metadataTitle ? "접근불가 콘텐츠" : metadataTitle || draft.title,
         memo: draft.memo,
+        ...(education ? { category_group: education.group, category_name: education.categoryName } : {}),
         ...(warning ? { warning } : {}),
         og_title: metadata.title || "",
         og_description: metadata.description || "",
@@ -197,7 +222,9 @@ async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMe
               "memo는 사용자가 직접 남긴 의미 있는 메모만 유지해. likes/comments/view/date/time 숫자는 버려.",
               "warning이 있으면 그대로 유지해. warning이 있으면 제목을 접근 불가 상태가 드러나게 짧게 정리해.",
               `허용 category_group/category_name: ${JSON.stringify(categoryTree)}`,
-              "instagram/youtube 링크는 명확한 교육/개인 단서가 없으면 기본 업무/광고소재로 분류해.",
+              "분류 우선순위: 포토샵/일러스트/AI/영어 튜토리얼, 팁, 강좌, 목업, 로고, 색조합, 자막, 디자인 방법론은 instagram/youtube여도 교육 카테고리가 우선이다.",
+              "포토샵 튜토리얼/목업/합성/자막/색조합/컬러팔레트는 교육/포토샵. 로고/벡터/일러스트레이터/아이콘은 교육/일러스트. AI 도구/프롬프트는 교육/AI.",
+              "instagram/youtube 링크는 위 교육/개인 단서가 없을 때만 업무/광고소재로 분류해.",
               `이미지/스크린샷에서 읽은 원문: ${visibleText}`,
               `후보와 OG 메타데이터: ${JSON.stringify(drafts)}`,
               '반환 형식: {"drafts":[{"url":"","title":"","memo":"","source_type":"","content_type":"","category_group":"","category_name":"","warning":""}]}',
