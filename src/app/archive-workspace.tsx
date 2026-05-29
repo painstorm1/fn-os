@@ -441,6 +441,7 @@ export default function ArchiveWorkspace() {
     const res = await fetch("/api/fnos/archive/ai-organize", { method: "POST", body: formData });
     const result = await res.json();
     if (!res.ok || result.ok === false) throw new Error(result.error || "AI 이미지 정리 실패");
+    invalidateClientCache("/api/fnos/archive");
     const drafts = Array.isArray(result.drafts) ? result.drafts as AutoArchiveDraft[] : [];
     setAutoDrafts(drafts);
     if (result.text) setAutoText((prev) => [prev, result.text].filter(Boolean).join("\n\n"));
