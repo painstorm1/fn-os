@@ -1972,13 +1972,10 @@ function NativeOrders({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Link className="inline-flex h-10 items-center rounded-lg bg-[#ff6a00] px-5 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/orders/new")}>F2 새 발주</Link>
-      </div>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <form
-            className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_150px_78px]"
+            className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[120px_1fr_150px_150px_78px]"
             onSubmit={(event) => {
               event.preventDefault();
               setAppliedFilters(filters);
@@ -1987,6 +1984,7 @@ function NativeOrders({
               loadOrders(filters).finally(() => setLoading(false));
             }}
           >
+            <Link className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/orders/new")}>F2 새 발주</Link>
             <input className="field-input" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} placeholder="제품명 or 거래처명" />
             <input className="field-input" type="date" value={filters.dateFrom} onChange={(event) => setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))} />
             <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
@@ -2587,13 +2585,13 @@ function NativeProducts() {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Link className="inline-flex h-10 items-center rounded-lg bg-[#ff6a00] px-5 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/products/new")}>F2 새 제품</Link>
-      </div>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <>
         <div className="mb-4 grid gap-3">
-          <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명 or 거래처명" />
+          <div className="grid gap-2 md:grid-cols-[120px_1fr]">
+            <Link className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/products/new")}>F2 새 제품</Link>
+            <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명 or 거래처명" />
+          </div>
           <div className="flex items-center gap-3 text-sm font-black">
             <button type="button" onClick={() => setTab("products")} className={!query.trim() && tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
             <span className="text-slate-300">|</span>
