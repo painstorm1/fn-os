@@ -8077,7 +8077,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               type="button"
               variant="secondary"
               onClick={downloadCustomerTemplate}
-              className="w-10 px-0"
+              className="w-10 border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -8516,7 +8516,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               type="button"
               variant="secondary"
               onClick={downloadProductTemplate}
-              className="w-10 px-0"
+              className="w-10 border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -10190,10 +10190,11 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
 
 function ExcelFormIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <rect x="3.5" y="3" width="17" height="18" rx="2" fill="#16a34a" />
-      <path d="M8 8.2 11 12l-3 3.8M13 8.2 10 12l3 3.8" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15.2 8.2h2.2M15.2 12h2.2M15.2 15.8h2.2" stroke="white" strokeWidth="1.4" strokeLinecap="round" opacity="0.9" />
+    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+      <path d="M6 3.5h8.2L19 8.3V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V5a1.5 1.5 0 0 1 1-1.5Z" fill="#16a34a" />
+      <path d="M14 3.7V8h4.3" fill="#bbf7d0" />
+      <path d="m8.2 10 2.4 3-2.4 3m5.1-6-2.4 3 2.4 3" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15.7 11h1.4m-1.4 2h1.4m-1.4 2h1.4" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
