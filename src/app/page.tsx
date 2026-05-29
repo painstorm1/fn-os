@@ -8605,7 +8605,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen((value) => !value)}>수정</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen(true)}>수정</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedCustomerKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input
@@ -8618,46 +8618,6 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             placeholder="거래처명 / 코드 검색"
           />
         </div>
-        {customerBulkOpen && (
-          <div className="mb-3 rounded-xl border border-gray-200 bg-white p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <select className={modalSelectClass} value={customerBulkField} onChange={(event) => setCustomerBulkField(event.target.value as CustomerBulkField)}>
-                <option value="customer_type">속성</option>
-                <option value="business_no">사업자번호</option>
-                <option value="contact_name">담당자</option>
-                <option value="phone">전화번호</option>
-                <option value="memo">메모</option>
-              </select>
-              {customerBulkField === "customer_type" ? (
-                <select className={modalSelectClass} value={customerBulkValue || "general"} onChange={(event) => setCustomerBulkValue(event.target.value)}>
-                  <option value="general">일반</option>
-                  <option value="shopping">쇼핑몰</option>
-                </select>
-              ) : (
-                <input className={modalInputClass} value={customerBulkValue} onChange={(event) => setCustomerBulkValue(event.target.value)} placeholder="선택한 거래처에 적용할 값" />
-              )}
-              <ActionButton type="button" onClick={() => void saveCustomerBulkEdit()}>저장</ActionButton>
-            </div>
-            <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full min-w-[620px] text-xs">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">거래처코드</th><th className="px-2 py-2 text-left">거래처명</th><th className="px-2 py-2 text-left">현재값</th></tr>
-                </thead>
-                <tbody>
-                  {selectedCustomers.map((customer, index) => (
-                    <tr key={customerRowKey(customer)} className="border-t border-gray-100">
-                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
-                      <td className="px-2 py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
-                      <td className="px-2 py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
-                      <td className="px-2 py-2 text-slate-600">{String(customerBulkField === "customer_type" ? customerAttributeLabel(customer.customer_type || customer.customer_type_label) : customer[customerBulkField as keyof FnCustomer] || "-")}</td>
-                    </tr>
-                  ))}
-                  {!selectedCustomers.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 거래처가 없습니다.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
@@ -8724,6 +8684,58 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         </div>
         {customerMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{customerMessage}</div>}
       </Panel>
+      {customerBulkOpen && (
+        <FormModal
+          title="거래처 선택수정"
+          description={`선택 ${selectedCustomers.length.toLocaleString("ko-KR")}개 거래처에 같은 값을 적용합니다.`}
+          onClose={() => setCustomerBulkOpen(false)}
+          size="xl"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveCustomerBulkEdit()}>저장</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+              <select className={modalSelectClass} value={customerBulkField} onChange={(event) => setCustomerBulkField(event.target.value as CustomerBulkField)}>
+                <option value="customer_type">속성</option>
+                <option value="business_no">사업자번호</option>
+                <option value="contact_name">담당자</option>
+                <option value="phone">전화번호</option>
+                <option value="memo">메모</option>
+              </select>
+              {customerBulkField === "customer_type" ? (
+                <select className={modalSelectClass} value={customerBulkValue || "general"} onChange={(event) => setCustomerBulkValue(event.target.value)}>
+                  <option value="general">일반</option>
+                  <option value="shopping">쇼핑몰</option>
+                </select>
+              ) : (
+                <input className={modalInputClass} value={customerBulkValue} onChange={(event) => setCustomerBulkValue(event.target.value)} placeholder="선택한 거래처에 적용할 값" />
+              )}
+            </div>
+            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[620px] text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">거래처코드</th><th className="px-2 py-2 text-left">거래처명</th><th className="px-2 py-2 text-left">현재값</th></tr>
+                </thead>
+                <tbody>
+                  {selectedCustomers.map((customer, index) => (
+                    <tr key={customerRowKey(customer)} className="border-t border-gray-100">
+                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
+                      <td className="px-2 py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
+                      <td className="px-2 py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
+                      <td className="px-2 py-2 text-slate-600">{String(customerBulkField === "customer_type" ? customerAttributeLabel(customer.customer_type || customer.customer_type_label) : customer[customerBulkField as keyof FnCustomer] || "-")}</td>
+                    </tr>
+                  ))}
+                  {!selectedCustomers.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 거래처가 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </FormModal>
+      )}
       {modalOpen && (
         <CustomerEditModal
           draft={draft}
@@ -9206,7 +9218,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen((value) => !value)}>수정</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen(true)}>수정</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedProductKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input
@@ -9220,49 +9232,6 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             placeholder="품목명 검색"
           />
         </div>
-        {productBulkOpen && (
-          <div className="mb-3 rounded-xl border border-gray-200 bg-white p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <select className={modalSelectClass} value={productBulkField} onChange={(event) => setProductBulkField(event.target.value as ProductBulkField)}>
-                <option value="product_attribute">속성</option>
-                <option value="cost_price">입고단가</option>
-                <option value="standard_price">출고단가</option>
-              </select>
-              {productBulkField === "product_attribute" ? (
-                <select className={modalSelectClass} value={productBulkValue || "plain"} onChange={(event) => setProductBulkValue(event.target.value)}>
-                  <option value="plain">일반</option>
-                  <option value="set">SET</option>
-                  <option value="rg">RG</option>
-                </select>
-              ) : (
-                <input className={modalInputClass} type="number" value={productBulkValue} onChange={(event) => setProductBulkValue(event.target.value)} placeholder="선택한 품목에 적용할 값" />
-              )}
-              <ActionButton type="button" onClick={() => void saveProductBulkEdit()}>저장</ActionButton>
-            </div>
-            <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full min-w-[680px] text-xs">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">품목코드</th><th className="px-2 py-2 text-left">품목명</th><th className="px-2 py-2 text-right">현재값</th></tr>
-                </thead>
-                <tbody>
-                  {selectedProducts.map((product, index) => (
-                    <tr key={productRowKey(product)} className="border-t border-gray-100">
-                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
-                      <td className="px-2 py-2 font-black">{product.product_code || product.sku || "-"}</td>
-                      <td className="px-2 py-2 font-bold">{product.product_name || "-"}</td>
-                      <td className="px-2 py-2 text-right text-slate-600">
-                        {productBulkField === "product_attribute"
-                          ? productAttributeLabel(productAttributeOf(product))
-                          : krw(Number(productBulkField === "cost_price" ? product.cost_price || 0 : product.standard_price || 0))}
-                      </td>
-                    </tr>
-                  ))}
-                  {!selectedProducts.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 품목이 없습니다.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[1100px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
@@ -9343,6 +9312,62 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         </div>
         {productMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{productMessage}</div>}
       </Panel>
+
+      {productBulkOpen && (
+        <FormModal
+          title="품목 선택수정"
+          description={`선택 ${selectedProducts.length.toLocaleString("ko-KR")}개 품목에 같은 값을 적용합니다.`}
+          onClose={() => setProductBulkOpen(false)}
+          size="xl"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveProductBulkEdit()}>저장</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+              <select className={modalSelectClass} value={productBulkField} onChange={(event) => setProductBulkField(event.target.value as ProductBulkField)}>
+                <option value="product_attribute">속성</option>
+                <option value="cost_price">입고단가</option>
+                <option value="standard_price">출고단가</option>
+              </select>
+              {productBulkField === "product_attribute" ? (
+                <select className={modalSelectClass} value={productBulkValue || "plain"} onChange={(event) => setProductBulkValue(event.target.value)}>
+                  <option value="plain">일반</option>
+                  <option value="set">SET</option>
+                  <option value="rg">RG</option>
+                </select>
+              ) : (
+                <input className={modalInputClass} type="number" value={productBulkValue} onChange={(event) => setProductBulkValue(event.target.value)} placeholder="선택한 품목에 적용할 값" />
+              )}
+            </div>
+            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[680px] text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">품목코드</th><th className="px-2 py-2 text-left">품목명</th><th className="px-2 py-2 text-right">현재값</th></tr>
+                </thead>
+                <tbody>
+                  {selectedProducts.map((product, index) => (
+                    <tr key={productRowKey(product)} className="border-t border-gray-100">
+                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
+                      <td className="px-2 py-2 font-black">{product.product_code || product.sku || "-"}</td>
+                      <td className="px-2 py-2 font-bold">{product.product_name || "-"}</td>
+                      <td className="px-2 py-2 text-right text-slate-600">
+                        {productBulkField === "product_attribute"
+                          ? productAttributeLabel(productAttributeOf(product))
+                          : krw(Number(productBulkField === "cost_price" ? product.cost_price || 0 : product.standard_price || 0))}
+                      </td>
+                    </tr>
+                  ))}
+                  {!selectedProducts.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 품목이 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </FormModal>
+      )}
 
       {modalOpen && (
         <ProductEditModal
