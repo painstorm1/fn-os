@@ -9659,7 +9659,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   };
   return (
     <div className="overflow-x-auto pb-1">
-      <table className="min-w-[1080px] table-fixed border-collapse text-center text-[12.5px] tabular-nums">
+      <table className="w-full min-w-[1080px] table-fixed border-collapse text-center text-[13px] tabular-nums">
         <colgroup>
           <col className="w-[12%]" />
           <col className="w-[9.3%]" />
@@ -9678,7 +9678,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
           <tr>
             <th className="border border-slate-200 bg-white px-2.5 py-2 text-left font-black">광고</th>
             {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-1.5 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-2 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
             ))}
           </tr>
         </thead>
@@ -9691,17 +9691,17 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
                   <span className="truncate">{row.label}</span>
                 </span>
               </td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cost)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.purchaseValue)}</td>
-              <td className={`border border-slate-200 px-1.5 py-2 text-[13px] font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
-              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
-              <td className={`border border-slate-200 px-1.5 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpc)}</td>
-              <td className="border border-slate-200 px-1.5 py-2">{krw(row.cpm)}</td>
+              <td className="border border-slate-200 px-2 py-2">{krw(row.cost)}</td>
+              <td className="border border-slate-200 px-2 py-2">{krw(row.purchaseValue)}</td>
+              <td className={`border border-slate-200 px-2 py-2 text-[13.5px] font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
+              <td className="border border-slate-200 px-2 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
+              <td className={`border border-slate-200 px-2 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
+              <td className={`border border-slate-200 px-2 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
+              <td className={`border border-slate-200 px-2 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
+              <td className="border border-slate-200 px-2 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-2 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className="border border-slate-200 px-2 py-2">{krw(row.cpc)}</td>
+              <td className="border border-slate-200 px-2 py-2">{krw(row.cpm)}</td>
             </tr>
           ))}
         </tbody>
