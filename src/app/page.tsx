@@ -7,7 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
-import { ActionButton, Card, EmptyState, FilterBar, KpiCard, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
+import { ActionButton, Card, EmptyState, FilterBar, FormField, KpiCard, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -399,7 +399,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
               </div>
             )}
             {item === "수입관리" && activeMenu === "수입관리" && importOpen && (
-              <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
+              <div className="ml-3 mt-2 space-y-2 border-l border-gray-200 pl-4">
                 {importSubMenus.map((sub) => (
                   <Link
                     key={sub.path}
@@ -410,8 +410,8 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                       event.preventDefault();
                       goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
                     }}
-                    className={`flex h-9 w-full items-center rounded-md px-3 text-left text-xs font-black ${
-                      importPath === sub.path ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
+                    className={`block py-1.5 text-sm font-semibold transition ${
+                      importPath === sub.path ? "text-[#ff6a00]" : "text-gray-500 hover:text-[#c2410c]"
                     }`}
                   >
                     {sub.label}
@@ -1676,15 +1676,53 @@ function NativeImportWorkspace({ path }: { path: string }) {
       void ensureImportErpServer().catch(() => undefined);
     }
   }, [basePath]);
-  if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
-  if (basePath.startsWith("/products/new")) return <NativeProductForm />;
-  if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
-  if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
-  if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
-  if (productMatch) return <NativeProductForm id={Number(productMatch[1])} />;
-  if (basePath.startsWith("/products")) return <NativeProducts />;
-  if (basePath.startsWith("/settings")) return <NativeSettings />;
-  return <NativeOrders initialOpenOrderId={openOrderId} initialFilters={initialOrderFilters} />;
+
+  const activeImportPath = basePath.startsWith("/products")
+    ? "/products"
+    : basePath.startsWith("/settings")
+      ? "/settings"
+      : "/orders";
+  const activeSubMenu = importSubMenus.find((sub) => sub.path === activeImportPath);
+  const content = (() => {
+    if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
+    if (basePath.startsWith("/products/new")) return <NativeProductForm />;
+    if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
+    if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
+    if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
+    if (productMatch) return <NativeProductForm id={Number(productMatch[1])} />;
+    if (basePath.startsWith("/products")) return <NativeProducts />;
+    if (basePath.startsWith("/settings")) return <NativeSettings />;
+    return <NativeOrders initialOpenOrderId={openOrderId} initialFilters={initialOrderFilters} />;
+  })();
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="수입관리"
+        description={`${activeSubMenu?.label || "발주"} 기준으로 수입 발주, 제품, 설정 데이터를 관리합니다.`}
+      />
+      <Card className="flex gap-2 overflow-x-auto p-1 shadow-none">
+        {importSubMenus.map((sub) => (
+          <Link
+            key={sub.path}
+            href={`/?menu=import&section=${encodeURIComponent(sub.path)}`}
+            onMouseEnter={() => warmImportCache(sub.path)}
+            onFocus={() => warmImportCache(sub.path)}
+            onClick={(event) => {
+              event.preventDefault();
+              goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
+            }}
+            className={`flex h-10 shrink-0 items-center rounded-lg px-5 text-sm font-semibold transition ${
+              activeImportPath === sub.path ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"
+            }`}
+          >
+            {sub.label}
+          </Link>
+        ))}
+      </Card>
+      {content}
+    </div>
+  );
 }
 
 function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrder; onClose: () => void; onChanged?: (count: number) => void }) {
