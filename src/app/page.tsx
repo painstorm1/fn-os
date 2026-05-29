@@ -1683,6 +1683,11 @@ function NativeImportWorkspace({ path }: { path: string }) {
       ? "/settings"
       : "/orders";
   const activeSubMenu = importSubMenus.find((sub) => sub.path === activeImportPath);
+  const descriptionByPath: Record<string, string> = {
+    "/orders": "수입 발주 목록을 확인하고 클릭해서 바로 수정합니다.",
+    "/products": "수입 발주용 제품과 부자재 카탈로그를 관리합니다.",
+    "/settings": "환율과 공급사/공장 기준정보를 관리합니다.",
+  };
   const content = (() => {
     if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
     if (basePath.startsWith("/products/new")) return <NativeProductForm />;
@@ -1698,28 +1703,9 @@ function NativeImportWorkspace({ path }: { path: string }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="수입관리"
-        description={`${activeSubMenu?.label || "발주"} 기준으로 수입 발주, 제품, 설정 데이터를 관리합니다.`}
+        title={`수입관리 -> ${activeSubMenu?.label || "발주"}`}
+        description={descriptionByPath[activeImportPath]}
       />
-      <Card className="flex gap-2 overflow-x-auto p-1 shadow-none">
-        {importSubMenus.map((sub) => (
-          <Link
-            key={sub.path}
-            href={`/?menu=import&section=${encodeURIComponent(sub.path)}`}
-            onMouseEnter={() => warmImportCache(sub.path)}
-            onFocus={() => warmImportCache(sub.path)}
-            onClick={(event) => {
-              event.preventDefault();
-              goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
-            }}
-            className={`flex h-10 shrink-0 items-center rounded-lg px-5 text-sm font-semibold transition ${
-              activeImportPath === sub.path ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"
-            }`}
-          >
-            {sub.label}
-          </Link>
-        ))}
-      </Card>
       {content}
     </div>
   );
@@ -1985,9 +1971,12 @@ function NativeOrders({
   }, [loading, initialOpenOrderId]);
 
   return (
-    <Panel title="발주" subtitle="리스트를 클릭하면 아래에서 바로 수정할 수 있습니다." action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>F2 +새 발주</Link>}>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Link className="inline-flex h-10 items-center rounded-lg bg-[#ff6a00] px-5 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/orders/new")}>F2 새 발주</Link>
+      </div>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
-        <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <form
             className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_150px_78px]"
             onSubmit={(event) => {
@@ -2073,7 +2062,7 @@ function NativeOrders({
           onChanged={(count) => updateAttachmentCount(folderOrder.id, count)}
         />
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -2597,11 +2586,10 @@ function NativeProducts() {
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko-KR", { numeric: true, sensitivity: "base" }));
 
   return (
-    <Panel
-      title="제품"
-      subtitle="수입 제품 카탈로그"
-      action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/products/new")}>F2 +새 제품</Link>}
-    >
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Link className="inline-flex h-10 items-center rounded-lg bg-[#ff6a00] px-5 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/products/new")}>F2 새 제품</Link>
+      </div>
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
         <>
         <div className="mb-4 grid gap-3">
@@ -2637,7 +2625,7 @@ function NativeProducts() {
         </div>
         </>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -4616,13 +4604,21 @@ function Info({ label, value, wide = false }: { label: string; value: string; wi
 
 function NativeSettings() {
   const [data, setData] = useState<{ rates: Record<string, number>; factories: ImportFactory[] } | null>(null);
+  const [ratesDraft, setRatesDraft] = useState<Record<string, string>>({ CNY: "", USD: "", JPY: "", EUR: "" });
   const [saving, setSaving] = useState(false);
   const [factoryFormOpen, setFactoryFormOpen] = useState(false);
   const [factoryDraft, setFactoryDraft] = useState({ name: "", country: "중국", platform: "1688", contact: "", note: "" });
 
   async function loadSettings() {
-    const next = await cachedJson<{ rates: Record<string, number>; factories: ImportFactory[] }>("/api/fnos/settings", 60_000);
-    setData({ ...next, factories: sortFactories(next.factories) });
+    const next = await cachedJson<{ rates?: Record<string, number>; factories?: ImportFactory[] }>("/api/fnos/settings", 0);
+    const rates = next.rates || {};
+    setData({ rates, factories: sortFactories(next.factories || []) });
+    setRatesDraft({
+      CNY: rates.CNY ? String(rates.CNY) : "",
+      USD: rates.USD ? String(rates.USD) : "",
+      JPY: rates.JPY ? String(rates.JPY) : "",
+      EUR: rates.EUR ? String(rates.EUR) : "",
+    });
   }
 
   useEffect(() => {
@@ -4633,12 +4629,11 @@ function NativeSettings() {
   async function saveRates(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
-    const form = new FormData(e.currentTarget);
     await fetch(apiUrl("/api/fnos/settings/rates"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(Object.fromEntries(form.entries())),
+      body: JSON.stringify(ratesDraft),
     });
     invalidateApiCache("/api/fnos/settings");
     invalidateApiCache("/api/fnos/form-data");
@@ -4669,7 +4664,14 @@ function NativeSettings() {
         <form onSubmit={saveRates} onKeyDown={preventEnterSubmit} className="grid gap-3 sm:grid-cols-2">
           {(["CNY", "USD", "JPY", "EUR"] as const).map((currency) => (
             <Field key={currency} label={`${currency} → KRW`}>
-              <input className="field-input text-right" type="number" step="0.0001" name={currency} defaultValue={data?.rates?.[currency] || ""} />
+              <input
+                className="field-input text-right"
+                type="number"
+                step="0.0001"
+                name={currency}
+                value={ratesDraft[currency] || ""}
+                onChange={(event) => setRatesDraft((prev) => ({ ...prev, [currency]: event.target.value }))}
+              />
             </Field>
           ))}
           <div className="sm:col-span-2 flex justify-end">
