@@ -8199,6 +8199,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [customerBulkField, setCustomerBulkField] = useState<CustomerBulkField>("customer_type");
   const [customerBulkValue, setCustomerBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const customerSelectModeRef = useRef<"select" | "deselect">("select");
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const customerKeys = customers.map((customer) => customer.id || customer.customer_code || customer.cust_code || "").filter(Boolean);
@@ -8717,24 +8718,25 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           </div>
         )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
-                <th className="w-12 py-2 text-center">
+                <th className="w-16 py-2 text-center">
                   <input
                     type="checkbox"
+                    className="h-5 w-5"
                     checked={allCustomersSelected}
                     onChange={(event) => setSelectedCustomerKeys(event.target.checked ? customerKeys : [])}
                     aria-label="거래처 전체선택"
                   />
                 </th>
-                <th className="py-2 text-left">거래처코드</th>
-                <th className="py-2 text-left">거래처명</th>
-                <th className="py-2 text-left">속성</th>
-                <th className="py-2 text-left">사업자번호</th>
-                <th className="py-2 text-left">담당자</th>
-                <th className="py-2 text-left">전화번호</th>
-                <th className="py-2 text-left">메모</th>
+                <th className="w-36 py-2 pl-3 text-left">거래처코드</th>
+                <th className="w-48 py-2 text-left">거래처명</th>
+                <th className="w-24 py-2 text-left">속성</th>
+                <th className="w-36 py-2 text-left">사업자번호</th>
+                <th className="w-28 py-2 text-left">담당자</th>
+                <th className="w-36 py-2 text-left">전화번호</th>
+                <th className="w-40 py-2 text-left">메모</th>
               </tr>
             </thead>
             <tbody>
@@ -8748,24 +8750,26 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                       type="button"
                       onMouseDown={(event) => {
                         event.preventDefault();
+                        const mode = selected ? "deselect" : "select";
+                        customerSelectModeRef.current = mode;
                         setCustomerSelecting(true);
-                        toggleCustomerSelected(key);
+                        setCustomerSelected(key, mode === "select");
                       }}
                       onMouseEnter={() => {
-                        if (customerSelecting) setCustomerSelected(key, true);
+                        if (customerSelecting) setCustomerSelected(key, customerSelectModeRef.current === "select");
                       }}
                       className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
                     >
                       {index + 1}
                     </button>
                   </td>
-                  <td className="py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
-                  <td className="py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
-                  <td className="py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
-                  <td className="py-2 text-slate-500">{customer.business_no || "-"}</td>
-                  <td className="py-2 text-slate-500">{customer.contact_name || "-"}</td>
-                  <td className="py-2 text-slate-500">{customer.phone || "-"}</td>
-                  <td className="py-2 text-slate-500">{customer.memo || "-"}</td>
+                  <td className="truncate py-2 pl-3 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
+                  <td className="truncate py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
+                  <td className="truncate py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
+                  <td className="truncate py-2 text-slate-500">{customer.business_no || "-"}</td>
+                  <td className="truncate py-2 text-slate-500">{customer.contact_name || "-"}</td>
+                  <td className="truncate py-2 text-slate-500">{customer.phone || "-"}</td>
+                  <td className="truncate py-2 text-slate-500" title={customer.memo || ""}>{customer.memo ? `${customer.memo.slice(0, 10)}${customer.memo.length > 10 ? "..." : ""}` : "-"}</td>
                 </tr>
               );})}
             </tbody>
@@ -8820,6 +8824,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [productBulkField, setProductBulkField] = useState<ProductBulkField>("cost_price");
   const [productBulkValue, setProductBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const productSelectModeRef = useRef<"select" | "deselect">("select");
   const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -9318,24 +9323,25 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           </div>
         )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[1100px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
-                <th className="w-12 py-2 text-center">
+                <th className="w-16 py-2 text-center">
                   <input
                     type="checkbox"
+                    className="h-5 w-5"
                     checked={allProductsSelected}
                     onChange={(event) => setSelectedProductKeys(event.target.checked ? productKeys : [])}
                     aria-label="품목 전체선택"
                   />
                 </th>
-                <th className="py-2 text-left">품목코드</th>
-                <th className="py-2 text-left">품목명</th>
-                <th className="py-2 text-right">입고가</th>
-                <th className="py-2 text-right">출고가</th>
-                <th className="py-2 text-right">현재고</th>
-                <th className="py-2 text-left">창고별 재고</th>
-                <th className="py-2 text-left">BOM / 수입연동</th>
+                <th className="w-36 py-2 pl-3 text-left">품목코드</th>
+                <th className="w-80 py-2 text-left">품목명</th>
+                <th className="w-28 py-2 text-right">입고가</th>
+                <th className="w-28 py-2 text-right">출고가</th>
+                <th className="w-24 py-2 text-right">현재고</th>
+                <th className="w-48 py-2 text-left">창고별 재고</th>
+                <th className="w-36 py-2 text-left">BOM / 수입연동</th>
               </tr>
             </thead>
             <tbody>
@@ -9349,23 +9355,25 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                       type="button"
                       onMouseDown={(event) => {
                         event.preventDefault();
+                        const mode = selected ? "deselect" : "select";
+                        productSelectModeRef.current = mode;
                         setProductSelecting(true);
-                        toggleProductSelected(key);
+                        setProductSelected(key, mode === "select");
                       }}
                       onMouseEnter={() => {
-                        if (productSelecting) setProductSelected(key, true);
+                        if (productSelecting) setProductSelected(key, productSelectModeRef.current === "select");
                       }}
                       className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
                     >
                       {index + 1}
                     </button>
                   </td>
-                  <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
-                  <td className="py-2 font-bold">{product.product_name || "-"}</td>
+                  <td className="truncate py-2 pl-3 font-black">{product.product_code || product.sku || "-"}</td>
+                  <td className="truncate py-2 font-bold" title={product.product_name || ""}>{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
                   <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
                   <td className="py-2 text-right font-black">{Number(product.current_stock || 0).toLocaleString("ko-KR")}</td>
-                  <td className="py-2 text-xs font-bold text-slate-500">
+                  <td className="truncate py-2 text-xs font-bold text-slate-500">
                     {(product.inventory || []).length
                       ? (product.inventory || []).map((stock) => `${stock.warehouse_name || stock.warehouse_code}: ${Number(stock.qty || 0).toLocaleString("ko-KR")}`).join(" / ")
                       : "-"}
@@ -10142,6 +10150,23 @@ type AdsSummary = {
   advice?: Array<{ title?: string; message?: string; tone?: string }>;
 };
 
+type AdsSummaryRange = { from: string; to: string };
+
+const ADS_SUMMARY_CACHE_TTL = 5 * 60_000;
+const ADS_SUMMARY_STORAGE_TTL = 10 * 60_000;
+
+function adsSummaryUrl(range: AdsSummaryRange) {
+  const params = new URLSearchParams({ from: range.from, to: range.to });
+  return `/api/fnos/ads/summary?${params.toString()}`;
+}
+
+function cachedAdsSummary(range: AdsSummaryRange) {
+  return cachedClientJson<AdsSummary>(adsSummaryUrl(range), {
+    ttl: ADS_SUMMARY_CACHE_TTL,
+    storageTtl: ADS_SUMMARY_STORAGE_TTL,
+  });
+}
+
 const adSources: Array<{ key: AdSourceKey; label: string; shortLabel: string; hint: string }> = [
   { key: "meta-gfa", label: "메타GFA", shortLabel: "META", hint: "광고 세트/소재 단위 리포트" },
   { key: "naver-shopping", label: "네이버쇼핑검색", shortLabel: "NS", hint: "쇼핑검색 캠페인 리포트" },
@@ -10669,12 +10694,15 @@ function AdsAnalysisWorkspace() {
 
   const loadSummary = () => {
     setLoading(true);
-    const params = new URLSearchParams({ from: dateFrom, to: dateTo });
+    const selectedRange = { from: dateFrom, to: dateTo };
     const graphRange = adChartRange(dateFrom, dateTo);
-    const graphParams = new URLSearchParams({ from: graphRange.from, to: graphRange.to });
+    const selectedSummary = cachedAdsSummary(selectedRange);
+    const graphSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
+      ? selectedSummary
+      : cachedAdsSummary(graphRange);
     Promise.all([
-      cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 }),
-      cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${graphParams.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 }),
+      selectedSummary,
+      graphSummary,
     ])
       .then(([data, graphData]) => {
         setSummary(data);
@@ -10892,8 +10920,7 @@ function AdsRightPanel() {
       ["최근 7일", adRangeForPreset("7d")],
       ["최근 30일", adRangeForPreset("30d")],
     ].map(([label, range]) => {
-      const params = new URLSearchParams(range as { from: string; to: string });
-      return cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+      return cachedAdsSummary(range as AdsSummaryRange)
         .then((data) => [label, data] as const);
     }))
       .then((entries) => {
@@ -11241,6 +11268,25 @@ type ExpenseUploadItem = {
 
 const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
 const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙"];
+const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/summary";
+const ACCOUNTING_CACHE_TTL = 5 * 60_000;
+const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
+
+function readCachedAccountingSummary() {
+  return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+}
+
+function fetchCachedAccountingSummary(force = false) {
+  return cachedClientJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, {
+    ttl: ACCOUNTING_CACHE_TTL,
+    storageTtl: ACCOUNTING_STORAGE_TTL,
+    force,
+  });
+}
+
+function invalidateAccountingCache() {
+  invalidateClientCache(ACCOUNTING_SUMMARY_ENDPOINT);
+}
 
 function AccountingWorkspace() {
   const [activeTab, setActiveTab] = useState(accountingTabs[0]);
@@ -11268,14 +11314,14 @@ function AccountingWorkspace() {
     memo: "",
   });
 
-  function loadSummary() {
+  function loadSummary(force = false) {
     setLoading(true);
-    const cached = readCachedJson<AccountingSummary>("/api/accounting/summary", { storageTtl: 10 * 60_000 });
-    if (cached) {
+    const cached = force ? null : readCachedAccountingSummary();
+    if (cached && !force) {
       setSummary(cached);
       setLoading(false);
     }
-    cachedClientJson<AccountingSummary>("/api/accounting/summary", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+    fetchCachedAccountingSummary(force)
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
       .finally(() => setLoading(false));
@@ -11387,8 +11433,8 @@ function AccountingWorkspace() {
     setUploadedExpenseFiles([]);
     setPreviewRows([]);
     setParsedFiles(Array.isArray(data.files) ? data.files : []);
-    invalidateClientCache("/api/accounting/summary");
-    loadSummary();
+    invalidateAccountingCache();
+    loadSummary(true);
   }
 
   async function saveManualExpense(event: FormEvent<HTMLFormElement>) {
@@ -11406,8 +11452,8 @@ function AccountingWorkspace() {
     }
     setMessage("비용 1건을 저장했습니다.");
     setManual((prev) => ({ ...prev, vendor_name: "", description: "", amount: "", vat_amount: "", total_amount: "", memo: "" }));
-    invalidateClientCache("/api/accounting/summary");
-    loadSummary();
+    invalidateAccountingCache();
+    loadSummary(true);
   }
 
   async function exportExpenses() {
@@ -11807,13 +11853,13 @@ function AccountingRightPanel() {
   useEffect(() => {
     let alive = true;
     let cachedTimer: number | undefined;
-    const cached = readCachedJson<AccountingSummary>("/api/accounting/summary", { storageTtl: 10 * 60_000 });
+    const cached = readCachedAccountingSummary();
     if (cached) {
       cachedTimer = window.setTimeout(() => {
         if (alive) setSummary(cached);
       }, 0);
     }
-    cachedClientJson<AccountingSummary>("/api/accounting/summary", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+    fetchCachedAccountingSummary()
       .then((data) => {
         if (alive) setSummary(data);
       })
