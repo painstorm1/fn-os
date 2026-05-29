@@ -6236,6 +6236,19 @@ function SalesRightTools() {
     }
   }
 
+  function lookupAmount(value?: string) {
+    const text = String(value || "").trim();
+    if (!text) return "-";
+    const number = Number(text.replace(/[^\d.-]/g, ""));
+    return Number.isFinite(number) && /\d/.test(text) ? number.toLocaleString("ko-KR") : text;
+  }
+
+  function copyLookupText(value?: string) {
+    const text = String(value || "").trim();
+    if (!text) return;
+    void navigator.clipboard?.writeText(text);
+  }
+
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
@@ -6254,11 +6267,13 @@ function SalesRightTools() {
         {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
         {lookupResult?.product && (
           <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
-            <div className="mb-2 font-black text-slate-950">{lookupResult.product.name || "-"}</div>
+            <button type="button" onClick={() => copyLookupText(lookupResult.product?.name)} className="mb-2 block w-full truncate text-left font-black text-slate-950 underline-offset-2 hover:text-orange-600 hover:underline" title="클릭해서 품목명 복사">
+              {lookupResult.product.name || "-"}
+            </button>
             <div className="grid grid-cols-[72px_1fr] gap-y-1 text-slate-600">
               <span>품목코드</span><b className="text-slate-950">{lookupResult.product.code || "-"}</b>
-              <span>입고단가</span><b className="text-slate-950">{lookupResult.product.inPrice || "-"}</b>
-              <span>출고단가</span><b className="text-slate-950">{lookupResult.product.outPrice || "-"}</b>
+              <span>입고단가</span><b className="text-slate-950">{lookupAmount(lookupResult.product.inPrice)}</b>
+              <span>출고단가</span><b className="text-slate-950">{lookupAmount(lookupResult.product.outPrice)}</b>
             </div>
           </div>
         )}
@@ -6267,7 +6282,12 @@ function SalesRightTools() {
             <div className="mb-1 text-xs font-black text-slate-500">포함 상품 {lookupResult.products.length}건</div>
             <div className="grid gap-1">
               {lookupResult.products.slice(1, 5).map((item, index) => (
-                <div key={`${item.code}-${index}`} className="truncate text-xs font-bold text-slate-600">
+                <div key={`${item.code}-${index}-summary`} className="truncate text-xs font-bold text-slate-600">
+                  {item.name || "-"} · 입고 {lookupAmount(item.inPrice)} / 출고 {lookupAmount(item.outPrice)}
+                </div>
+              ))}
+              {false && lookupResult?.products?.slice(1, 5).map((item, index) => (
+                <div key={`${item.code}-${index}`} className="hidden truncate text-xs font-bold text-slate-600">
                   {item.code || "-"} · {item.name || "-"}
                 </div>
               ))}
@@ -6398,6 +6418,19 @@ function SalesSyncTools() {
       ? [lookupResult.product]
       : [];
 
+  function lookupAmount(value?: string) {
+    const text = String(value || "").trim();
+    if (!text) return "-";
+    const number = Number(text.replace(/[^\d.-]/g, ""));
+    return Number.isFinite(number) && /\d/.test(text) ? number.toLocaleString("ko-KR") : text;
+  }
+
+  function copyLookupText(value?: string) {
+    const text = String(value || "").trim();
+    if (!text) return;
+    void navigator.clipboard?.writeText(text);
+  }
+
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
@@ -6433,16 +6466,22 @@ function SalesSyncTools() {
                     >
                       <span className="min-w-0">
                         <b className="block truncate text-slate-950">{item.name || "-"}</b>
-                        <span className="mt-0.5 block truncate font-bold text-slate-500">{item.code || "-"}</span>
+                        <span className="mt-0.5 block truncate font-bold text-slate-500">
+                          입고 {lookupAmount(item.inPrice)} / 출고 {lookupAmount(item.outPrice)}
+                        </span>
                       </span>
                       <span className="shrink-0 text-sm font-black text-orange-500">{isOpen ? "−" : "+"}</span>
                     </button>
                     {isOpen && (
                       <div className="border-t border-orange-100 bg-orange-50 px-3 py-2 text-xs text-slate-600">
                         <div className="grid grid-cols-[76px_1fr] gap-y-1">
+                          <span>품목명</span>
+                          <button type="button" onClick={() => copyLookupText(item.name)} className="min-w-0 truncate text-left font-black text-slate-950 underline-offset-2 hover:text-orange-600 hover:underline" title="클릭해서 품목명 복사">
+                            {item.name || "-"}
+                          </button>
                           <span>품목코드</span><b className="text-slate-950">{item.code || "-"}</b>
-                          <span>입고단가</span><b className="text-slate-950">{item.inPrice || "-"}</b>
-                          <span>출고단가</span><b className="text-slate-950">{item.outPrice || "-"}</b>
+                          <span>입고단가</span><b className="text-slate-950">{lookupAmount(item.inPrice)}</b>
+                          <span>출고단가</span><b className="text-slate-950">{lookupAmount(item.outPrice)}</b>
                         </div>
                         <div className="mt-2 rounded-md border border-orange-100 bg-white">
                           <div className="border-b border-orange-100 px-2 py-1 font-black text-slate-500">창고별 현재고</div>
