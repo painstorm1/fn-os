@@ -8043,7 +8043,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             placeholder="거래처명 / 코드 검색"
           />
         </FilterBar>
-        <div className="fn-table-shell overflow-x-auto">
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
@@ -8501,7 +8501,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             />
           </div>
         </FilterBar>
-        <div className="fn-table-shell overflow-x-auto">
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
