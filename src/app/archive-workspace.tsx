@@ -538,20 +538,20 @@ export default function ArchiveWorkspace() {
         <Card className="space-y-3 p-3">
           <div className="flex flex-wrap items-center gap-2">
             {menuItems.map(([key, label]) => (
-              <ActionButton key={key} type="button" variant={activeMenu === key ? "primary" : "secondary"} onClick={() => openMenu(key)} className="px-3">
+              <ActionButton key={key} type="button" variant={activeMenu === key ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
               </ActionButton>
             ))}
             {activeMenu !== "save" && (
-              <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
+              <select className="field-input h-10 !w-40 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
                 <option value="preview">미리보기</option>
                 <option value="list">리스트보기</option>
               </select>
             )}
           </div>
           {activeMenu !== "save" && (
-            <FilterBar className="grid w-full grid-cols-[56px_minmax(140px,1fr)_110px_110px_110px_52px_96px_12px_96px] items-center gap-2 p-0 border-0 shadow-none">
-              <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "px-2" : "border-slate-950 bg-slate-950 px-2 text-white hover:bg-slate-800"}>
+            <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 p-0 shadow-none">
+              <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "whitespace-nowrap px-4" : "whitespace-nowrap border-slate-950 bg-slate-950 px-4 text-white hover:bg-slate-800"}>
                 선택
               </ActionButton>
               <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
@@ -575,10 +575,10 @@ export default function ArchiveWorkspace() {
                 <option value="">소스 전체</option>
                 {sources.map((source) => <option key={source} value={source}>{source}</option>)}
               </select>
-              <span className="text-xs font-black text-slate-500">기간선택</span>
-              <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
+              <span className="whitespace-nowrap text-xs font-black text-slate-500">기간선택</span>
+              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
               <span className="text-center text-sm font-black text-slate-400">~</span>
-              <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
+              <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
             </FilterBar>
           )}
         </Card>
@@ -782,12 +782,17 @@ function ArchiveList({
   return (
     <div className="space-y-4">
       {selectMode && (
-        <section className="flex max-w-[760px] items-center gap-1 text-xs">
-          <ActionButton type="button" variant="secondary" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-8 border-orange-200 bg-white px-3 text-xs text-orange-700">
+        <section className="flex flex-wrap items-center gap-2 text-xs">
+          <ActionButton type="button" variant="secondary" onClick={toggleAllSelected} className="h-9 min-w-24 whitespace-nowrap px-4 text-xs">
+            {allSelected ? "모두해제" : "모두선택"}
+          </ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-9 min-w-32 whitespace-nowrap border-orange-200 bg-white px-4 text-xs text-orange-700">
             미리보기 재생성
           </ActionButton>
-          <StatusBadge tone="orange">{selectedIds.length.toLocaleString("ko-KR")}개</StatusBadge>
-          <select className="field-input h-8 w-24 rounded-md border border-slate-200 bg-white px-2 font-bold" value={bulkCategoryGroup} onChange={(event) => {
+          <ActionButton type="button" variant="secondary" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-9 min-w-16 whitespace-nowrap border-red-200 px-4 text-xs text-red-600">
+            삭제
+          </ActionButton>
+          <select className="field-input h-9 !w-32 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryGroup} onChange={(event) => {
             const group = event.target.value as CategoryGroup | "";
             setBulkCategoryGroup(group);
             setBulkCategoryName("");
@@ -795,19 +800,14 @@ function ArchiveList({
             <option value="">카테고리1</option>
             {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
           </select>
-          <select className="field-input h-8 w-28 rounded-md border border-slate-200 bg-white px-2 font-bold" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
+          <select className="field-input h-9 !w-40 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
             <option value="">카테고리2</option>
             {bulkCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
           </select>
-          <ActionButton type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-8 px-3 text-xs">
+          <ActionButton type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-9 min-w-16 whitespace-nowrap px-4 text-xs">
             이동
           </ActionButton>
-          <ActionButton type="button" variant="secondary" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-8 border-red-200 px-3 text-xs text-red-600">
-            삭제
-          </ActionButton>
-          <ActionButton type="button" variant="secondary" onClick={toggleAllSelected} className="h-8 px-3 text-xs">
-            {allSelected ? "모두해제" : "모두선택"}
-          </ActionButton>
+          <span className="whitespace-nowrap text-xs font-black text-slate-500">선택 {selectedIds.length.toLocaleString("ko-KR")}개</span>
         </section>
       )}
 
