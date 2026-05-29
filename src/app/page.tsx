@@ -782,7 +782,7 @@ type ProductImportLinkRow = {
   default_ratio?: number;
 };
 
-type ProductRelationFilter = "plain" | "set" | "rg" | "import";
+type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
 
 function normalizeProductAttribute(value: unknown, fallback: ProductAttribute = "plain"): ProductAttribute {
@@ -7792,7 +7792,6 @@ function MasterManagementPanel({
         <Panel
           title="창고 목록"
           subtitle="창고는 RG/SET 같은 재고상태 또는 창고 유형 기준으로 관리합니다."
-          action={<button type="button" className="rounded-md bg-slate-950 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
         >
           <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">창고 목록 테이블은 다음 단계에서 창고 조회 API와 연결합니다.</div>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
@@ -7829,6 +7828,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [products, setProducts] = useState<FnProduct[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   const [query, setQuery] = useState("");
+  const [searchByCode, setSearchByCode] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -7856,11 +7856,12 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     };
   }
 
-  async function loadProducts(nextPage = page, nextQuery = query, nextFilter = relationFilter) {
+  async function loadProducts(nextPage = page, nextQuery = query, nextFilter = relationFilter, nextSearchByCode = searchByCode) {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize), relation: nextFilter });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      if (nextSearchByCode) params.set("searchField", "code");
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -7877,10 +7878,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadProducts(page, query, relationFilter);
+      void loadProducts(page, query, relationFilter, searchByCode);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [page, query, relationFilter]);
+  }, [page, query, relationFilter, searchByCode]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -7968,6 +7969,27 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     await loadProducts(page, query);
   }
 
+  async function deleteProductDraft() {
+    const productId = String(draft.id || "").trim();
+    const productCode = String(draft.product_code || "").trim();
+    if (!productId && !productCode) return;
+    if (!window.confirm("이 품목을 삭제할까요?")) return;
+    const res = await fetch("/api/fnos/products/master", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id: productId, product_code: productCode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setProductMessage(data.error || "품목 삭제 실패");
+      return;
+    }
+    setProductMessage(`품목 삭제 완료: ${productCode}`);
+    setModalOpen(false);
+    await loadProducts(page, query, relationFilter, searchByCode);
+  }
+
   function downloadProductTemplate() {
     void downloadTableXlsx(
       "FN_OS_품목_엑셀폼.xlsx",
@@ -7981,6 +8003,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const filterLabel = relationFilters.find((filter) => filter.key === relationFilter)?.label || "품목";
     const params = new URLSearchParams({ page: "1", pageSize: "5000", relation: relationFilter });
     if (query.trim()) params.set("q", query.trim());
+    if (searchByCode) params.set("searchField", "code");
     const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
@@ -8131,6 +8154,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     { key: "set", label: "SET" },
     { key: "rg", label: "RG" },
     { key: "import", label: "수입연동" },
+    { key: "all", label: "전체품목" },
   ];
 
   return (
@@ -8185,21 +8209,35 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm font-black text-slate-700">상품수 {total.toLocaleString("ko-KR")}개</div>
-          <input
-            className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
-            value={query}
-            onChange={(event) => {
-              setPage(1);
-              setQuery(event.target.value);
-            }}
-            placeholder="품목코드 / 품목명 검색"
-          />
+          <div className="flex w-full max-w-xl flex-wrap items-center justify-end gap-2">
+            <label className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
+              <input
+                type="checkbox"
+                checked={searchByCode}
+                onChange={(event) => {
+                  setPage(1);
+                  setSearchByCode(event.target.checked);
+                }}
+              />
+              상품코드 검색
+            </label>
+            <input
+              className="field-input min-w-[220px] flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm"
+              value={query}
+              onChange={(event) => {
+                setPage(1);
+                setQuery(event.target.value);
+              }}
+              placeholder={searchByCode ? "상품코드 검색" : "상품명 검색"}
+            />
+          </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[840px] text-sm">
+          <table className="w-full min-w-[920px] text-sm">
             <thead className="border-b border-slate-200 text-xs text-slate-500">
               <tr>
                 <th className="py-2 text-left">품목코드</th>
+                <th className="py-2 text-left">속성</th>
                 <th className="py-2 text-left">품목명</th>
                 <th className="py-2 text-right">입고가</th>
                 <th className="py-2 text-right">출고가</th>
@@ -8212,6 +8250,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               {products.map((product) => (
                 <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
                   <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
+                  <td className="py-2 text-xs font-black text-slate-600">{product.product_attribute_label || productAttributeLabel(productAttributeOf(product))}</td>
                   <td className="py-2 font-bold">{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
                   <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
@@ -8256,6 +8295,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           onChange={updateDraft}
           onBomRowsChange={setBomRows}
           onSave={() => void saveProductDraft()}
+          onDelete={() => void deleteProductDraft()}
         />
       )}
     </div>
@@ -8271,6 +8311,7 @@ function ProductEditModal({
   onChange,
   onBomRowsChange,
   onSave,
+  onDelete,
 }: {
   draft: Record<string, string>;
   warehouses: WarehouseOption[];
@@ -8280,6 +8321,7 @@ function ProductEditModal({
   onChange: (key: string, value: string) => void;
   onBomRowsChange: (rows: ProductBomRow[]) => void;
   onSave: () => void;
+  onDelete: () => void;
 }) {
   const [componentQuery, setComponentQuery] = useState("");
   const [componentCandidates, setComponentCandidates] = useState<FnProduct[]>([]);
@@ -8332,6 +8374,12 @@ function ProductEditModal({
     onBomRowsChange(bomRows.filter((_, rowIndex) => rowIndex !== index));
   }
 
+  function selectProductAttribute(attribute: ProductAttribute) {
+    onChange("product_attribute", attribute);
+    onChange("product_kind", attribute);
+    onChange("product_name", productNameWithAttribute(draft.product_name || "", attribute));
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
       <div className="w-full max-w-3xl rounded-lg bg-white p-5 shadow-2xl">
@@ -8339,19 +8387,28 @@ function ProductEditModal({
           <h3 className="text-xl font-black">{draft.id ? "품목 수정" : "새 품목 등록"}</h3>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {(["plain", "set", "rg"] as ProductAttribute[]).map((attribute) => {
+              const selected = normalizeProductAttribute(draft.product_attribute || draft.product_kind) === attribute;
+              return (
+                <button
+                  key={attribute}
+                  type="button"
+                  onClick={() => selectProductAttribute(attribute)}
+                  className={`rounded-md border px-4 py-2 text-sm font-black ${
+                    selected ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600"
+                  }`}
+                >
+                  {productAttributeLabel(attribute)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">속성
-            <select className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_attribute || draft.product_kind || "plain"} onChange={(event) => {
-              onChange("product_attribute", event.target.value);
-              onChange("product_kind", event.target.value);
-            }}>
-              <option value="plain">일반</option>
-              <option value="set">SET</option>
-              <option value="rg">RG</option>
-            </select>
-          </label>
           <label className="text-xs font-black text-slate-500">입고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">출고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></label>
         </div>
@@ -8430,9 +8487,14 @@ function ProductEditModal({
             {!importLinks.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">연동된 수입관리 상품이 없습니다.</div>}
           </div>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex justify-between gap-2">
+          <div>
+            {draft.id && <button type="button" onClick={onDelete} className="rounded-md border border-rose-200 px-4 py-2 text-sm font-black text-rose-600 hover:bg-rose-50">삭제</button>}
+          </div>
+          <div className="flex gap-2">
           <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-500">닫기</button>
           <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
+          </div>
         </div>
       </div>
     </div>

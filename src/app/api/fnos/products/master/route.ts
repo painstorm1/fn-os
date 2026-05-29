@@ -21,7 +21,7 @@ function productCode(row: AnyRecord) {
 }
 
 function productName(row: AnyRecord) {
-  return text(row.product_name || row.prod_name);
+  return normalizeSetPrefix(row.product_name || row.prod_name);
 }
 
 function inferredProductAttribute(row: { product_code?: string; product_name?: string }) {
@@ -116,6 +116,7 @@ export async function GET(request: NextRequest) {
     if (!hasDbConfig()) return NextResponse.json({ ok: true, products: [], total: 0, page: 1, pageSize: 20, warehouses: [] });
     const query = text(request.nextUrl.searchParams.get("q")).toLowerCase();
     const queryTokens = query.split(/\s+/).filter(Boolean);
+    const searchField = text(request.nextUrl.searchParams.get("searchField"));
     const relation = text(request.nextUrl.searchParams.get("relation"));
     const excludeBom = text(request.nextUrl.searchParams.get("excludeBom")).toLowerCase() === "true";
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
@@ -158,7 +159,8 @@ export async function GET(request: NextRequest) {
       importLinksByProduct.set(key, [...(importLinksByProduct.get(key) || []), row]);
     });
 
-    const normalizedProducts = products.map((row) => {
+    const activeProducts = products.filter((row) => text(row.status).toLowerCase() !== "deleted" && row.is_active !== false);
+    const normalizedProducts = activeProducts.map((row) => {
       const code = productCode(row);
       const stockRows = inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
       const inventoryList = stockRows.map(normalizeInventory);
@@ -212,12 +214,10 @@ export async function GET(request: NextRequest) {
       if (relation === "import" && !row.import_links.length) return false;
       if (relation === "plain" && row.product_kind !== "plain") return false;
       if (excludeBom && (row.bom.length || row.product_kind === "set" || row.product_kind === "rg")) return false;
-      return matchesSearchTokens([
-        row.product_code,
-        row.product_name,
-        ...row.bom.flatMap((item) => [item.component_product_code, item.component_sku, item.component_product_name]),
-        ...row.import_links.flatMap((item) => [item.import_product_name, item.import_option_name]),
-      ], queryTokens);
+      const searchValues = searchField === "code"
+        ? [row.product_code]
+        : [row.product_name];
+      return matchesSearchTokens(searchValues, queryTokens);
     });
     const offset = (page - 1) * pageSize;
     const pageRows = filtered.slice(offset, offset + pageSize);
@@ -375,5 +375,27 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "품목 저장 실패" }, { status });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    if (!hasDbConfig()) return NextResponse.json({ ok: false, error: "Supabase 환경변수가 설정되지 않았습니다." }, { status: 503 });
+    const body = await request.json().catch(() => ({}));
+    const id = text(body.id || request.nextUrl.searchParams.get("id"));
+    const code = text(body.product_code || request.nextUrl.searchParams.get("product_code"));
+    if (!id && !code) {
+      return NextResponse.json({ ok: false, error: "삭제할 품목을 찾을 수 없습니다." }, { status: 400 });
+    }
+    const filters = id ? { id: `eq.${id}` } : { product_code: `eq.${code}` };
+    const rows = await patchRows<AnyRecord>("products", filters, {
+      status: "deleted",
+      is_active: false,
+      updated_at: nowIso(),
+    });
+    return NextResponse.json({ ok: true, deleted: rows.length });
+  } catch (error) {
+    const status = error instanceof FnosDbError ? error.status : 500;
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "품목 삭제 실패" }, { status });
   }
 }
