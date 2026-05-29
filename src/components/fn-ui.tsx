@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "muted" | "orange";
@@ -154,3 +155,30 @@ export function FormField({ label, children, className }: { label: ReactNode; ch
   );
 }
 
+const escapeCloseStack: symbol[] = [];
+
+export function useEscapeToClose(enabled: boolean, onClose: () => void) {
+  const idRef = useRef<symbol | null>(null);
+  if (!idRef.current) idRef.current = Symbol("escape-close");
+
+  useEffect(() => {
+    if (!enabled) return;
+    const id = idRef.current!;
+    escapeCloseStack.push(id);
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (escapeCloseStack[escapeCloseStack.length - 1] !== id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      const index = escapeCloseStack.lastIndexOf(id);
+      if (index >= 0) escapeCloseStack.splice(index, 1);
+    };
+  }, [enabled, onClose]);
+}

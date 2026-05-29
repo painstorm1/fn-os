@@ -7,6 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
+import { ActionButton, Card, EmptyState, FilterBar, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -31,17 +32,6 @@ function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (target instanceof HTMLTextAreaElement) return;
   if (target instanceof HTMLButtonElement) return;
   event.preventDefault();
-}
-
-function useEscapeToClose(enabled: boolean, onClose: () => void) {
-  useEffect(() => {
-    if (!enabled) return;
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [enabled, onClose]);
 }
 
 function useF2Navigate(enabled: boolean, href: string) {
@@ -1796,7 +1786,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-8">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl">
+      <ModalShell className="max-h-[90vh] w-full max-w-4xl overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-black">첨부파일 - {title}</h2>
@@ -1872,7 +1862,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             )}
           </div>
         </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -2888,6 +2878,7 @@ function FnProductPickerModal({
   const [products, setProducts] = useState<FnProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState<ImportSkuLink[]>(selected);
+  useEscapeToClose(open, onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -2942,8 +2933,8 @@ function FnProductPickerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
-      <div className="w-full max-w-6xl rounded-md bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
+      <ModalShell className="w-full max-w-6xl p-0">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <h3 className="text-lg font-black">FN 상품에서 찾기</h3>
           <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
@@ -3005,7 +2996,7 @@ function FnProductPickerModal({
             </div>
           </div>
         </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -3528,8 +3519,8 @@ function NativeProductForm({ id }: { id?: number }) {
           </div>
         </form>
         {productLinkOpen && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
-            <div className="w-full max-w-4xl rounded-md bg-white shadow-xl">
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
+            <ModalShell className="w-full max-w-4xl p-0">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <h3 className="text-lg font-black">상품 선택</h3>
                 <button type="button" className="text-2xl text-slate-400 hover:text-slate-700" onClick={() => setProductLinkOpen(false)}>×</button>
@@ -3564,7 +3555,7 @@ function NativeProductForm({ id }: { id?: number }) {
                   <button type="button" className="h-10 rounded-md bg-slate-950 px-5 text-sm font-black text-white" onClick={() => setProductLinkOpen(false)}>완료</button>
                 </div>
               </div>
-            </div>
+            </ModalShell>
           </div>
         )}
         <FnProductPickerModal
@@ -3613,6 +3604,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
   const [allocations, setAllocations] = useState<Record<string, number>>({});
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  useEscapeToClose(true, onClose);
 
   function linksForOrderItem(item: ImportOrderItem) {
     const importProductId = Number(item.product_id || 0);
@@ -3738,8 +3730,8 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
-      <div className="w-full max-w-6xl rounded-md bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
+      <ModalShell className="w-full max-w-6xl p-0">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h3 className="text-lg font-black">SKU별 수량 배분</h3>
@@ -3794,7 +3786,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
             <button type="button" className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving} onClick={saveReceipt}>{saving ? "생성 중..." : "구매/입고 생성"}</button>
           </div>
         </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -4388,8 +4380,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           </div>
 
           {catalogOpen && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 py-10">
-              <div className="w-full max-w-5xl rounded-md bg-white shadow-xl">
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
+              <ModalShell className="w-full max-w-5xl p-0">
                 <div className="flex items-center justify-between border-b border-slate-200 p-4">
                   <h3 className="text-lg font-black">제품 선택</h3>
                   <button type="button" className="text-2xl text-slate-500" onClick={() => setCatalogOpen(false)}>×</button>
@@ -4420,7 +4412,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     {!catalogProducts.length && <p className="rounded-md bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">등록된 제품이 없습니다.</p>}
                   </div>
                 </div>
-              </div>
+              </ModalShell>
             </div>
           )}
         </form>
@@ -4778,28 +4770,23 @@ function LegacyNativeSettings() {
 
 function Panel({ title, subtitle, action, children, className = "" }: { title: string; subtitle?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-md border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black">{title}</h2>
-          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
-        </div>
-        {action}
-      </div>
+    <Card className={`p-5 ${className}`}>
+      <SectionHeader title={title} description={subtitle} actions={action} />
       {children}
-    </section>
+    </Card>
   );
 }
 
 function StatusPill({ status }: { status?: string }) {
   const label = status || "-";
   const tone = (() => {
-    if (["주문", "1차결제", "2차결제", "결제완료"].includes(label)) return "bg-rose-50 text-rose-700";
-    if (["공장출고", "배대지도착"].includes(label)) return "bg-amber-50 text-amber-700";
-    if (["통관완료", "FN입고", "입고완료"].includes(label)) return "bg-emerald-50 text-emerald-700";
-    return "bg-slate-100 text-slate-600";
+    if (["주문", "1차결제", "2차결제", "결제완료", "위험", "FAIL"].includes(label)) return "danger";
+    if (["공장출고", "배대지도착", "대기", "보류"].includes(label)) return "warning";
+    if (["통관완료", "FN입고", "입고완료", "정상", "SAVED"].includes(label)) return "success";
+    if (label === "SET" || label === "RG") return "orange";
+    return "muted";
   })();
-  return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${tone}`}>{label}</span>;
+  return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }
 
 type SalesSheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
@@ -6500,6 +6487,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const isHistorySection = section === "history";
   const isInventorySection = section === "inventory";
   const isMasterSection = section === "master";
+  const sectionTitle = isOnlineSection ? "온라인 발주" : isHistorySection ? "판매/구매" : isInventorySection ? "재고현황" : "기초관리";
+  const sectionDescription = isOnlineSection
+    ? "주문수집부터 송장/출고까지 한 화면에서 처리합니다."
+    : isHistorySection
+      ? "판매내역, 구매내역, 기간별 현황을 FN OS DB 기준으로 관리합니다."
+      : isInventorySection
+        ? "현재고와 수동 재고 조정을 확인합니다."
+        : "거래처, 품목, 창고, 쇼핑몰, 근태 기준정보를 관리합니다.";
 
   function makeEntryDraft(mode: "sales" | "purchases", sequence = entryRows.length + 1) {
     const date = new Date().toISOString().slice(0, 10);
@@ -7183,6 +7178,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title={sectionTitle} description={sectionDescription} />
       {isOnlineSection && (
         <Panel
           title="온라인 발주"
@@ -7588,6 +7584,7 @@ function SalesPurchaseEntryModal({
   onSave: () => void;
 }) {
   const partnerLabel = mode === "sales" ? "거래처" : "공급처";
+  useEscapeToClose(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
       <div className="w-full max-w-5xl rounded-lg bg-white p-5 shadow-2xl">
@@ -8023,10 +8020,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         subtitle={<div className="text-sm font-bold text-slate-500">거래처수 {total.toLocaleString("ko-KR")}개</div>}
         action={
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={openNewCustomer} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 거래처</button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
-            <button type="button" onClick={() => void downloadCustomers()} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">거래처정보 다운로드</button>
-            <button type="button" onClick={downloadCustomerTemplate} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700" title="엑셀폼 다운로드">엑셀폼</button>
+            <ActionButton type="button" onClick={openNewCustomer}>F2 새 거래처</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => void downloadCustomers()}>거래처정보 다운로드</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={downloadCustomerTemplate} title="엑셀폼 다운로드">엑셀폼</ActionButton>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadCustomers(file);
@@ -8035,7 +8032,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           </div>
         }
       >
-        <div className="mb-3 flex justify-end">
+        <FilterBar className="mb-3 justify-end p-3">
           <input
             className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
             value={query}
@@ -8045,10 +8042,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             }}
             placeholder="거래처명 / 코드 검색"
           />
-        </div>
-        <div className="overflow-x-auto">
+        </FilterBar>
+        <div className="fn-table-shell overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
-            <thead className="border-b border-slate-200 text-xs text-slate-500">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
                 <th className="py-2 text-left">거래처코드</th>
                 <th className="py-2 text-left">거래처명</th>
@@ -8061,7 +8058,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             </thead>
             <tbody>
               {customers.map((customer) => (
-                <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
+                <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
                   <td className="py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
                   <td className="py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
                   <td className="py-2 text-slate-500">{customer.customer_type || "-"}</td>
@@ -8073,7 +8070,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               ))}
             </tbody>
           </table>
-          {!customers.length && <div className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "거래처가 없습니다."}</div>}
+          {!customers.length && <EmptyState title={loading ? "불러오는 중..." : "거래처가 없습니다."} />}
         </div>
         <div className="mt-4 flex items-center justify-center gap-1">
           {pageNumbers.map((number) => (
@@ -8453,13 +8450,14 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         }
         action={
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={openNewProduct} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 품목</button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
-            <button type="button" onClick={downloadVisibleProducts} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">상품정보 다운로드</button>
-            <button
+            <ActionButton type="button" onClick={openNewProduct}>F2 새 품목</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={downloadVisibleProducts}>상품정보 다운로드</ActionButton>
+            <ActionButton
               type="button"
+              variant="secondary"
               onClick={downloadProductTemplate}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+              className="w-10 px-0 text-emerald-700"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -8469,7 +8467,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 <path d="M8 11h8M8 14h8M8 17h8M11 11v6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 <path d="M8.2 9.2l2.9 3.8m0-3.8-2.9 3.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
-            </button>
+            </ActionButton>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadProducts(file);
@@ -8478,7 +8476,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           </div>
         }
       >
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <FilterBar className="mb-3 justify-between p-3">
           <div className="text-sm font-black text-slate-700">상품수 {total.toLocaleString("ko-KR")}개</div>
           <div className="flex w-full max-w-xl flex-wrap items-center justify-end gap-2">
             <label className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
@@ -8502,10 +8500,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               placeholder={searchByCode ? "상품코드 검색" : "상품명 검색"}
             />
           </div>
-        </div>
-        <div className="overflow-x-auto">
+        </FilterBar>
+        <div className="fn-table-shell overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
-            <thead className="border-b border-slate-200 text-xs text-slate-500">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
                 <th className="py-2 text-left">품목코드</th>
                 <th className="py-2 text-left">품목명</th>
@@ -8518,7 +8516,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             </thead>
             <tbody>
               {products.map((product) => (
-                <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
+                <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
                   <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
                   <td className="py-2 font-bold">{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
@@ -8530,14 +8528,14 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                       : "-"}
                   </td>
                   <td className="py-2 text-xs font-black">
-                    <span className={`mr-2 rounded px-2 py-1 ${(product.bom || []).length ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-400"}`}>BOM {(product.bom || []).length}</span>
-                    <span className={`rounded px-2 py-1 ${(product.import_links || []).length ? "bg-orange-50 text-orange-700" : "bg-slate-50 text-slate-400"}`}>수입 {(product.import_links || []).length}</span>
+                    <StatusBadge tone={(product.bom || []).length ? "success" : "muted"} className="mr-2">BOM {(product.bom || []).length}</StatusBadge>
+                    <StatusBadge tone={(product.import_links || []).length ? "orange" : "muted"}>수입 {(product.import_links || []).length}</StatusBadge>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!products.length && <div className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "품목이 없습니다."}</div>}
+          {!products.length && <EmptyState title={loading ? "불러오는 중..." : "품목이 없습니다."} />}
         </div>
         <div className="mt-4 flex items-center justify-center gap-1">
           {pageNumbers.map((number) => (
@@ -8584,9 +8582,10 @@ function CustomerEditModal({
   onSave: () => void;
   onDelete: () => void;
 }) {
+  useEscapeToClose(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
-      <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
+      <ModalShell className="w-full max-w-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <h3 className="text-xl font-black">{draft.id ? "거래처 수정" : "새 거래처 등록"}</h3>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
@@ -8608,7 +8607,7 @@ function CustomerEditModal({
             <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
           </div>
         </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -8639,6 +8638,7 @@ function ProductEditModal({
   const [bomOpen, setBomOpen] = useState(false);
   const productAttribute = normalizeProductAttribute(draft.product_attribute || draft.product_kind);
   const showBomPanel = productAttribute === "set" || bomRows.length > 0 || bomOpen;
+  useEscapeToClose(true, onClose);
 
   useEffect(() => {
     const keyword = componentQuery.trim() || (productAttribute === "set" ? relatedProductSearchQuery(draft.product_name) : "");
@@ -8698,7 +8698,7 @@ function ProductEditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
-      <div className="w-full max-w-3xl rounded-lg bg-white p-5 shadow-2xl">
+      <ModalShell className="w-full max-w-3xl">
         <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <h3 className="text-xl font-black">{draft.id ? "품목 수정" : "새 품목 등록"}</h3>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
@@ -8820,7 +8820,7 @@ function ProductEditModal({
           <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
           </div>
         </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -9311,14 +9311,8 @@ function shiftAdDateRange(from: string, to: string, direction: -1 | 1) {
 }
 
 function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string; value: string; note?: string; tone?: "orange" | "slate" | "rose" }) {
-  const toneClass = tone === "rose" ? "text-rose-600" : tone === "slate" ? "text-slate-600" : "text-orange-600";
-  return (
-    <article className="h-full min-h-[88px] rounded-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-      <p className="break-keep text-[12.5px] font-black leading-tight text-slate-500">{label}</p>
-      <p className="mt-2 text-[21px] font-black leading-none tracking-normal text-slate-950">{value}</p>
-      {note && <p className={`mt-1.5 break-keep text-[12px] font-bold leading-tight ${toneClass}`}>{note}</p>}
-    </article>
-  );
+  const nextTone = tone === "rose" ? "danger" : tone === "orange" ? "orange" : "default";
+  return <KpiCard label={label} value={value} note={note} tone={nextTone} className="h-full min-h-[88px]" />;
 }
 
 function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; selectedChannels: string[] }) {
@@ -9336,8 +9330,8 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
     });
   const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-black">채널별 현황</h2>
+    <Card className="p-4">
+      <SectionHeader title="채널별 현황" className="mb-3" />
       <div className="mt-3 space-y-2.5">
         {orderedRows.map((row) => (
           <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
@@ -9349,14 +9343,14 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
               <span className="shrink-0 font-black text-slate-950">{adPercent(row.roas)}</span>
               <span className="shrink-0 font-black text-orange-600">{krw(row.cost)}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
+            <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+              <div className="h-full rounded-full bg-[#ff6a00]" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
             </div>
           </div>
         ))}
-        {!orderedRows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+        {!orderedRows.length && <EmptyState title="데이터 없음" className="min-h-28" />}
               </div>
-    </section>
+    </Card>
   );
 }
 
@@ -9441,23 +9435,26 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   ];
 
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="whitespace-nowrap text-base font-black">일별 광고비 / ROAS</h2>
-        <div className="flex shrink-0 gap-2.5 text-xs font-black">
-          <span className="text-orange-600">광고비</span>
+    <Card className="p-5">
+      <SectionHeader
+        title="일별 광고비 / ROAS"
+        className="mb-3"
+        actions={(
+        <div className="flex shrink-0 gap-2.5 text-xs font-semibold">
+          <span className="text-[#ff6a00]">광고비</span>
           <span className="text-emerald-600">ROAS</span>
           <span className="text-slate-400">{range.title}</span>
         </div>
-      </div>
-      <div className="mt-4 rounded-md bg-slate-50 px-4 py-3">
+        )}
+      />
+      <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
         {points.length ? (
           <>
             <div className="relative h-44">
               <div className="pointer-events-none absolute inset-0 z-10">
                 {axisTicks.map((tick) => (
                   <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
-                    <span className="rounded bg-slate-50/80 px-1 text-orange-500/60">{krw(tick.cost)}</span>
+                    <span className="rounded bg-slate-50/80 px-1 text-[#ff6a00]/70">{krw(tick.cost)}</span>
                     <span className="rounded bg-slate-50/80 px-1 text-emerald-600/70">{adPercent(tick.roas)}</span>
                   </div>
                 ))}
@@ -9466,7 +9463,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
                 <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
                 <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
-                {points.length > 1 && <path d={costPath} fill="none" stroke="#f97316" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+                {points.length > 1 && <path d={costPath} fill="none" stroke="#ff6a00" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
                 {points.length > 1 && <path d={roasPath} fill="none" stroke="#16a34a" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
               {chartPoints.map(({ row, x, costY, roasY }, index) => {
@@ -9477,7 +9474,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 return (
                 <div key={`ad-hover-point-${String(row.date)}-${index}`} className="group">
                   {[
-                    { y: costY, xOffset: -0.55, color: "bg-orange-500" },
+                    { y: costY, xOffset: -0.55, color: "bg-[#ff6a00]" },
                     { y: roasY, xOffset: 0.55, color: "bg-emerald-600" },
                   ].map((point) => (
                     <button
@@ -9512,10 +9509,10 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
             </div>
           </>
         ) : (
-          <div className="flex h-40 items-center justify-center text-sm font-bold text-slate-400">광고 파일을 올리면 그래프가 표시됩니다.</div>
+          <EmptyState title="광고 파일을 올리면 그래프가 표시됩니다." className="min-h-40 border-0 bg-gray-50" />
         )}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -9658,7 +9655,7 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
     return "";
   };
   return (
-    <div className="overflow-x-auto pb-1">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 pb-1">
       <table className="w-full min-w-[1080px] table-fixed border-collapse text-center text-[13px] tabular-nums">
         <colgroup>
           <col className="w-[12%]" />
@@ -9676,32 +9673,32 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
         </colgroup>
         <thead>
           <tr>
-            <th className="border border-slate-200 bg-white px-2.5 py-2 text-left font-black">광고</th>
+            <th className="border-b border-r border-gray-200 bg-gray-50 px-2.5 py-2 text-left font-semibold text-gray-700">광고</th>
             {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border border-slate-200 px-2 py-2 font-black leading-tight text-slate-950 ${main ? "bg-yellow-200" : "bg-white"}`}>{label}</th>
+              <th key={label} className={`whitespace-pre-line break-keep border-b border-r border-gray-200 px-2 py-2 font-semibold leading-tight text-gray-800 ${main ? "bg-[#fff7ed] text-orange-800" : "bg-gray-50"}`}>{label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[12px] font-bold" : "bg-white"}>
-              <td className="border border-slate-200 bg-inherit px-2 py-2 text-left font-black">
+            <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[12px] font-bold" : "bg-white hover:bg-[#fff7ed]"}>
+              <td className="border-b border-r border-gray-100 bg-inherit px-2 py-2 text-left font-black">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AdChannelLogo channel={row.channel} />
                   <span className="truncate">{row.label}</span>
                 </span>
               </td>
-              <td className="border border-slate-200 px-2 py-2">{krw(row.cost)}</td>
-              <td className="border border-slate-200 px-2 py-2">{krw(row.purchaseValue)}</td>
-              <td className={`border border-slate-200 px-2 py-2 text-[13.5px] font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
-              <td className="border border-slate-200 px-2 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
-              <td className={`border border-slate-200 px-2 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
-              <td className={`border border-slate-200 px-2 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
-              <td className={`border border-slate-200 px-2 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
-              <td className="border border-slate-200 px-2 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-2 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
-              <td className="border border-slate-200 px-2 py-2">{krw(row.cpc)}</td>
-              <td className="border border-slate-200 px-2 py-2">{krw(row.cpm)}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{krw(row.cost)}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{krw(row.purchaseValue)}</td>
+              <td className={`border-b border-r border-gray-100 px-2 py-2 text-[13.5px] font-black ${roasCellClass(row.roas)}`}>{adPercent(row.roas)}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{row.purchases.toLocaleString("ko-KR")}</td>
+              <td className={`border-b border-r border-gray-100 px-2 py-2 font-bold ${highLowCellClass(row.purchaseCvr, minPurchaseCvr, maxPurchaseCvr, row.channel === "total")}`}>{adPercent2(row.purchaseCvr)}</td>
+              <td className={`border-b border-r border-gray-100 px-2 py-2 font-bold ${cpaCellClass(row)}`}>{krw(row.costPerPurchase)}</td>
+              <td className={`border-b border-r border-gray-100 px-2 py-2 font-bold ${highLowCellClass(row.ctr, minCtr, maxCtr, row.channel === "total")}`}>{adPercent2(row.ctr)}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{row.impressions.toLocaleString("ko-KR")}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{row.clicks.toLocaleString("ko-KR")}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{krw(row.cpc)}</td>
+              <td className="border-b border-r border-gray-100 px-2 py-2">{krw(row.cpm)}</td>
             </tr>
           ))}
         </tbody>
@@ -9772,11 +9769,9 @@ function AdsAnalysisWorkspace() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black">광고분석</h1>
-      </div>
+      <PageHeader title="광고분석" className="mb-0" />
 
-      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
+      {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{summary.error}</Card>}
 
       <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
@@ -9786,13 +9781,15 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
-      <section className="rounded-md border border-slate-200 bg-white px-3 py-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-black">광고 리포트</h2>
+      <Card className="px-3 py-4">
+        <SectionHeader
+          title="광고 리포트"
+          actions={(
           <div className="flex flex-wrap items-center gap-2">
             {adReportChannelOrder.map((channel) => (
-              <label key={channel} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-black text-slate-600">
+              <label key={channel} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-600 transition hover:border-orange-200 hover:bg-orange-50">
                 <input
+                  className="accent-[#ff6a00]"
                   type="checkbox"
                   checked={selectedAdChannels.includes(channel)}
                   onChange={(event) => setSelectedAdChannels((prev) => event.target.checked ? [...prev, channel] : prev.filter((item) => item !== channel))}
@@ -9800,13 +9797,15 @@ function AdsAnalysisWorkspace() {
                 {adReportChannelNames[channel]}
               </label>
             ))}
-            <button type="button" onClick={exportAdReportCsv} className="rounded-md bg-slate-950 px-3 py-2 text-xs font-black text-white">엑셀용 CSV 다운로드</button>
+            <ActionButton type="button" onClick={exportAdReportCsv} className="h-8 px-3 text-xs">엑셀용 CSV 다운로드</ActionButton>
           </div>
-        </div>
+          )}
+          className="mb-3"
+        />
         <div className="mt-4">
           <AdsReportTable rows={reportRows} />
         </div>
-      </section>
+      </Card>
 
       <section className="grid gap-4 xl:grid-cols-[1.15fr_1.05fr]">
         <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
