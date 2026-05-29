@@ -142,14 +142,175 @@ export function FilterBar({ className, ...props }: HTMLAttributes<HTMLDivElement
   return <div className={cn("flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4", className)} {...props} />;
 }
 
-export function ModalShell({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-2xl border border-gray-200 bg-white p-6 shadow-xl", className)} {...props} />;
+type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
+
+const modalSizes: Record<ModalSize, string> = {
+  sm: "max-w-[420px]",
+  md: "max-w-[560px]",
+  lg: "max-w-[760px]",
+  xl: "max-w-[960px]",
+  full: "max-w-[1120px]",
+};
+
+export const modalInputClass =
+  "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
+export const modalSelectClass =
+  "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
+export const modalTextareaClass =
+  "min-h-24 w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm font-medium text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
+
+export function ModalShell({
+  className,
+  size = "lg",
+  ...props
+}: HTMLAttributes<HTMLDivElement> & {
+  size?: ModalSize;
+}) {
+  return <div className={cn("relative w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-xl", modalSizes[size], className)} {...props} />;
 }
 
-export function FormField({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
+export function ModalCloseButton({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <label className={cn("block text-xs font-semibold text-gray-500", className)}>
-      <span>{label}</span>
+    <button
+      type="button"
+      aria-label="닫기"
+      className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl leading-none text-gray-500 transition hover:bg-gray-100 hover:text-gray-700", className)}
+      {...props}
+    >
+      ×
+    </button>
+  );
+}
+
+export function ModalHeader({
+  title,
+  description,
+  onClose,
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose?: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex items-start justify-between gap-4 border-b border-gray-200 pb-4", className)}>
+      <div className="min-w-0">
+        <h3 className="text-xl font-bold leading-tight text-gray-900">{title}</h3>
+        {description && <p className="mt-1 text-[13px] font-medium leading-5 text-gray-500">{description}</p>}
+      </div>
+      {onClose && <ModalCloseButton onClick={onClose} />}
+    </div>
+  );
+}
+
+export function ModalBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("py-5", className)} {...props} />;
+}
+
+export function ModalFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex justify-end gap-2 border-t border-gray-200 pt-4", className)} {...props} />;
+}
+
+function ModalOverlay({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/55 px-4 py-8", className)}>{children}</div>;
+}
+
+export function FormModal({
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  size = "lg",
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  size?: ModalSize;
+  className?: string;
+}) {
+  return (
+    <ModalOverlay>
+      <ModalShell size={size} className={className}>
+        <ModalHeader title={title} description={description} onClose={onClose} />
+        <ModalBody>{children}</ModalBody>
+        {footer && <ModalFooter>{footer}</ModalFooter>}
+      </ModalShell>
+    </ModalOverlay>
+  );
+}
+
+export function SelectionModal({
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  size = "xl",
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  size?: ModalSize;
+  className?: string;
+}) {
+  return (
+    <ModalOverlay className="py-10">
+      <ModalShell size={size} className={className}>
+        <ModalHeader title={title} description={description} onClose={onClose} />
+        <ModalBody>{children}</ModalBody>
+        {footer && <ModalFooter>{footer}</ModalFooter>}
+      </ModalShell>
+    </ModalOverlay>
+  );
+}
+
+export function ConfirmModal({
+  title,
+  description,
+  onClose,
+  onConfirm,
+  confirmLabel = "확인",
+  cancelLabel = "취소",
+  danger = false,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose: () => void;
+  onConfirm: () => void;
+  confirmLabel?: ReactNode;
+  cancelLabel?: ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <FormModal
+      title={title}
+      description={description}
+      onClose={onClose}
+      size="sm"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>{cancelLabel}</ActionButton>
+          <ActionButton type="button" variant={danger ? "danger" : "primary"} onClick={onConfirm}>{confirmLabel}</ActionButton>
+        </>
+      }
+    >
+      <div />
+    </FormModal>
+  );
+}
+
+export function FormField({ label, children, className, required = false }: { label: ReactNode; children: ReactNode; className?: string; required?: boolean }) {
+  return (
+    <label className={cn("block text-[13px] font-semibold text-gray-700", className)}>
+      <span>{label}{required && <span className="ml-1 text-[#ff6a00]">*</span>}</span>
       <div className="mt-1">{children}</div>
     </label>
   );

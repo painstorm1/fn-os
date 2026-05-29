@@ -7,7 +7,24 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
-import { ActionButton, Card, EmptyState, FilterBar, FormField, KpiCard, ModalShell, PageHeader, SectionHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
+import {
+  ActionButton,
+  Card,
+  EmptyState,
+  FilterBar,
+  FormField,
+  KpiCard,
+  ModalShell,
+  PageHeader,
+  SectionHeader,
+  SelectionModal,
+  FormModal,
+  StatusBadge,
+  modalInputClass,
+  modalSelectClass,
+  modalTextareaClass,
+  useEscapeToClose,
+} from "@/components/fn-ui";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -4606,40 +4623,34 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           </div>
 
           {catalogOpen && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 px-4 py-10">
-              <ModalShell className="w-full max-w-5xl p-0">
-                <div className="flex items-center justify-between border-b border-slate-200 p-4">
-                  <h3 className="text-lg font-black">제품 선택</h3>
-                  <button type="button" className="text-2xl text-slate-500" onClick={() => setCatalogOpen(false)}>×</button>
-                </div>
-                <div className="grid gap-3 p-4">
-                  <input className="field-input" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="제품명 검색" />
-                  <div className="grid max-h-[58vh] gap-2 overflow-auto">
-                    {catalogProducts.map((product) => {
-                      const options = optionsFor(product);
-                      return (
-                        <div key={product.id} className="grid items-center gap-3 border-b border-slate-100 py-2 last:border-b-0 md:grid-cols-[76px_1fr_180px_90px]">
-                          <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
-                            {product.image_path ? <img src={assetUrl(product.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">사진</div>}
-                          </div>
-                          <div>
-                            <p className="font-black">{product.name}</p>
-                            <p className="mt-1 text-xs font-bold text-slate-500">{product.factory_name || "-"} · {product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || "CNY"}` : "단가 없음"}</p>
-                          </div>
-                          {options.length ? (
-                            <select className="field-input" value={catalogOptions[product.id] || options[0]} onChange={(event) => setCatalogOptions((prev) => ({ ...prev, [product.id]: event.target.value }))}>
-                              {options.map((option) => <option key={option}>{option}</option>)}
-                            </select>
-                          ) : <span className="text-sm font-bold text-slate-500">옵션 없음</span>}
-                          <button type="button" className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-black text-white" onClick={() => addProduct(product)}>추가</button>
+            <SelectionModal title="제품 선택" onClose={() => setCatalogOpen(false)} className="p-6">
+              <div className="grid gap-3">
+                <input className={modalInputClass} value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="제품명 검색" />
+                <div className="grid max-h-[58vh] overflow-auto rounded-xl border border-gray-200">
+                  {catalogProducts.map((product) => {
+                    const options = optionsFor(product);
+                    return (
+                      <div key={product.id} className="grid min-h-[84px] items-center gap-3 border-b border-gray-100 px-3 py-3 last:border-b-0 hover:bg-orange-50/40 md:grid-cols-[68px_1fr_180px_90px]">
+                        <div className="h-14 w-14 overflow-hidden rounded-lg bg-gray-100">
+                          {product.image_path ? <img src={assetUrl(product.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-gray-400">사진</div>}
                         </div>
-                      );
-                    })}
-                    {!catalogProducts.length && <p className="rounded-md bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">등록된 제품이 없습니다.</p>}
-                  </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-[15px] font-semibold text-gray-900">{product.name}</p>
+                          <p className="mt-1 truncate text-xs font-medium text-gray-500">{product.factory_name || "-"} · {product.std_price ? `${product.std_price.toLocaleString("ko-KR")} ${product.currency || "CNY"}` : "단가 없음"}</p>
+                        </div>
+                        {options.length ? (
+                          <select className={modalSelectClass} value={catalogOptions[product.id] || options[0]} onChange={(event) => setCatalogOptions((prev) => ({ ...prev, [product.id]: event.target.value }))}>
+                            {options.map((option) => <option key={option}>{option}</option>)}
+                          </select>
+                        ) : <span className="text-sm font-semibold text-gray-500">옵션 없음</span>}
+                        <ActionButton type="button" onClick={() => addProduct(product)}>추가</ActionButton>
+                      </div>
+                    );
+                  })}
+                  {!catalogProducts.length && <p className="bg-gray-50 p-5 text-center text-sm font-semibold text-gray-500">등록된 제품이 없습니다.</p>}
                 </div>
-              </ModalShell>
-            </div>
+              </div>
+            </SelectionModal>
           )}
         </form>
       )}
@@ -8945,15 +8956,23 @@ function CustomerEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
-      <ModalShell className="w-full max-w-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-          <h3 className="text-xl font-black">{draft.id ? "거래처 수정" : "새 거래처 등록"}</h3>
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+    <FormModal
+      title={draft.id ? "거래처 수정" : "새 거래처 등록"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div className="flex w-full justify-between gap-2">
+          <div>{draft.id && <ActionButton type="button" variant="danger" onClick={onDelete}>삭제</ActionButton>}</div>
+          <div className="flex gap-2">
+            <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+            <ActionButton type="button" onClick={onSave}>저장</ActionButton>
+          </div>
         </div>
-        <div className="mt-4 space-y-4">
+      }
+    >
+        <div className="space-y-4">
           <div>
-            <div className="mb-2 text-xs font-black text-slate-500">속성 선택 *</div>
+            <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 선택 <span className="text-[#ff6a00]">*</span></div>
             <div className="flex gap-2">
               {[
                 { key: "general" as CustomerAttribute, label: "일반" },
@@ -8963,46 +8982,37 @@ function CustomerEditModal({
                   key={item.key}
                   type="button"
                   onClick={() => onChange("customer_type", item.key)}
-                  className={`rounded-md border px-4 py-2 text-sm font-black ${customerType === item.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-500"}`}
+                  className={`h-10 rounded-lg border px-4 text-sm font-semibold ${customerType === item.key ? "border-orange-200 bg-orange-50 text-orange-700" : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50"}`}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-xs font-black text-slate-500">거래처코드 *<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></label>
-            <label className="text-xs font-black text-slate-500">거래처명 *<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></label>
-            <label className="text-xs font-black text-slate-500 md:col-span-2">
-              사업자번호
-              <input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <FormField label="거래처코드" required><input className={modalInputClass} value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></FormField>
+            <FormField label="거래처명" required><input className={modalInputClass} value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></FormField>
+            <FormField label="사업자번호" className="md:col-span-2">
+              <input className={modalInputClass} value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
               <span className="mt-2 flex items-center gap-2 text-[11px] font-bold text-slate-500">
                 <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
                 거래처코드와 동일
               </span>
-            </label>
-            <label className="text-xs font-black text-slate-500">담당자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></label>
-            <label className="text-xs font-black text-slate-500">전화번호<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></label>
-            <label className="text-xs font-black text-slate-500 md:col-span-2">거래처정보 · 기타 메모<textarea className="mt-1 min-h-[100px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></label>
+            </FormField>
+            <FormField label="담당자"><input className={modalInputClass} value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></FormField>
+            <FormField label="전화번호"><input className={modalInputClass} value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+            <FormField label="거래처정보 · 기타 메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></FormField>
           </div>
           {customerType === "shopping" && (
             <div className="rounded-xl border border-orange-100 bg-orange-50/60 p-4">
-              <div className="mb-2 text-sm font-black text-orange-700">쇼핑몰정보</div>
-              <p className="text-xs font-bold leading-relaxed text-orange-700">
+              <div className="mb-2 text-sm font-semibold text-orange-700">쇼핑몰정보</div>
+              <p className="text-xs font-medium leading-relaxed text-orange-700">
                 ID/PW/API 연동정보는 주문수집 credential 설계 확정 후 저장 필드와 env 반영 방식까지 연결합니다. 지금은 위 메모에 임시 정보만 남길 수 있습니다.
               </p>
             </div>
           )}
         </div>
-        <div className="mt-5 flex justify-between gap-2">
-          <div>{draft.id && <button type="button" onClick={onDelete} className="rounded-md border border-rose-200 px-4 py-2 text-sm font-black text-rose-600 hover:bg-rose-50">삭제</button>}</div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-500">닫기</button>
-            <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
-          </div>
-        </div>
-      </ModalShell>
-    </div>
+    </FormModal>
   );
 }
 
