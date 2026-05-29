@@ -782,6 +782,22 @@ type ProductImportLinkRow = {
   default_ratio?: number;
 };
 
+type FnCustomer = {
+  id?: string;
+  customer_code?: string;
+  cust_code?: string;
+  customer_name?: string;
+  cust_name?: string;
+  customer_type?: string;
+  business_no?: string;
+  ceo_name?: string;
+  contact_name?: string;
+  phone?: string;
+  payment_terms?: string;
+  memo?: string;
+  is_active?: boolean;
+};
+
 type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
 
@@ -819,6 +835,16 @@ function productNameWithAttribute(name: string, attribute: unknown) {
   if (normalized === "rg") return `[RG]${baseName}`;
   if (normalized === "set") return `[SET]${baseName}`;
   return baseName;
+}
+
+function relatedProductSearchQuery(name: unknown) {
+  const baseName = String(name || "")
+    .replace(/^\s*\[(RG|SET|NG|NS)[\]\}]\s*/i, "")
+    .replace(/\b\d+\s*개\b/gi, "")
+    .replace(/[()/_-]/g, " ")
+    .trim();
+  const tokens = baseName.split(/\s+/).filter((token) => token.length >= 2 && !/^\d+$/.test(token));
+  return tokens.slice(0, 4).join(" ");
 }
 
 function sortWarehousesByCode(a: WarehouseOption, b: WarehouseOption) {
@@ -7769,7 +7795,7 @@ function MasterManagementPanel({
         </div>
       </div>
 
-      {activeMasterTab !== "products" && (
+      {activeMasterTab !== "products" && activeMasterTab !== "customers" && (
         <MasterEntryPanel
           config={activeConfig}
           setMessage={setMessage}
@@ -7778,10 +7804,7 @@ function MasterManagementPanel({
       )}
 
       {activeMasterTab === "customers" && (
-        <Panel title="거래처 목록" subtitle="거래처는 개별 등록 또는 엑셀 업로드로 추가합니다.">
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">거래처 목록 테이블은 다음 단계에서 고객 조회 API와 연결합니다.</div>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
+        <CustomerManagementPanel message={message} setMessage={setMessage} />
       )}
 
       {activeMasterTab === "products" && (
@@ -7819,6 +7842,254 @@ function MasterManagementPanel({
           <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">근태 저장 테이블은 다음 단계에서 DB 스키마와 저장 API를 연결합니다.</div>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
+      )}
+    </div>
+  );
+}
+
+function CustomerManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
+  const [customers, setCustomers] = useState<FnCustomer[]>([]);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [customerMessage, setCustomerMessage] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pageSize = 20;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  function blankCustomerDraft() {
+    return { id: "", customer_code: "", customer_name: "", customer_type: "", business_no: "", contact_name: "", phone: "", payment_terms: "", memo: "" };
+  }
+
+  async function loadCustomers(nextPage = page, nextQuery = query) {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
+      if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setCustomerMessage(data.error || "거래처 조회 실패");
+        return;
+      }
+      setCustomers(data.customers || []);
+      setTotal(Number(data.total || 0));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadCustomers(page, query), 0);
+    return () => window.clearTimeout(timer);
+  }, [page, query]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2") return;
+      event.preventDefault();
+      openNewCustomer();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function openNewCustomer() {
+    setDraft(blankCustomerDraft());
+    setModalOpen(true);
+  }
+
+  function openCustomer(customer: FnCustomer) {
+    setDraft({
+      id: customer.id || "",
+      customer_code: customer.customer_code || customer.cust_code || "",
+      customer_name: customer.customer_name || customer.cust_name || "",
+      customer_type: customer.customer_type || "",
+      business_no: customer.business_no || "",
+      contact_name: customer.contact_name || "",
+      phone: customer.phone || "",
+      payment_terms: customer.payment_terms || "",
+      memo: customer.memo || "",
+    });
+    setModalOpen(true);
+  }
+
+  function updateDraft(key: string, value: string) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveCustomerDraft() {
+    const code = String(draft.customer_code || "").trim();
+    const name = String(draft.customer_name || "").trim();
+    if (!code || !name) {
+      setCustomerMessage("거래처코드와 거래처명은 필수입니다.");
+      return;
+    }
+    const res = await fetch("/api/fnos/customers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ customer: draft }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setCustomerMessage(data.error || "거래처 저장 실패");
+      return;
+    }
+    setCustomerMessage(`거래처 저장 완료: ${code}`);
+    setMessage("");
+    setModalOpen(false);
+    await loadCustomers(page, query);
+  }
+
+  async function deleteCustomerDraft() {
+    const id = String(draft.id || "").trim();
+    const code = String(draft.customer_code || "").trim();
+    if (!id && !code) return;
+    if (!window.confirm("이 거래처를 삭제할까요?")) return;
+    const res = await fetch("/api/fnos/customers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id, customer_code: code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setCustomerMessage(data.error || "거래처 삭제 실패");
+      return;
+    }
+    setCustomerMessage(`거래처 삭제 완료: ${code}`);
+    setModalOpen(false);
+    await loadCustomers(page, query);
+  }
+
+  function downloadCustomerTemplate() {
+    void downloadTableXlsx(
+      "FN_OS_거래처_엑셀폼.xlsx",
+      "거래처",
+      ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "메모"],
+      [["CUST001", "샘플거래처", "쇼핑몰", "000-00-00000", "담당자", "010-0000-0000", "월말결제", ""]],
+    );
+  }
+
+  async function uploadCustomers(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/fnos/customers/upload", { method: "POST", credentials: "include", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setCustomerMessage(data.error || "거래처 엑셀등록 실패");
+      return;
+    }
+    setCustomerMessage(`거래처 엑셀등록 완료: ${data.count || 0}건`);
+    await loadCustomers(1, query);
+    setPage(1);
+  }
+
+  async function downloadCustomers() {
+    const params = new URLSearchParams({ page: "1", pageSize: "5000" });
+    if (query.trim()) params.set("q", query.trim());
+    const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setCustomerMessage(data.error || "거래처 다운로드 실패");
+      return;
+    }
+    const rows = ((data.customers || []) as FnCustomer[]).map((customer) => [
+      customer.customer_code || customer.cust_code || "",
+      customer.customer_name || customer.cust_name || "",
+      customer.customer_type || "",
+      customer.business_no || "",
+      customer.contact_name || "",
+      customer.phone || "",
+      customer.payment_terms || "",
+      customer.memo || "",
+    ]);
+    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "메모"], rows);
+  }
+
+  const pageNumbers = Array.from({ length: Math.min(6, pageCount) }, (_, index) => {
+    const start = Math.min(Math.max(1, page - 2), Math.max(1, pageCount - 5));
+    return start + index;
+  }).filter((value) => value <= pageCount);
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="거래처 관리"
+        subtitle={<div className="text-sm font-bold text-slate-500">거래처수 {total.toLocaleString("ko-KR")}개</div>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={openNewCustomer} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">F2 새 거래처</button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀등록</button>
+            <button type="button" onClick={() => void downloadCustomers()} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">거래처정보 다운로드</button>
+            <button type="button" onClick={downloadCustomerTemplate} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700" title="엑셀폼 다운로드">엑셀폼</button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadCustomers(file);
+              event.target.value = "";
+            }} />
+          </div>
+        }
+      >
+        <div className="mb-3 flex justify-end">
+          <input
+            className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={query}
+            onChange={(event) => {
+              setPage(1);
+              setQuery(event.target.value);
+            }}
+            placeholder="거래처명 / 코드 검색"
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="border-b border-slate-200 text-xs text-slate-500">
+              <tr>
+                <th className="py-2 text-left">거래처코드</th>
+                <th className="py-2 text-left">거래처명</th>
+                <th className="py-2 text-left">구분</th>
+                <th className="py-2 text-left">사업자번호</th>
+                <th className="py-2 text-left">담당자</th>
+                <th className="py-2 text-left">전화</th>
+                <th className="py-2 text-left">결제조건</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customers.map((customer) => (
+                <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
+                  <td className="py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
+                  <td className="py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.customer_type || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.business_no || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.contact_name || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.phone || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.payment_terms || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!customers.length && <div className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "거래처가 없습니다."}</div>}
+        </div>
+        <div className="mt-4 flex items-center justify-center gap-1">
+          {pageNumbers.map((number) => (
+            <button key={number} type="button" onClick={() => setPage(number)} className={`h-7 min-w-7 rounded px-2 text-xs font-black ${page === number ? "bg-slate-950 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{number}</button>
+          ))}
+        </div>
+        {customerMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{customerMessage}</div>}
+      </Panel>
+      {modalOpen && (
+        <CustomerEditModal
+          draft={draft}
+          onClose={() => setModalOpen(false)}
+          onChange={updateDraft}
+          onSave={() => void saveCustomerDraft()}
+          onDelete={() => void deleteCustomerDraft()}
+        />
       )}
     </div>
   );
@@ -8233,11 +8504,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b border-slate-200 text-xs text-slate-500">
               <tr>
                 <th className="py-2 text-left">품목코드</th>
-                <th className="py-2 text-left">속성</th>
                 <th className="py-2 text-left">품목명</th>
                 <th className="py-2 text-right">입고가</th>
                 <th className="py-2 text-right">출고가</th>
@@ -8250,7 +8520,6 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               {products.map((product) => (
                 <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50">
                   <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
-                  <td className="py-2 text-xs font-black text-slate-600">{product.product_attribute_label || productAttributeLabel(productAttributeOf(product))}</td>
                   <td className="py-2 font-bold">{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
                   <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
@@ -8302,6 +8571,48 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   );
 }
 
+function CustomerEditModal({
+  draft,
+  onClose,
+  onChange,
+  onSave,
+  onDelete,
+}: {
+  draft: Record<string, string>;
+  onClose: () => void;
+  onChange: (key: string, value: string) => void;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
+      <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+          <h3 className="text-xl font-black">{draft.id ? "거래처 수정" : "새 거래처 등록"}</h3>
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="text-xs font-black text-slate-500">거래처코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">거래처명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">거래처구분<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_type || ""} onChange={(event) => onChange("customer_type", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">사업자번호<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">담당자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500">전화<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500 md:col-span-2">결제조건<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.payment_terms || ""} onChange={(event) => onChange("payment_terms", event.target.value)} /></label>
+          <label className="text-xs font-black text-slate-500 md:col-span-2">메모<textarea className="mt-1 min-h-[90px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} /></label>
+        </div>
+        <div className="mt-5 flex justify-between gap-2">
+          <div>{draft.id && <button type="button" onClick={onDelete} className="rounded-md border border-rose-200 px-4 py-2 text-sm font-black text-rose-600 hover:bg-rose-50">삭제</button>}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-500">닫기</button>
+            <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProductEditModal({
   draft,
   warehouses,
@@ -8325,15 +8636,19 @@ function ProductEditModal({
 }) {
   const [componentQuery, setComponentQuery] = useState("");
   const [componentCandidates, setComponentCandidates] = useState<FnProduct[]>([]);
+  const [bomOpen, setBomOpen] = useState(false);
+  const productAttribute = normalizeProductAttribute(draft.product_attribute || draft.product_kind);
+  const showBomPanel = productAttribute === "set" || bomRows.length > 0 || bomOpen;
 
   useEffect(() => {
-    if (!componentQuery.trim()) {
+    const keyword = componentQuery.trim() || (productAttribute === "set" ? relatedProductSearchQuery(draft.product_name) : "");
+    if (!keyword) {
       setComponentCandidates([]);
       return;
     }
     let alive = true;
     const timer = window.setTimeout(async () => {
-      const params = new URLSearchParams({ q: componentQuery.trim(), page: "1", pageSize: "20", excludeBom: "true" });
+      const params = new URLSearchParams({ q: keyword, page: "1", pageSize: "20", excludeBom: "true" });
       const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (alive) {
@@ -8346,7 +8661,7 @@ function ProductEditModal({
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [componentQuery, draft.id, bomRows]);
+  }, [componentQuery, draft.id, draft.product_name, productAttribute, bomRows]);
 
   function addBomComponent(product: FnProduct) {
     if (!product.id) return;
@@ -8378,6 +8693,7 @@ function ProductEditModal({
     onChange("product_attribute", attribute);
     onChange("product_kind", attribute);
     onChange("product_name", productNameWithAttribute(draft.product_name || "", attribute));
+    if (attribute === "set") setBomOpen(true);
   }
 
   return (
@@ -8433,7 +8749,12 @@ function ProductEditModal({
             {!warehouses.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">등록된 창고가 없습니다. 먼저 창고관리에서 창고를 등록해 주세요.</div>}
           </div>
         </div>
-        <div className="mt-5 rounded-md border border-slate-200 p-4">
+        {!showBomPanel && (
+          <div className="mt-5 rounded-md border border-dashed border-slate-200 p-4">
+            <button type="button" onClick={() => setBomOpen(true)} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600">BOM 설정</button>
+          </div>
+        )}
+        {showBomPanel && <div className="mt-5 rounded-md border border-slate-200 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black text-slate-700">BOM 관리</div>
@@ -8458,7 +8779,7 @@ function ProductEditModal({
                 >
                   <span className="font-black">{product.product_code || product.sku}</span>
                   <span className="flex-1 truncate font-bold text-slate-600">{product.product_name}</span>
-                  <span className="text-xs font-black text-orange-600">추가</span>
+                  <span className="text-xs font-black text-orange-600">선택</span>
                 </button>
               ))}
             </div>
@@ -8474,9 +8795,12 @@ function ProductEditModal({
             ))}
             {!bomRows.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">BOM 구성품이 없습니다.</div>}
           </div>
-        </div>
+        </div>}
         <div className="mt-5 rounded-md border border-slate-200 p-4">
-          <div className="mb-3 text-sm font-black text-slate-700">수입관리 연동</div>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-sm font-black text-slate-700">수입관리 연동</div>
+            <button type="button" onClick={() => goToInternal(importHref("/products"))} className="rounded-md border border-orange-200 px-3 py-1.5 text-xs font-black text-orange-600 hover:bg-orange-50">수입관리에서 수정</button>
+          </div>
           <div className="space-y-2">
             {importLinks.map((link, index) => (
               <div key={`${link.import_product_id}-${index}`} className="rounded-md bg-orange-50 px-3 py-2 text-sm font-bold text-orange-800">
