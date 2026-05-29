@@ -10960,6 +10960,8 @@ function AccountingWorkspace() {
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [filters, setFilters] = useState({ q: "", category: "", from: "", to: "" });
   const [manual, setManual] = useState({
     expense_date: new Date().toISOString().slice(0, 10),
@@ -11059,6 +11061,7 @@ function AccountingWorkspace() {
     }
     setPreviewRows(Array.isArray(data.rows) ? data.rows.slice(0, 500) : []);
     setParsedFiles(Array.isArray(data.files) ? data.files : []);
+    setPreviewModalOpen(true);
     setMessage(`파일 ${Number(data.files?.length || 0).toLocaleString("ko-KR")}개에서 ${Number(data.rows?.length || 0).toLocaleString("ko-KR")}건의 비용 데이터를 생성했습니다.`);
   }
 
@@ -11136,6 +11139,39 @@ function AccountingWorkspace() {
   const vendorRows = summary?.by_vendor || [];
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
+  const manualExpenseFields = (
+    <div className="grid gap-3 md:grid-cols-2">
+      <FormField label="일자">
+        <input className={modalInputClass} type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
+      </FormField>
+      <FormField label="업체명">
+        <input className={modalInputClass} value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
+      </FormField>
+      <FormField label="내용" className="md:col-span-2">
+        <input className={modalInputClass} value={manual.description} onChange={(event) => setManual((prev) => ({ ...prev, description: event.target.value }))} />
+      </FormField>
+      <FormField label="카테고리">
+        <select className={modalSelectClass} value={manual.category_name} onChange={(event) => setManual((prev) => ({ ...prev, category_name: event.target.value }))}>
+          {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
+        </select>
+      </FormField>
+      <FormField label="결제수단">
+        <input className={modalInputClass} value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
+      </FormField>
+      <FormField label="공급가액">
+        <input className={`${modalInputClass} text-right`} type="number" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
+      </FormField>
+      <FormField label="부가세">
+        <input className={`${modalInputClass} text-right`} type="number" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
+      </FormField>
+      <FormField label="합계">
+        <input className={`${modalInputClass} text-right`} type="number" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
+      </FormField>
+      <FormField label="메모" className="md:col-span-2">
+        <textarea className={modalTextareaClass} value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
+      </FormField>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -11243,7 +11279,15 @@ function AccountingWorkspace() {
           </Card>
 
           <Card className="p-5">
-            <SectionHeader title="생성 데이터 미리보기" actions={<StatusBadge>{previewRows.length.toLocaleString("ko-KR")}건</StatusBadge>} />
+            <SectionHeader
+              title="생성 데이터 미리보기"
+              actions={
+                <>
+                  <StatusBadge>{previewRows.length.toLocaleString("ko-KR")}건</StatusBadge>
+                  <ActionButton type="button" variant="secondary" onClick={() => setPreviewModalOpen(true)} disabled={!previewRows.length} className="h-8 px-3 text-xs">미리보기 열기</ActionButton>
+                </>
+              }
+            />
             <div className="mt-4">
               <ExpenseTable rows={previewRows} categoryById={categoryById} compact />
             </div>
@@ -11290,41 +11334,17 @@ function AccountingWorkspace() {
             </div>
           </Card>
           <Card className="p-5">
-            <form onSubmit={saveManualExpense}>
-              <SectionHeader title="수동 비용 입력" />
-              <div className="mt-4 space-y-3">
-                <FormField label="일자">
-                  <input className="field-input w-full px-3 py-2 text-sm" type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
-                </FormField>
-                <FormField label="업체명">
-                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
-                </FormField>
-                <FormField label="내용">
-                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.description} onChange={(event) => setManual((prev) => ({ ...prev, description: event.target.value }))} />
-                </FormField>
-                <FormField label="카테고리">
-                  <select className="field-input w-full px-3 py-2 text-sm" value={manual.category_name} onChange={(event) => setManual((prev) => ({ ...prev, category_name: event.target.value }))}>
-                    {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
-                  </select>
-                </FormField>
-                <FormField label="공급가액">
-                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
-                </FormField>
-                <FormField label="부가세">
-                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
-                </FormField>
-                <FormField label="합계">
-                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
-                </FormField>
-                <FormField label="결제수단">
-                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
-                </FormField>
-                <FormField label="메모">
-                  <textarea className="field-input min-h-[80px] w-full px-3 py-2 text-sm" value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
-                </FormField>
-                <ActionButton className="w-full">저장</ActionButton>
-              </div>
-            </form>
+            <SectionHeader
+              title="수동 비용 입력"
+              description="단건 비용은 공통 모달에서 입력합니다."
+              actions={<ActionButton type="button" onClick={() => setManualExpenseModalOpen(true)}>비용 등록</ActionButton>}
+            />
+            <EmptyState
+              title="비용 등록 모달"
+              description="저장 로직은 기존 수동 비용 저장 API를 그대로 사용합니다."
+              action={<ActionButton type="button" onClick={() => setManualExpenseModalOpen(true)}>열기</ActionButton>}
+              className="min-h-44"
+            />
           </Card>
         </section>
       )}
@@ -11375,6 +11395,44 @@ function AccountingWorkspace() {
             </div>
           </Card>
         </section>
+      )}
+
+      {manualExpenseModalOpen && (
+        <FormModal
+          title="수동 비용 등록"
+          description="카테고리, 금액, 결제수단을 입력해 비용 1건을 저장합니다."
+          onClose={() => setManualExpenseModalOpen(false)}
+          size="lg"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setManualExpenseModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="submit" form="accounting-manual-expense-form">저장</ActionButton>
+            </>
+          }
+        >
+          <form id="accounting-manual-expense-form" onSubmit={saveManualExpense}>
+            {manualExpenseFields}
+          </form>
+        </FormModal>
+      )}
+
+      {previewModalOpen && (
+        <SelectionModal
+          title="비용 파일 미리보기"
+          description={`${previewRows.length.toLocaleString("ko-KR")}건의 생성 데이터를 확인합니다.`}
+          onClose={() => setPreviewModalOpen(false)}
+          size="full"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setPreviewModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>
+                {uploading ? "저장 중" : "DB 저장"}
+              </ActionButton>
+            </>
+          }
+        >
+          <ExpenseTable rows={previewRows} categoryById={categoryById} />
+        </SelectionModal>
       )}
     </div>
   );
