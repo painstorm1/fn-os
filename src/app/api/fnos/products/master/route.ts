@@ -27,7 +27,7 @@ function productName(row: AnyRecord) {
 function inferredProductAttribute(row: { product_code?: string; product_name?: string }) {
   const value = `${text(row.product_code)} ${text(row.product_name)}`.toUpperCase();
   if (/\[RG[\]\}]/.test(value)) return "rg";
-  if (/\[NG[\]\}]/.test(value)) return "set";
+  if (/\[(SET|NG)[\]\}]/.test(value)) return "set";
   return "plain";
 }
 
@@ -35,6 +35,17 @@ function normalizeProductAttribute(value: unknown, fallback: "plain" | "set" | "
   const normalized = text(value).toLowerCase();
   if (normalized === "plain" || normalized === "set" || normalized === "rg") return normalized;
   return fallback;
+}
+
+function productAttributeLabel(value: unknown) {
+  const normalized = normalizeProductAttribute(value);
+  if (normalized === "set") return "SET";
+  if (normalized === "rg") return "RG";
+  return "일반";
+}
+
+function normalizeSetPrefix(value: unknown) {
+  return text(value).replace(/^\s*\[NG[\]\}]\s*/i, "[SET]");
 }
 
 function compactSearchText(value: unknown) {
@@ -184,6 +195,7 @@ export async function GET(request: NextRequest) {
         product_name: productName(row),
         product_attribute: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
         product_kind: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
+        product_attribute_label: productAttributeLabel(row.product_attribute),
         cost_price: numberValue(row.cost_price ?? row.in_price),
         standard_price: numberValue(row.standard_price ?? row.out_price),
         current_stock: currentStock,
@@ -195,7 +207,7 @@ export async function GET(request: NextRequest) {
     });
     const filtered = normalizedProducts.filter((row) => {
       if (relation === "bom" && !row.bom.length) return false;
-      if (relation === "ng" && row.product_kind !== "set") return false;
+      if ((relation === "ng" || relation === "set") && row.product_kind !== "set") return false;
       if (relation === "rg" && row.product_kind !== "rg") return false;
       if (relation === "import" && !row.import_links.length) return false;
       if (relation === "plain" && row.product_kind !== "plain") return false;
@@ -234,7 +246,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const product = (body.product || {}) as AnyRecord;
     const code = text(product.product_code || product.prod_cd || product.sku);
-    const name = text(product.product_name || product.prod_name);
+    const name = normalizeSetPrefix(product.product_name || product.prod_name);
     if (!code || !name) {
       return NextResponse.json({ ok: false, error: "품목코드와 품목명은 필수입니다." }, { status: 400 });
     }

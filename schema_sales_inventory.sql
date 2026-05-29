@@ -130,10 +130,18 @@ alter table products add column if not exists out_price double precision;
 alter table products alter column product_attribute set default 'plain';
 
 update products
+set
+  product_name = regexp_replace(product_name, '\[NG[\]\}]', '[SET]', 'gi'),
+  prod_name = regexp_replace(prod_name, '\[NG[\]\}]', '[SET]', 'gi')
+where
+  coalesce(product_name, '') ~* '\[NG[\]\}]'
+  or coalesce(prod_name, '') ~* '\[NG[\]\}]';
+
+update products
 set product_attribute = case
   when upper(coalesce(product_name, '') || ' ' || coalesce(product_code, '') || ' ' || coalesce(prod_name, '') || ' ' || coalesce(prod_cd, '')) ~ '\[RG[\]\}]'
     then 'rg'
-  when upper(coalesce(product_name, '') || ' ' || coalesce(product_code, '') || ' ' || coalesce(prod_name, '') || ' ' || coalesce(prod_cd, '')) ~ '\[NG[\]\}]'
+  when upper(coalesce(product_name, '') || ' ' || coalesce(product_code, '') || ' ' || coalesce(prod_name, '') || ' ' || coalesce(prod_cd, '')) ~ '\[(SET|NG)[\]\}]'
     then 'set'
   else 'plain'
 end;

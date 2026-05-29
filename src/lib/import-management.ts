@@ -78,7 +78,7 @@ function productKind(row: AnyRecord) {
   if (explicitKind === "rg" || explicitKind.includes("rocket") || explicitKind.includes("로켓")) return "rg";
   if (explicitKind === "set" || explicitKind.includes("세트")) return "set";
   if (/\[RG[\]\}]/.test(value)) return "rg";
-  if (/\[NG[\]\}]/.test(value)) return "set";
+  if (/\[(SET|NG)[\]\}]/.test(value)) return "set";
   return "plain";
 }
 
