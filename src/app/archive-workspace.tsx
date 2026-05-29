@@ -16,6 +16,7 @@ import {
   modalSelectClass,
   modalTextareaClass,
 } from "@/components/fn-ui";
+import { cachedJson, invalidateClientCache, readCachedJson } from "@/lib/client-cache";
 
 type ArchiveItem = {
   id: string;
@@ -307,9 +308,13 @@ export default function ArchiveWorkspace() {
   async function refresh() {
     setLoading(true);
     try {
-      const res = await fetch("/api/fnos/archive", { cache: "no-store" });
-      const next = await res.json();
-      if (!res.ok || next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
+      const cached = readCachedJson<ArchiveData>("/api/fnos/archive", { storageTtl: 5 * 60_000 });
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+      }
+      const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>("/api/fnos/archive", { ttl: 3 * 60_000, storageTtl: 5 * 60_000 });
+      if (next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
       setData({ items: next.items || [], categories: next.categories || [], tags: next.tags || [], itemTags: next.itemTags || [], links: next.links || [] });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 조회 실패");
@@ -342,6 +347,7 @@ export default function ArchiveWorkspace() {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const result = await res.json();
     if (!res.ok || result.ok === false) throw new Error(result.error || "저장 실패");
+    if (url.startsWith("/api/fnos/archive")) invalidateClientCache("/api/fnos/archive");
     return result;
   }
 
@@ -360,6 +366,7 @@ export default function ArchiveWorkspace() {
       const res = await fetch("/api/fnos/archive", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 수정 실패");
+      invalidateClientCache("/api/fnos/archive");
       setMessage("아카이브를 수정했습니다.");
       await refresh();
     } catch (error) {
@@ -374,6 +381,7 @@ export default function ArchiveWorkspace() {
         const result = await res.json();
         if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 수정 실패");
       }));
+      invalidateClientCache("/api/fnos/archive");
       setMessage(`${items.length.toLocaleString("ko-KR")}개 항목을 수정했습니다.`);
       await refresh();
     } catch (error) {
@@ -393,6 +401,7 @@ export default function ArchiveWorkspace() {
       const res = await fetch("/api/fnos/archive", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 삭제 실패");
+      invalidateClientCache("/api/fnos/archive");
       setPendingDeleteIds([]);
       await refresh();
     } catch (error) {
@@ -498,6 +507,7 @@ export default function ArchiveWorkspace() {
         return fetch("/api/fnos/archive", { method: "POST", body: formData }).then(async (res) => {
           const result = await res.json();
           if (!res.ok || result.ok === false) throw new Error(result.error || "저장 실패");
+          invalidateClientCache("/api/fnos/archive");
           return result;
         });
       }));
@@ -549,6 +559,7 @@ export default function ArchiveWorkspace() {
       const res = await fetch("/api/fnos/archive", { method: "POST", body: formData });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
+      invalidateClientCache("/api/fnos/archive");
       void requestPreview(result?.saved?.id);
       setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";

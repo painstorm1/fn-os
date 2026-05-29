@@ -24,6 +24,7 @@ import {
   modalTextareaClass,
   useEscapeToClose,
 } from "@/components/fn-ui";
+import { cachedJson as cachedClientJson, invalidateClientCache, readCachedJson } from "@/lib/client-cache";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -6804,8 +6805,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 ]`);
 
   function loadSummary() {
-    fetch("/api/dashboard/summary", { credentials: "include" })
-      .then((res) => res.json())
+    const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+    if (cached) setSummary(cached);
+    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000 })
       .then((summaryData) => {
         setSummary(summaryData);
       })
@@ -8213,9 +8215,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
       if (nextRelation !== "all") params.set("relation", nextRelation);
-      const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
+      const endpoint = `/api/fnos/customers?${params.toString()}`;
+      const cached = readCachedJson<{ customers?: FnCustomer[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 5 * 60_000 });
+      if (cached) {
+        setCustomers(cached.customers || []);
+        setTotal(Number(cached.total || 0));
+        setLoading(false);
+      }
+      const data = await cachedClientJson<{ customers?: FnCustomer[]; total?: number; ok?: boolean; error?: string }>(endpoint, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 });
+      if (data.ok === false) {
         setCustomerMessage(data.error || "거래처 조회 실패");
         return;
       }
@@ -8337,9 +8345,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setChannelLoading(true);
     setCredentialsRevealed(false);
     try {
-      const res = await fetch("/api/fnos/sales-channels", { cache: "no-store", credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
+      const data = await cachedClientJson<{ channels?: SalesChannelRow[]; ok?: boolean; error?: string }>("/api/fnos/sales-channels", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 });
+      if (data.ok === false) {
         setCustomerMessage(data.error || "쇼핑몰 채널 조회 실패");
         return;
       }
@@ -8411,6 +8418,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       setCustomerMessage(data.error || "거래처 저장 실패");
       return;
     }
+    invalidateClientCache("/api/fnos/customers");
     const savedCustomer = data.customer || {};
     if (normalizeCustomerAttribute(draft.customer_type) === "shopping") {
       const channelPayload = {
@@ -8433,6 +8441,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         setCustomerMessage(channelData.error || "쇼핑몰 채널 저장 실패");
         return;
       }
+      invalidateClientCache("/api/fnos/sales-channels");
       const savedChannel = (channelData.channels || [])[0] as SalesChannelRow | undefined;
       const channelId = String(savedChannel?.id || channelDraft.id || "");
       const credentialPayload = Object.fromEntries(
@@ -8452,6 +8461,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           setCustomerMessage(credentialData.error || "쇼핑몰 credential 저장 실패");
           return;
         }
+        invalidateClientCache("/api/fnos/sales-channel-credentials");
       }
     }
     setCustomerMessage(`거래처 저장 완료: ${code}`);
@@ -8476,6 +8486,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       setCustomerMessage(data.error || "거래처 삭제 실패");
       return;
     }
+    invalidateClientCache("/api/fnos/customers");
+    invalidateClientCache("/api/fnos/sales-channels");
     setCustomerMessage(`거래처 삭제 완료: ${code}`);
     setModalOpen(false);
     await loadCustomers(page, query, relationFilter);
@@ -8834,9 +8846,16 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize), relation: nextFilter });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
       if (nextSearchByCode) params.set("searchField", "code");
-      const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
+      const endpoint = `/api/fnos/products/master?${params.toString()}`;
+      const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
+      if (cached) {
+        setProducts(cached.products || []);
+        setWarehouses(cached.warehouses || []);
+        setTotal(Number(cached.total || 0));
+        setLoading(false);
+      }
+      const data = await cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(endpoint, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 });
+      if (data.ok === false) {
         setProductMessage(data.error || "품목 조회 실패");
         return;
       }
@@ -8964,6 +8983,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setProductMessage(`품목 저장 완료: ${productCode}`);
     setMessage("");
     setModalOpen(false);
+    invalidateClientCache("/api/fnos/products/master");
     await loadProducts(page, query);
   }
 
@@ -8985,6 +9005,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }
     setProductMessage(`품목 삭제 완료: ${productCode}`);
     setModalOpen(false);
+    invalidateClientCache("/api/fnos/products/master");
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
@@ -9173,6 +9194,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }
     setProductMessage(`엑셀 등록 완료: 저장 ${saved}건 / 스킵 ${skipped}건`);
     setMessage("");
+    invalidateClientCache("/api/fnos/products/master");
     await loadProducts(1, query);
     setPage(1);
   }
@@ -9569,8 +9591,7 @@ function ProductEditModal({
     let alive = true;
     const timer = window.setTimeout(async () => {
       const params = new URLSearchParams({ q: keyword, page: "1", pageSize: "20", excludeBom: "true" });
-      const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
+      const data = await cachedClientJson<{ products?: FnProduct[] }>(`/api/fnos/products/master?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 }).catch(() => ({ products: [] }));
       if (alive) {
         setComponentCandidates((data.products || []).filter((product: FnProduct) => (
           product.id !== draft.id && !bomRows.some((row) => row.component_product_id === product.id)
@@ -10652,8 +10673,8 @@ function AdsAnalysisWorkspace() {
     const graphRange = adChartRange(dateFrom, dateTo);
     const graphParams = new URLSearchParams({ from: graphRange.from, to: graphRange.to });
     Promise.all([
-      fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" }).then((res) => res.json()),
-      fetch(`/api/fnos/ads/summary?${graphParams.toString()}`, { cache: "no-store" }).then((res) => res.json()),
+      cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 }),
+      cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${graphParams.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 }),
     ])
       .then(([data, graphData]) => {
         setSummary(data);
@@ -10852,6 +10873,7 @@ function AdsRightPanel() {
     }
     setMessage(data.message || data.error || "업로드 처리 완료");
     if (res.ok) {
+      invalidateClientCache("/api/fnos/ads/summary");
       setUploadedAdFiles([]);
       openAdRange(dateFrom, dateTo);
     }
@@ -10871,8 +10893,7 @@ function AdsRightPanel() {
       ["최근 30일", adRangeForPreset("30d")],
     ].map(([label, range]) => {
       const params = new URLSearchParams(range as { from: string; to: string });
-      return fetch(`/api/fnos/ads/summary?${params.toString()}`, { cache: "no-store" })
-        .then((res) => res.json())
+      return cachedClientJson<AdsSummary>(`/api/fnos/ads/summary?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
         .then((data) => [label, data] as const);
     }))
       .then((entries) => {
@@ -11249,8 +11270,12 @@ function AccountingWorkspace() {
 
   function loadSummary() {
     setLoading(true);
-    fetch("/api/accounting/summary", { cache: "no-store" })
-      .then((res) => res.json())
+    const cached = readCachedJson<AccountingSummary>("/api/accounting/summary", { storageTtl: 10 * 60_000 });
+    if (cached) {
+      setSummary(cached);
+      setLoading(false);
+    }
+    cachedClientJson<AccountingSummary>("/api/accounting/summary", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
       .finally(() => setLoading(false));
@@ -11362,6 +11387,7 @@ function AccountingWorkspace() {
     setUploadedExpenseFiles([]);
     setPreviewRows([]);
     setParsedFiles(Array.isArray(data.files) ? data.files : []);
+    invalidateClientCache("/api/accounting/summary");
     loadSummary();
   }
 
@@ -11380,6 +11406,7 @@ function AccountingWorkspace() {
     }
     setMessage("비용 1건을 저장했습니다.");
     setManual((prev) => ({ ...prev, vendor_name: "", description: "", amount: "", vat_amount: "", total_amount: "", memo: "" }));
+    invalidateClientCache("/api/accounting/summary");
     loadSummary();
   }
 
@@ -11779,8 +11806,14 @@ function AccountingRightPanel() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/accounting/summary", { cache: "no-store" })
-      .then((res) => res.json())
+    let cachedTimer: number | undefined;
+    const cached = readCachedJson<AccountingSummary>("/api/accounting/summary", { storageTtl: 10 * 60_000 });
+    if (cached) {
+      cachedTimer = window.setTimeout(() => {
+        if (alive) setSummary(cached);
+      }, 0);
+    }
+    cachedClientJson<AccountingSummary>("/api/accounting/summary", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
       .then((data) => {
         if (alive) setSummary(data);
       })
@@ -11789,6 +11822,7 @@ function AccountingRightPanel() {
       });
     return () => {
       alive = false;
+      if (cachedTimer) window.clearTimeout(cachedTimer);
     };
   }, []);
 
@@ -11847,8 +11881,16 @@ function DashboardNew() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/dashboard/summary", { cache: "no-store" })
-      .then((res) => res.json())
+    let cachedTimer: number | undefined;
+    const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+    if (cached) {
+      cachedTimer = window.setTimeout(() => {
+        if (!alive) return;
+        setSummary(cached);
+        setLoading(false);
+      }, 0);
+    }
+    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000 })
       .then((data) => {
         if (alive) setSummary(data);
       })
@@ -11860,6 +11902,7 @@ function DashboardNew() {
       });
     return () => {
       alive = false;
+      if (cachedTimer) window.clearTimeout(cachedTimer);
     };
   }, []);
 

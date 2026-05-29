@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, KpiCard, StatusBadge } from "@/components/fn-ui";
+import { cachedJson, readCachedJson } from "@/lib/client-cache";
 
 type Row = Record<string, unknown>;
 type Point = {
@@ -285,8 +286,22 @@ export default function MainDashboard() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/dashboard/summary", { cache: "no-store" })
-      .then((res) => res.json())
+    let cachedTimer: number | undefined;
+    const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+    if (cached) {
+      cachedTimer = window.setTimeout(() => {
+        if (!alive) return;
+        setSummary(cached);
+        setLoading(false);
+      }, 0);
+    }
+    cachedJson<DashboardSummary>("/api/dashboard/summary", {
+      ttl: 45_000,
+      storageTtl: 60_000,
+      onUpdate: (data) => {
+        if (alive) setSummary(data);
+      },
+    })
       .then((data) => {
         if (alive) setSummary(data);
       })
@@ -298,6 +313,7 @@ export default function MainDashboard() {
       });
     return () => {
       alive = false;
+      if (cachedTimer) window.clearTimeout(cachedTimer);
     };
   }, []);
 
