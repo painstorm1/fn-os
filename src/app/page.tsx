@@ -9590,24 +9590,26 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
         cost: adNumber(row.cost),
         roas: adNumber(row.roas),
       };
-    });
+    })
+    .sort((a, b) => b.roas - a.roas);
   const maxRoas = Math.max(...orderedRows.map((row) => row.roas), 1);
+  const barOpacityByRank = ["1", "0.78", "0.62", "0.46", "0.3"];
   return (
     <Card className="p-4">
       <SectionHeader title="채널별 현황" className="mb-3" />
       <div className="mt-3 space-y-2.5">
-        {orderedRows.map((row) => (
+        {orderedRows.map((row, index) => (
           <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
             <div className="grid grid-cols-[minmax(82px,1fr)_auto_auto] items-center gap-2 text-sm">
               <span className="flex min-w-0 items-center gap-1.5 font-black text-slate-700">
                 <AdChannelLogo channel={row.channel} />
                 <span className="truncate">{row.label}</span>
               </span>
-              <span className="shrink-0 font-black text-slate-950">{adPercent(row.roas)}</span>
-              <span className="shrink-0 font-black text-orange-600">{krw(row.cost)}</span>
+              <span className="shrink-0 font-black text-[#ff6a00]">{adPercent(row.roas)}</span>
+              <span className="shrink-0 font-black text-gray-950">{krw(row.cost)}</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-              <div className="h-full rounded-full bg-[#ff6a00]" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%` }} />
+              <div className="h-full rounded-full bg-[#ff6a00]" style={{ width: `${Math.min(100, (row.roas / maxRoas) * 100)}%`, opacity: barOpacityByRank[index] || "0.3" }} />
             </div>
           </div>
         ))}
