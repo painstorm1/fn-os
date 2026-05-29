@@ -21,6 +21,16 @@ function customerName(row: AnyRecord) {
   return text(row.customer_name || row.cust_name);
 }
 
+function normalizeCustomerType(value: unknown) {
+  const normalized = text(value).toLowerCase();
+  if (["shopping", "mall", "shop", "쇼핑몰"].includes(normalized)) return "shopping";
+  return "general";
+}
+
+function customerTypeLabel(value: unknown) {
+  return normalizeCustomerType(value) === "shopping" ? "쇼핑몰" : "일반";
+}
+
 function matches(values: unknown[], query: string) {
   if (!query) return true;
   const needle = query.toLowerCase().replace(/\s+/g, "");
@@ -31,6 +41,7 @@ export async function GET(request: NextRequest) {
   try {
     if (!hasDbConfig()) return NextResponse.json({ ok: true, customers: [], total: 0, page: 1, pageSize: 20 });
     const query = text(request.nextUrl.searchParams.get("q"));
+    const relation = text(request.nextUrl.searchParams.get("relation"));
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
     const rows = await selectRows<AnyRecord>("customers", { order: "customer_name.asc", limit: 5000 });
@@ -40,7 +51,8 @@ export async function GET(request: NextRequest) {
         id: text(row.id),
         customer_code: customerCode(row),
         customer_name: customerName(row),
-        customer_type: text(row.customer_type || row.cust_type),
+        customer_type: normalizeCustomerType(row.customer_type || row.cust_type),
+        customer_type_label: customerTypeLabel(row.customer_type || row.cust_type),
         business_no: text(row.business_no),
         ceo_name: text(row.ceo_name),
         contact_name: text(row.contact_name),
@@ -49,6 +61,11 @@ export async function GET(request: NextRequest) {
         memo: text(row.memo || row.remarks),
         is_active: boolActive(row.is_active),
       }))
+      .filter((row) => {
+        if (relation === "shopping") return row.customer_type === "shopping";
+        if (relation === "general") return row.customer_type !== "shopping";
+        return true;
+      })
       .filter((row) => matches([row.customer_code, row.customer_name, row.business_no, row.phone, row.contact_name], query));
     const offset = (page - 1) * pageSize;
     return NextResponse.json({
@@ -78,7 +95,7 @@ export async function POST(request: NextRequest) {
       cust_code: code,
       customer_name: name,
       cust_name: name,
-      customer_type: text(customer.customer_type || customer.cust_type),
+      customer_type: normalizeCustomerType(customer.customer_type || customer.cust_type),
       business_no: text(customer.business_no),
       ceo_name: text(customer.ceo_name),
       contact_name: text(customer.contact_name),

@@ -952,6 +952,7 @@ type FnCustomer = {
   customer_name?: string;
   cust_name?: string;
   customer_type?: string;
+  customer_type_label?: string;
   business_no?: string;
   ceo_name?: string;
   contact_name?: string;
@@ -963,6 +964,25 @@ type FnCustomer = {
 
 type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
+type CustomerRelationFilter = "general" | "shopping" | "all";
+type CustomerAttribute = "general" | "shopping";
+
+function normalizeCustomerAttribute(value: unknown, fallback: CustomerAttribute = "general"): CustomerAttribute {
+  const textValue = String(value || "").trim().toLowerCase();
+  if (["shopping", "mall", "shop", "쇼핑몰"].includes(textValue)) return "shopping";
+  return fallback;
+}
+
+function customerAttributeLabel(value: unknown) {
+  return normalizeCustomerAttribute(value) === "shopping" ? "쇼핑몰" : "일반";
+}
+
+function formatBusinessNoInput(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
 
 function normalizeProductAttribute(value: unknown, fallback: ProductAttribute = "plain"): ProductAttribute {
   const textValue = String(value || "").trim().toUpperCase();
@@ -8037,7 +8057,7 @@ function MasterManagementPanel({
     <div className="space-y-4">
       <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
         <div className="flex min-w-max gap-1">
-          {masterTabs.map((tab) => (
+          {masterTabs.filter((tab) => tab.key !== "channels").map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -8107,6 +8127,7 @@ function MasterManagementPanel({
 function CustomerManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
   const [customers, setCustomers] = useState<FnCustomer[]>([]);
   const [query, setQuery] = useState("");
+  const [relationFilter, setRelationFilter] = useState<CustomerRelationFilter>("general");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -8118,14 +8139,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   function blankCustomerDraft() {
-    return { id: "", customer_code: "", customer_name: "", customer_type: "", business_no: "", contact_name: "", phone: "", payment_terms: "", memo: "" };
+    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", contact_name: "", phone: "", payment_terms: "", memo: "" };
   }
 
-  async function loadCustomers(nextPage = page, nextQuery = query) {
+  async function loadCustomers(nextPage = page, nextQuery = query, nextRelation = relationFilter) {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      if (nextRelation !== "all") params.set("relation", nextRelation);
       const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -8140,9 +8162,9 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadCustomers(page, query), 0);
+    const timer = window.setTimeout(() => void loadCustomers(page, query, relationFilter), 0);
     return () => window.clearTimeout(timer);
-  }, [page, query]);
+  }, [page, query, relationFilter]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -8164,8 +8186,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       id: customer.id || "",
       customer_code: customer.customer_code || customer.cust_code || "",
       customer_name: customer.customer_name || customer.cust_name || "",
-      customer_type: customer.customer_type || "",
-      business_no: customer.business_no || "",
+      customer_type: normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label),
+      business_no: formatBusinessNoInput(customer.business_no || ""),
       contact_name: customer.contact_name || "",
       phone: customer.phone || "",
       payment_terms: customer.payment_terms || "",
@@ -8175,7 +8197,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }
 
   function updateDraft(key: string, value: string) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+    setDraft((prev) => {
+      if (key === "customer_type") return { ...prev, customer_type: normalizeCustomerAttribute(value) };
+      if (key === "business_no") return { ...prev, business_no: formatBusinessNoInput(value) };
+      return { ...prev, [key]: value };
+    });
   }
 
   async function saveCustomerDraft() {
@@ -8199,7 +8225,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setCustomerMessage(`거래처 저장 완료: ${code}`);
     setMessage("");
     setModalOpen(false);
-    await loadCustomers(page, query);
+    await loadCustomers(page, query, relationFilter);
   }
 
   async function deleteCustomerDraft() {
@@ -8220,35 +8246,70 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     }
     setCustomerMessage(`거래처 삭제 완료: ${code}`);
     setModalOpen(false);
-    await loadCustomers(page, query);
+    await loadCustomers(page, query, relationFilter);
   }
 
   function downloadCustomerTemplate() {
     void downloadTableXlsx(
       "FN_OS_거래처_엑셀폼.xlsx",
       "거래처",
-      ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "메모"],
-      [["CUST001", "샘플거래처", "쇼핑몰", "000-00-00000", "담당자", "010-0000-0000", "월말결제", ""]],
+      ["속성", "거래처코드", "거래처명", "사업자번호", "담당자", "전화번호", "주소/Email/기타메모"],
+      [["일반", "CUST001", "샘플거래처", "1111111111", "담당자", "010-0000-0000", "주소: 서울 / Email: sample@fnos.local"]],
     );
   }
 
   async function uploadCustomers(file: File) {
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch("/api/fnos/customers/upload", { method: "POST", credentials: "include", body: form });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      setCustomerMessage(data.error || "거래처 엑셀등록 실패");
-      return;
+    const rows = await readXlsxObjects(file);
+    const allRes = await fetch("/api/fnos/customers?page=1&pageSize=5000", { cache: "no-store" });
+    const allData = await allRes.json().catch(() => ({}));
+    const existing = new Map<string, FnCustomer>((allData.customers || []).map((customer: FnCustomer) => [String(customer.customer_code || customer.cust_code || ""), customer]));
+    const normalized = rows
+      .map((row) => ({
+        customer_type: normalizeCustomerAttribute(row["속성"] || row["거래처속성"] || row["거래처구분"] || row["구분"]),
+        customer_code: String(row["거래처코드"] || row["거래처 코드"] || row["코드"] || row["customer_code"] || "").trim(),
+        customer_name: String(row["거래처명"] || row["거래처명칭"] || row["상호"] || row["customer_name"] || "").trim(),
+        business_no: formatBusinessNoInput(String(row["사업자번호"] || row["사업자등록번호"] || "").trim()),
+        contact_name: String(row["담당자"] || row["연락담당자"] || "").trim(),
+        phone: String(row["전화번호"] || row["전화"] || row["연락처"] || row["휴대폰"] || "").trim(),
+        memo: String(row["주소/Email/기타메모"] || row["거래처정보"] || row["기타메모"] || row["메모"] || row["비고"] || "").trim(),
+      }))
+      .filter((row) => row.customer_code && row.customer_name);
+    const exactMatches = normalized.filter((row) => {
+      const found = existing.get(row.customer_code);
+      return found && String(found.customer_name || found.cust_name || "").trim() === row.customer_name;
+    });
+    const overwrite = exactMatches.length
+      ? window.confirm(`${exactMatches.length}개 거래처의 거래처코드와 거래처명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      : false;
+    let saved = 0;
+    let skipped = 0;
+    for (const row of normalized) {
+      const found = existing.get(row.customer_code);
+      if (found && !overwrite) {
+        skipped += 1;
+        continue;
+      }
+      if (found && String(found.customer_name || found.cust_name || "").trim() !== row.customer_name) {
+        skipped += 1;
+        continue;
+      }
+      const res = await fetch("/api/fnos/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ customer: { ...row, id: found?.id } }),
+      });
+      if (res.ok) saved += 1;
     }
-    setCustomerMessage(`거래처 엑셀등록 완료: ${data.count || 0}건`);
-    await loadCustomers(1, query);
+    setCustomerMessage(`거래처 엑셀등록 완료: 저장 ${saved.toLocaleString("ko-KR")}건 / 스킵 ${skipped.toLocaleString("ko-KR")}건`);
+    await loadCustomers(1, query, relationFilter);
     setPage(1);
   }
 
   async function downloadCustomers() {
     const params = new URLSearchParams({ page: "1", pageSize: "5000" });
     if (query.trim()) params.set("q", query.trim());
+    if (relationFilter !== "all") params.set("relation", relationFilter);
     const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
@@ -8258,14 +8319,13 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     const rows = ((data.customers || []) as FnCustomer[]).map((customer) => [
       customer.customer_code || customer.cust_code || "",
       customer.customer_name || customer.cust_name || "",
-      customer.customer_type || "",
+      customerAttributeLabel(customer.customer_type || customer.customer_type_label),
       customer.business_no || "",
       customer.contact_name || "",
       customer.phone || "",
-      customer.payment_terms || "",
       customer.memo || "",
     ]);
-    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "메모"], rows);
+    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "속성", "사업자번호", "담당자", "전화번호", "주소/Email/기타메모"], rows);
   }
 
   const pageNumbers = Array.from({ length: Math.min(6, pageCount) }, (_, index) => {
@@ -8277,7 +8337,28 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     <div className="space-y-4">
       <Panel
         title="거래처 관리"
-        subtitle={<div className="text-sm font-bold text-slate-500">거래처수 {total.toLocaleString("ko-KR")}개</div>}
+        subtitle={
+          <div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
+            {[
+              { key: "general" as CustomerRelationFilter, label: "일반" },
+              { key: "shopping" as CustomerRelationFilter, label: "쇼핑몰" },
+              { key: "all" as CustomerRelationFilter, label: "전체거래처" },
+            ].map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => {
+                  setRelationFilter(filter.key);
+                  setPage(1);
+                }}
+                className={`font-black underline-offset-4 hover:underline ${relationFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"}`}
+              >
+                {filter.label}
+              </button>
+            ))}
+            <span>거래처수 {total.toLocaleString("ko-KR")}개</span>
+          </div>
+        }
         action={
           <div className="flex flex-wrap gap-2">
             <ActionButton type="button" onClick={openNewCustomer}>F2 새 거래처</ActionButton>
@@ -8318,11 +8399,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               <tr>
                 <th className="py-2 text-left">거래처코드</th>
                 <th className="py-2 text-left">거래처명</th>
-                <th className="py-2 text-left">구분</th>
+                <th className="py-2 text-left">속성</th>
                 <th className="py-2 text-left">사업자번호</th>
                 <th className="py-2 text-left">담당자</th>
-                <th className="py-2 text-left">전화</th>
-                <th className="py-2 text-left">결제조건</th>
+                <th className="py-2 text-left">전화번호</th>
+                <th className="py-2 text-left">메모</th>
               </tr>
             </thead>
             <tbody>
@@ -8330,11 +8411,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                 <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
                   <td className="py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
                   <td className="py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
-                  <td className="py-2 text-slate-500">{customer.customer_type || "-"}</td>
+                  <td className="py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
                   <td className="py-2 text-slate-500">{customer.business_no || "-"}</td>
                   <td className="py-2 text-slate-500">{customer.contact_name || "-"}</td>
                   <td className="py-2 text-slate-500">{customer.phone || "-"}</td>
-                  <td className="py-2 text-slate-500">{customer.payment_terms || "-"}</td>
+                  <td className="py-2 text-slate-500">{customer.memo || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -8847,6 +8928,13 @@ function CustomerEditModal({
   onDelete: () => void;
 }) {
   useEscapeToClose(true, onClose);
+  const customerType = normalizeCustomerAttribute(draft.customer_type);
+  const businessSameAsCode = Boolean(draft.customer_code && draft.business_no && draft.business_no === formatBusinessNoInput(draft.customer_code));
+
+  function changeBusinessSameAsCode(checked: boolean) {
+    onChange("business_no", checked ? draft.customer_code || "" : "");
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
       <ModalShell className="w-full max-w-2xl">
@@ -8854,15 +8942,48 @@ function CustomerEditModal({
           <h3 className="text-xl font-black">{draft.id ? "거래처 수정" : "새 거래처 등록"}</h3>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="text-xs font-black text-slate-500">거래처코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">거래처명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">거래처구분<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_type || ""} onChange={(event) => onChange("customer_type", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">사업자번호<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">담당자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">전화<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500 md:col-span-2">결제조건<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.payment_terms || ""} onChange={(event) => onChange("payment_terms", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500 md:col-span-2">메모<textarea className="mt-1 min-h-[90px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} /></label>
+        <div className="mt-4 space-y-4">
+          <div>
+            <div className="mb-2 text-xs font-black text-slate-500">속성 선택 *</div>
+            <div className="flex gap-2">
+              {[
+                { key: "general" as CustomerAttribute, label: "일반" },
+                { key: "shopping" as CustomerAttribute, label: "쇼핑몰" },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => onChange("customer_type", item.key)}
+                  className={`rounded-md border px-4 py-2 text-sm font-black ${customerType === item.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-500"}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-black text-slate-500">거래처코드 *<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></label>
+            <label className="text-xs font-black text-slate-500">거래처명 *<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></label>
+            <label className="text-xs font-black text-slate-500 md:col-span-2">
+              사업자번호
+              <input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
+              <span className="mt-2 flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
+                거래처코드와 동일
+              </span>
+            </label>
+            <label className="text-xs font-black text-slate-500">담당자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></label>
+            <label className="text-xs font-black text-slate-500">전화번호<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></label>
+            <label className="text-xs font-black text-slate-500 md:col-span-2">거래처정보 · 기타 메모<textarea className="mt-1 min-h-[100px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></label>
+          </div>
+          {customerType === "shopping" && (
+            <div className="rounded-xl border border-orange-100 bg-orange-50/60 p-4">
+              <div className="mb-2 text-sm font-black text-orange-700">쇼핑몰정보</div>
+              <p className="text-xs font-bold leading-relaxed text-orange-700">
+                ID/PW/API 연동정보는 주문수집 credential 설계 확정 후 저장 필드와 env 반영 방식까지 연결합니다. 지금은 위 메모에 임시 정보만 남길 수 있습니다.
+              </p>
+            </div>
+          )}
         </div>
         <div className="mt-5 flex justify-between gap-2">
           <div>{draft.id && <button type="button" onClick={onDelete} className="rounded-md border border-rose-200 px-4 py-2 text-sm font-black text-rose-600 hover:bg-rose-50">삭제</button>}</div>
