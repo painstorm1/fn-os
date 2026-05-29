@@ -2603,7 +2603,7 @@ function NativeProducts() {
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
-            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-lg bg-white p-3 transition hover:bg-orange-50/60">
+            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-orange-200 hover:bg-orange-50/60">
               <div className="aspect-square w-full overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
@@ -3454,7 +3454,7 @@ function NativeProductForm({ id }: { id?: number }) {
             </div>
             <Field label="메모"><textarea className="field-input" name="note" defaultValue={product?.note || ""} /></Field>
             {itemType === "PRODUCT" && (
-              <section className="grid gap-3 border-t border-slate-200 pt-4">
+              <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-black">옵션별 FN 품목 연동</h3>
                   <span className="text-xs font-bold text-slate-500">{fnSkuLinks.length.toLocaleString("ko-KR")}개 연결</span>
@@ -3463,7 +3463,7 @@ function NativeProductForm({ id }: { id?: number }) {
                   {linkGroups.map((optionName) => {
                     const groupLinks = optionName ? fnSkuLinks.filter((link) => sameImportOption(link, optionName)) : fnSkuLinks.filter((link) => !linkOptionName(link));
                     return (
-                      <section key={optionName || "__default"} className="border-l-2 border-orange-100 py-1 pl-3">
+                      <section key={optionName || "__default"} className="rounded-lg border border-orange-100 bg-orange-50/30 px-3 py-2">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div>
                             <p className="text-sm font-black">{optionName || "기본 옵션"}</p>
@@ -3505,7 +3505,7 @@ function NativeProductForm({ id }: { id?: number }) {
               </section>
             )}
             {itemType === "PRODUCT" && (
-              <section className="grid gap-3 border-t border-slate-200 pt-4">
+              <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-black">부자재 연동</h3>
                   <span className="text-xs font-bold text-slate-500">상품 1개당 사용 수량</span>
@@ -4243,7 +4243,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           <input type="hidden" name="fx_rate" value={String(fxRate)} />
           {Object.entries(visibleStageValues).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
 
-          <section className="grid gap-3 border-t border-slate-200 pt-4">
+          <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 className="border-b border-slate-200 pb-2 text-base font-black">기본 정보</h3>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="발주처(공장)">
@@ -4271,7 +4271,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
             </div>
           </section>
 
-          <section className="grid gap-3">
+          <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-end justify-between border-b border-slate-200 pb-2">
               <h3 className="text-base font-black">진행 상태</h3>
               <p className="text-xs font-bold text-slate-500">날짜는 필요한 단계만 입력하면 됩니다.</p>
@@ -4279,12 +4279,12 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
             <StageProgressLane paymentMethod={paymentMethod} values={visibleStageValues} onChange={(name, value) => setStageValues((prev) => ({ ...prev, [name]: value }))} />
           </section>
 
-          <section className="grid gap-3">
+          <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <h3 className="text-base font-black">제품 라인</h3>
               <div className="flex gap-2">
-                <button type="button" className="inline-flex h-9 items-center rounded-md border border-slate-300 px-3 text-sm font-black" onClick={() => setCatalogOpen(true)}>카탈로그에서 추가</button>
-                <button type="button" className="inline-flex h-9 items-center rounded-md border border-slate-900 px-3 text-sm font-black" onClick={addEmptyLine}>+ 직접 입력</button>
+                <button type="button" className="inline-flex h-9 items-center rounded-lg bg-[#ff6a00] px-3 text-sm font-black text-white shadow-sm hover:bg-[#ea580c]" onClick={() => setCatalogOpen(true)}>카탈로그에서 추가</button>
+                <button type="button" className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-50" onClick={addEmptyLine}>직접 입력</button>
               </div>
             </div>
             <div className="hidden grid-cols-[76px_1.6fr_1fr_80px_160px_120px_1fr_40px] gap-3 border-b border-slate-200 px-2 py-2 text-sm font-black text-slate-600 xl:grid">
@@ -4344,8 +4344,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 );
               })}
             </div>
-            <div className="grid items-end gap-4 border-t border-slate-200 pt-3 md:grid-cols-[minmax(0,660px)_1fr]">
-              <div className={`grid gap-3 ${isTT ? "md:grid-cols-[1fr_1fr_1fr_1.55fr]" : "md:grid-cols-2"}`}>
+            <div className="grid items-end gap-4 border-t border-slate-200 pt-4 md:grid-cols-[minmax(0,660px)_1fr]">
+              <div className={`grid gap-3 rounded-lg border border-orange-100 bg-orange-50/30 p-3 ${isTT ? "md:grid-cols-[1fr_1fr_1fr_1.55fr]" : "md:grid-cols-2"}`}>
                 {isTT ? (
                   <>
                     <Field label="실결제 통화">
@@ -4380,7 +4380,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
               </div>
             </div>
-            <div className="grid gap-3 border-t border-slate-200 pt-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
+            <div className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
               <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" value={chinaCosts.shipping} onChange={(event) => setChinaCosts((prev) => ({ ...prev, shipping: event.target.value }))} /></Field>
               <Field label="수수료"><input className="field-input text-right" type="number" name="china_fee" value={chinaCosts.fee} onChange={(event) => setChinaCosts((prev) => ({ ...prev, fee: event.target.value }))} /></Field>
               <Field label="중국내 기타금액"><input className="field-input text-right" type="number" name="china_other_cost" value={chinaCosts.other} onChange={(event) => setChinaCosts((prev) => ({ ...prev, other: event.target.value }))} /></Field>
@@ -4393,7 +4393,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
             </div>
           </section>
 
-          <section className="grid gap-3 border-t border-slate-200 pt-4">
+          <section className="grid gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 className="border-b border-slate-200 pb-2 text-base font-black">물류·통관 비용 (원)</h3>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="배대지 배송비"><input className="field-input text-right" type="number" name="shipping_cost" defaultValue={order?.shipping_cost || 0} /></Field>
@@ -8073,7 +8073,16 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             <ActionButton type="button" onClick={openNewCustomer}>F2 새 거래처</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => void downloadCustomers()}>거래처정보 다운로드</ActionButton>
-            <ActionButton type="button" variant="secondary" onClick={downloadCustomerTemplate} title="엑셀폼 다운로드">엑셀폼</ActionButton>
+            <ActionButton
+              type="button"
+              variant="secondary"
+              onClick={downloadCustomerTemplate}
+              className="w-10 px-0"
+              aria-label="엑셀폼 다운로드"
+              title="엑셀폼 다운로드"
+            >
+              <ExcelFormIcon />
+            </ActionButton>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadCustomers(file);
@@ -8507,16 +8516,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               type="button"
               variant="secondary"
               onClick={downloadProductTemplate}
-              className="w-10 px-0 text-emerald-700"
+              className="w-10 px-0"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
-              <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-                <path d="M5 3h9l5 5v13H5z" fill="currentColor" opacity="0.16" />
-                <path d="M14 3v5h5M5 3h9l5 5v13H5V3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-                <path d="M8 11h8M8 14h8M8 17h8M11 11v6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M8.2 9.2l2.9 3.8m0-3.8-2.9 3.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
+              <ExcelFormIcon />
             </ActionButton>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
@@ -10181,6 +10185,16 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
         {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
       </div>
     </section>
+  );
+}
+
+function ExcelFormIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <rect x="3.5" y="3" width="17" height="18" rx="2" fill="#16a34a" />
+      <path d="M8 8.2 11 12l-3 3.8M13 8.2 10 12l3 3.8" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15.2 8.2h2.2M15.2 12h2.2M15.2 15.8h2.2" stroke="white" strokeWidth="1.4" strokeLinecap="round" opacity="0.9" />
+    </svg>
   );
 }
 
