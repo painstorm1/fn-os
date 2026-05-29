@@ -2,7 +2,20 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
-import { ActionButton, Card, EmptyState, FilterBar, FormField, ModalShell, PageHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
+import {
+  ActionButton,
+  Card,
+  ConfirmModal,
+  EmptyState,
+  FilterBar,
+  FormField,
+  FormModal,
+  PageHeader,
+  StatusBadge,
+  modalInputClass,
+  modalSelectClass,
+  modalTextareaClass,
+} from "@/components/fn-ui";
 
 type ArchiveItem = {
   id: string;
@@ -251,6 +264,8 @@ export default function ArchiveWorkspace() {
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [noticeMessage, setNoticeMessage] = useState("");
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const [autoText, setAutoText] = useState("");
   const [autoDrafts, setAutoDrafts] = useState<AutoArchiveDraft[]>([]);
   const [autoImagePreview, setAutoImagePreview] = useState("");
@@ -318,7 +333,7 @@ export default function ArchiveWorkspace() {
   useEffect(() => {
     if (!message) return;
     const shouldPopup = /(실패|선택|입력|없습니다)/.test(message) && !message.includes("미리보기를 생성할 URL");
-    if (shouldPopup) window.alert(message);
+    if (shouldPopup) setNoticeMessage(message);
     setMessage("");
   }, [message]);
 
@@ -367,11 +382,17 @@ export default function ArchiveWorkspace() {
 
   async function deleteArchiveItems(ids: string[]) {
     if (!ids.length) return;
-    if (!window.confirm(`${ids.length.toLocaleString("ko-KR")}개 항목을 삭제할까요?`)) return;
+    setPendingDeleteIds(ids);
+  }
+
+  async function confirmDeleteArchiveItems() {
+    const ids = pendingDeleteIds;
+    if (!ids.length) return;
     try {
       const res = await fetch("/api/fnos/archive", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 삭제 실패");
+      setPendingDeleteIds([]);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 삭제 실패");
@@ -751,6 +772,28 @@ export default function ArchiveWorkspace() {
           onDeleteItems={deleteArchiveItems}
         />
       )}
+
+      {noticeMessage && (
+        <FormModal
+          title="알림"
+          onClose={() => setNoticeMessage("")}
+          size="sm"
+          footer={<ActionButton type="button" onClick={() => setNoticeMessage("")}>확인</ActionButton>}
+        >
+          <p className="text-sm font-semibold leading-6 text-gray-700">{noticeMessage}</p>
+        </FormModal>
+      )}
+
+      {pendingDeleteIds.length > 0 && (
+        <ConfirmModal
+          title="아카이브 삭제"
+          description={`${pendingDeleteIds.length.toLocaleString("ko-KR")}개 항목을 삭제할까요?`}
+          onClose={() => setPendingDeleteIds([])}
+          onConfirm={() => void confirmDeleteArchiveItems()}
+          confirmLabel="삭제"
+          danger
+        />
+      )}
     </div>
   );
 }
@@ -824,8 +867,6 @@ function ArchiveList({
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
   }, [selectMode]);
-
-  useEscapeToClose(Boolean(editDraft), () => setEditDraft(null));
 
   return (
     <div className="space-y-4">
@@ -925,28 +966,34 @@ function ArchiveList({
       </section>
       )}
       {editDraft && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <ModalShell className="w-full max-w-lg">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-black text-slate-950">아카이브 수정</h2>
-              <button type="button" onClick={() => setEditDraft(null)} className="h-8 w-8 rounded border border-slate-200 text-sm font-black text-slate-500">X</button>
-            </div>
-            <div className="space-y-2">
+        <FormModal
+          title="아카이브 수정"
+          description="제목, URL, 소스, 카테고리, 미리보기, 메모를 수정합니다."
+          onClose={() => setEditDraft(null)}
+          size="md"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setEditDraft(null)}>취소</ActionButton>
+              <ActionButton type="button" onClick={() => void saveEdit()}>저장</ActionButton>
+            </>
+          }
+        >
+            <div className="space-y-3">
               <FormField label="제목">
-                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
+                <input className={modalInputClass} value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
               </FormField>
               <FormField label="URL">
-                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
+                <input className={modalInputClass} value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
               </FormField>
               <div className="grid grid-cols-2 gap-2">
                 <FormField label="소스">
-                  <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
+                  <select className={modalSelectClass} value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
                     <option value="">소스</option>
                     {sources.map((source) => <option key={source} value={source}>{source}</option>)}
                   </select>
                 </FormField>
                 <FormField label="카테고리">
-                  <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
+                  <select className={modalSelectClass} value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
                     const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
                     setEditDraft({ ...editDraft, category_id: category?.id || "" });
                   }}>
@@ -956,18 +1003,13 @@ function ArchiveList({
                 </FormField>
               </div>
               <FormField label="미리보기 이미지 URL">
-                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
+                <input className={modalInputClass} value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
               </FormField>
               <FormField label="메모">
-                <textarea className="field-input min-h-24 w-full rounded-md border border-slate-200 bg-white p-3 text-sm" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
+                <textarea className={modalTextareaClass} value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
               </FormField>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <ActionButton type="button" variant="secondary" onClick={() => setEditDraft(null)}>취소</ActionButton>
-              <ActionButton type="button" onClick={() => void saveEdit()}>저장</ActionButton>
-            </div>
-          </ModalShell>
-        </div>
+        </FormModal>
       )}
     </div>
   );
