@@ -743,6 +743,8 @@ type FnProduct = {
   inventory?: ProductInventoryRow[];
   bom?: ProductBomRow[];
   import_links?: ProductImportLinkRow[];
+  product_attribute?: ProductAttribute;
+  product_attribute_label?: string;
   product_kind?: ProductAttribute;
 };
 
@@ -780,20 +782,42 @@ type ProductImportLinkRow = {
   default_ratio?: number;
 };
 
-type ProductRelationFilter = "plain" | "ng" | "rg" | "import";
+type ProductRelationFilter = "plain" | "set" | "rg" | "import";
 type ProductAttribute = "plain" | "set" | "rg";
+
+function normalizeProductAttribute(value: unknown, fallback: ProductAttribute = "plain"): ProductAttribute {
+  const textValue = String(value || "").trim().toUpperCase();
+  if (!textValue) return fallback;
+  if (textValue === "PLAIN" || textValue === "일반") return "plain";
+  if (textValue === "SET" || textValue === "세트" || textValue === "NG" || textValue.includes("[NG")) return "set";
+  if (textValue === "RG" || textValue === "로켓그로스") return "rg";
+  return fallback;
+}
 
 function productAttributeFromName(value: unknown): ProductAttribute {
   const textValue = String(value || "").toUpperCase();
+  if (/\[SET[\]\}]/.test(textValue)) return "set";
   if (/\[RG[\]\}]/.test(textValue)) return "rg";
   if (/\[NG[\]\}]/.test(textValue)) return "set";
   return "plain";
 }
 
+function productAttributeOf(product: Partial<FnProduct>): ProductAttribute {
+  return normalizeProductAttribute(product.product_attribute ?? product.product_kind, productAttributeFromName(product.product_name));
+}
+
+function productAttributeLabel(attribute: unknown) {
+  const normalized = normalizeProductAttribute(attribute);
+  if (normalized === "set") return "SET";
+  if (normalized === "rg") return "RG";
+  return "일반";
+}
+
 function productNameWithAttribute(name: string, attribute: unknown) {
-  const baseName = String(name || "").replace(/^\s*\[(RG|NG|NS)[\]\}]\s*/i, "").trim();
-  if (attribute === "rg") return `[RG]${baseName}`;
-  if (attribute === "set") return `[NG]${baseName}`;
+  const normalized = normalizeProductAttribute(attribute);
+  const baseName = String(name || "").replace(/^\s*\[(RG|SET|NG|NS)[\]\}]\s*/i, "").trim();
+  if (normalized === "rg") return `[RG]${baseName}`;
+  if (normalized === "set") return `[SET]${baseName}`;
   return baseName;
 }
 
@@ -7671,7 +7695,7 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     label: "품목관리",
     title: "품목",
     templateHeaders: ["품목코드", "품목명", "속성", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
-    sampleRow: ["SET001", "세트상품명", "세트", "7000", "10000", "100", "0", "FL0001", "2"],
+    sampleRow: ["SET001", "[SET]세트상품명", "SET", "7000", "10000", "100", "0", "FL0001", "2"],
   },
   {
     key: "warehouses",
@@ -7767,7 +7791,7 @@ function MasterManagementPanel({
       {activeMasterTab === "warehouses" && (
         <Panel
           title="창고 목록"
-          subtitle="창고는 RG/NG 같은 재고상태 또는 창고 유형 기준으로 관리합니다."
+          subtitle="창고는 RG/SET 같은 재고상태 또는 창고 유형 기준으로 관리합니다."
           action={<button type="button" className="rounded-md bg-slate-950 px-4 py-2 text-sm font-black text-white" onClick={() => sync("inventory")}>재고 동기화</button>}
         >
           <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">창고 목록 테이블은 다음 단계에서 창고 조회 API와 연결합니다.</div>
@@ -7824,6 +7848,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       id: "",
       product_code: "",
       product_name: "",
+      product_attribute: "plain",
       product_kind: "plain",
       cost_price: "",
       standard_price: "",
@@ -7883,7 +7908,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       id: product.id || "",
       product_code: product.product_code || product.sku || "",
       product_name: product.product_name || "",
-      product_kind: productAttributeFromName(product.product_name),
+      product_attribute: productAttributeOf(product),
+      product_kind: productAttributeOf(product),
       cost_price: product.cost_price != null ? String(product.cost_price) : "",
       standard_price: product.standard_price != null ? String(product.standard_price) : "",
       ...stockValues,
@@ -7900,7 +7926,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   async function saveProductDraft() {
     const productCode = String(draft.product_code || "").trim();
     const rawProductName = String(draft.product_name || "").trim();
-    const productName = productNameWithAttribute(rawProductName, draft.product_kind);
+    const productAttribute = normalizeProductAttribute(draft.product_attribute ?? draft.product_kind);
+    const productName = productNameWithAttribute(rawProductName, productAttribute);
     if (!productCode || !rawProductName) {
       setProductMessage("품목코드와 품목명은 필수입니다.");
       return;
@@ -7921,6 +7948,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           id: draft.id,
           product_code: productCode,
           product_name: productName,
+          product_attribute: productAttribute,
+          product_kind: productAttribute,
           cost_price: draft.cost_price,
           standard_price: draft.standard_price,
         },
@@ -7944,7 +7973,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       "FN_OS_품목_엑셀폼.xlsx",
       "품목",
       ["품목코드", "품목명", "속성", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
-      [["SET001", "세트상품명", "세트", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
+      [["SET001", "[SET]세트상품명", "SET", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
     );
   }
 
@@ -7962,7 +7991,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const rows = exportProducts.map((product) => [
       product.product_code || product.sku || "",
       product.product_name || "",
-      productAttributeFromName(product.product_name) === "rg" ? "RG" : productAttributeFromName(product.product_name) === "set" ? "세트" : "일반",
+      product.product_attribute_label || productAttributeLabel(productAttributeOf(product)),
       String(product.cost_price ?? ""),
       String(product.standard_price ?? ""),
       String(product.current_stock ?? 0),
@@ -7987,12 +8016,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       .map((row) => {
         const rawProductName = String(row["품목명"] || row["상품명"] || "").trim();
         const rawAttribute = String(row["속성"] || row["품목속성"] || "").toUpperCase();
+        const productAttribute = rawAttribute ? normalizeProductAttribute(rawAttribute, "plain") : "plain";
         return {
           product_code: String(row["품목코드"] || row["SKU"] || row["sku"] || "").trim(),
-          product_name: productNameWithAttribute(
-            rawProductName,
-            rawAttribute.includes("RG") ? "rg" : rawAttribute.includes("세트") ? "set" : productAttributeFromName(rawProductName),
-          ),
+          product_name: productNameWithAttribute(rawProductName, productAttribute),
+          product_attribute: productAttribute,
           cost_price: String(row["입고가"] || row["매입가"] || "").trim(),
           standard_price: String(row["출고가"] || row["판매가"] || "").trim(),
           warehouse_code: String(row["창고코드"] || warehouses[0]?.warehouse_code || "100").trim(),
@@ -8037,6 +8065,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             id: found?.id,
             product_code: row.product_code,
             product_name: row.product_name,
+            product_attribute: row.product_attribute,
+            product_kind: row.product_attribute,
             cost_price: row.cost_price,
             standard_price: row.standard_price,
           },
@@ -8076,6 +8106,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             id: parent.id,
             product_code: row.product_code,
             product_name: row.product_name,
+            product_attribute: row.product_attribute,
+            product_kind: row.product_attribute,
             cost_price: row.cost_price,
             standard_price: row.standard_price,
           },
@@ -8096,8 +8128,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }).filter((value) => value <= pageCount);
   const relationFilters: Array<{ key: ProductRelationFilter; label: string }> = [
     { key: "plain", label: "일반" },
-    { key: "ng", label: "[NG]세트" },
-    { key: "rg", label: "[RG]로켓그로스" },
+    { key: "set", label: "SET" },
+    { key: "rg", label: "RG" },
     { key: "import", label: "수입연동" },
   ];
 
@@ -8311,9 +8343,12 @@ function ProductEditModal({
           <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></label>
           <label className="text-xs font-black text-slate-500">속성
-            <select className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_kind || "plain"} onChange={(event) => onChange("product_kind", event.target.value)}>
+            <select className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_attribute || draft.product_kind || "plain"} onChange={(event) => {
+              onChange("product_attribute", event.target.value);
+              onChange("product_kind", event.target.value);
+            }}>
               <option value="plain">일반</option>
-              <option value="set">세트</option>
+              <option value="set">SET</option>
               <option value="rg">RG</option>
             </select>
           </label>
