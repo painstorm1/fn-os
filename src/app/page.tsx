@@ -150,8 +150,7 @@ function CalendarMemo() {
   useEffect(() => {
     let alive = true;
     function loadServerMemos() {
-      fetch(apiUrl("/api/fnos/calendar-production-memos"), { credentials: "include" })
-        .then((res) => res.ok ? res.json() : {})
+      cachedJson<Record<string, Array<string | CalendarServerMemo>>>("/api/fnos/calendar-production-memos", 30_000)
         .then((data) => {
           if (!alive) return;
           const normalized = Object.fromEntries(
@@ -2725,8 +2724,12 @@ function LegacyNativeOrders() {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/fnos/orders"), { credentials: "include" })
-      .then((res) => res.json())
+    const cachedOrders = readImportCache<{ orders?: ImportOrder[] }>("/api/fnos/orders");
+    if (cachedOrders?.orders?.length) {
+      setOrders(cachedOrders.orders);
+      setLoading(false);
+    }
+    cachedJson<{ orders?: ImportOrder[] }>("/api/fnos/orders", 30_000)
       .then((data) => {
         if (alive) setOrders(data.orders || []);
       })
@@ -6408,6 +6411,10 @@ function SalesRightTools() {
         setRegisterMessage(data.error || "등록 실패");
         return;
       }
+      invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/products/search");
+      invalidateClientCache("/api/fnos/customers");
+      invalidateClientCache("/api/dashboard/summary");
       setRegisterMessage(registerMode === "product" ? "제품등록 전송 완료" : "거래처등록 전송 완료");
     } catch (error) {
       window.alert(FNOS_DB_ERROR_MESSAGE);
@@ -6433,6 +6440,9 @@ function SalesRightTools() {
         setInputMessage(data.error || "입력 실패");
         return;
       }
+      invalidateClientCache("/api/dashboard/summary");
+      invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/products/search");
       setInputMessage(inputMode === "sales" ? "판매입력 전송 완료" : "구매입력 전송 완료");
     } catch (error) {
       window.alert(FNOS_DB_ERROR_MESSAGE);
@@ -6760,10 +6770,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 ]`);
 
-  function loadSummary() {
-    const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
-    if (cached) setSummary(cached);
-    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000 })
+  function invalidateSalesInventoryCaches() {
+    invalidateClientCache("/api/dashboard/summary");
+    invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/products/search");
+    invalidateClientCache("/api/fnos/products");
+    invalidateClientCache("/api/fnos/orders");
+  }
+
+  function loadSummary(force = false) {
+    if (!force) {
+      const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+      if (cached) setSummary(cached);
+    }
+    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000, force })
       .then((summaryData) => {
         setSummary(summaryData);
       })
@@ -6888,7 +6908,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setEntryModalMode(null);
     setEntryRows([]);
     setEditingEntryIndex(null);
-    loadSummary();
+    invalidateSalesInventoryCaches();
+    loadSummary(true);
   }
 
   useEffect(() => {
@@ -7002,7 +7023,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     setMessage(`FN OS 저장 완료: ${data.total_count || 0}건`);
-    loadSummary();
+    invalidateSalesInventoryCaches();
+    loadSummary(true);
   }
 
   async function sync(target: "products" | "inventory") {
@@ -7019,7 +7041,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     setMessage(`${target === "products" ? "품목" : "재고"} 동기화 완료: ${data.count || 0}건`);
-    loadSummary();
+    invalidateSalesInventoryCaches();
+    loadSummary(true);
   }
 
   function pickOrderFiles(files: FileList | File[] | null, kind: "orders" | "invoices" = "orders") {
@@ -7299,7 +7322,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
         setMessage(`판매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
       }
-      loadSummary();
+      invalidateSalesInventoryCaches();
+      loadSummary(true);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
       window.alert(`FN OS 판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
@@ -8497,8 +8521,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
   async function uploadCustomers(file: File) {
     const rows = await readXlsxObjects(file);
-    const allRes = await fetch("/api/fnos/customers?page=1&pageSize=5000", { cache: "no-store" });
-    const allData = await allRes.json().catch(() => ({}));
+    const allData = await cachedClientJson<{ customers?: FnCustomer[] }>("/api/fnos/customers?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
     const existing = new Map<string, FnCustomer>((allData.customers || []).map((customer: FnCustomer) => [String(customer.customer_code || customer.cust_code || ""), customer]));
     const normalized = rows
       .map((row) => ({
@@ -8548,9 +8571,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     const params = new URLSearchParams({ page: "1", pageSize: "5000" });
     if (query.trim()) params.set("q", query.trim());
     if (relationFilter !== "all") params.set("relation", relationFilter);
-    const res = await fetch(`/api/fnos/customers?${params.toString()}`, { cache: "no-store" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
+    const data = await cachedClientJson<{ customers?: FnCustomer[]; ok?: boolean; error?: string }>(`/api/fnos/customers?${params.toString()}`, { ttl: 60_000, storageTtl: 5 * 60_000 }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : "거래처 다운로드 실패", customers: [] }));
+    if (data.ok === false) {
       setCustomerMessage(data.error || "거래처 다운로드 실패");
       return;
     }
@@ -9015,6 +9037,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setProductBulkOpen(false);
     setProductBulkValue("");
     setSelectedProductKeys([]);
+    invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/products/search");
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
@@ -9032,9 +9056,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const params = new URLSearchParams({ page: "1", pageSize: "5000", relation: relationFilter });
     if (query.trim()) params.set("q", query.trim());
     if (searchByCode) params.set("searchField", "code");
-    const res = await fetch(`/api/fnos/products/master?${params.toString()}`, { cache: "no-store" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
+    const data = await cachedClientJson<{ products?: FnProduct[]; ok?: boolean; error?: string }>(`/api/fnos/products/master?${params.toString()}`, { ttl: 60_000, storageTtl: 5 * 60_000 }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : "상품정보 다운로드 대상 조회 실패", products: [] }));
+    if (data.ok === false) {
       setProductMessage(data.error || "상품정보 다운로드 대상 조회 실패");
       return;
     }
@@ -9060,8 +9083,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   async function uploadProducts(file: File) {
     const rows = await readXlsxObjects(file);
-    const allRes = await fetch("/api/fnos/products/master?page=1&pageSize=5000", { cache: "no-store" });
-    const allData = await allRes.json().catch(() => ({}));
+    const allData = await cachedClientJson<{ products?: FnProduct[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
     const existing = new Map<string, FnProduct>((allData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
     const normalized = rows
       .map((row) => {
@@ -9129,8 +9151,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         processedRows.push(row);
       }
     }
-    const refreshedRes = await fetch("/api/fnos/products/master?page=1&pageSize=5000", { cache: "no-store" });
-    const refreshedData = await refreshedRes.json().catch(() => ({}));
+    invalidateClientCache("/api/fnos/products/master");
+    const refreshedData = await cachedClientJson<{ products?: FnProduct[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 0, storageTtl: 0, force: true });
     const productsByCode = new Map<string, FnProduct>((refreshedData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
     for (const row of processedRows.filter((item) => item.bom.length > 0)) {
       const parent = productsByCode.get(row.product_code);
@@ -9761,6 +9783,25 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
 
+  function invalidateMasterEntryCaches() {
+    if (config.key === "customers") {
+      invalidateClientCache("/api/fnos/customers");
+      invalidateClientCache("/api/fnos/sales-channels");
+    }
+    if (config.key === "products") {
+      invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/products/search");
+      invalidateClientCache("/api/fnos/products");
+    }
+    if (config.key === "warehouses") {
+      invalidateClientCache("/api/fnos/products/master");
+    }
+    if (config.key === "channels") {
+      invalidateClientCache("/api/fnos/sales-channels");
+    }
+    invalidateClientCache("/api/dashboard/summary");
+  }
+
   useEffect(() => {
     setDraft(Object.fromEntries(config.templateHeaders.slice(0, 6).map((header) => [header, ""])));
   }, [config.key]);
@@ -9797,6 +9838,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
         if (res.ok) success += 1;
       }
       setMessage(`품목 ${success}건을 저장했습니다.`);
+      invalidateMasterEntryCaches();
       return;
     }
 
@@ -9809,6 +9851,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       });
       const data = await res.json().catch(() => ({}));
       setMessage(res.ok && data.ok !== false ? `쇼핑몰 ${data.count || rows.length}건을 저장했습니다.` : data.error || "쇼핑몰 저장 실패");
+      invalidateMasterEntryCaches();
       loadSummary();
       return;
     }
@@ -9835,6 +9878,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
         if (res.ok) success += 1;
       }
       setMessage(`창고 ${success}건을 저장했습니다.`);
+      invalidateMasterEntryCaches();
       return;
     }
 
@@ -9855,6 +9899,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
         const res = await fetch(config.uploadEndpoint, { method: "POST", credentials: "include", body: form });
         const data = await res.json().catch(() => ({}));
         setMessage(res.ok && data.ok !== false ? `${config.title} ${data.count || 0}건을 업로드했습니다.` : data.error || `${config.title} 업로드 실패`);
+        if (res.ok && data.ok !== false) invalidateMasterEntryCaches();
         return;
       }
       const rows = await readXlsxObjects(file);
@@ -9887,6 +9932,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       });
       const data = await res.json().catch(() => ({}));
       setMessage(res.ok && data.ok !== false ? "거래처를 저장했습니다." : data.error || "거래처 저장 실패");
+      if (res.ok && data.ok !== false) invalidateMasterEntryCaches();
       return;
     }
     await saveRows([row]);
