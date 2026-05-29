@@ -194,6 +194,28 @@ function categoryDisplayLabel(categoryName?: string) {
   return group ? `${group} / ${categoryName}` : categoryName;
 }
 
+function sourceBadgeClass(source?: string) {
+  const key = String(source || "web").toLowerCase();
+  if (key === "instagram") return "bg-pink-50 text-pink-700 border-pink-100";
+  if (key === "youtube") return "bg-red-50 text-red-700 border-red-100";
+  if (key === "naver" || key === "smartstore") return "bg-emerald-50 text-emerald-700 border-emerald-100";
+  if (key === "coupang") return "bg-sky-50 text-sky-700 border-sky-100";
+  if (key === "taobao" || key === "1688") return "bg-orange-50 text-orange-700 border-orange-100";
+  if (key === "amazon") return "bg-amber-50 text-amber-700 border-amber-100";
+  if (key === "rakuten") return "bg-rose-50 text-rose-700 border-rose-100";
+  if (key === "file") return "bg-violet-50 text-violet-700 border-violet-100";
+  if (key === "manual") return "bg-slate-50 text-slate-700 border-slate-100";
+  return "bg-gray-50 text-gray-700 border-gray-100";
+}
+
+function SourceBadge({ source, className = "" }: { source?: string; className?: string }) {
+  return (
+    <span className={`inline-flex h-6 max-w-full items-center rounded-full border px-2 text-xs font-bold ${sourceBadgeClass(source)} ${className}`}>
+      <span className="truncate">{source || "-"}</span>
+    </span>
+  );
+}
+
 function categoryOptionEntries() {
   return (Object.keys(categoryTree) as CategoryGroup[]).flatMap((group) => categoryTree[group].map((category) => ({ group, category, label: `${group} / ${category}` })));
 }
@@ -536,7 +558,7 @@ export default function ArchiveWorkspace() {
 
       <section>
         <Card className="space-y-3 p-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 pl-4">
             {menuItems.map(([key, label]) => (
               <ActionButton key={key} type="button" variant={activeMenu === key ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
@@ -550,7 +572,7 @@ export default function ArchiveWorkspace() {
             )}
           </div>
           {activeMenu !== "save" && (
-            <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 p-0 shadow-none">
+            <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
               <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "whitespace-nowrap px-4" : "whitespace-nowrap border-slate-950 bg-slate-950 px-4 text-white hover:bg-slate-800"}>
                 선택
               </ActionButton>
@@ -783,9 +805,10 @@ function ArchiveList({
     <div className="space-y-4">
       {selectMode && (
         <section className="flex flex-wrap items-center gap-2 text-xs">
-          <ActionButton type="button" variant="secondary" onClick={toggleAllSelected} className="h-9 min-w-24 whitespace-nowrap px-4 text-xs">
+          <label className="flex h-9 min-w-28 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={allSelected} onChange={toggleAllSelected} aria-label={allSelected ? "모두해제" : "모두선택"} />
             {allSelected ? "모두해제" : "모두선택"}
-          </ActionButton>
+          </label>
           <ActionButton type="button" variant="secondary" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-9 min-w-32 whitespace-nowrap border-orange-200 bg-white px-4 text-xs text-orange-700">
             미리보기 재생성
           </ActionButton>
@@ -820,7 +843,7 @@ function ArchiveList({
               <div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}>
                 {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />}
                 <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
-                <StatusBadge className="max-w-20 truncate" tone="muted">{item.source_type || "-"}</StatusBadge>
+                <SourceBadge source={item.source_type} className="max-w-20" />
                 <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 <button type="button" onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
@@ -834,7 +857,7 @@ function ArchiveList({
           {!items.length && <div className="col-span-3 rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400">저장된 아카이브가 없습니다.</div>}
         </section>
       ) : (
-      <section className="grid grid-cols-6 gap-3 2xl:grid-cols-12">
+      <section className="grid grid-cols-5 gap-3 2xl:grid-cols-10">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
@@ -852,8 +875,8 @@ function ArchiveList({
                 </div>
               </a>
               <div className="p-2">
-                <div className="flex items-center gap-2">
-                  <h2 className="min-w-0 flex-1 truncate text-sm font-black text-slate-950">{item.title || "제목 없음"}</h2>
+                <div className="flex items-start gap-2">
+                  <h2 className="line-clamp-2 min-h-10 min-w-0 flex-1 text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
                   <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                       <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -861,16 +884,18 @@ function ArchiveList({
                     </svg>
                   </button>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-1 text-xs font-black">
-                  <StatusBadge className="min-w-0 truncate" tone="muted">{item.source_type || "-"}</StatusBadge>
-                  <StatusBadge className="min-w-0 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
+                <div className="mt-2">
+                  <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 </div>
-                {item.memo && <p className="mt-1 line-clamp-1 text-xs font-bold leading-4 text-slate-500">{item.memo}</p>}
+                <div className="mt-1">
+                  <SourceBadge source={item.source_type} />
+                </div>
+                <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{item.memo || item.summary || item.description || ""}</p>
               </div>
             </article>
           );
         })}
-        {!items.length && <EmptyState className="col-span-6 2xl:col-span-12" title="저장된 아카이브가 없습니다." />}
+        {!items.length && <EmptyState className="col-span-5 2xl:col-span-10" title="저장된 아카이브가 없습니다." />}
       </section>
       )}
       {editDraft && (
