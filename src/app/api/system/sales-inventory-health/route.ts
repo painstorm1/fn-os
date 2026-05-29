@@ -3,6 +3,7 @@ import { hasDbConfig, selectRows } from "@/lib/fnos-db";
 
 const REQUIRED_TABLES = [
   "sales_channels",
+  "sales_channel_credentials",
   "customers",
   "products",
   "warehouses",

@@ -36,6 +36,7 @@ create table if not exists sales_channels (
   seller_id text,
   account_label text,
   customer_id uuid,
+  customer_code text,
   customer_name text,
   api_enabled boolean default false,
   api_status text default 'manual',
@@ -72,6 +73,39 @@ create table if not exists customers (
   transfer_info text,
   last_synced_at timestamptz
 );
+
+alter table sales_channels add column if not exists customer_id uuid;
+alter table sales_channels add column if not exists customer_code text;
+alter table sales_channels add column if not exists customer_name text;
+alter table sales_channels add column if not exists seller_id text;
+alter table sales_channels add column if not exists account_label text;
+alter table sales_channels add column if not exists api_enabled boolean default false;
+alter table sales_channels add column if not exists api_status text default 'manual';
+alter table sales_channels add column if not exists credential_ref text;
+alter table sales_channels add column if not exists seller_site_url text;
+
+create table if not exists sales_channel_credentials (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references sales_channels(id) on delete cascade,
+  credential_key text not null,
+  credential_value_encrypted text,
+  credential_hint text,
+  is_secret boolean default true,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique(channel_id, credential_key)
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'sales_channels_customer_id_fkey'
+  ) then
+    alter table sales_channels
+      add constraint sales_channels_customer_id_fkey
+      foreign key (customer_id) references customers(id) on delete set null;
+  end if;
+end $$;
 
 alter table customers add column if not exists customer_code text;
 alter table customers add column if not exists customer_name text;
@@ -857,6 +891,10 @@ create index if not exists idx_sales_prod_cd on sales(prod_cd);
 create index if not exists idx_sales_sku on sales(sku);
 create index if not exists idx_sales_batch on sales(upload_batch_id);
 create unique index if not exists idx_sales_source_ref_unique on sales(source_ref_id) where source_ref_id is not null and source_ref_id <> '';
+create index if not exists idx_sales_channels_customer_id on sales_channels(customer_id);
+create index if not exists idx_sales_channels_customer_code on sales_channels(customer_code);
+create index if not exists idx_sales_channel_credentials_channel on sales_channel_credentials(channel_id);
+create unique index if not exists idx_sales_channel_credentials_key on sales_channel_credentials(channel_id, credential_key);
 create index if not exists idx_purchases_io_date on purchases(io_date);
 create index if not exists idx_purchases_prod_cd on purchases(prod_cd);
 create unique index if not exists idx_purchases_source_ref_unique on purchases(source_ref_id) where source_ref_id is not null and source_ref_id <> '';
