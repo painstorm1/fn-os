@@ -74,7 +74,7 @@ export function KpiCard({
   return (
     <div className={cn("min-w-0 rounded-xl border border-gray-200 bg-white p-4", className)}>
       <p className="truncate text-xs font-semibold text-gray-500">{label}</p>
-      <p className={cn("mt-2 truncate text-xl font-bold leading-tight", valueTone)}>{value}</p>
+      <p className={cn("mt-2 break-keep text-xl font-bold leading-tight", valueTone)}>{value}</p>
       {note && <p className="mt-1 truncate text-xs font-medium text-gray-500">{note}</p>}
     </div>
   );
