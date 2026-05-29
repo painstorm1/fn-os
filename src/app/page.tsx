@@ -281,9 +281,157 @@ function CalendarMemo() {
   );
 }
 
+function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEscapeToClose(open, onClose);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode("view");
+    setCurrentPassword("");
+    setNewPassword("");
+    setShowPassword(false);
+    setMessage("");
+    setError("");
+    setLoading(true);
+
+    fetch("/api/login", { method: "GET" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "비밀번호를 불러오지 못했습니다.");
+        setCurrentPassword(String(data.password || ""));
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  if (!open) return null;
+
+  async function savePassword() {
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    const response = await fetch("/api/login", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    const data = await response.json().catch(() => ({}));
+    setLoading(false);
+
+    if (!response.ok) {
+      setError(data.error || "비밀번호 변경에 실패했습니다.");
+      return;
+    }
+
+    setCurrentPassword(newPassword);
+    setNewPassword("");
+    setMode("view");
+    setMessage("비밀번호가 변경되었습니다.");
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 px-4">
+      <div className="w-full max-w-[460px] rounded-2xl border border-gray-200 bg-white p-6 shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">{mode === "view" ? "설정" : "비밀번호 변경"}</h2>
+            <p className="mt-1 text-sm font-medium text-gray-500">
+              {mode === "view" ? "현재 FN OS 로그인 비밀번호를 확인할 수 있습니다." : "새 비밀번호로 변경합니다."}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="닫기">
+            x
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <label className="block text-sm font-semibold text-gray-700" htmlFor="current-password">
+            현재 비밀번호
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="current-password"
+              className="h-10 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100"
+              type={showPassword ? "text" : "password"}
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              readOnly={mode === "view"}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              {showPassword ? "가리기" : "보기"}
+            </button>
+          </div>
+
+          {mode === "edit" && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700" htmlFor="new-password">
+                새 비밀번호
+              </label>
+              <input
+                id="new-password"
+                className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100"
+                type={showPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
+        </div>
+
+        {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
+        {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            닫기
+          </button>
+          {mode === "view" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("edit");
+                setMessage("");
+                setError("");
+              }}
+              className="h-10 rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white hover:bg-[#ea580c]"
+              disabled={loading}
+            >
+              수정
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void savePassword()}
+              className="h-10 rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white hover:bg-[#ea580c] disabled:opacity-60"
+              disabled={loading || !newPassword}
+            >
+              {loading ? "저장 중..." : "변경"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -297,8 +445,14 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
+  async function logout() {
+    await fetch("/api/login", { method: "DELETE" }).catch(() => null);
+    window.location.href = "/login";
+  }
+
   return (
     <aside className="hidden min-h-screen w-[280px] shrink-0 border-r border-slate-200 bg-white px-6 py-5 lg:block">
+      <PasswordSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <Link
         href="/?menu=dashboard"
         className="mb-4 block"
@@ -309,6 +463,24 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
       >
         <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
+      <div className="mb-5 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-600 hover:bg-gray-50 hover:text-orange-600"
+          title="로그아웃"
+        >
+          로그아웃
+        </button>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="flex h-9 items-center justify-center rounded-lg border border-orange-200 bg-orange-50 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+          title="설정"
+        >
+          설정
+        </button>
+      </div>
 
       <nav className="space-y-1">
         {mainMenus.map((item) => (

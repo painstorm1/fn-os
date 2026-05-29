@@ -4,6 +4,14 @@
 
 create extension if not exists pgcrypto;
 
+create table if not exists fnos_settings (
+  setting_key text primary key,
+  setting_value text,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists upload_batches (
   id uuid primary key default gen_random_uuid(),
   batch_type text not null,
