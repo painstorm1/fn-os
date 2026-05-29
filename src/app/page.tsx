@@ -9794,8 +9794,8 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs font-bold leading-relaxed text-slate-500">
-        약자: ROAS=광고 수익률, CPA=전환 구매당 광고비, CTR=클릭률, CPM=1000회당 노출비용, CPC=클릭당 비용, CVR=전환 구매율
+      <p className="mt-2 pl-4 text-xs font-bold leading-relaxed text-slate-500">
+        ※ 약자: ROAS=광고 수익률, CPA=전환 구매당 광고비, CTR=클릭률, CPM=1000회당 노출비용, CPC=클릭당 비용, CVR=전환 구매율
       </p>
     </div>
   );
