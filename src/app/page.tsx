@@ -1356,13 +1356,6 @@ function needsImportErpServer(path: string) {
   return !path.startsWith("/api/fnos/");
 }
 
-type CacheEntry<T> = {
-  at: number;
-  data?: T;
-  promise?: Promise<T>;
-};
-
-const apiCache = new Map<string, CacheEntry<unknown>>();
 const DEFAULT_CACHE_TTL = 45_000;
 let importErpEnsurePromise: Promise<unknown> | null = null;
 let importErpLastEnsuredAt = 0;
@@ -1386,73 +1379,19 @@ function ensureImportErpServer(force = false) {
 
 function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   const key = apiUrl(path);
-  const now = Date.now();
-  const cached = apiCache.get(key) as CacheEntry<T> | undefined;
-  if (cached?.data !== undefined && now - cached.at < ttl) return Promise.resolve(cached.data);
-  if (cached?.promise) return cached.promise;
-  const promise = (needsImportErpServer(path) ? ensureImportErpServer().catch(() => undefined) : Promise.resolve())
-    .then(() => fetch(key, { credentials: "include", cache: "no-store" }))
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json() as Promise<T>;
-    })
-    .then((data) => {
-      apiCache.set(key, { at: Date.now(), data });
-      return data;
-    })
-    .catch((error) => {
-      apiCache.delete(key);
-      throw error;
-    });
-  apiCache.set(key, { at: now, promise });
-  return promise;
-}
-
-function browserCacheKey(path: string) {
-  return `fnos-api-cache:${apiUrl(path)}`;
-}
-
-function readBrowserCache<T>(path: string, maxAge = 5 * 60_000): T | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(browserCacheKey(path));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { at?: number; data?: T };
-    if (!parsed?.at || Date.now() - parsed.at > maxAge) return null;
-    return parsed.data ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function writeBrowserCache(path: string, data: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(browserCacheKey(path), JSON.stringify({ at: Date.now(), data }));
-  } catch {
-    // Cache is only a speed hint; storage can fail in private or quota-limited sessions.
-  }
+  const storageTtl = Math.max(ttl, 5 * 60_000);
+  return (needsImportErpServer(path) ? ensureImportErpServer().catch(() => undefined) : Promise.resolve())
+    .then(() => cachedClientJson<T>(key, { ttl, storageTtl }));
 }
 
 function invalidateApiCache(match?: string) {
   if (!match) {
-    apiCache.clear();
-    if (typeof window !== "undefined") {
-      for (const key of Object.keys(window.sessionStorage)) {
-        if (key.startsWith("fnos-api-cache:")) window.sessionStorage.removeItem(key);
-      }
-    }
+    invalidateClientCache();
     return;
   }
   const needle = apiUrl(match);
-  for (const key of Array.from(apiCache.keys())) {
-    if (key.includes(needle) || key.includes(match)) apiCache.delete(key);
-  }
-  if (typeof window !== "undefined") {
-    for (const key of Object.keys(window.sessionStorage)) {
-      if (key.includes(needle) || key.includes(match)) window.sessionStorage.removeItem(key);
-    }
-  }
+  invalidateClientCache(needle);
+  if (needle !== match) invalidateClientCache(match);
 }
 
 function warmImportCache(section?: string) {
@@ -2183,16 +2122,18 @@ function NativeOrders({
     const data = await cachedJson<{ orders?: ImportOrder[] }>(path, 30_000);
     const nextOrders = data.orders || [];
     setOrders(nextOrders);
-    writeBrowserCache(path, nextOrders);
   }
 
   useEffect(() => {
     let alive = true;
     const defaultPath = "/api/fnos/orders";
-    const cachedOrders = readBrowserCache<ImportOrder[]>(defaultPath);
-    if (cachedOrders?.length) {
-      setOrders(cachedOrders);
-      setLoading(false);
+    const cachedOrders = readCachedJson<{ orders?: ImportOrder[] }>(defaultPath, { storageTtl: 5 * 60_000 });
+    if (cachedOrders?.orders?.length) {
+      window.setTimeout(() => {
+        if (!alive) return;
+        setOrders(cachedOrders.orders || []);
+        setLoading(false);
+      }, 0);
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadOrders().finally(() => {
@@ -2819,17 +2760,19 @@ function NativeProducts() {
 
   useEffect(() => {
     let alive = true;
-    const cachedProducts = readBrowserCache<ImportProduct[]>("/api/fnos/products");
-    if (cachedProducts?.length) {
-      setProducts(cachedProducts);
-      setLoading(false);
+    const cachedProducts = readCachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", { storageTtl: 5 * 60_000 });
+    if (cachedProducts?.products?.length) {
+      window.setTimeout(() => {
+        if (!alive) return;
+        setProducts(cachedProducts.products || []);
+        setLoading(false);
+      }, 0);
     }
     cachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", 60_000)
       .then((data) => {
         if (!alive) return;
         const nextProducts = data.products || [];
         setProducts(nextProducts);
-        writeBrowserCache("/api/fnos/products", nextProducts);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2926,8 +2869,7 @@ function NativeProductDetail({ id }: { id: number }) {
       .then((next) => {
         if (!alive) return;
         setDetail(next);
-        fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" })
-          .then(async (res): Promise<{ links?: ImportSkuLink[]; bom?: ImportBomStatus[] }> => res.ok ? res.json() : {})
+        cachedClientJson<{ links?: ImportSkuLink[]; bom?: ImportBomStatus[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
           .then((linkData) => {
             if (!alive) return;
             setSkuLinks(linkData.links || []);
@@ -3182,8 +3124,7 @@ function FnProductPickerModal({
     setLoading(true);
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim());
-    fetch(`/api/fnos/products/search?${params.toString()}`, { cache: "no-store" })
-      .then((res) => res.json())
+    cachedClientJson<{ products?: FnProduct[] }>(`/api/fnos/products/search?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
       .then((data) => {
         if (alive) setProducts(data.products || []);
       })
@@ -3486,8 +3427,7 @@ function NativeProductForm({ id }: { id?: number }) {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    fetch(`/api/fnos/import-product-links?import_product_id=${id}`, { cache: "no-store" })
-      .then((res) => res.json())
+    cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
       .then((data) => {
         if (alive) setFnSkuLinks(data.links || []);
       })
@@ -3530,6 +3470,7 @@ function NativeProductForm({ id }: { id?: number }) {
           credentials: "include",
           body: JSON.stringify({ import_product_id: id || json.product?.id, links: fnSkuLinks }),
         });
+        invalidateClientCache("/api/fnos/import-product-links");
       }
       invalidateApiCache("/api/fnos/products");
       invalidateApiCache("/api/fnos/form-data");
@@ -3928,8 +3869,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
     let alive = true;
     const productIds = Array.from(new Set((detail.items || []).map((item) => Number(item.product_id || 0)).filter(Boolean)));
     Promise.all(productIds.map((productId) => (
-      fetch(`/api/fnos/import-product-links?import_product_id=${productId}`, { cache: "no-store" })
-        .then((res) => res.json())
+      cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
         .then((data) => [productId, data.links || []] as const)
         .catch(() => [productId, []] as const)
     ))).then((entries) => {
@@ -4293,8 +4233,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     let alive = true;
     const productIds = Array.from(new Set(lines.map((line) => String(line.product_id || "")).filter(Boolean)));
     Promise.all(productIds.map((productId) => (
-      fetch(`/api/fnos/import-product-links?import_product_id=${productId}`, { cache: "no-store" })
-        .then((res) => res.json())
+      cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
         .then((json) => [productId, json.links || []] as const)
         .catch(() => [productId, []] as const)
     ))).then((entries) => {
@@ -8526,6 +8465,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setCustomerBulkOpen(false);
     setCustomerBulkValue("");
     setSelectedCustomerKeys([]);
+    invalidateClientCache("/api/fnos/customers");
     await loadCustomers(page, query, relationFilter);
   }
 
@@ -8582,6 +8522,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       if (res.ok) saved += 1;
     }
     setCustomerMessage(`거래처 엑셀등록 완료: 저장 ${saved.toLocaleString("ko-KR")}건 / 스킵 ${skipped.toLocaleString("ko-KR")}건`);
+    invalidateClientCache("/api/fnos/customers");
     await loadCustomers(1, query, relationFilter);
     setPage(1);
   }
@@ -9992,8 +9933,7 @@ function SalesProductMasterPanel({ message, setMessage, sync }: { message: strin
     let alive = true;
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim());
-    fetch(`/api/fnos/products/search?${params.toString()}`, { cache: "no-store" })
-      .then((res) => res.json())
+    cachedClientJson<{ products?: FnProduct[] }>(`/api/fnos/products/search?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
       .then((data) => {
         if (alive) setProducts(data.products || []);
       })
