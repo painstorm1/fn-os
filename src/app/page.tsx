@@ -463,19 +463,20 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
       >
         <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
-      <div className="mb-5 grid grid-cols-2 gap-2">
+      <div className="mb-5 flex items-center gap-2 text-xs font-semibold text-gray-500">
         <button
           type="button"
           onClick={() => void logout()}
-          className="flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-600 hover:bg-gray-50 hover:text-orange-600"
+          className="hover:text-orange-600"
           title="로그아웃"
         >
           로그아웃
         </button>
+        <span className="text-gray-300">|</span>
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          className="flex h-9 items-center justify-center rounded-lg border border-orange-200 bg-orange-50 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+          className="hover:text-orange-600"
           title="설정"
         >
           설정
