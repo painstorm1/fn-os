@@ -8200,6 +8200,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setDraft((prev) => {
       if (key === "customer_type") return { ...prev, customer_type: normalizeCustomerAttribute(value) };
       if (key === "business_no") return { ...prev, business_no: formatBusinessNoInput(value) };
+      if (key === "customer_code") {
+        const previousCodeBusinessNo = formatBusinessNoInput(prev.customer_code || "");
+        const shouldSyncBusinessNo = Boolean(prev.business_no && prev.business_no === previousCodeBusinessNo);
+        return {
+          ...prev,
+          customer_code: value,
+          business_no: shouldSyncBusinessNo ? formatBusinessNoInput(value) : prev.business_no,
+        };
+      }
       return { ...prev, [key]: value };
     });
   }
