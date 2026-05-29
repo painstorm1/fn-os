@@ -79,16 +79,20 @@ function sanitizeDrafts(value: unknown, fallbackText: string) {
     if (!url || seen.has(url)) return [];
     seen.add(url);
     const sourceType = validSources.includes(String(item.source_type || "")) ? String(item.source_type) : sourceFromUrl(url);
-    const group = validGroups.includes(item.category_group as CategoryGroup) ? item.category_group as CategoryGroup : "업무";
-    const categoryOptions = categoryTree[group];
-    const categoryName = categoryOptions.includes(String(item.category_name || "")) ? String(item.category_name) : categoryOptions[0];
+    let group = validGroups.includes(item.category_group as CategoryGroup) ? item.category_group as CategoryGroup : "업무";
+    let categoryOptions = categoryTree[group];
+    let categoryName = categoryOptions.includes(String(item.category_name || "")) ? String(item.category_name) : categoryOptions[0];
+    if ((sourceType === "instagram" || sourceType === "youtube") && group === "개인" && categoryName === "기타") {
+      group = "업무";
+      categoryName = "광고소재";
+    }
     const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
     return [{
       url,
       title: shortTitle(String(item.title || ""), sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url)),
       memo,
       source_type: sourceType,
-      content_type: String(item.content_type || (sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : "link")),
+      content_type: String(sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : item.content_type || "link"),
       category_group: group,
       category_name: categoryName,
     }];
@@ -119,14 +123,18 @@ export async function POST(request: NextRequest) {
     const imageUrl = `data:${image.type || "image/png"};base64,${bytes.toString("base64")}`;
     const model = process.env.ARCHIVE_AI_MODEL || "gpt-4.1-mini";
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model,
+        max_output_tokens: 900,
         input: [{
           role: "user",
           content: [
@@ -137,6 +145,7 @@ export async function POST(request: NextRequest) {
                 "목표: 링크 추출, 10자 내외 제목, category_group/category_name 추천.",
                 `허용 category_group/category_name: ${JSON.stringify(categoryTree)}`,
                 `허용 source_type: ${validSources.join(", ")}`,
+                "instagram/youtube 링크는 명확한 교육/개인 단서가 없으면 기본 category_group=업무, category_name=광고소재, content_type=ad_reference로 분류해.",
                 "memo는 사용자가 직접 적은 의미 있는 메모만 넣어. likes/comments/view count/date/time 같은 수치는 memo에 넣지 마.",
                 "인스타그램 URL이 줄바꿈/공백/OCR 오류로 깨져 있으면 가능한 정상 URL로 복원해.",
                 `보조 텍스트: ${text}`,
@@ -149,6 +158,7 @@ export async function POST(request: NextRequest) {
         text: { format: { type: "json_object" } },
       }),
     });
+    clearTimeout(timeout);
 
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok) throw new Error(String((data.error as { message?: string } | undefined)?.message || "OpenAI 이미지 분석 실패"));
