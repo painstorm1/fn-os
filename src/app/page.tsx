@@ -14,7 +14,6 @@ import {
   FilterBar,
   FormField,
   KpiCard,
-  ModalShell,
   PageHeader,
   SectionHeader,
   SelectionModal,
@@ -356,92 +355,77 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 px-4">
-      <div className="w-full max-w-[460px] rounded-2xl border border-gray-200 bg-white p-6 shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{mode === "view" ? "설정" : "비밀번호 변경"}</h2>
-            <p className="mt-1 text-sm font-medium text-gray-500">
-              {mode === "view" ? "현재 FN OS 로그인 비밀번호를 확인할 수 있습니다." : "새 비밀번호로 변경합니다."}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="닫기">
-            x
-          </button>
-        </div>
-
-        <div className="mt-6 space-y-4">
-          <label className="block text-sm font-semibold text-gray-700" htmlFor="current-password">
-            현재 비밀번호
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="current-password"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100"
-              type={showPassword ? "text" : "password"}
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              readOnly={mode === "view"}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((value) => !value)}
-              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              {showPassword ? "가리기" : "보기"}
-            </button>
-          </div>
-
-          {mode === "edit" && (
-            <div>
-              <label className="block text-sm font-semibold text-gray-700" htmlFor="new-password">
-                새 비밀번호
-              </label>
-              <input
-                id="new-password"
-                className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100"
-                type={showPassword ? "text" : "password"}
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                autoFocus
-              />
-            </div>
-          )}
-        </div>
-
-        {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
-        {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
-
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-            닫기
-          </button>
+    <FormModal
+      title={mode === "view" ? "설정" : "비밀번호 변경"}
+      description={mode === "view" ? "현재 FN OS 로그인 비밀번호를 확인할 수 있습니다." : "새 비밀번호로 변경합니다."}
+      onClose={onClose}
+      size="md"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
           {mode === "view" ? (
-            <button
+            <ActionButton
               type="button"
               onClick={() => {
                 setMode("edit");
                 setMessage("");
                 setError("");
               }}
-              className="h-10 rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white hover:bg-[#ea580c]"
               disabled={loading}
             >
               수정
-            </button>
+            </ActionButton>
           ) : (
-            <button
+            <ActionButton
               type="button"
               onClick={() => void savePassword()}
-              className="h-10 rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white hover:bg-[#ea580c] disabled:opacity-60"
               disabled={loading || !newPassword}
             >
               {loading ? "저장 중..." : "변경"}
-            </button>
+            </ActionButton>
+          )}
+        </>
+      }
+    >
+        <div className="space-y-4">
+          <FormField label="현재 비밀번호">
+          <div className="flex gap-2">
+            <input
+              id="current-password"
+              className={`${modalInputClass} min-w-0 flex-1`}
+              type={showPassword ? "text" : "password"}
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              readOnly={mode === "view"}
+            />
+            <ActionButton
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              onClick={() => setShowPassword((value) => !value)}
+            >
+              {showPassword ? "가리기" : "보기"}
+            </ActionButton>
+          </div>
+          </FormField>
+
+          {mode === "edit" && (
+            <FormField label="새 비밀번호">
+              <input
+                id="new-password"
+                className={modalInputClass}
+                type={showPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                autoFocus
+              />
+            </FormField>
           )}
         </div>
-      </div>
-    </div>
+
+        {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
+        {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
+    </FormModal>
   );
 }
 
@@ -6189,14 +6173,19 @@ function SalesExcelGrid({
         </table>
       </div>
       {productSearch.open && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/20 pt-20"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setProductSearch((prev) => ({ ...prev, open: false }));
-          }}
+        <SelectionModal
+          title="품목검색"
+          onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))}
+          size="lg"
+          className="overflow-hidden"
+          footer={
+            <div className="flex w-full items-center justify-between gap-3 text-xs text-gray-500">
+              <span>Enter 선택 · ↑↓ 이동 · Esc 닫기</span>
+              <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
+            </div>
+          }
         >
           <div
-            className="w-[720px] overflow-hidden rounded-md border border-slate-300 bg-white shadow-2xl"
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 setProductSearch((prev) => ({ ...prev, open: false }));
@@ -6218,12 +6207,8 @@ function SalesExcelGrid({
               }
             }}
           >
-            <div className="flex items-center justify-between bg-slate-950 px-4 py-2 text-white">
-              <strong>품목검색</strong>
-              <button type="button" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))} className="text-xl leading-none">×</button>
-            </div>
-            <div className="flex items-center gap-2 border-b border-slate-200 p-3">
-              <span className="shrink-0 text-sm font-black text-slate-800">품목검색</span>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-sm font-semibold text-gray-800">품목검색</span>
               <input
                 autoFocus
                 value={productSearch.query}
@@ -6239,28 +6224,27 @@ function SalesExcelGrid({
                     void searchFnOsProducts(productSearch.query);
                   }
                 }}
-                className="min-w-0 flex-1 rounded border border-orange-300 px-3 py-2 text-sm outline-orange-500"
+                className={modalInputClass}
                 placeholder="품목명 또는 품목코드"
               />
-              <button
+              <ActionButton
                 type="button"
                 onClick={() => void searchFnOsProducts(productSearch.query)}
                 disabled={productSearch.loading}
-                className="rounded bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600 disabled:opacity-50"
               >
                 {productSearch.loading ? "검색중" : "검색"}
-              </button>
+              </ActionButton>
             </div>
-            <div className="max-h-[420px] overflow-auto p-3">
+            <div className="mt-4 max-h-[420px] overflow-auto rounded-xl border border-gray-200">
               {productSearch.error && <div className="mb-2 rounded bg-rose-50 p-3 text-sm font-black text-rose-600">{productSearch.error}</div>}
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="bg-slate-100 text-left text-slate-600">
-                    <th className="w-14 border border-slate-200 px-2 py-2 text-center">선택</th>
-                    <th className="w-32 border border-slate-200 px-2 py-2">품목코드</th>
-                    <th className="border border-slate-200 px-2 py-2">품목명[규격]</th>
-                    <th className="w-24 border border-slate-200 px-2 py-2">입고단가</th>
-                    <th className="w-24 border border-slate-200 px-2 py-2">출고단가</th>
+                  <tr className="bg-gray-50 text-left text-gray-600">
+                    <th className="w-14 border-b border-gray-200 px-2 py-2 text-center">선택</th>
+                    <th className="w-32 border-b border-gray-200 px-2 py-2">품목코드</th>
+                    <th className="border-b border-gray-200 px-2 py-2">품목명[규격]</th>
+                    <th className="w-24 border-b border-gray-200 px-2 py-2">입고단가</th>
+                    <th className="w-24 border-b border-gray-200 px-2 py-2">출고단가</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -6292,12 +6276,8 @@ function SalesExcelGrid({
                 </tbody>
               </table>
             </div>
-            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-              <span>Enter 선택 · ↑↓ 이동 · Esc 닫기</span>
-              <button type="button" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))} className="rounded border border-slate-300 bg-white px-3 py-2 font-black text-slate-700">닫기</button>
-            </div>
           </div>
-        </div>
+        </SelectionModal>
       )}
     </div>
   );
@@ -7569,8 +7549,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
           {directPartnerPickerOpen && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+            <SelectionModal
+              title="거래처"
+              description="직송파일 양식을 선택해 주세요."
+              onClose={() => setDirectPartnerPickerOpen(false)}
+              size="sm"
+            >
+              <div
               onKeyDown={(event) => {
                 if (event.key === "1") {
                   event.preventDefault();
@@ -7582,37 +7567,27 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 }
               }}
             >
-              <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-black">거래처</h3>
-                  <button type="button" onClick={() => setDirectPartnerPickerOpen(false)} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
-                </div>
-                <p className="mt-2 text-sm font-bold text-slate-500">직송파일 양식을 선택해 주세요.</p>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button type="button" autoFocus onClick={() => void makeDirectShippingFile("JB")} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">1. JB</button>
-                  <button type="button" onClick={() => void makeDirectShippingFile("케이모아")} className="rounded-md border border-slate-200 bg-white px-4 py-5 text-lg font-black text-slate-700 hover:bg-slate-50">2. 케이모아</button>
-                </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" autoFocus onClick={() => void makeDirectShippingFile("JB")} className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-5 text-lg font-black text-orange-600 hover:bg-orange-100">1. JB</button>
+                <button type="button" onClick={() => void makeDirectShippingFile("케이모아")} className="rounded-xl border border-gray-200 bg-white px-4 py-5 text-lg font-black text-gray-700 hover:bg-gray-50">2. 케이모아</button>
               </div>
-            </div>
+              </div>
+            </SelectionModal>
           )}
           {invoiceMemoText && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-              <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-black">직접 송장 입력 메모장</h3>
-                  <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md px-2 py-1 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">×</button>
-                </div>
+            <FormModal
+              title="직접 송장 입력 메모장"
+              onClose={() => setInvoiceMemoText("")}
+              size="xl"
+              footer={<ActionButton type="button" onClick={() => setInvoiceMemoText("")}>확인</ActionButton>}
+            >
                 <textarea
-                  className="mt-4 h-80 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-4 font-mono text-sm font-bold text-slate-800 outline-orange-400"
+                  className={`${modalTextareaClass} h-80 resize-none font-mono`}
                   value={invoiceMemoText}
                   onChange={(event) => setInvoiceMemoText(event.target.value)}
                   autoFocus
                 />
-                <div className="mt-4 flex justify-end">
-                  <button type="button" onClick={() => setInvoiceMemoText("")} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">확인</button>
-                </div>
-              </div>
-            </div>
+            </FormModal>
           )}
         </Panel>
       )}
@@ -7868,55 +7843,56 @@ function SalesPurchaseEntryModal({
   const partnerLabel = mode === "sales" ? "거래처" : "공급처";
   useEscapeToClose(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
-      <div className="w-full max-w-5xl rounded-lg bg-white p-5 shadow-2xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
-          <div>
-            <h3 className="text-xl font-black">{mode === "sales" ? "판매입력" : "구매입력"}</h3>
-            <p className="mt-1 text-sm font-bold text-slate-500">행 추가 후 수정/삭제하고 저장하면 FN OS DB에 반영됩니다.</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+    <FormModal
+      title={mode === "sales" ? "판매입력" : "구매입력"}
+      description="행 추가 후 수정/삭제하고 저장하면 FN OS DB에 반영됩니다."
+      onClose={onClose}
+      size="full"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={onNew}>새 입력</ActionButton>
+          <ActionButton type="button" onClick={onSave}>저장</ActionButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <FormField label="일자"><input className={modalInputClass} type="date" value={draft.io_date || ""} onChange={(event) => onDraftChange("io_date", event.target.value)} /></FormField>
+          <FormField label={partnerLabel}><input className={modalInputClass} value={draft.cust_name || ""} onChange={(event) => onDraftChange("cust_name", event.target.value)} /></FormField>
+          <FormField label="창고"><input className={modalInputClass} value={draft.wh_cd || ""} onChange={(event) => onDraftChange("wh_cd", event.target.value)} /></FormField>
+          <FormField label="순번"><input className={modalInputClass} value={draft.upload_ser_no || ""} onChange={(event) => onDraftChange("upload_ser_no", event.target.value)} /></FormField>
+          <FormField label="품목코드"><input className={modalInputClass} value={draft.prod_cd || ""} onChange={(event) => onDraftChange("prod_cd", event.target.value)} /></FormField>
+          <FormField label="품목명"><input className={modalInputClass} value={draft.prod_name || ""} onChange={(event) => onDraftChange("prod_name", event.target.value)} /></FormField>
+          <FormField label="수량"><input className={modalInputClass} type="number" value={draft.qty || ""} onChange={(event) => onDraftChange("qty", event.target.value)} /></FormField>
+          <FormField label="단가"><input className={modalInputClass} type="number" value={draft.price || ""} onChange={(event) => onDraftChange("price", event.target.value)} /></FormField>
+          <FormField label="공급가액"><input className={modalInputClass} type="number" value={draft.supply_amt || ""} onChange={(event) => onDraftChange("supply_amt", event.target.value)} /></FormField>
+          <FormField label="메모" className="md:col-span-3"><input className={modalInputClass} value={draft.remarks || ""} onChange={(event) => onDraftChange("remarks", event.target.value)} /></FormField>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <label className="text-xs font-black text-slate-500">일자<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="date" value={draft.io_date || ""} onChange={(event) => onDraftChange("io_date", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">{partnerLabel}<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.cust_name || ""} onChange={(event) => onDraftChange("cust_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">창고<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.wh_cd || ""} onChange={(event) => onDraftChange("wh_cd", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">순번<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.upload_ser_no || ""} onChange={(event) => onDraftChange("upload_ser_no", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.prod_cd || ""} onChange={(event) => onDraftChange("prod_cd", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.prod_name || ""} onChange={(event) => onDraftChange("prod_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">수량<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.qty || ""} onChange={(event) => onDraftChange("qty", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">단가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.price || ""} onChange={(event) => onDraftChange("price", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">공급가액<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.supply_amt || ""} onChange={(event) => onDraftChange("supply_amt", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500 md:col-span-3">메모<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.remarks || ""} onChange={(event) => onDraftChange("remarks", event.target.value)} /></label>
-        </div>
-
-        <div className="mt-4 flex flex-wrap justify-between gap-2">
-          <button type="button" onClick={onAddOrUpdate} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
+        <div className="flex flex-wrap justify-start gap-2">
+          <ActionButton type="button" variant="secondary" onClick={onAddOrUpdate}>
             {editingIndex === null ? "행 추가" : "수정 반영"}
-          </button>
-          <div className="flex gap-2">
-            <button type="button" onClick={onNew} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-500 hover:bg-slate-50">새 입력</button>
-            <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white hover:bg-slate-800">저장</button>
-          </div>
+          </ActionButton>
         </div>
 
-        <div className="mt-5 overflow-x-auto rounded-md border border-slate-200">
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full min-w-[860px] text-sm">
-            <thead className="bg-slate-50 text-xs font-black text-slate-500">
+            <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
               <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">{partnerLabel}</th><th className="px-3 py-2 text-left">품목</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2 text-right">공급가액</th><th className="px-3 py-2 text-center">관리</th></tr>
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={`${row.upload_ser_no}-${index}`} className="border-t border-slate-100">
+                <tr key={`${row.upload_ser_no}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/40">
                   <td className="px-3 py-2 font-bold">{row.io_date || "-"}</td>
                   <td className="px-3 py-2">{row.cust_name || "-"}</td>
                   <td className="px-3 py-2 font-bold">{row.prod_name || row.prod_cd || "-"}</td>
                   <td className="px-3 py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
                   <td className="px-3 py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
                   <td className="px-3 py-2 text-center">
-                    <button type="button" onClick={() => onEdit(index)} className="mr-2 rounded border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">수정</button>
-                    <button type="button" onClick={() => onDelete(index)} className="rounded border border-rose-200 px-3 py-1 text-xs font-black text-rose-600">삭제</button>
+                    <ActionButton type="button" variant="secondary" className="mr-2 h-8 px-3 text-xs" onClick={() => onEdit(index)}>수정</ActionButton>
+                    <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50" onClick={() => onDelete(index)}>삭제</ActionButton>
                   </td>
                 </tr>
               ))}
@@ -7927,7 +7903,7 @@ function SalesPurchaseEntryModal({
           </table>
         </div>
       </div>
-    </div>
+    </FormModal>
   );
 }
 
@@ -9092,13 +9068,22 @@ function ProductEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
-      <ModalShell className="w-full max-w-3xl">
-        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-          <h3 className="text-xl font-black">{draft.id ? "품목 수정" : "새 품목 등록"}</h3>
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xl font-black text-slate-500 hover:bg-slate-100" aria-label="닫기">x</button>
+    <FormModal
+      title={draft.id ? "품목 수정" : "새 품목 등록"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div className="flex w-full justify-between gap-2">
+          <div>{draft.id && <ActionButton type="button" variant="danger" onClick={onDelete}>삭제</ActionButton>}</div>
+          <div className="flex gap-2">
+            <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+            <ActionButton type="button" onClick={onSave}>저장</ActionButton>
+          </div>
         </div>
-        <div className="mt-4 space-y-3">
+      }
+    >
+      <div className="space-y-5">
+        <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
             {(["plain", "set", "rg"] as ProductAttribute[]).map((attribute) => {
               const selected = normalizeProductAttribute(draft.product_attribute || draft.product_kind) === attribute;
@@ -9117,14 +9102,14 @@ function ProductEditModal({
             })}
           </div>
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <label className="text-xs font-black text-slate-500">품목코드<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">품목명<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">입고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></label>
-          <label className="text-xs font-black text-slate-500">출고가<input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold" type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></label>
+        <div className="grid gap-4 md:grid-cols-2">
+          <FormField label="품목코드" required><input className={modalInputClass} value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></FormField>
+          <FormField label="품목명" required><input className={modalInputClass} value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></FormField>
+          <FormField label="입고가"><input className={modalInputClass} type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></FormField>
+          <FormField label="출고가"><input className={modalInputClass} type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></FormField>
         </div>
-        <div className="mt-5 rounded-md border border-slate-200 p-4">
-          <div className="mb-3 text-sm font-black text-slate-700">재고등록(수정)</div>
+        <div className="rounded-xl border border-gray-200 p-4">
+          <div className="mb-3 text-sm font-semibold text-gray-900">재고등록(수정)</div>
           <div className="grid gap-2 md:grid-cols-2">
             {warehouses.map((warehouse) => (
               <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
@@ -9133,7 +9118,7 @@ function ProductEditModal({
                   <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">현재 {Number(draft[`stock_${warehouse.warehouse_code}`] || 0).toLocaleString("ko-KR")}</span>
                 </span>
                 <input
-                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-bold"
+                  className={modalInputClass}
                   type="number"
                   value={draft[`stock_${warehouse.warehouse_code}`] || ""}
                   placeholder="수정 수량"
@@ -9145,26 +9130,26 @@ function ProductEditModal({
           </div>
         </div>
         {!showBomPanel && (
-          <div className="mt-5 rounded-md border border-dashed border-slate-200 p-4">
-            <button type="button" onClick={() => setBomOpen(true)} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600">BOM 설정</button>
+          <div className="rounded-xl border border-dashed border-gray-200 p-4">
+            <ActionButton type="button" variant="secondary" onClick={() => setBomOpen(true)}>BOM 설정</ActionButton>
           </div>
         )}
-        {showBomPanel && <div className="mt-5 rounded-md border border-slate-200 p-4">
+        {showBomPanel && <div className="rounded-xl border border-gray-200 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black text-slate-700">BOM 관리</div>
-              <p className="mt-1 text-xs font-bold text-slate-500">세트 판매품이면 실제 차감될 구성 품목과 수량을 지정합니다.</p>
+              <div className="text-sm font-semibold text-gray-900">BOM 관리</div>
+              <p className="mt-1 text-xs font-medium text-gray-500">세트 판매품이면 실제 차감될 구성 품목과 수량을 지정합니다.</p>
             </div>
             <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-black text-emerald-700">{bomRows.length}개 구성</span>
           </div>
           <input
-            className="field-input mb-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            className={`${modalInputClass} mb-2`}
             value={componentQuery}
             onChange={(event) => setComponentQuery(event.target.value)}
             placeholder="구성품 품목코드 / 품목명 검색"
           />
           {!!componentCandidates.length && (
-            <div className="mb-3 max-h-36 overflow-auto rounded-md border border-slate-200">
+            <div className="mb-3 max-h-36 overflow-auto rounded-xl border border-gray-200">
               {componentCandidates.map((product) => (
                 <button
                   key={product.id}
@@ -9181,20 +9166,20 @@ function ProductEditModal({
           )}
           <div className="space-y-2">
             {bomRows.map((row, index) => (
-              <div key={`${row.component_product_id}-${index}`} className="grid items-center gap-2 rounded-md bg-slate-50 p-2 md:grid-cols-[120px_1fr_90px_64px]">
+              <div key={`${row.component_product_id}-${index}`} className="grid items-center gap-2 rounded-lg bg-gray-50 p-2 md:grid-cols-[120px_1fr_90px_64px]">
                 <div className="text-sm font-black">{row.component_product_code || row.component_sku}</div>
                 <div className="truncate text-sm font-bold text-slate-600">{row.component_product_name || "-"}</div>
-                <input className="rounded-md border border-slate-200 px-2 py-1 text-right text-sm font-bold" type="number" min="0" step="1" value={row.qty_per_unit || ""} onChange={(event) => updateBomQty(index, event.target.value)} />
-                <button type="button" onClick={() => removeBomComponent(index)} className="rounded-md border border-rose-200 px-2 py-1 text-xs font-black text-rose-600">삭제</button>
+                <input className={`${modalInputClass} h-8 text-right`} type="number" min="0" step="1" value={row.qty_per_unit || ""} onChange={(event) => updateBomQty(index, event.target.value)} />
+                <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-2 text-xs text-rose-600 hover:bg-rose-50" onClick={() => removeBomComponent(index)}>삭제</ActionButton>
               </div>
             ))}
             {!bomRows.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">BOM 구성품이 없습니다.</div>}
           </div>
         </div>}
-        <div className="mt-5 rounded-md border border-slate-200 p-4">
+        <div className="rounded-xl border border-gray-200 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-sm font-black text-slate-700">수입관리 연동</div>
-            <button type="button" onClick={() => goToInternal(importHref("/products"))} className="rounded-md border border-orange-200 px-3 py-1.5 text-xs font-black text-orange-600 hover:bg-orange-50">수입관리에서 수정</button>
+            <div className="text-sm font-semibold text-gray-900">수입관리 연동</div>
+            <ActionButton type="button" variant="secondary" className="h-8 border-orange-200 px-3 text-xs text-orange-700 hover:bg-orange-50" onClick={() => goToInternal(importHref("/products"))}>수입관리에서 수정</ActionButton>
           </div>
           <div className="space-y-2">
             {importLinks.map((link, index) => (
@@ -9206,17 +9191,8 @@ function ProductEditModal({
             {!importLinks.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">연동된 수입관리 상품이 없습니다.</div>}
           </div>
         </div>
-        <div className="mt-5 flex justify-between gap-2">
-          <div>
-            {draft.id && <button type="button" onClick={onDelete} className="rounded-md border border-rose-200 px-4 py-2 text-sm font-black text-rose-600 hover:bg-rose-50">삭제</button>}
-          </div>
-          <div className="flex gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-500">닫기</button>
-          <button type="button" onClick={onSave} className="rounded-md bg-slate-950 px-5 py-2 text-sm font-black text-white">저장</button>
-          </div>
-        </div>
-      </ModalShell>
-    </div>
+      </div>
+    </FormModal>
   );
 }
 

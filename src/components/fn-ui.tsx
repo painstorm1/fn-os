@@ -233,6 +233,8 @@ export function FormModal({
   size?: ModalSize;
   className?: string;
 }) {
+  useEscapeToClose(true, onClose);
+
   return (
     <ModalOverlay>
       <ModalShell size={size} className={className}>
@@ -261,6 +263,8 @@ export function SelectionModal({
   size?: ModalSize;
   className?: string;
 }) {
+  useEscapeToClose(true, onClose);
+
   return (
     <ModalOverlay className="py-10">
       <ModalShell size={size} className={className}>
