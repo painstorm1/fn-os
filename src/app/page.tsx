@@ -550,7 +550,7 @@ function RightTools() {
   }
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-gray-200 bg-white px-4 py-6 xl:block">
       <ToolSection title="LCL 배송요금" defaultOpen>
         <select
           value={lcl.method}
@@ -5740,6 +5740,7 @@ function SalesExcelGrid({
     setRange({ startRow: productSearch.row, endRow: productSearch.row, startCol: productSearch.col, endCol: productSearch.col });
     window.setTimeout(() => gridRef.current?.focus(), 0);
   }
+  useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
   function addRow() {
     onChange([...rows, headers.map(() => "")]);
   }
@@ -10173,19 +10174,7 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
 }
 
 function AccountingMetric({ label, value, note, tone = "slate" }: { label: string; value: string; note?: string; tone?: "slate" | "orange" | "green" | "rose" }) {
-  const toneClass = {
-    slate: "text-slate-950",
-    orange: "text-orange-600",
-    green: "text-emerald-600",
-    rose: "text-rose-600",
-  }[tone];
-  return (
-    <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-black text-slate-500">{label}</p>
-      <p className={`mt-2 text-xl font-black ${toneClass}`}>{value}</p>
-      {note && <p className="mt-1 text-xs font-bold text-slate-500">{note}</p>}
-    </article>
-  );
+  return <KpiCard label={label} value={value} note={note} tone={tone === "green" ? "success" : tone === "rose" ? "danger" : tone === "orange" ? "orange" : "default"} />;
 }
 
 function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<string, unknown>>; compact?: boolean }) {
@@ -10199,9 +10188,9 @@ function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<str
       }).join(" ")
     : "";
   return (
-    <section className={`${compact ? "" : "rounded-md border border-slate-200 bg-white p-5 shadow-sm"}`}>
-      {!compact && <h2 className="text-base font-black">월별 비용 추이</h2>}
-      <div className="mt-3 rounded-md bg-slate-50 p-3">
+    <Card className={compact ? "border-0 p-0 shadow-none" : "p-5"}>
+      {!compact && <SectionHeader title="월별 비용 추이" />}
+      <div className="rounded-xl bg-gray-50 p-3">
         <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label="월별 비용 추이 그래프">
           <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
           {points && <polyline points={points} fill="none" stroke="#f97316" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
@@ -10218,10 +10207,10 @@ function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<str
               <p className="mt-1 font-black text-slate-950">{krw(asNumber(row.amount))}</p>
             </div>
           ))}
-          {!chartRows.length && <p className="col-span-full rounded bg-white px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+          {!chartRows.length && <div className="col-span-full"><EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" /></div>}
         </div>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -10231,9 +10220,9 @@ function AccountingCategoryChart({ rows, compact = false }: { rows: Array<Record
   const colors = ["#f97316", "#0ea5e9", "#10b981", "#f43f5e", "#64748b", "#a855f7"];
   let offset = 0;
   return (
-    <section className={`${compact ? "" : "rounded-md border border-slate-200 bg-white p-5 shadow-sm"}`}>
-      {!compact && <h2 className="text-base font-black">카테고리 비중</h2>}
-      <div className="mt-3 grid gap-4 rounded-md bg-slate-50 p-3 md:grid-cols-[160px_1fr]">
+    <Card className={compact ? "border-0 p-0 shadow-none" : "p-5"}>
+      {!compact && <SectionHeader title="카테고리 비중" />}
+      <div className="grid gap-4 rounded-xl bg-gray-50 p-3 md:grid-cols-[160px_1fr]">
         <svg viewBox="0 0 42 42" className="h-40 w-40">
           <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" strokeWidth="6" />
           {chartRows.map((row, index) => {
@@ -10272,10 +10261,10 @@ function AccountingCategoryChart({ rows, compact = false }: { rows: Array<Record
               </div>
             );
           })}
-          {!chartRows.length && <p className="rounded bg-white px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+          {!chartRows.length && <EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" />}
         </div>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -10492,29 +10481,27 @@ function AccountingWorkspace() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <div>
-          <h1 className="text-2xl font-black">회계/비용</h1>
-          <p className="mt-1 text-sm font-bold text-slate-500">국민카드, 은행 입출금, 세금계산서, 물류/광고 비용을 파일 기반으로 모아 손익까지 봅니다.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="회계/비용"
+        description="국민카드, 은행 입출금, 세금계산서, 물류/광고 비용을 파일 기반으로 모아 손익까지 봅니다."
+      />
 
-      <div className="flex gap-2 overflow-x-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+      <Card className="flex gap-2 overflow-x-auto p-1 shadow-none">
         {accountingTabs.map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`h-10 shrink-0 rounded-md px-4 text-sm font-black ${activeTab === tab ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            className={`h-10 shrink-0 rounded-lg px-4 text-sm font-semibold transition ${activeTab === tab ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
           >
             {tab}
           </button>
         ))}
-      </div>
+      </Card>
 
-      {loading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">회계 데이터를 불러오는 중입니다.</div>}
-      {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">{summary.error}</div>}
-      {message && <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</div>}
+      {loading && <Card className="p-4 text-sm font-semibold text-gray-500">회계 데이터를 불러오는 중입니다.</Card>}
+      {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{summary.error}</Card>}
+      {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-700">{message}</Card>}
 
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <AccountingLineChart rows={monthRows} />
@@ -10523,13 +10510,13 @@ function AccountingWorkspace() {
 
       {activeTab === "작업실" && (
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+          <Card className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-black">비용 파일 작업실</h2>
-                <p className="mt-1 text-xs font-bold text-slate-500">국민카드 2개, 국민은행 1개, 기업은행 1개 파일을 한 번에 올립니다.</p>
+                <h2 className="text-[18px] font-semibold text-gray-900">비용 파일 작업실</h2>
+                <p className="mt-1 text-sm text-gray-500">국민카드 2개, 국민은행 1개, 기업은행 1개 파일을 한 번에 올립니다.</p>
               </div>
-              <select className="field-input h-9 rounded-md border border-slate-200 px-3 text-xs font-black text-slate-600" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+              <select className="field-input h-9 max-w-40 px-3 text-xs font-semibold text-gray-600" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
                 <option>자동 분류</option>
                 {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
@@ -10540,54 +10527,54 @@ function AccountingWorkspace() {
               onDragOver={(event) => event.preventDefault()}
               onDrop={onExpenseDrop}
             >
-              <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-5 text-sm font-black text-orange-600 hover:bg-orange-100">
+              <label className="flex h-10 cursor-pointer items-center justify-center rounded-lg bg-[#ff6a00] px-5 text-sm font-semibold text-white transition hover:bg-[#ea580c]">
                 파일 선택
                 <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
               </label>
-              <div className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm font-black text-slate-500">
+              <div className="flex min-h-10 items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 text-sm font-semibold text-gray-500">
                 국민카드 2개 / 국민은행 / 기업은행 파일을 모두 드래그앤드롭
               </div>
-              <div className="flex h-10 items-center justify-center rounded-md bg-slate-100 px-3 text-xs font-black text-slate-600">
+              <div className="flex h-10 items-center justify-center rounded-lg bg-gray-100 px-3 text-xs font-semibold text-gray-600">
                 대기 {pendingUploadCount.toLocaleString("ko-KR")}개
               </div>
-              <button type="button" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="h-10 rounded-md border border-slate-300 px-4 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
+              <ActionButton type="button" variant="secondary" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length} className="px-4">
                 {parsing ? "생성 중" : "데이터 생성"}
-              </button>
+              </ActionButton>
             </div>
 
             <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <div className="rounded-md bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+              <div className="rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
                 파일명에 국민카드, 국민은행, 기업은행이 있으면 출처를 자동으로 잡습니다.
               </div>
-              <button type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="h-10 rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:bg-slate-300">
+              <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length} className="px-5">
                 {uploading ? "저장 중" : "DB 저장"}
-              </button>
+              </ActionButton>
             </div>
 
             {uploadedExpenseFiles.length > 0 && (
-              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-black text-slate-700">대기 중 파일 {uploadedExpenseFiles.length}개</p>
-                  <button type="button" onClick={() => { setUploadedExpenseFiles([]); setPreviewRows([]); setParsedFiles([]); }} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">전체 비우기</button>
+                  <p className="text-sm font-semibold text-gray-700">대기 중 파일 {uploadedExpenseFiles.length}개</p>
+                  <ActionButton type="button" variant="secondary" onClick={() => { setUploadedExpenseFiles([]); setPreviewRows([]); setParsedFiles([]); }} className="h-8 px-3 text-xs">전체 비우기</ActionButton>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {uploadedExpenseFiles.map((item) => (
-                    <span key={expenseFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-600">{item.sourceType}</span>
+                    <span key={expenseFileKey(item)} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700">
+                      <StatusBadge tone="orange">{item.sourceType}</StatusBadge>
                       <span className="truncate">{item.file.name}</span>
-                      <span className="text-slate-400">{(item.file.size / 1024).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} KB</span>
-                      <button type="button" onClick={() => removeExpenseFile(item)} className="font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
+                      <span className="text-gray-400">{(item.file.size / 1024).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} KB</span>
+                      <button type="button" onClick={() => removeExpenseFile(item)} className="font-bold text-red-500" aria-label={`${item.file.name} 제외`}>x</button>
                     </span>
                   ))}
                 </div>
               </div>
             )}
             {parsedFiles.length > 0 && (
-              <div className="mt-4 rounded-md bg-slate-50 p-3">
-                <p className="text-xs font-black text-slate-500">최근 생성 결과</p>
+              <div className="mt-4 rounded-xl bg-gray-50 p-3">
+                <p className="text-xs font-semibold text-gray-500">최근 생성 결과</p>
                 <div className="mt-2 space-y-1">
                   {parsedFiles.map((file, index) => (
-                    <div key={`${String(file.name)}-${index}`} className="flex justify-between gap-2 text-xs font-bold text-slate-600">
+                    <div key={`${String(file.name)}-${index}`} className="flex justify-between gap-2 text-xs font-medium text-gray-600">
                       <span className="truncate">{String(file.name)}</span>
                       <span>{Number(file.row_count || 0).toLocaleString("ko-KR")}건</span>
                     </div>
@@ -10595,86 +10582,110 @@ function AccountingWorkspace() {
                 </div>
               </div>
             )}
-          </div>
+          </Card>
 
-          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-black">생성 데이터 미리보기</h2>
-              <span className="rounded bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">{previewRows.length.toLocaleString("ko-KR")}건</span>
-            </div>
+          <Card className="p-5">
+            <SectionHeader title="생성 데이터 미리보기" actions={<StatusBadge>{previewRows.length.toLocaleString("ko-KR")}건</StatusBadge>} />
             <div className="mt-4">
               <ExpenseTable rows={previewRows} categoryById={categoryById} compact />
             </div>
-          </section>
+          </Card>
         </section>
       )}
 
       {activeTab === "비용 내역" && (
-        <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div className="grid gap-2 md:grid-cols-4">
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="업체/내용/메모" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} />
-              <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={filters.category} onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value }))}>
+        <Card className="p-5">
+          <SectionHeader
+            title="비용 내역"
+            description="기간, 카테고리, 업체명을 기준으로 비용을 빠르게 좁혀봅니다."
+            actions={<ActionButton type="button" variant="secondary" onClick={exportExpenses}>엑셀 내보내기</ActionButton>}
+          />
+          <FilterBar className="mb-4 p-3 shadow-none">
+            <div className="grid flex-1 gap-2 md:grid-cols-4">
+              <input className="field-input px-3 py-2 text-sm" placeholder="업체/내용/메모" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} />
+              <select className="field-input px-3 py-2 text-sm" value={filters.category} onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value }))}>
                 <option value="">전체 카테고리</option>
                 {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
               </select>
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.from} onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))} />
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
+              <input className="field-input px-3 py-2 text-sm" type="date" value={filters.from} onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))} />
+              <input className="field-input px-3 py-2 text-sm" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
             </div>
-            <button type="button" onClick={exportExpenses} className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600">엑셀 내보내기</button>
-          </div>
+          </FilterBar>
           <ExpenseTable rows={filteredExpenses} categoryById={categoryById} />
-        </section>
+        </Card>
       )}
 
       {activeTab === "분류 규칙" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">규칙 기반 분류 결과</h2>
+          <Card className="p-5">
+            <SectionHeader title="규칙 기반 분류 결과" description="업체명과 설명 패턴으로 자동 분류한 후보를 확인합니다." />
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {["네이버파이낸셜 -> 광고비 또는 정산", "쿠팡 -> 판매수수료/정산", "CJ대한통운 -> 택배비", "관세사 -> 통관수수료", "카드사 해외결제 -> 샘플비/수입비용 후보", "포장/박스/봉투 -> 포장비"].map((rule) => (
-                <div key={rule} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700">{rule}</div>
+                <div key={rule} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-gray-700">
+                  <span>{rule}</span>
+                  <StatusBadge tone="orange">규칙</StatusBadge>
+                </div>
               ))}
             </div>
             <div className="mt-5">
               <ExpenseTable rows={expenses.slice(0, 20)} categoryById={categoryById} compact />
             </div>
-          </div>
-          <form onSubmit={saveManualExpense} className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">수동 비용 입력</h2>
-            <div className="mt-4 space-y-2">
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="업체명" value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="내용" value={manual.description} onChange={(event) => setManual((prev) => ({ ...prev, description: event.target.value }))} />
-              <select className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={manual.category_name} onChange={(event) => setManual((prev) => ({ ...prev, category_name: event.target.value }))}>
-                {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
-              </select>
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="공급가액" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="부가세" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-right text-sm" type="number" placeholder="합계" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
-              <input className="field-input w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="결제수단" value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
-              <textarea className="field-input min-h-[80px] w-full rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder="메모" value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
-              <button className="w-full rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white">저장</button>
-            </div>
-          </form>
+          </Card>
+          <Card className="p-5">
+            <form onSubmit={saveManualExpense}>
+              <SectionHeader title="수동 비용 입력" />
+              <div className="mt-4 space-y-3">
+                <FormField label="일자">
+                  <input className="field-input w-full px-3 py-2 text-sm" type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
+                </FormField>
+                <FormField label="업체명">
+                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
+                </FormField>
+                <FormField label="내용">
+                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.description} onChange={(event) => setManual((prev) => ({ ...prev, description: event.target.value }))} />
+                </FormField>
+                <FormField label="카테고리">
+                  <select className="field-input w-full px-3 py-2 text-sm" value={manual.category_name} onChange={(event) => setManual((prev) => ({ ...prev, category_name: event.target.value }))}>
+                    {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="공급가액">
+                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
+                </FormField>
+                <FormField label="부가세">
+                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
+                </FormField>
+                <FormField label="합계">
+                  <input className="field-input w-full px-3 py-2 text-right text-sm" type="number" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
+                </FormField>
+                <FormField label="결제수단">
+                  <input className="field-input w-full px-3 py-2 text-sm" value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
+                </FormField>
+                <FormField label="메모">
+                  <textarea className="field-input min-h-[80px] w-full px-3 py-2 text-sm" value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
+                </FormField>
+                <ActionButton className="w-full">저장</ActionButton>
+              </div>
+            </form>
+          </Card>
         </section>
       )}
 
       {activeTab === "손익 그래프" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">월별 손익 계산</h2>
+          <Card className="p-5">
+            <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <AccountingLineChart rows={monthRows} compact />
               <AccountingCategoryChart rows={categoryRows} compact />
             </div>
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[760px] text-sm">
-                <thead className="border-b border-slate-200 text-xs text-slate-500"><tr><th className="py-2 text-left">월</th><th className="py-2 text-right">매출</th><th className="py-2 text-right">상품매입</th><th className="py-2 text-right">광고비</th><th className="py-2 text-right">비용</th><th className="py-2 text-right">예상 순이익</th></tr></thead>
-                <tbody><tr className="border-b border-slate-100"><td className="py-3 font-black">{String(totals.month || "-")}</td><td className="py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="py-3 text-right font-black text-orange-600">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="px-3 py-2 text-left">월</th><th className="px-3 py-2 text-right">매출</th><th className="px-3 py-2 text-right">상품매입</th><th className="px-3 py-2 text-right">광고비</th><th className="px-3 py-2 text-right">비용</th><th className="px-3 py-2 text-right">예상 순이익</th></tr></thead>
+                <tbody><tr className="border-t border-gray-100 hover:bg-orange-50/60"><td className="px-3 py-3 font-semibold">{String(totals.month || "-")}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="px-3 py-3 text-right font-bold text-[#ff6a00]">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
               </table>
             </div>
-          </div>
+          </Card>
           <ReportList title="비용 카테고리 비중" rows={summary?.by_category || []} />
         </section>
       )}
@@ -10697,14 +10708,14 @@ function AccountingWorkspace() {
         <section className="grid gap-4 xl:grid-cols-3">
           <AccountingList title="최근 업로드" rows={recentBatches} primaryKey="source_file_name" amountKey="success_count" emptyText="아직 업로드 기록이 없습니다." />
           <ReportList title="업체별 비용" rows={vendorRows} />
-          <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-black">한눈에 보기</h2>
-            <div className="mt-4 space-y-2 text-sm font-bold text-slate-600">
+          <Card className="p-5">
+            <SectionHeader title="한눈에 보기" />
+            <div className="mt-4 space-y-2 text-sm font-medium text-gray-600">
               <p className="rounded-md bg-slate-50 px-3 py-2">가장 큰 비용: <b className="text-slate-950">{String(largestCategory?.label || "데이터 없음")}</b></p>
               <p className="rounded-md bg-slate-50 px-3 py-2">최근 비용 행: <b className="text-slate-950">{expenses.length.toLocaleString("ko-KR")}건</b></p>
               <p className="rounded-md bg-slate-50 px-3 py-2">파일 대기: <b className="text-orange-600">{pendingUploadCount.toLocaleString("ko-KR")}개</b></p>
             </div>
-          </section>
+          </Card>
         </section>
       )}
     </div>
@@ -10712,23 +10723,23 @@ function AccountingWorkspace() {
 }
 
 function ExpenseTable({ rows, categoryById, compact = false }: { rows: Array<Record<string, unknown>>; categoryById: Map<string, string>; compact?: boolean }) {
-  if (!rows.length) return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">데이터 없음</div>;
+  if (!rows.length) return <EmptyState title="데이터 없음" className="min-h-32" />;
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-gray-200">
       <table className={`w-full text-sm ${compact ? "min-w-[760px]" : "min-w-[980px]"}`}>
-        <thead className="border-b border-slate-200 text-xs text-slate-500">
-          <tr><th className="py-2 text-left">일자</th><th className="py-2 text-left">자료</th><th className="py-2 text-left">업체</th><th className="py-2 text-left">내용</th><th className="py-2 text-left">분류</th><th className="py-2 text-right">합계</th>{!compact && <th className="py-2 text-left">메모</th>}</tr>
+        <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+          <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">자료</th><th className="px-3 py-2 text-left">업체</th><th className="px-3 py-2 text-left">내용</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-right">합계</th>{!compact && <th className="px-3 py-2 text-left">메모</th>}</tr>
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={String(row.id || index)} className="border-b border-slate-100">
-              <td className="py-2 font-bold">{String(row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
-              <td className="py-2">{String(row.source_type || "-")}</td>
-              <td className="py-2 font-bold">{String(row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
-              <td className="max-w-[280px] truncate py-2">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
-              <td className="py-2"><StatusPill status={categoryById.get(String(row.category_id || "")) || String(row.category || "기타")} /></td>
-              <td className="py-2 text-right font-black">{krw(asNumber(row.total_amount || row["합계"] || row["금액"] || row.amount))}</td>
-              {!compact && <td className="max-w-[220px] truncate py-2 text-slate-500">{String(row.memo || "-")}</td>}
+            <tr key={String(row.id || index)} className="border-t border-gray-100 hover:bg-orange-50/60">
+              <td className="px-3 py-2 font-semibold text-gray-800">{String(row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
+              <td className="px-3 py-2 text-gray-600"><StatusBadge>{String(row.source_type || "-")}</StatusBadge></td>
+              <td className="px-3 py-2 font-semibold text-gray-900">{String(row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
+              <td className="max-w-[280px] truncate px-3 py-2 text-gray-600">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
+              <td className="px-3 py-2"><StatusBadge tone="orange">{categoryById.get(String(row.category_id || "")) || String(row.category || "기타")}</StatusBadge></td>
+              <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(asNumber(row.total_amount || row["합계"] || row["금액"] || row.amount))}</td>
+              {!compact && <td className="max-w-[220px] truncate px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>}
             </tr>
           ))}
         </tbody>
@@ -10739,39 +10750,39 @@ function ExpenseTable({ rows, categoryById, compact = false }: { rows: Array<Rec
 
 function AccountingList({ title, rows, primaryKey, amountKey, emptyText }: { title: string; rows: Array<Record<string, unknown>>; primaryKey: string; amountKey: string; emptyText: string }) {
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-base font-black">{title}</h2>
+    <Card className="p-5">
+      <SectionHeader title={title} />
       <div className="mt-4 space-y-2">
         {rows.map((row, index) => (
-          <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
-            <span className="truncate font-bold text-slate-700">{String(row[primaryKey] || row.customer_name || row.memo || "-")}</span>
-            <span className="font-black">{amountKey.includes("count") ? `${asNumber(row[amountKey]).toLocaleString("ko-KR")}건` : krw(asNumber(row[amountKey]))}</span>
+          <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-xl bg-gray-50 px-3 py-2 text-sm">
+            <span className="truncate font-semibold text-gray-700">{String(row[primaryKey] || row.customer_name || row.memo || "-")}</span>
+            <span className="font-bold text-gray-900">{amountKey.includes("count") ? `${asNumber(row[amountKey]).toLocaleString("ko-KR")}건` : krw(asNumber(row[amountKey]))}</span>
           </div>
         ))}
-        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{emptyText}</p>}
+        {!rows.length && <EmptyState title={emptyText} className="min-h-32" />}
       </div>
-    </section>
+    </Card>
   );
 }
 
 function ReportList({ title, rows }: { title: string; rows: Array<Record<string, unknown>> }) {
   const max = Math.max(1, ...rows.map((row) => asNumber(row.amount)));
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-base font-black">{title}</h2>
+    <Card className="p-5">
+      <SectionHeader title={title} />
       <div className="mt-4 space-y-3">
         {rows.slice(0, 10).map((row, index) => {
           const amount = asNumber(row.amount);
           return (
             <div key={`${title}-${index}`}>
-              <div className="mb-1 flex justify-between gap-3 text-sm"><span className="truncate font-bold">{String(row.label || "-")}</span><span className="font-black">{krw(amount)}</span></div>
-              <div className="h-2 rounded bg-slate-100"><div className="h-2 rounded bg-orange-500" style={{ width: `${Math.max(4, (amount / max) * 100)}%` }} /></div>
+              <div className="mb-1 flex justify-between gap-3 text-sm"><span className="truncate font-semibold text-gray-700">{String(row.label || "-")}</span><span className="font-bold text-gray-900">{krw(amount)}</span></div>
+              <div className="h-2 rounded-full bg-gray-100"><div className="h-2 rounded-full bg-[#ff6a00]" style={{ width: `${Math.max(4, (amount / max) * 100)}%` }} /></div>
             </div>
           );
         })}
-        {!rows.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">데이터 없음</p>}
+        {!rows.length && <EmptyState title="데이터 없음" className="min-h-32" />}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -10803,8 +10814,8 @@ function AccountingRightPanel() {
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <div className="mb-4">
-        <h2 className="text-base font-black text-slate-950">회계 대시보드</h2>
-        <p className="mt-1 text-xs font-bold text-slate-500">비용, 결제, 손익 핵심만 모아봅니다.</p>
+        <h2 className="text-[18px] font-semibold text-gray-900">회계 대시보드</h2>
+        <p className="mt-1 text-xs font-medium text-gray-500">비용, 결제, 손익 핵심만 모아봅니다.</p>
       </div>
       <div className="space-y-3">
         <AccountingMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" tone="orange" />
@@ -10814,28 +10825,28 @@ function AccountingRightPanel() {
         <AccountingMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} tone="green" />
         <AccountingMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 확인" tone="rose" />
       </div>
-      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <h3 className="text-xs font-black text-slate-500">큰 비용 TOP</h3>
+      <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <h3 className="text-xs font-semibold text-gray-500">큰 비용 TOP</h3>
         <div className="mt-2 space-y-2">
           {categoryRows.slice(0, 4).map((row, index) => (
             <div key={`${String(row.label)}-${index}`} className="flex items-center justify-between gap-2 text-xs">
-              <span className="truncate font-bold text-slate-600">{String(row.label || "-")}</span>
-              <span className="font-black text-slate-950">{krw(asNumber(row.amount))}</span>
+              <span className="truncate font-semibold text-gray-600">{String(row.label || "-")}</span>
+              <span className="font-bold text-gray-900">{krw(asNumber(row.amount))}</span>
             </div>
           ))}
-          {!categoryRows.length && <p className="rounded bg-white px-2 py-4 text-center text-xs font-bold text-slate-400">데이터 없음</p>}
+          {!categoryRows.length && <EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white px-2 py-4" />}
         </div>
       </div>
-      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <h3 className="text-xs font-black text-slate-500">최근 업로드</h3>
+      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <h3 className="text-xs font-semibold text-gray-500">최근 업로드</h3>
         <div className="mt-2 space-y-2">
           {recentBatches.slice(0, 4).map((row, index) => (
             <div key={`${String(row.id || row.source_file_name)}-${index}`} className="text-xs">
-              <p className="truncate font-black text-slate-700">{String(row.source_file_name || row.source_type || "-")}</p>
-              <p className="mt-0.5 text-slate-400">{asNumber(row.success_count).toLocaleString("ko-KR")}건 저장</p>
+              <p className="truncate font-semibold text-gray-700">{String(row.source_file_name || row.source_type || "-")}</p>
+              <p className="mt-0.5 text-gray-400">{asNumber(row.success_count).toLocaleString("ko-KR")}건 저장</p>
             </div>
           ))}
-          {!recentBatches.length && <p className="rounded bg-white px-2 py-4 text-center text-xs font-bold text-slate-400">업로드 없음</p>}
+          {!recentBatches.length && <EmptyState title="업로드 없음" className="min-h-24 border-0 bg-white px-2 py-4" />}
         </div>
       </div>
     </aside>
