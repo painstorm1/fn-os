@@ -216,6 +216,14 @@ function SourceBadge({ source, className = "" }: { source?: string; className?: 
   );
 }
 
+function displayMemo(item: ArchiveItem) {
+  const memo = String(item.memo || "").trim();
+  if (!memo) return "";
+  if (/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i.test(memo)) return "";
+  if (/^\s*좋아요\s*[\d,]+\s*개?\s*,?\s*댓글\s*[\d,]+\s*개?\s*$/i.test(memo)) return "";
+  return memo;
+}
+
 function categoryOptionEntries() {
   return (Object.keys(categoryTree) as CategoryGroup[]).flatMap((group) => categoryTree[group].map((category) => ({ group, category, label: `${group} / ${category}` })));
 }
@@ -395,6 +403,20 @@ export default function ArchiveWorkspace() {
     setMessage(drafts.length ? `${drafts.length.toLocaleString("ko-KR")}개 링크를 자동 정리했습니다.` : "추출된 링크가 없습니다.");
   }
 
+  async function organizeImageWithAi(file: File) {
+    const formData = new FormData();
+    formData.set("image", file);
+    formData.set("text", autoText);
+    const res = await fetch("/api/fnos/archive/ai-organize", { method: "POST", body: formData });
+    const result = await res.json();
+    if (!res.ok || result.ok === false) throw new Error(result.error || "AI 이미지 정리 실패");
+    const drafts = Array.isArray(result.drafts) ? result.drafts as AutoArchiveDraft[] : [];
+    setAutoDrafts(drafts);
+    if (result.text) setAutoText((prev) => [prev, result.text].filter(Boolean).join("\n\n"));
+    setMessage(drafts.length ? `AI가 ${drafts.length.toLocaleString("ko-KR")}개 링크를 정리했습니다.` : "AI가 추출한 링크가 없습니다.");
+    return drafts;
+  }
+
   async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
     autoImageFileRef.current = file;
@@ -405,9 +427,13 @@ export default function ArchiveWorkspace() {
     setAutoWorking(true);
     setMessage("이미지에서 링크를 읽는 중입니다.");
     try {
-      const text = await runOcr(file);
-      setAutoText((prev) => [prev, text].filter(Boolean).join("\n\n"));
-      extractFromText(text);
+      try {
+        await organizeImageWithAi(file);
+      } catch {
+        const text = await runOcr(file);
+        setAutoText((prev) => [prev, text].filter(Boolean).join("\n\n"));
+        extractFromText(text);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "이미지 링크 추출 실패");
     } finally {
@@ -890,7 +916,7 @@ function ArchiveList({
                 <div className="mt-1">
                   <SourceBadge source={item.source_type} />
                 </div>
-                <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{item.memo || item.summary || item.description || ""}</p>
+                <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{displayMemo(item)}</p>
               </div>
             </article>
           );
