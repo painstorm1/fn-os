@@ -1379,9 +1379,13 @@ function ensureImportErpServer(force = false) {
 
 function cachedJson<T>(path: string, ttl = DEFAULT_CACHE_TTL): Promise<T> {
   const key = apiUrl(path);
-  const storageTtl = Math.max(ttl, 5 * 60_000);
+  const force = ttl <= 0;
   return (needsImportErpServer(path) ? ensureImportErpServer().catch(() => undefined) : Promise.resolve())
-    .then(() => cachedClientJson<T>(key, { ttl, storageTtl }));
+    .then(() => cachedClientJson<T>(key, { ttl, storageTtl: force ? 0 : Math.max(ttl, 5 * 60_000), force }));
+}
+
+function readImportCache<T>(path: string, maxAge = 5 * 60_000) {
+  return readCachedJson<T>(apiUrl(path), { storageTtl: maxAge });
 }
 
 function invalidateApiCache(match?: string) {
@@ -1789,6 +1793,12 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     let alive = true;
+    const cachedDashboard = readImportCache<{ recent?: ImportOrder[]; monthly?: Array<{ month: string; cnt: number; amount: number }> }>("/api/fnos/dashboard");
+    if (cachedDashboard) {
+      setRecent(cachedDashboard.recent || []);
+      setMonthly(cachedDashboard.monthly || []);
+      setLoading(false);
+    }
     cachedJson<{ recent?: ImportOrder[]; monthly?: Array<{ month: string; cnt: number; amount: number }> }>("/api/fnos/dashboard")
       .then((data) => {
         if (!alive) return;
@@ -1934,9 +1944,8 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}/attachments`), { credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) throw new Error(data.error || "첨부파일을 불러오지 못했습니다.");
+      const data = await cachedJson<{ ok?: boolean; error?: string; attachments?: OrderAttachment[] }>(`/api/fnos/orders/${order.id}/attachments`, 60_000);
+      if (data.ok === false) throw new Error(data.error || "첨부파일을 불러오지 못했습니다.");
       const next = Array.isArray(data.attachments) ? data.attachments : [];
       setAttachments(next);
       onChanged?.(next.length);
@@ -1990,6 +1999,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
       }
       setSelectedFiles([]);
       setNote("");
+      invalidateApiCache(`/api/fnos/orders/${order.id}/attachments`);
       await loadAttachments();
     } catch (err) {
       setError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
@@ -2008,6 +2018,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.error || "삭제에 실패했습니다.");
+      invalidateApiCache(`/api/fnos/orders/${order.id}/attachments`);
       await loadAttachments();
     } catch (err) {
       setError(err instanceof Error ? err.message : "삭제에 실패했습니다.");
@@ -2127,13 +2138,10 @@ function NativeOrders({
   useEffect(() => {
     let alive = true;
     const defaultPath = "/api/fnos/orders";
-    const cachedOrders = readCachedJson<{ orders?: ImportOrder[] }>(defaultPath, { storageTtl: 5 * 60_000 });
+    const cachedOrders = readImportCache<{ orders?: ImportOrder[] }>(defaultPath);
     if (cachedOrders?.orders?.length) {
-      window.setTimeout(() => {
-        if (!alive) return;
-        setOrders(cachedOrders.orders || []);
-        setLoading(false);
-      }, 0);
+      setOrders(cachedOrders.orders);
+      setLoading(false);
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadOrders().finally(() => {
@@ -2380,6 +2388,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
     if (res.ok && next.ok) {
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
@@ -2398,6 +2407,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
@@ -2554,6 +2564,8 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
         })),
       }),
     });
+    invalidateApiCache(`/api/fnos/orders/${orderId}`);
+    invalidateApiCache("/api/fnos/orders");
     setSaving(false);
   }
 
@@ -2663,6 +2675,8 @@ function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unit
         naver_free_shipping: naverFree,
       }),
     });
+    invalidateApiCache(`/api/fnos/orders/${orderId}`);
+    invalidateApiCache("/api/fnos/orders");
     setSaving(false);
   }
 
@@ -2760,13 +2774,10 @@ function NativeProducts() {
 
   useEffect(() => {
     let alive = true;
-    const cachedProducts = readCachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", { storageTtl: 5 * 60_000 });
+    const cachedProducts = readImportCache<{ products?: ImportProduct[] }>("/api/fnos/products");
     if (cachedProducts?.products?.length) {
-      window.setTimeout(() => {
-        if (!alive) return;
-        setProducts(cachedProducts.products || []);
-        setLoading(false);
-      }, 0);
+      setProducts(cachedProducts.products);
+      setLoading(false);
     }
     cachedJson<{ products?: ImportProduct[] }>("/api/fnos/products", 60_000)
       .then((data) => {
@@ -2869,7 +2880,7 @@ function NativeProductDetail({ id }: { id: number }) {
       .then((next) => {
         if (!alive) return;
         setDetail(next);
-        cachedClientJson<{ links?: ImportSkuLink[]; bom?: ImportBomStatus[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+        cachedJson<{ links?: ImportSkuLink[]; bom?: ImportBomStatus[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, 60_000)
           .then((linkData) => {
             if (!alive) return;
             setSkuLinks(linkData.links || []);
@@ -2899,8 +2910,8 @@ function NativeProductDetail({ id }: { id: number }) {
       });
       if (!res.ok) throw new Error("삭제에 실패했습니다.");
       invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
-      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch {
       alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
@@ -3124,7 +3135,7 @@ function FnProductPickerModal({
     setLoading(true);
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim());
-    cachedClientJson<{ products?: FnProduct[] }>(`/api/fnos/products/search?${params.toString()}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+    cachedJson<{ products?: FnProduct[] }>(`/api/fnos/products/search?${params.toString()}`, 60_000)
       .then((data) => {
         if (alive) setProducts(data.products || []);
       })
@@ -3427,7 +3438,7 @@ function NativeProductForm({ id }: { id?: number }) {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+    cachedJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${id}`, 60_000)
       .then((data) => {
         if (alive) setFnSkuLinks(data.links || []);
       })
@@ -3464,17 +3475,20 @@ function NativeProductForm({ id }: { id?: number }) {
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "제품 저장에 실패했습니다.");
       if (fnSkuLinks.length || id) {
+        const savedProductId = id || json.product?.id;
         await fetch("/api/fnos/import-product-links", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ import_product_id: id || json.product?.id, links: fnSkuLinks }),
+          body: JSON.stringify({ import_product_id: savedProductId, links: fnSkuLinks }),
         });
         invalidateClientCache("/api/fnos/import-product-links");
+        invalidateApiCache(`/api/fnos/import-product-links?import_product_id=${savedProductId}`);
+        invalidateApiCache(`/api/fnos/products/${savedProductId}`);
       }
       invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
-      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
@@ -3498,8 +3512,8 @@ function NativeProductForm({ id }: { id?: number }) {
         throw new Error(json?.error || "제품 삭제에 실패했습니다.");
       }
       invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
-      sessionStorage.removeItem("fnos-products-cache");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 삭제에 실패했습니다.");
@@ -3869,7 +3883,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
     let alive = true;
     const productIds = Array.from(new Set((detail.items || []).map((item) => Number(item.product_id || 0)).filter(Boolean)));
     Promise.all(productIds.map((productId) => (
-      cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+      cachedJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, 60_000)
         .then((data) => [productId, data.links || []] as const)
         .catch(() => [productId, []] as const)
     ))).then((entries) => {
@@ -3952,6 +3966,11 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.error || "구매/입고 생성 실패");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache(`/api/fnos/orders/${order.id}`);
+      invalidateApiCache("/api/fnos/products");
+      invalidateApiCache("/api/fnos/products/search");
+      invalidateApiCache("/api/fnos/import-receipts");
       setMessage(`구매/입고 ${data.count || rows.length}건을 생성했습니다.`);
       window.setTimeout(onClose, 900);
     } catch (error) {
@@ -4172,8 +4191,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     if (!sourceId) return;
     let alive = true;
     const isCopy = !id && Boolean(copyId);
-    fetch(apiUrl(`/api/fnos/orders/${sourceId}`), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<ImportOrderDetail>(`/api/fnos/orders/${sourceId}`, 30_000)
       .then((next: ImportOrderDetail) => {
         if (!alive) return;
         const sourceOrder = next.order || null;
@@ -4233,7 +4251,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     let alive = true;
     const productIds = Array.from(new Set(lines.map((line) => String(line.product_id || "")).filter(Boolean)));
     Promise.all(productIds.map((productId) => (
-      cachedClientJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+      cachedJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, 60_000)
         .then((json) => [productId, json.links || []] as const)
         .catch(() => [productId, []] as const)
     ))).then((entries) => {
@@ -4971,8 +4989,7 @@ function LegacyNativeSettings() {
 
   useEffect(() => {
     let alive = true;
-    fetch(apiUrl("/api/fnos/settings"), { credentials: "include" })
-      .then((res) => res.json())
+    cachedJson<{ rates: Record<string, number>; factories: ImportFactory[] }>("/api/fnos/settings", 60_000)
       .then((next) => {
         if (alive) setData(next);
       });
@@ -10102,6 +10119,24 @@ type UploadedAdFile = {
   file: File;
 };
 
+type AdUploadResultRow = {
+  channel?: string;
+  success_count?: number;
+  fail_count?: number;
+  replaced_count?: number;
+  replaced_dates?: string[];
+  message?: string;
+};
+
+type AdUploadReport = {
+  message?: string;
+  parsed_count?: number;
+  success_count?: number;
+  fail_count?: number;
+  replaced_count?: number;
+  results?: AdUploadResultRow[];
+};
+
 type AdsSummary = {
   ok?: boolean;
   error?: string;
@@ -10150,6 +10185,21 @@ function adUploadFileKey(file: File) {
 
 function uploadedAdFileKey(item: UploadedAdFile) {
   return `${item.sourceKey}:${adUploadFileKey(item.file)}`;
+}
+
+function adFileSizeLabel(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)}MB`;
+  if (size >= 1024) return `${Math.max(1, Math.round(size / 1024)).toLocaleString("ko-KR")}KB`;
+  return `${size.toLocaleString("ko-KR")}B`;
+}
+
+function adUploadResultLabel(result: AdUploadReport | null) {
+  if (!result) return "";
+  const success = adNumber(result.success_count).toLocaleString("ko-KR");
+  const fail = adNumber(result.fail_count).toLocaleString("ko-KR");
+  const replaced = adNumber(result.replaced_count).toLocaleString("ko-KR");
+  const parsed = adNumber(result.parsed_count).toLocaleString("ko-KR");
+  return `읽음 ${parsed} / 저장 ${success} / 제외 ${fail}${adNumber(result.replaced_count) ? ` / 대체 ${replaced}` : ""}`;
 }
 
 function inferAdSourceKey(fileName: string): AdSourceKey {
@@ -10686,19 +10736,80 @@ function AdsAnalysisWorkspace() {
     return () => window.clearTimeout(timer);
   }, [dateFrom, dateTo]);
 
-  function exportAdReportCsv() {
-    const rows = [
-      ["광고", "총비용", "전환매출", "ROAS", "전환 건수", "CVR", "CPA", "CTR", "노출", "클릭", "CPC", "CPM"],
-      ...reportRows.map((row) => [row.label, Math.round(row.cost), Math.round(row.purchaseValue), `${row.roas.toFixed(1)}%`, row.purchases, `${row.purchaseCvr.toFixed(2)}%`, Math.round(row.costPerPurchase), `${row.ctr.toFixed(2)}%`, row.impressions, row.clicks, Math.round(row.cpc), Math.round(row.cpm)]),
+  async function exportAdReportXlsx() {
+    const xlsx = await loadXlsxModule();
+    const headers = ["광고", "총비용", "전환매출", "ROAS", "전환\n건수", "CVR", "CPA", "CTR", "노출", "클릭", "CPC", "CPM"];
+    const rows = reportRows.map((row) => [
+      row.label,
+      Math.round(row.cost),
+      Math.round(row.purchaseValue),
+      `${row.roas.toFixed(1)}%`,
+      Math.round(row.purchases),
+      `${row.purchaseCvr.toFixed(2)}%`,
+      Math.round(row.costPerPurchase),
+      `${row.ctr.toFixed(2)}%`,
+      Math.round(row.impressions),
+      Math.round(row.clicks),
+      Math.round(row.cpc),
+      Math.round(row.cpm),
+    ]);
+    const note = "※ 약자: ROAS=광고 수익률, CPA=전환 구매당 광고비, CTR=클릭률, CPM=1000회당 노출비용, CPC=클릭당 비용, CVR=전환 구매율";
+    const worksheet = xlsx.utils.aoa_to_sheet([headers, ...rows, [], [note]]);
+    const range = worksheet["!ref"] ? xlsx.utils.decode_range(worksheet["!ref"]) : null;
+    const moneyCols = new Set([1, 2, 6, 10, 11]);
+    const yellowCols = new Set([1, 2, 3, 4, 5, 6, 7]);
+    const headerStyle = { font: { name: "Pretendard", sz: 11, bold: true }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, fill: { fgColor: { rgb: "FEF08A" } }, border: { bottom: { style: "thin", color: { rgb: "D1D5DB" } }, right: { style: "thin", color: { rgb: "E5E7EB" } } } };
+    const normalHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "F9FAFB" } } };
+    const totalFill = "FFF7ED";
+    if (range) {
+      for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+        for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex += 1) {
+          const address = xlsx.utils.encode_cell({ r: rowIndex, c: colIndex });
+          const cell = worksheet[address] as (CellObject & { s?: Record<string, unknown>; z?: string }) | undefined;
+          if (!cell) continue;
+          if (rowIndex === 0) {
+            cell.s = yellowCols.has(colIndex) ? headerStyle : normalHeaderStyle;
+            continue;
+          }
+          if (rowIndex === rows.length + 2) {
+            cell.s = { font: { name: "Pretendard", sz: 10, bold: true, color: { rgb: "64748B" } } };
+            continue;
+          }
+          const sourceRow = reportRows[rowIndex - 1];
+          const roas = sourceRow?.roas || 0;
+          const fill = rowIndex === 1 ? totalFill : colIndex === 3 ? roas <= 300 ? "FEE2E2" : roas < 450 ? "FEF9C3" : "DCFCE7" : undefined;
+          cell.s = {
+            font: { name: "Pretendard", sz: 11, bold: rowIndex === 1 || colIndex === 3 },
+            alignment: { horizontal: colIndex === 0 ? "left" : "center", vertical: "center" },
+            fill: fill ? { fgColor: { rgb: fill } } : undefined,
+            border: { bottom: { style: "thin", color: { rgb: "E5E7EB" } }, right: { style: "thin", color: { rgb: "E5E7EB" } } },
+          };
+          if (typeof cell.v === "number" && moneyCols.has(colIndex)) cell.z = "₩#,##0";
+          if (typeof cell.v === "number" && [4, 8, 9].includes(colIndex)) cell.z = "#,##0";
+        }
+      }
+    }
+    worksheet["!cols"] = [
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 13 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 11 },
+      { wch: 8 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 9 },
+      { wch: 9 },
     ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
-    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `fnos-ad-report-${dateFrom}_${dateTo}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    worksheet["!rows"] = [{ hpt: 34 }, ...rows.map(() => ({ hpt: 25 }))];
+    if (worksheet["!merges"]) worksheet["!merges"].push({ s: { r: rows.length + 2, c: 0 }, e: { r: rows.length + 2, c: 11 } });
+    else worksheet["!merges"] = [{ s: { r: rows.length + 2, c: 0 }, e: { r: rows.length + 2, c: 11 } }];
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "광고리포트");
+    const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+    downloadBlob(`fnos-ad-report-${dateFrom}_${dateTo}.xlsx`, new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   }
 
   const channels = summary?.channels || [];
@@ -10737,7 +10848,7 @@ function AdsAnalysisWorkspace() {
                 {adReportChannelNames[channel]}
               </label>
             ))}
-            <ActionButton type="button" onClick={exportAdReportCsv} className="h-8 px-3 text-xs">엑셀용 CSV 다운로드</ActionButton>
+            <ActionButton type="button" onClick={() => void exportAdReportXlsx()} className="h-8 px-3 text-xs">엑셀 다운로드</ActionButton>
           </div>
           )}
           className="mb-3"
@@ -10765,6 +10876,7 @@ function AdsRightPanel() {
   const [uploading, setUploading] = useState(false);
   const [isAdDragOver, setIsAdDragOver] = useState(false);
   const [message, setMessage] = useState("");
+  const [lastUploadReport, setLastUploadReport] = useState<AdUploadReport | null>(null);
   const [rangePreset, setRangePreset] = useState<AdRangePreset | "custom">(adPresetForRange(initialFrom, initialTo));
   const [dateFrom, setDateFrom] = useState(initialFrom);
   const [dateTo, setDateTo] = useState(initialTo);
@@ -10809,6 +10921,7 @@ function AdsRightPanel() {
       return;
     }
     setUploadedAdFiles((prev) => [...prev, ...fresh]);
+    setLastUploadReport(null);
     setMessage(`${fresh.length}개 파일 대기 중. 데이터 생성을 누르면 저장됩니다.`);
   }
 
@@ -10860,6 +10973,7 @@ function AdsRightPanel() {
     const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
     const data = await res.json();
     setUploading(false);
+    setLastUploadReport(data);
     if (data.needs_confirmation) {
       setReplaceConfirm({ message: data.message || "해당일에 입력된 자료가 있습니다." });
       return;
@@ -10933,10 +11047,49 @@ function AdsRightPanel() {
             <div className="max-h-32 space-y-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
               {uploadedAdFiles.map((item) => (
                 <div key={uploadedAdFileKey(item)} className="flex items-center gap-2 rounded bg-white px-2 py-1 text-xs font-bold text-slate-600">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-black text-orange-700">
+                    <AdChannelLogo channel={adSourceLabels[item.sourceKey]} />
+                    {adSourceLabels[item.sourceKey]}
+                  </span>
                   <span className="min-w-0 flex-1 truncate">{item.file.name}</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">{adFileSizeLabel(item.file.size)}</span>
                   <button type="button" onClick={() => removeAdFile(item)} className="shrink-0 font-black text-rose-500" aria-label={`${item.file.name} 제외`}>x</button>
                 </div>
               ))}
+            </div>
+          )}
+          {!!uploadedAdFiles.length && (
+            <div className="rounded-md border border-orange-100 bg-orange-50/70 p-2 text-xs font-bold text-slate-600">
+              <p className="font-black text-orange-700">저장 전 매칭 미리보기</p>
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                {adSourceOrder.map((sourceKey) => {
+                  const count = uploadedAdFiles.filter((item) => item.sourceKey === sourceKey).length;
+                  return (
+                    <span key={sourceKey} className={count ? "text-slate-800" : "text-slate-400"}>
+                      {adSourceLabels[sourceKey]} {count}개
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {lastUploadReport && (
+            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs font-bold text-slate-600">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-black text-slate-800">업로드 검증 리포트</span>
+                <span className={adNumber(lastUploadReport.fail_count) ? "text-rose-600" : "text-emerald-600"}>{adUploadResultLabel(lastUploadReport)}</span>
+              </div>
+              {!!adNumber(lastUploadReport.fail_count) && (
+                <p className="mt-1 rounded bg-rose-50 px-2 py-1 text-rose-600">제외 주요 사유: 빈 행, 합계 행, 광고 지표가 없는 행을 우선 확인하세요.</p>
+              )}
+              <div className="mt-2 space-y-1">
+                {(lastUploadReport.results || []).slice(0, 5).map((row, index) => (
+                  <div key={`${row.channel || index}-${index}`} className="flex items-center justify-between gap-2 border-t border-slate-100 pt-1">
+                    <span className="truncate">{row.channel || "-"}</span>
+                    <span className="shrink-0">저장 {adNumber(row.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(row.fail_count).toLocaleString("ko-KR")}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
