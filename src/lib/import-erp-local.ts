@@ -959,7 +959,12 @@ async function handleGptMiniHs(request: NextRequest) {
           content: [
             {
               type: "input_text",
-              text: "You help a Korean import manager estimate HS codes and tariff/VAT notes. Reply in Korean, concise, and include uncertainty. Do not invent a definitive customs ruling.",
+              text: [
+                "You help a Korean import manager estimate HS codes and tariff rates.",
+                "Reply in Korean only.",
+                "Keep the answer very short and easy to scan in a small UI box.",
+                "Do not invent a definitive customs ruling.",
+              ].join("\n"),
             },
           ],
         },
@@ -971,14 +976,20 @@ async function handleGptMiniHs(request: NextRequest) {
               text: [
                 `제품명: ${productName}`,
                 "위 제품명은 실제 사용자가 입력한 제품명이다.",
-                "가능성이 높은 HS 코드, 기본 관세율, FTA 적용 확인 포인트를 짧게 정리해줘.",
+                "아래 형식을 그대로 지켜서 6줄 이내로만 답해줘.",
+                "가능 HS: 코드 1개 또는 2개, 괄호로 짧은 품목 설명",
+                "기본 관세: 0~8%처럼 범위 또는 추정값",
+                "중국 FTA: 적용 가능 관세율 또는 확인 필요",
+                "일본 FTA: 적용 가능 관세율 또는 확인 필요",
+                "부가세: 보통 10%",
+                "주의: 재질/용도/원산지증명서에 따라 달라질 수 있음",
               ].join("\n"),
             },
           ],
         },
       ],
       temperature: 0.2,
-      max_output_tokens: 700,
+      max_output_tokens: 260,
     }),
     cache: "no-store",
   });
