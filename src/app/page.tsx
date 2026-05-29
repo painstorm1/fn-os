@@ -2603,7 +2603,7 @@ function NativeProducts() {
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
-            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-md border border-slate-200 bg-white p-3 hover:border-orange-200">
+            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-lg bg-white p-3 transition hover:bg-orange-50/60">
               <div className="aspect-square w-full overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
@@ -3307,7 +3307,13 @@ function NativeProductForm({ id }: { id?: number }) {
   const linkGroups = importOptions.length ? importOptions : [""];
 
   return (
-    <Panel title={id ? "제품 수정" : "새 제품 등록"} subtitle="FN OS 화면에서 입력하고 수입관리 원장에 저장합니다.">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">{id ? "제품 수정" : "새 제품 등록"}</h2>
+          <p className="mt-1 text-sm text-gray-500">FN OS 화면에서 입력하고 수입관리 원장에 저장합니다.</p>
+        </div>
+      </div>
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
         <>
         <form key={product?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
@@ -3448,7 +3454,7 @@ function NativeProductForm({ id }: { id?: number }) {
             </div>
             <Field label="메모"><textarea className="field-input" name="note" defaultValue={product?.note || ""} /></Field>
             {itemType === "PRODUCT" && (
-              <section className="rounded-md border border-slate-200 bg-white p-3">
+              <section className="grid gap-3 border-t border-slate-200 pt-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-black">옵션별 FN 품목 연동</h3>
                   <span className="text-xs font-bold text-slate-500">{fnSkuLinks.length.toLocaleString("ko-KR")}개 연결</span>
@@ -3457,7 +3463,7 @@ function NativeProductForm({ id }: { id?: number }) {
                   {linkGroups.map((optionName) => {
                     const groupLinks = optionName ? fnSkuLinks.filter((link) => sameImportOption(link, optionName)) : fnSkuLinks.filter((link) => !linkOptionName(link));
                     return (
-                      <section key={optionName || "__default"} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                      <section key={optionName || "__default"} className="border-l-2 border-orange-100 py-1 pl-3">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div>
                             <p className="text-sm font-black">{optionName || "기본 옵션"}</p>
@@ -3479,7 +3485,7 @@ function NativeProductForm({ id }: { id?: number }) {
                             const fnProduct = link.product;
                             const variant = linkVariantLabel(link);
                             return (
-                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm md:grid-cols-[1.4fr_110px_1fr_88px]">
+                              <div key={`${optionName}:${link.product_id}`} className="grid items-center gap-2 border-b border-slate-100 py-2 text-sm last:border-b-0 md:grid-cols-[1.4fr_110px_1fr_88px]">
                                 <div className="min-w-0">
                                   <p className="truncate font-black">{fnProductName(fnProduct)}</p>
                                   <p className="truncate text-xs font-bold text-slate-500">{fnProductSku(fnProduct)}</p>
@@ -3490,7 +3496,7 @@ function NativeProductForm({ id }: { id?: number }) {
                               </div>
                             );
                           })}
-                          {!groupLinks.length && <p className="rounded-md bg-white px-3 py-3 text-sm font-bold text-slate-400">이 옵션에 연결된 FN 품목이 없습니다.</p>}
+                          {!groupLinks.length && <p className="py-3 text-sm font-bold text-slate-400">이 옵션에 연결된 FN 품목이 없습니다.</p>}
                         </div>
                       </section>
                     );
@@ -3499,7 +3505,7 @@ function NativeProductForm({ id }: { id?: number }) {
               </section>
             )}
             {itemType === "PRODUCT" && (
-              <section className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <section className="grid gap-3 border-t border-slate-200 pt-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-black">부자재 연동</h3>
                   <span className="text-xs font-bold text-slate-500">상품 1개당 사용 수량</span>
@@ -3509,7 +3515,7 @@ function NativeProductForm({ id }: { id?: number }) {
                     const checked = linkedMaterials.some((item) => item.material_id === material.id);
                     const linked = linkedMaterials.find((item) => item.material_id === material.id);
                     return (
-                      <label key={material.id} className={`grid grid-cols-[20px_1fr_86px] items-center gap-2 rounded-md border bg-white p-2 text-sm ${checked ? "border-orange-300" : "border-slate-200"}`}>
+                      <label key={material.id} className={`grid grid-cols-[20px_1fr_86px] items-center gap-2 border-b py-2 text-sm last:border-b-0 ${checked ? "border-orange-200" : "border-slate-100"}`}>
                         <input type="checkbox" checked={checked} onChange={() => toggleMaterial(material)} />
                         <span>
                           <b>{material.name}</b>
@@ -3620,7 +3626,7 @@ function NativeProductForm({ id }: { id?: number }) {
         />
         </>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -4222,11 +4228,14 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
     ];
 
   return (
-    <Panel
-      title={id ? "발주서 수정" : "새 발주서 작성"}
-      subtitle="발주 정보와 제품 라인을 입력합니다."
-      action={<span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>}
-    >
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">{id ? "발주서 수정" : "새 발주서 작성"}</h2>
+          <p className="mt-1 text-sm text-gray-500">발주 정보와 제품 라인을 입력합니다.</p>
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>
+      </div>
       {loading || detailLoading ? <p className="text-sm text-slate-500">데이터를 불러오는 중...</p> : (
         <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <input type="hidden" name="platform" value={order?.platform || "FN_OS"} />
@@ -4335,8 +4344,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 );
               })}
             </div>
-            <div className="grid items-end gap-4 md:grid-cols-[minmax(0,660px)_1fr]">
-              <div className={`grid gap-3 rounded-md border border-slate-200 bg-white p-3 ${isTT ? "md:grid-cols-[1fr_1fr_1fr_1.55fr]" : "md:grid-cols-2"}`}>
+            <div className="grid items-end gap-4 border-t border-slate-200 pt-3 md:grid-cols-[minmax(0,660px)_1fr]">
+              <div className={`grid gap-3 ${isTT ? "md:grid-cols-[1fr_1fr_1fr_1.55fr]" : "md:grid-cols-2"}`}>
                 {isTT ? (
                   <>
                     <Field label="실결제 통화">
@@ -4371,7 +4380,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                 <p className="text-xs text-slate-500">환율 참고: {formRateNote}</p>
               </div>
             </div>
-            <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
+            <div className="grid gap-3 border-t border-slate-200 pt-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
               <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" value={chinaCosts.shipping} onChange={(event) => setChinaCosts((prev) => ({ ...prev, shipping: event.target.value }))} /></Field>
               <Field label="수수료"><input className="field-input text-right" type="number" name="china_fee" value={chinaCosts.fee} onChange={(event) => setChinaCosts((prev) => ({ ...prev, fee: event.target.value }))} /></Field>
               <Field label="중국내 기타금액"><input className="field-input text-right" type="number" name="china_other_cost" value={chinaCosts.other} onChange={(event) => setChinaCosts((prev) => ({ ...prev, other: event.target.value }))} /></Field>
@@ -4418,7 +4427,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     {catalogProducts.map((product) => {
                       const options = optionsFor(product);
                       return (
-                        <div key={product.id} className="grid items-center gap-3 rounded-md border border-slate-200 p-2 md:grid-cols-[76px_1fr_180px_90px]">
+                        <div key={product.id} className="grid items-center gap-3 border-b border-slate-100 py-2 last:border-b-0 md:grid-cols-[76px_1fr_180px_90px]">
                           <div className="h-16 w-16 overflow-hidden rounded-md bg-slate-100">
                             {product.image_path ? <img src={assetUrl(product.image_path)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">사진</div>}
                           </div>
@@ -4443,7 +4452,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           )}
         </form>
       )}
-    </Panel>
+    </div>
   );
 }
 
