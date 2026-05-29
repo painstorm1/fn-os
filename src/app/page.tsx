@@ -10205,6 +10205,7 @@ function AdsRightPanel() {
   const [rangePreset, setRangePreset] = useState<AdRangePreset | "custom">(adPresetForRange(initialFrom, initialTo));
   const [dateFrom, setDateFrom] = useState(initialFrom);
   const [dateTo, setDateTo] = useState(initialTo);
+  const [replaceConfirm, setReplaceConfirm] = useState<{ message: string } | null>(null);
 
   function openAdRange(from: string, to: string) {
     const params = new URLSearchParams({ menu: "ads", adsFrom: from, adsTo: to });
@@ -10297,8 +10298,8 @@ function AdsRightPanel() {
     const data = await res.json();
     setUploading(false);
     if (data.needs_confirmation) {
-      const ok = window.confirm(`${data.message || "해당일에 입력된 자료가 있습니다."}\n\n기존 광고 DB 자료를 대체 저장할까요?`);
-      if (ok) return uploadRows(true);
+      setReplaceConfirm({ message: data.message || "해당일에 입력된 자료가 있습니다." });
+      return;
     }
     setMessage(data.message || data.error || "업로드 처리 완료");
     if (res.ok) {
@@ -10340,8 +10341,9 @@ function AdsRightPanel() {
   const recentBatches = uploadSource.batches || [];
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
+    <>
+      <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+        <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
         <div className="space-y-2">
           <label
             className={`flex min-h-16 cursor-pointer flex-col justify-center rounded-md border border-dashed px-3 py-2 transition ${
@@ -10376,8 +10378,8 @@ function AdsRightPanel() {
             </div>
           )}
         </div>
-      </ToolSection>
-      <ToolSection title="기간 선택" defaultOpen showChevron={false}>
+        </ToolSection>
+        <ToolSection title="기간 선택" defaultOpen showChevron={false}>
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <button type="button" onClick={() => moveRange(-1)} className="h-9 w-9 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600" aria-label="이전 기간">‹</button>
@@ -10424,14 +10426,14 @@ function AdsRightPanel() {
           </div>
           <ActionButton type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full text-xs">조회</ActionButton>
         </div>
-      </ToolSection>
-      <ToolSection title="분석 기준" showChevron={false}>
+        </ToolSection>
+        <ToolSection title="분석 기준" showChevron={false}>
         <div className="space-y-2 text-xs font-bold text-slate-600">
           <p className="rounded-md bg-slate-50 p-3">먼저 ROAS와 광고비 급증을 보고, 그 다음 SKU별 재고/순이익을 확인합니다.</p>
           <p className="rounded-md bg-orange-50 p-3 text-orange-700">ROAS 높음 + 재고 부족은 발주 우선, ROAS 낮음 + 재고 적음은 광고 중단 후보입니다.</p>
         </div>
-      </ToolSection>
-      <ToolSection title="최근 업로드" showChevron>
+        </ToolSection>
+        <ToolSection title="최근 업로드" showChevron>
         <div className="space-y-2">
           <p className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-500">
             실패는 오류가 아니라 저장 대상에서 제외된 행입니다. 빈 행, 합계 행, 또는 광고비/노출/클릭/구매완료 값이 모두 없는 행이 여기에 잡힙니다.
@@ -10449,8 +10451,38 @@ function AdsRightPanel() {
           ))}
           {!recentBatches.length && <EmptyState title="업로드 내역 없음" className="min-h-24 py-5" />}
         </div>
-      </ToolSection>
-    </aside>
+        </ToolSection>
+      </aside>
+      {replaceConfirm && (
+        <FormModal
+          title="광고 DB 대체 저장"
+          description="동일 날짜 광고 자료가 이미 저장되어 있습니다."
+          onClose={() => setReplaceConfirm(null)}
+          size="sm"
+          footer={(
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setReplaceConfirm(null)}>
+                취소
+              </ActionButton>
+              <ActionButton
+                type="button"
+                onClick={() => {
+                  setReplaceConfirm(null);
+                  void uploadRows(true);
+                }}
+              >
+                대체 저장
+              </ActionButton>
+            </>
+          )}
+        >
+          <div className="space-y-3 text-sm font-semibold leading-6 text-gray-700">
+            <p className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-orange-700">{replaceConfirm.message}</p>
+            <p>기존 광고 DB 자료를 현재 업로드한 파일 기준으로 대체 저장할까요?</p>
+          </div>
+        </FormModal>
+      )}
+    </>
   );
 }
 
