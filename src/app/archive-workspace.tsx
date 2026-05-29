@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
+import { ActionButton, Card, EmptyState, FilterBar, FormField, ModalShell, PageHeader, StatusBadge, useEscapeToClose } from "@/components/fn-ui";
 
 type ArchiveItem = {
   id: string;
@@ -527,18 +528,19 @@ export default function ArchiveWorkspace() {
 
   return (
     <div className="space-y-4" onPaste={activeMenu === "save" && saveMode === "auto" ? onPasteAuto : undefined}>
-      <div>
-        <h1 className="text-2xl font-black">아카이브</h1>
-        <p className="mt-1 text-sm font-bold text-slate-500">링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다.</p>
-      </div>
+      <PageHeader
+        title="아카이브"
+        description="링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다."
+        className="mb-4"
+      />
 
       <section>
-        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <Card className="space-y-3 p-3">
           <div className="flex flex-wrap items-center gap-2">
             {menuItems.map(([key, label]) => (
-              <button key={key} type="button" onClick={() => openMenu(key)} className={`h-10 rounded-md border px-3 text-sm font-black ${activeMenu === key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+              <ActionButton key={key} type="button" variant={activeMenu === key ? "primary" : "secondary"} onClick={() => openMenu(key)} className="px-3">
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
-              </button>
+              </ActionButton>
             ))}
             {activeMenu !== "save" && (
               <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
@@ -548,10 +550,10 @@ export default function ArchiveWorkspace() {
             )}
           </div>
           {activeMenu !== "save" && (
-            <div className="grid w-full grid-cols-[56px_minmax(140px,1fr)_110px_110px_110px_52px_96px_12px_96px] items-center gap-2">
-              <button type="button" onClick={() => setSelectMode((prev) => !prev)} className={`h-10 whitespace-nowrap rounded-md border px-2 text-sm font-black ${selectMode ? "border-orange-500 bg-orange-500 text-white" : "border-slate-950 bg-slate-950 text-white"}`}>
+            <FilterBar className="grid w-full grid-cols-[56px_minmax(140px,1fr)_110px_110px_110px_52px_96px_12px_96px] items-center gap-2 p-0 border-0 shadow-none">
+              <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "px-2" : "border-slate-950 bg-slate-950 px-2 text-white hover:bg-slate-800"}>
                 선택
-              </button>
+              </ActionButton>
               <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
               <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.categoryGroup} onChange={(event) => {
                 const group = event.target.value;
@@ -577,22 +579,22 @@ export default function ArchiveWorkspace() {
               <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
               <span className="text-center text-sm font-black text-slate-400">~</span>
               <input className="field-input h-10 rounded-md border border-slate-200 px-1.5 text-xs font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
-            </div>
+            </FilterBar>
           )}
-        </div>
+        </Card>
       </section>
 
       {activeMenu === "save" && (
         <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-          <div className="space-y-4 rounded-md border border-slate-200 bg-white p-5 shadow-sm" onPaste={onPasteAuto}>
+          <Card className="space-y-4 p-5" onPaste={onPasteAuto}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-black">새로 저장</h2>
                 <p className="mt-1 text-sm font-bold text-slate-500">이미지는 붙여넣기, 링크는 텍스트 붙여넣기로 바로 정리합니다.</p>
               </div>
               <div className="flex rounded-md bg-slate-100 p-1">
-                <button type="button" onClick={() => setSaveMode("auto")} className={`h-8 rounded px-3 text-xs font-black ${saveMode === "auto" ? "bg-white text-orange-600 shadow-sm" : "text-slate-500"}`}>자동정리</button>
-                <button type="button" onClick={() => setSaveMode("manual")} className={`h-8 rounded px-3 text-xs font-black ${saveMode === "manual" ? "bg-white text-orange-600 shadow-sm" : "text-slate-500"}`}>수동업로드</button>
+                <button type="button" onClick={() => setSaveMode("auto")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "auto" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>자동정리</button>
+                <button type="button" onClick={() => setSaveMode("manual")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "manual" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>수동업로드</button>
               </div>
             </div>
 
@@ -616,8 +618,8 @@ export default function ArchiveWorkspace() {
                     이미지 선택
                     <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => void processImageFile(event.target.files?.[0])} />
                   </label>
-                  <button type="button" onClick={() => void processImageFile(autoImageRef.current?.files?.[0] || autoImageFileRef.current || undefined)} disabled={autoWorking} className="h-10 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 disabled:opacity-50">이미지에서 추출</button>
-                  <button type="button" onClick={() => extractFromText()} disabled={autoWorking} className="h-10 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">텍스트 정리</button>
+                  <ActionButton type="button" variant="secondary" onClick={() => void processImageFile(autoImageRef.current?.files?.[0] || autoImageFileRef.current || undefined)} disabled={autoWorking} className="border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100">이미지에서 추출</ActionButton>
+                  <ActionButton type="button" variant="primary" onClick={() => extractFromText()} disabled={autoWorking}>텍스트 정리</ActionButton>
                 </div>
               </>
             ) : (
@@ -634,7 +636,7 @@ export default function ArchiveWorkspace() {
                       {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
                     </select>
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={linkForm.memo} onChange={(event) => setLinkForm({ ...linkForm, memo: event.target.value })} />
-                    <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">링크 저장</button>
+                    <ActionButton className="lg:col-span-2">링크 저장</ActionButton>
                   </form>
                 ) : (
                   <form onSubmit={saveFile} className="grid gap-3 lg:grid-cols-2">
@@ -647,20 +649,20 @@ export default function ArchiveWorkspace() {
                       {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
                     </select>
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={fileForm.memo} onChange={(event) => setFileForm({ ...fileForm, memo: event.target.value })} />
-                    <button className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white lg:col-span-2">파일 저장</button>
+                    <ActionButton className="lg:col-span-2">파일 저장</ActionButton>
                   </form>
                 )}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+          <Card className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-black">저장 전 확인</h2>
                 <p className="mt-1 text-sm font-bold text-slate-500">제목은 10자 내외로 자동 생성됩니다. 자료 포인트는 메모가 아니라 참고 유형입니다.</p>
               </div>
-              <button type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length} className="h-10 rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:bg-slate-300">{autoWorking ? "처리 중" : "전체 저장"}</button>
+              <ActionButton type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length}>{autoWorking ? "처리 중" : "전체 저장"}</ActionButton>
             </div>
             <div className="mt-4 space-y-3">
               {autoDrafts.map((draft, index) => (
@@ -682,9 +684,9 @@ export default function ArchiveWorkspace() {
                   <input className="field-input mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.memo} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, memo: event.target.value } : item))} />
                 </div>
               ))}
-              {!autoDrafts.length && <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">아직 정리된 링크가 없습니다.</p>}
+              {!autoDrafts.length && <EmptyState title="아직 정리된 링크가 없습니다." />}
             </div>
-          </div>
+          </Card>
         </section>
       )}
 
@@ -775,14 +777,16 @@ function ArchiveList({
     if (!selectMode) setSelectedIds([]);
   }, [selectMode]);
 
+  useEscapeToClose(Boolean(editDraft), () => setEditDraft(null));
+
   return (
     <div className="space-y-4">
       {selectMode && (
         <section className="flex max-w-[760px] items-center gap-1 text-xs">
-          <button type="button" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-8 rounded-md border border-orange-200 bg-white px-3 font-black text-orange-700 disabled:text-slate-300">
+          <ActionButton type="button" variant="secondary" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-8 border-orange-200 bg-white px-3 text-xs text-orange-700">
             미리보기 재생성
-          </button>
-          <span className="px-2 font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개</span>
+          </ActionButton>
+          <StatusBadge tone="orange">{selectedIds.length.toLocaleString("ko-KR")}개</StatusBadge>
           <select className="field-input h-8 w-24 rounded-md border border-slate-200 bg-white px-2 font-bold" value={bulkCategoryGroup} onChange={(event) => {
             const group = event.target.value as CategoryGroup | "";
             setBulkCategoryGroup(group);
@@ -795,15 +799,15 @@ function ArchiveList({
             <option value="">카테고리2</option>
             {bulkCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
           </select>
-          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-8 rounded-md bg-orange-500 px-3 font-black text-white disabled:bg-slate-300">
+          <ActionButton type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-8 px-3 text-xs">
             이동
-          </button>
-          <button type="button" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-8 rounded-md border border-red-200 bg-white px-3 font-black text-red-600 disabled:text-slate-300">
+          </ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-8 border-red-200 px-3 text-xs text-red-600">
             삭제
-          </button>
-          <button type="button" onClick={toggleAllSelected} className="h-8 rounded-md border border-slate-200 bg-white px-3 font-black text-slate-700">
+          </ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={toggleAllSelected} className="h-8 px-3 text-xs">
             {allSelected ? "모두해제" : "모두선택"}
-          </button>
+          </ActionButton>
         </section>
       )}
 
@@ -816,8 +820,8 @@ function ArchiveList({
               <div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}>
                 {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />}
                 <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
-                <span className="max-w-20 truncate rounded bg-slate-100 px-1.5 py-1 font-black text-slate-600">{item.source_type || "-"}</span>
-                <span className="max-w-24 truncate rounded bg-slate-100 px-1.5 py-1 font-black text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
+                <StatusBadge className="max-w-20 truncate" tone="muted">{item.source_type || "-"}</StatusBadge>
+                <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 <button type="button" onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
                     <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -830,13 +834,13 @@ function ArchiveList({
           {!items.length && <div className="col-span-3 rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400">저장된 아카이브가 없습니다.</div>}
         </section>
       ) : (
-      <section className="grid grid-cols-6 gap-3">
+      <section className="grid grid-cols-6 gap-3 2xl:grid-cols-12">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
+            <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-xl border bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)] ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200"}`}>
               {selectMode && (
                 <label className="absolute left-2 top-2 z-10 flex h-7 items-center rounded-md border border-slate-200 bg-white/95 px-2 shadow-sm">
                   <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
@@ -858,48 +862,60 @@ function ArchiveList({
                   </button>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 text-xs font-black">
-                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{item.source_type || "-"}</span>
-                  <span className="truncate rounded bg-slate-100 px-2 py-1 text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
+                  <StatusBadge className="min-w-0 truncate" tone="muted">{item.source_type || "-"}</StatusBadge>
+                  <StatusBadge className="min-w-0 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 </div>
                 {item.memo && <p className="mt-1 line-clamp-1 text-xs font-bold leading-4 text-slate-500">{item.memo}</p>}
               </div>
             </article>
           );
         })}
-        {!items.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
+        {!items.length && <EmptyState className="col-span-6 2xl:col-span-12" title="저장된 아카이브가 없습니다." />}
       </section>
       )}
       {editDraft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="w-full max-w-lg rounded-md bg-white p-4 shadow-xl">
+          <ModalShell className="w-full max-w-lg">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-black text-slate-950">아카이브 수정</h2>
               <button type="button" onClick={() => setEditDraft(null)} className="h-8 w-8 rounded border border-slate-200 text-sm font-black text-slate-500">X</button>
             </div>
             <div className="space-y-2">
-              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
-              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
+              <FormField label="제목">
+                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={editDraft.title || ""} placeholder="제목" onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
+              </FormField>
+              <FormField label="URL">
+                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.url || ""} placeholder="URL" onChange={(event) => setEditDraft({ ...editDraft, url: event.target.value })} />
+              </FormField>
               <div className="grid grid-cols-2 gap-2">
-                <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
-                  <option value="">소스</option>
-                  {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-                </select>
-                <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
-                  const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
-                  setEditDraft({ ...editDraft, category_id: category?.id || "" });
-                }}>
-                  <option value="">카테고리</option>
-                  {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
-                </select>
+                <FormField label="소스">
+                  <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.source_type || ""} onChange={(event) => setEditDraft({ ...editDraft, source_type: event.target.value })}>
+                    <option value="">소스</option>
+                    {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="카테고리">
+                  <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={categoryById.get(String(editDraft.category_id || ""))?.category_name || ""} onChange={(event) => {
+                    const category = data.categories.find((candidate) => candidate.category_name === event.target.value);
+                    setEditDraft({ ...editDraft, category_id: category?.id || "" });
+                  }}>
+                    <option value="">카테고리</option>
+                    {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
+                  </select>
+                </FormField>
               </div>
-              <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
-              <textarea className="field-input min-h-24 w-full rounded-md border border-slate-200 bg-white p-3 text-sm" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
+              <FormField label="미리보기 이미지 URL">
+                <input className="field-input h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={editDraft.preview_image_url || ""} placeholder="미리보기 이미지 URL" onChange={(event) => setEditDraft({ ...editDraft, preview_image_url: event.target.value, preview_status: event.target.value ? "manual" : editDraft.preview_status })} />
+              </FormField>
+              <FormField label="메모">
+                <textarea className="field-input min-h-24 w-full rounded-md border border-slate-200 bg-white p-3 text-sm" value={editDraft.memo || ""} placeholder="메모" onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })} />
+              </FormField>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setEditDraft(null)} className="h-10 rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600">취소</button>
-              <button type="button" onClick={() => void saveEdit()} className="h-10 rounded-md bg-orange-500 text-sm font-black text-white">저장</button>
+              <ActionButton type="button" variant="secondary" onClick={() => setEditDraft(null)}>취소</ActionButton>
+              <ActionButton type="button" onClick={() => void saveEdit()}>저장</ActionButton>
             </div>
-          </div>
+          </ModalShell>
         </div>
       )}
     </div>
