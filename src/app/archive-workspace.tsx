@@ -40,6 +40,7 @@ type AutoArchiveDraft = {
 
 type CategoryGroup = "교육" | "업무" | "개인";
 type ActiveMenu = "save" | "all" | CategoryGroup;
+type ArchiveViewMode = "preview" | "list";
 
 const categoryTree: Record<CategoryGroup, string[]> = {
   교육: ["영어", "포토샵", "일러스트", "AI"],
@@ -215,6 +216,7 @@ export default function ArchiveWorkspace() {
   const [manualType, setManualType] = useState<"link" | "file">("link");
   const [activeSubCategory, setActiveSubCategory] = useState("");
   const [selectMode, setSelectMode] = useState(false);
+  const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -329,6 +331,19 @@ export default function ArchiveWorkspace() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 수정 실패");
+    }
+  }
+
+  async function deleteArchiveItems(ids: string[]) {
+    if (!ids.length) return;
+    if (!window.confirm(`${ids.length.toLocaleString("ko-KR")}개 항목을 삭제할까요?`)) return;
+    try {
+      const res = await fetch("/api/fnos/archive", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      const result = await res.json();
+      if (!res.ok || result.ok === false) throw new Error(result.error || "아카이브 삭제 실패");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "아카이브 삭제 실패");
     }
   }
 
@@ -525,6 +540,12 @@ export default function ArchiveWorkspace() {
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
               </button>
             ))}
+            {activeMenu !== "save" && (
+              <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
+                <option value="preview">미리보기</option>
+                <option value="list">리스트보기</option>
+              </select>
+            )}
           </div>
           {activeMenu !== "save" && (
             <div className="grid w-full grid-cols-[56px_minmax(140px,1fr)_110px_110px_110px_52px_96px_12px_96px] items-center gap-2">
@@ -672,10 +693,12 @@ export default function ArchiveWorkspace() {
           items={filteredItems}
           categoryById={categoryById}
           selectMode={selectMode}
+          viewMode={viewMode}
           data={data}
           onRegeneratePreview={requestPreview}
           onUpdateItem={updateArchiveItem}
           onUpdateItems={updateArchiveItems}
+          onDeleteItems={deleteArchiveItems}
         />
       )}
     </div>
@@ -686,23 +709,30 @@ function ArchiveList({
   items,
   categoryById,
   selectMode,
+  viewMode,
   data,
   onRegeneratePreview,
   onUpdateItem,
   onUpdateItems,
+  onDeleteItems,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
   selectMode: boolean;
+  viewMode: ArchiveViewMode;
   data: ArchiveData;
   onRegeneratePreview: (id?: string, force?: boolean) => void;
   onUpdateItem: (item: ArchiveItem) => Promise<void>;
   onUpdateItems: (items: ArchiveItem[]) => Promise<void>;
+  onDeleteItems: (ids: string[]) => Promise<void>;
 }) {
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkCategoryGroup, setBulkCategoryGroup] = useState<CategoryGroup | "">("");
   const [bulkCategoryName, setBulkCategoryName] = useState("");
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const allSelected = Boolean(items.length) && selectedIds.length === items.length;
+  const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
 
   function startEdit(item: ArchiveItem) {
     setEditDraft({ ...item });
@@ -723,12 +753,22 @@ function ArchiveList({
     if (!category || !selectedItems.length) return;
     await onUpdateItems(selectedItems.map((item) => ({ ...item, category_id: category.id })));
     setSelectedIds([]);
+    setBulkCategoryGroup("");
     setBulkCategoryName("");
   }
 
   async function regenerateSelectedPreviews() {
     await Promise.all(selectedItems.map((item) => onRegeneratePreview(item.id, true)));
     setSelectedIds([]);
+  }
+
+  async function deleteSelectedItems() {
+    await onDeleteItems(selectedIds);
+    setSelectedIds([]);
+  }
+
+  function toggleAllSelected() {
+    setSelectedIds(allSelected ? [] : items.map((item) => item.id));
   }
 
   useEffect(() => {
@@ -738,27 +778,58 @@ function ArchiveList({
   return (
     <div className="space-y-4">
       {selectMode && (
-        <section className="flex items-center gap-2 rounded-md border border-orange-200 bg-orange-50 p-2 text-sm">
-          <span className="font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개 선택</span>
-          <select className="field-input h-8 min-w-0 flex-1 rounded-md border border-orange-200 bg-white px-3 text-xs" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
-            <option value="">이동할 카테고리</option>
-            {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
-          </select>
-          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName} className="h-8 rounded-md bg-orange-500 px-3 text-xs font-black text-white disabled:bg-slate-300">
-            카테고리 이동
-          </button>
-          <button type="button" onClick={() => void regenerateSelectedPreviews()} className="h-8 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
+        <section className="flex max-w-[760px] items-center gap-1 text-xs">
+          <button type="button" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-8 rounded-md border border-orange-200 bg-white px-3 font-black text-orange-700 disabled:text-slate-300">
             미리보기 재생성
           </button>
-          <button type="button" onClick={() => setSelectedIds(items.map((item) => item.id))} className="h-8 rounded-md border border-orange-200 bg-white px-3 text-xs font-black text-orange-700">
-            모두선택
+          <span className="px-2 font-black text-orange-700">{selectedIds.length.toLocaleString("ko-KR")}개</span>
+          <select className="field-input h-8 w-24 rounded-md border border-slate-200 bg-white px-2 font-bold" value={bulkCategoryGroup} onChange={(event) => {
+            const group = event.target.value as CategoryGroup | "";
+            setBulkCategoryGroup(group);
+            setBulkCategoryName("");
+          }}>
+            <option value="">카테고리1</option>
+            {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
+          </select>
+          <select className="field-input h-8 w-28 rounded-md border border-slate-200 bg-white px-2 font-bold" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
+            <option value="">카테고리2</option>
+            {bulkCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+          </select>
+          <button type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-8 rounded-md bg-orange-500 px-3 font-black text-white disabled:bg-slate-300">
+            이동
           </button>
-          <button type="button" onClick={() => setSelectedIds([])} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
-            모두해제
+          <button type="button" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-8 rounded-md border border-red-200 bg-white px-3 font-black text-red-600 disabled:text-slate-300">
+            삭제
+          </button>
+          <button type="button" onClick={toggleAllSelected} className="h-8 rounded-md border border-slate-200 bg-white px-3 font-black text-slate-700">
+            {allSelected ? "모두해제" : "모두선택"}
           </button>
         </section>
       )}
 
+      {viewMode === "list" ? (
+        <section className="grid grid-cols-3 gap-2">
+          {items.map((item) => {
+            const category = categoryById.get(String(item.category_id || ""));
+            const href = item.url || item.file_url || "";
+            return (
+              <div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}>
+                {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />}
+                <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
+                <span className="max-w-20 truncate rounded bg-slate-100 px-1.5 py-1 font-black text-slate-600">{item.source_type || "-"}</span>
+                <span className="max-w-24 truncate rounded bg-slate-100 px-1.5 py-1 font-black text-slate-600">{categoryDisplayLabel(category?.category_name)}</span>
+                <button type="button" onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+                    <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                    <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
+          {!items.length && <div className="col-span-3 rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400">저장된 아카이브가 없습니다.</div>}
+        </section>
+      ) : (
       <section className="grid grid-cols-6 gap-3">
         {items.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
@@ -767,13 +838,12 @@ function ArchiveList({
           return (
             <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-md border bg-white shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-slate-200"}`}>
               {selectMode && (
-                <label className="absolute left-2 top-2 z-10 flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white/95 px-2 text-xs font-black text-slate-700 shadow-sm">
+                <label className="absolute left-2 top-2 z-10 flex h-7 items-center rounded-md border border-slate-200 bg-white/95 px-2 shadow-sm">
                   <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
-                  선택
                 </label>
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
-                <div className="flex h-[138px] w-full items-center justify-center bg-slate-100">
+                <div className="flex aspect-[4/5] w-full items-center justify-center bg-slate-100">
                   {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
@@ -798,6 +868,7 @@ function ArchiveList({
         })}
         {!items.length && <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-400 md:col-span-2 2xl:col-span-3">저장된 아카이브가 없습니다.</div>}
       </section>
+      )}
       {editDraft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
           <div className="w-full max-w-lg rounded-md bg-white p-4 shadow-xl">

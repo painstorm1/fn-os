@@ -185,6 +185,16 @@ export async function updateArchiveItem(id: string, input: ArchiveInput) {
   return saved;
 }
 
+export async function deleteArchiveItems(ids: string[]) {
+  const cleanIds = ids.map(text).filter(Boolean);
+  if (!cleanIds.length) throw new Error("삭제할 아카이브를 선택해 주세요.");
+  const inFilter = `in.(${cleanIds.join(",")})`;
+  await deleteRows("archive_item_tags", { archive_item_id: inFilter }).catch(() => []);
+  await deleteRows("archive_links", { archive_item_id: inFilter }).catch(() => []);
+  await deleteRows("archive_items", { id: inFilter });
+  return { deleted: cleanIds.length };
+}
+
 export async function saveArchiveCategory(input: AnyRecord) {
   const id = text(input.id);
   const values = {

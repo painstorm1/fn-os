@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createArchiveFileItem, createArchiveItem, listArchiveData, updateArchiveItem } from "@/lib/archive";
+import { createArchiveFileItem, createArchiveItem, deleteArchiveItems, listArchiveData, updateArchiveItem } from "@/lib/archive";
 import { FnosDbError } from "@/lib/fnos-db";
 
 function errorResponse(error: unknown, fallback: string) {
@@ -35,5 +35,15 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ ok: true, saved: await updateArchiveItem(id, body) });
   } catch (error) {
     return errorResponse(error, "아카이브 수정 실패");
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const ids = Array.isArray(body.ids) ? body.ids.map(String) : [String(body.id || "")].filter(Boolean);
+    return NextResponse.json({ ok: true, ...(await deleteArchiveItems(ids)) });
+  } catch (error) {
+    return errorResponse(error, "아카이브 삭제 실패");
   }
 }
