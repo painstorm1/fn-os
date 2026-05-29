@@ -3576,6 +3576,20 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
     return `${item.id || item.option_value || item.product_id}:${link.product_id}`;
   }
 
+  const unitCostByOrderItem = useMemo(() => {
+    const map = new Map<number, number>();
+    (detail.cost_grid?.rows || []).forEach((row) => {
+      const key = Number(row.order_item_id || 0);
+      const cost = Number(row.estimated_unit_cost || 0);
+      if (key && cost > 0) map.set(key, cost);
+    });
+    return map;
+  }, [detail.cost_grid]);
+
+  function receiptUnitCost(item: ImportOrderItem) {
+    return unitCostByOrderItem.get(Number(item.id || 0)) || Number(item.unit_price || 0);
+  }
+
   useEffect(() => {
     let alive = true;
     const productIds = Array.from(new Set((detail.items || []).map((item) => Number(item.product_id || 0)).filter(Boolean)));
@@ -3646,7 +3660,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
         product_id: link.product_id,
         sku: link.sku || link.product?.sku,
         allocated_qty: allocations[allocationKey(item, link)] || 0,
-        unit_cost: Number(item.unit_price || 0),
+        unit_cost: receiptUnitCost(item),
       }));
     }).filter((row) => row.allocated_qty > 0);
     try {
@@ -3715,7 +3729,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
                         </div>
                         <span className="text-right text-xs font-bold text-slate-500">비율 {Number(link.default_ratio || 1)}</span>
                         <input className="field-input h-9 text-right" type="number" min="0" step="0.01" value={allocations[key] || 0} onChange={(event) => setAllocations((prev) => ({ ...prev, [key]: Number(event.target.value || 0) }))} />
-                        <span className="text-right font-black">{krw(Number(item.unit_price || 0))}</span>
+                        <span className="text-right font-black">{krw(receiptUnitCost(item))}</span>
                       </div>
                     );
                   })}

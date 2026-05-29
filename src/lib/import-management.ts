@@ -303,6 +303,14 @@ export async function createImportReceipt(payload: {
   const productMap = new Map(productRows.map((row) => [text(row.id), row]));
   const purchaseDate = dateKey(payload.purchase_date);
   const sourceRefId = text(payload.source_ref_id || allocations[0]?.import_order_id);
+  const importOrderId = numberValue(allocations[0]?.import_order_id || sourceRefId);
+  if (importOrderId) {
+    const existingAllocations = await selectRows<AnyRecord>("import_purchase_sku_allocations", {
+      import_order_id: `eq.${importOrderId}`,
+      limit: 1,
+    }).catch(() => []);
+    if (existingAllocations.length) throw new Error("이미 FN OS 구매/입고로 반영된 발주입니다.");
+  }
   const now = nowIso();
 
   const purchaseRows = allocations.map((item, index) => {
