@@ -24,11 +24,17 @@ function productName(row: AnyRecord) {
   return text(row.product_name || row.prod_name);
 }
 
-function productKind(row: { product_code?: string; product_name?: string }) {
+function inferredProductAttribute(row: { product_code?: string; product_name?: string }) {
   const value = `${text(row.product_code)} ${text(row.product_name)}`.toUpperCase();
   if (/\[RG[\]\}]/.test(value)) return "rg";
   if (/\[NG[\]\}]/.test(value)) return "set";
   return "plain";
+}
+
+function normalizeProductAttribute(value: unknown, fallback: "plain" | "set" | "rg" = "plain") {
+  const normalized = text(value).toLowerCase();
+  if (normalized === "plain" || normalized === "set" || normalized === "rg") return normalized;
+  return fallback;
 }
 
 function compactSearchText(value: unknown) {
@@ -176,7 +182,8 @@ export async function GET(request: NextRequest) {
         id: text(row.id),
         product_code: code,
         product_name: productName(row),
-        product_kind: productKind({ product_code: code, product_name: productName(row) }),
+        product_attribute: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
+        product_kind: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
         cost_price: numberValue(row.cost_price ?? row.in_price),
         standard_price: numberValue(row.standard_price ?? row.out_price),
         current_stock: currentStock,
@@ -233,12 +240,15 @@ export async function POST(request: NextRequest) {
     }
 
     const now = nowIso();
+    const inferredAttribute = inferredProductAttribute({ product_code: code, product_name: name });
+    const productAttribute = normalizeProductAttribute(product.product_attribute ?? product.product_kind, inferredAttribute);
     const values = {
       product_code: code,
       prod_cd: code,
       sku: code,
       product_name: name,
       prod_name: name,
+      product_attribute: productAttribute,
       cost_price: numberValue(product.cost_price ?? product.in_price),
       in_price: numberValue(product.cost_price ?? product.in_price),
       standard_price: numberValue(product.standard_price ?? product.out_price),
