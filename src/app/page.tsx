@@ -8073,9 +8073,9 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             <ActionButton type="button" variant="secondary" onClick={() => void downloadCustomers()}>거래처정보 다운로드</ActionButton>
             <ActionButton
               type="button"
-              variant="secondary"
+              variant="ghost"
               onClick={downloadCustomerTemplate}
-              className="w-10 border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100"
+              className="w-10 border-0 bg-transparent px-0 text-emerald-600 shadow-none hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -8512,9 +8512,9 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             <ActionButton type="button" variant="secondary" onClick={downloadVisibleProducts}>상품정보 다운로드</ActionButton>
             <ActionButton
               type="button"
-              variant="secondary"
+              variant="ghost"
               onClick={downloadProductTemplate}
-              className="w-10 border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100"
+              className="w-10 border-0 bg-transparent px-0 text-emerald-600 shadow-none hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
