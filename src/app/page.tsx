@@ -963,10 +963,82 @@ type FnCustomer = {
   is_active?: boolean;
 };
 
+type SalesChannelDraft = Record<string, string>;
+
+type SalesChannelCredentialMeta = {
+  key: string;
+  hint?: string;
+  has_value?: boolean;
+  is_secret?: boolean;
+};
+
+type SalesChannelRow = {
+  id?: string;
+  channel_code?: string;
+  channel_name?: string;
+  seller_id?: string;
+  customer_id?: string;
+  customer_code?: string;
+  customer_name?: string;
+  seller_site_url?: string;
+  api_enabled?: boolean;
+  api_status?: string;
+  credentials?: SalesChannelCredentialMeta[];
+};
+
 type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
 type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
+
+const salesChannelCredentialKeys = [
+  "seller_password",
+  "api_client_id",
+  "api_client_secret",
+  "access_key",
+  "secret_key",
+  "refresh_token",
+] as const;
+
+const salesChannelCredentialLabels: Record<(typeof salesChannelCredentialKeys)[number], string> = {
+  seller_password: "seller_password",
+  api_client_id: "api_client_id",
+  api_client_secret: "api_client_secret",
+  access_key: "access_key",
+  secret_key: "secret_key",
+  refresh_token: "refresh_token",
+};
+
+function blankSalesChannelDraft(customer?: Record<string, string>): SalesChannelDraft {
+  const code = String(customer?.customer_code || "").trim().toUpperCase();
+  const name = String(customer?.customer_name || "").trim();
+  return {
+    id: "",
+    channel_code: code,
+    channel_name: name,
+    seller_id: "",
+    seller_site_url: "",
+    api_enabled: "false",
+    api_status: "manual",
+  };
+}
+
+function normalizeSalesChannelDraft(channel: SalesChannelRow | null | undefined, customer?: Record<string, string>): SalesChannelDraft {
+  return {
+    ...blankSalesChannelDraft(customer),
+    id: String(channel?.id || ""),
+    channel_code: String(channel?.channel_code || customer?.customer_code || "").trim().toUpperCase(),
+    channel_name: String(channel?.channel_name || customer?.customer_name || "").trim(),
+    seller_id: String(channel?.seller_id || ""),
+    seller_site_url: String(channel?.seller_site_url || ""),
+    api_enabled: channel?.api_enabled ? "true" : "false",
+    api_status: String(channel?.api_status || "manual"),
+  };
+}
+
+function blankSalesChannelCredentials() {
+  return Object.fromEntries(salesChannelCredentialKeys.map((key) => [key, ""])) as Record<(typeof salesChannelCredentialKeys)[number], string>;
+}
 
 function normalizeCustomerAttribute(value: unknown, fallback: CustomerAttribute = "general"): CustomerAttribute {
   const textValue = String(value || "").trim().toLowerCase();
@@ -8111,6 +8183,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [channelDraft, setChannelDraft] = useState<SalesChannelDraft>(blankSalesChannelDraft());
+  const [channelCredentials, setChannelCredentials] = useState(blankSalesChannelCredentials());
+  const [credentialMeta, setCredentialMeta] = useState<Record<string, SalesChannelCredentialMeta>>({});
+  const [credentialsRevealed, setCredentialsRevealed] = useState(false);
+  const [channelLoading, setChannelLoading] = useState(false);
   const [customerMessage, setCustomerMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 20;
@@ -8155,12 +8232,17 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }, []);
 
   function openNewCustomer() {
-    setDraft(blankCustomerDraft());
+    const nextDraft = blankCustomerDraft();
+    setDraft(nextDraft);
+    setChannelDraft(blankSalesChannelDraft(nextDraft));
+    setChannelCredentials(blankSalesChannelCredentials());
+    setCredentialMeta({});
+    setCredentialsRevealed(false);
     setModalOpen(true);
   }
 
   function openCustomer(customer: FnCustomer) {
-    setDraft({
+    const nextDraft = {
       id: customer.id || "",
       customer_code: customer.customer_code || customer.cust_code || "",
       customer_name: customer.customer_name || customer.cust_name || "",
@@ -8170,8 +8252,14 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       phone: customer.phone || "",
       payment_terms: customer.payment_terms || "",
       memo: customer.memo || "",
-    });
+    };
+    setDraft(nextDraft);
+    setChannelDraft(blankSalesChannelDraft(nextDraft));
+    setChannelCredentials(blankSalesChannelCredentials());
+    setCredentialMeta({});
+    setCredentialsRevealed(false);
     setModalOpen(true);
+    if (normalizeCustomerAttribute(nextDraft.customer_type) === "shopping") void loadCustomerChannel(nextDraft);
   }
 
   function updateDraft(key: string, value: string) {
@@ -8181,14 +8269,92 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       if (key === "customer_code") {
         const previousCodeBusinessNo = formatBusinessNoInput(prev.customer_code || "");
         const shouldSyncBusinessNo = Boolean(prev.business_no && prev.business_no === previousCodeBusinessNo);
+        setChannelDraft((channel) => ({
+          ...channel,
+          channel_code: channel.id ? channel.channel_code : value.trim().toUpperCase(),
+        }));
         return {
           ...prev,
           customer_code: value,
           business_no: shouldSyncBusinessNo ? formatBusinessNoInput(value) : prev.business_no,
         };
       }
+      if (key === "customer_name") {
+        setChannelDraft((channel) => ({
+          ...channel,
+          channel_name: channel.id ? channel.channel_name : value,
+        }));
+      }
       return { ...prev, [key]: value };
     });
+  }
+
+  function updateChannelDraft(key: string, value: string) {
+    setChannelDraft((prev) => ({ ...prev, [key]: key === "channel_code" ? value.trim().toUpperCase() : value }));
+  }
+
+  function updateChannelCredential(key: string, value: string) {
+    setChannelCredentials((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function loadCustomerChannel(customer: Record<string, string>) {
+    setChannelLoading(true);
+    setCredentialsRevealed(false);
+    try {
+      const res = await fetch("/api/fnos/sales-channels", { cache: "no-store", credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setCustomerMessage(data.error || "쇼핑몰 채널 조회 실패");
+        return;
+      }
+      const channels = (data.channels || []) as SalesChannelRow[];
+      const channel = channels.find((item) => (
+        (customer.id && String(item.customer_id || "") === customer.id) ||
+        (customer.customer_code && String(item.customer_code || "").trim() === customer.customer_code) ||
+        (customer.customer_name && String(item.customer_name || "").trim() === customer.customer_name)
+      ));
+      setChannelDraft(normalizeSalesChannelDraft(channel, customer));
+      const meta = Object.fromEntries((channel?.credentials || []).map((item) => [item.key, item]));
+      setCredentialMeta(meta);
+      setChannelCredentials(blankSalesChannelCredentials());
+    } finally {
+      setChannelLoading(false);
+    }
+  }
+
+  async function revealChannelCredentials() {
+    if (credentialsRevealed) {
+      setCredentialsRevealed(false);
+      setChannelCredentials(blankSalesChannelCredentials());
+      return;
+    }
+    const channelId = String(channelDraft.id || "").trim();
+    if (!channelId) {
+      setCustomerMessage("먼저 쇼핑몰 채널을 저장한 뒤 secret 값을 볼 수 있습니다.");
+      return;
+    }
+    setChannelLoading(true);
+    try {
+      const res = await fetch(`/api/fnos/sales-channel-credentials?channel_id=${encodeURIComponent(channelId)}&reveal=true`, { cache: "no-store", credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setCustomerMessage(data.error || "쇼핑몰 credential 조회 실패");
+        return;
+      }
+      const next = blankSalesChannelCredentials();
+      const nextMeta: Record<string, SalesChannelCredentialMeta> = {};
+      (data.credentials || []).forEach((item: SalesChannelCredentialMeta & { value?: string }) => {
+        if (salesChannelCredentialKeys.includes(item.key as (typeof salesChannelCredentialKeys)[number])) {
+          next[item.key as (typeof salesChannelCredentialKeys)[number]] = String(item.value || "");
+          nextMeta[item.key] = item;
+        }
+      });
+      setCredentialMeta((prev) => ({ ...prev, ...nextMeta }));
+      setChannelCredentials(next);
+      setCredentialsRevealed(true);
+    } finally {
+      setChannelLoading(false);
+    }
   }
 
   async function saveCustomerDraft() {
@@ -8208,6 +8374,49 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     if (!res.ok || data.ok === false) {
       setCustomerMessage(data.error || "거래처 저장 실패");
       return;
+    }
+    const savedCustomer = data.customer || {};
+    if (normalizeCustomerAttribute(draft.customer_type) === "shopping") {
+      const channelPayload = {
+        ...channelDraft,
+        channel_code: (channelDraft.channel_code || code).trim().toUpperCase(),
+        channel_name: (channelDraft.channel_name || name).trim(),
+        customer_id: savedCustomer.id || draft.id || null,
+        customer_code: code,
+        customer_name: name,
+        api_enabled: channelDraft.api_enabled === "true",
+      };
+      const channelRes = await fetch("/api/fnos/sales-channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(channelPayload),
+      });
+      const channelData = await channelRes.json().catch(() => ({}));
+      if (!channelRes.ok || channelData.ok === false) {
+        setCustomerMessage(channelData.error || "쇼핑몰 채널 저장 실패");
+        return;
+      }
+      const savedChannel = (channelData.channels || [])[0] as SalesChannelRow | undefined;
+      const channelId = String(savedChannel?.id || channelDraft.id || "");
+      const credentialPayload = Object.fromEntries(
+        salesChannelCredentialKeys
+          .map((key) => [key, String(channelCredentials[key] || "").trim()] as const)
+          .filter(([, value]) => value !== "")
+      );
+      if (channelId && Object.keys(credentialPayload).length) {
+        const credentialRes = await fetch("/api/fnos/sales-channel-credentials", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ channel_id: channelId, credentials: credentialPayload }),
+        });
+        const credentialData = await credentialRes.json().catch(() => ({}));
+        if (!credentialRes.ok || credentialData.ok === false) {
+          setCustomerMessage(credentialData.error || "쇼핑몰 credential 저장 실패");
+          return;
+        }
+      }
     }
     setCustomerMessage(`거래처 저장 완료: ${code}`);
     setMessage("");
@@ -8419,8 +8628,16 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       {modalOpen && (
         <CustomerEditModal
           draft={draft}
+          channelDraft={channelDraft}
+          channelCredentials={channelCredentials}
+          credentialMeta={credentialMeta}
+          credentialsRevealed={credentialsRevealed}
+          channelLoading={channelLoading}
           onClose={() => setModalOpen(false)}
           onChange={updateDraft}
+          onChannelChange={updateChannelDraft}
+          onCredentialChange={updateChannelCredential}
+          onRevealCredentials={() => void revealChannelCredentials()}
           onSave={() => void saveCustomerDraft()}
           onDelete={() => void deleteCustomerDraft()}
         />
@@ -8903,14 +9120,30 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
 function CustomerEditModal({
   draft,
+  channelDraft,
+  channelCredentials,
+  credentialMeta,
+  credentialsRevealed,
+  channelLoading,
   onClose,
   onChange,
+  onChannelChange,
+  onCredentialChange,
+  onRevealCredentials,
   onSave,
   onDelete,
 }: {
   draft: Record<string, string>;
+  channelDraft: SalesChannelDraft;
+  channelCredentials: Record<(typeof salesChannelCredentialKeys)[number], string>;
+  credentialMeta: Record<string, SalesChannelCredentialMeta>;
+  credentialsRevealed: boolean;
+  channelLoading: boolean;
   onClose: () => void;
   onChange: (key: string, value: string) => void;
+  onChannelChange: (key: string, value: string) => void;
+  onCredentialChange: (key: string, value: string) => void;
+  onRevealCredentials: () => void;
   onSave: () => void;
   onDelete: () => void;
 }) {
@@ -8971,10 +9204,54 @@ function CustomerEditModal({
             <FormField label="거래처정보 · 기타 메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></FormField>
           </div>
           {customerType === "shopping" && (
-            <div className="rounded-xl border border-orange-100 bg-orange-50/60 p-4">
-              <div className="mb-2 text-sm font-semibold text-orange-700">쇼핑몰정보</div>
-              <p className="text-xs font-medium leading-relaxed text-orange-700">
-                ID/PW/API 연동정보는 주문수집 credential 설계 확정 후 저장 필드와 env 반영 방식까지 연결합니다. 지금은 위 메모에 임시 정보만 남길 수 있습니다.
+            <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-orange-700">쇼핑몰 API 정보</div>
+                  <p className="mt-1 text-xs font-medium text-orange-700">주문수집에서 사용할 쇼핑몰 채널과 credential을 연결합니다.</p>
+                </div>
+                <ActionButton type="button" variant="secondary" className="h-8 border-orange-200 px-3 text-xs text-orange-700 hover:bg-orange-50" onClick={onRevealCredentials} disabled={channelLoading}>
+                  {credentialsRevealed ? "가리기" : "보기"}
+                </ActionButton>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField label="channel_code"><input className={modalInputClass} value={channelDraft.channel_code || ""} onChange={(event) => onChannelChange("channel_code", event.target.value)} placeholder="NAVER" /></FormField>
+                <FormField label="channel_name"><input className={modalInputClass} value={channelDraft.channel_name || ""} onChange={(event) => onChannelChange("channel_name", event.target.value)} placeholder="네이버 스마트스토어" /></FormField>
+                <FormField label="seller_id"><input className={modalInputClass} value={channelDraft.seller_id || ""} onChange={(event) => onChannelChange("seller_id", event.target.value)} /></FormField>
+                <FormField label="seller_site_url"><input className={modalInputClass} value={channelDraft.seller_site_url || ""} onChange={(event) => onChannelChange("seller_site_url", event.target.value)} placeholder="https://..." /></FormField>
+                <FormField label="api_enabled">
+                  <select className={modalSelectClass} value={channelDraft.api_enabled || "false"} onChange={(event) => onChannelChange("api_enabled", event.target.value)}>
+                    <option value="false">N</option>
+                    <option value="true">Y</option>
+                  </select>
+                </FormField>
+                <FormField label="api_status">
+                  <select className={modalSelectClass} value={channelDraft.api_status || "manual"} onChange={(event) => onChannelChange("api_status", event.target.value)}>
+                    <option value="manual">manual</option>
+                    <option value="planned">planned</option>
+                    <option value="ready">ready</option>
+                    <option value="connected">connected</option>
+                    <option value="error">error</option>
+                  </select>
+                </FormField>
+                {salesChannelCredentialKeys.map((key) => {
+                  const meta = credentialMeta[key];
+                  const placeholder = meta?.has_value ? meta.hint || "****" : "";
+                  return (
+                    <FormField key={key} label={salesChannelCredentialLabels[key]}>
+                      <input
+                        className={modalInputClass}
+                        type={credentialsRevealed ? "text" : "password"}
+                        value={channelCredentials[key] || ""}
+                        onChange={(event) => onCredentialChange(key, event.target.value)}
+                        placeholder={placeholder}
+                      />
+                    </FormField>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-xs font-medium leading-relaxed text-orange-700">
+                저장된 secret은 평문으로 기본 표시하지 않습니다. 값이 있는 항목은 hint만 보이고, 새 값을 입력한 항목만 저장 시 갱신됩니다.
               </p>
             </div>
           )}
