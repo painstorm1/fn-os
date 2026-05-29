@@ -990,6 +990,8 @@ type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
 type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
+type ProductBulkField = "product_attribute" | "cost_price" | "standard_price";
+type CustomerBulkField = "customer_type" | "business_no" | "contact_name" | "phone" | "memo";
 
 const salesChannelCredentialKeys = [
   "seller_password",
@@ -8189,9 +8191,17 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [credentialsRevealed, setCredentialsRevealed] = useState(false);
   const [channelLoading, setChannelLoading] = useState(false);
   const [customerMessage, setCustomerMessage] = useState("");
+  const [selectedCustomerKeys, setSelectedCustomerKeys] = useState<string[]>([]);
+  const [customerSelecting, setCustomerSelecting] = useState(false);
+  const [customerBulkOpen, setCustomerBulkOpen] = useState(false);
+  const [customerBulkField, setCustomerBulkField] = useState<CustomerBulkField>("customer_type");
+  const [customerBulkValue, setCustomerBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const customerKeys = customers.map((customer) => customer.id || customer.customer_code || customer.cust_code || "").filter(Boolean);
+  const selectedCustomers = customers.filter((customer) => selectedCustomerKeys.includes(customer.id || customer.customer_code || customer.cust_code || ""));
+  const allCustomersSelected = Boolean(customerKeys.length) && customerKeys.every((key) => selectedCustomerKeys.includes(key));
 
   function blankCustomerDraft() {
     return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", contact_name: "", phone: "", payment_terms: "", memo: "" };
@@ -8220,6 +8230,18 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     const timer = window.setTimeout(() => void loadCustomers(page, query, relationFilter), 0);
     return () => window.clearTimeout(timer);
   }, [page, query, relationFilter]);
+
+  useEffect(() => {
+    setSelectedCustomerKeys([]);
+  }, [page, query, relationFilter]);
+
+  useEffect(() => {
+    function stopSelecting() {
+      setCustomerSelecting(false);
+    }
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -8295,6 +8317,20 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
   function updateChannelCredential(key: string, value: string) {
     setChannelCredentials((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function customerRowKey(customer: FnCustomer) {
+    return customer.id || customer.customer_code || customer.cust_code || "";
+  }
+
+  function setCustomerSelected(key: string, selected: boolean) {
+    if (!key) return;
+    setSelectedCustomerKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function toggleCustomerSelected(key: string) {
+    if (!key) return;
+    setSelectedCustomerKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]);
   }
 
   async function loadCustomerChannel(customer: Record<string, string>) {
@@ -8445,6 +8481,41 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     await loadCustomers(page, query, relationFilter);
   }
 
+  async function saveCustomerBulkEdit() {
+    if (!selectedCustomers.length) {
+      setCustomerMessage("수정할 거래처를 먼저 선택해 주세요.");
+      return;
+    }
+    const value = customerBulkField === "business_no" ? formatBusinessNoInput(customerBulkValue) : customerBulkValue;
+    let saved = 0;
+    for (const customer of selectedCustomers) {
+      const payload = {
+        id: customer.id,
+        customer_code: customer.customer_code || customer.cust_code || "",
+        customer_name: customer.customer_name || customer.cust_name || "",
+        customer_type: normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label),
+        business_no: customer.business_no || "",
+        contact_name: customer.contact_name || "",
+        phone: customer.phone || "",
+        payment_terms: customer.payment_terms || "",
+        memo: customer.memo || "",
+        [customerBulkField]: customerBulkField === "customer_type" ? normalizeCustomerAttribute(value) : value,
+      };
+      const res = await fetch("/api/fnos/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ customer: payload }),
+      });
+      if (res.ok) saved += 1;
+    }
+    setCustomerMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
+    setCustomerBulkOpen(false);
+    setCustomerBulkValue("");
+    setSelectedCustomerKeys([]);
+    await loadCustomers(page, query, relationFilter);
+  }
+
   function downloadCustomerTemplate() {
     void downloadTableXlsx(
       "FN_OS_거래처_엑셀폼.xlsx",
@@ -8552,7 +8623,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                 {filter.label}
               </button>
             ))}
-            <span>거래처수 {total.toLocaleString("ko-KR")}개</span>
+            <span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">거래처수 {total.toLocaleString("ko-KR")}개</span>
           </div>
         }
         action={
@@ -8578,7 +8649,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           </div>
         }
       >
-        <FilterBar className="mb-3 justify-end p-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen((value) => !value)}>수정</ActionButton>
+            <span className="text-xs font-bold text-slate-500">선택 {selectedCustomerKeys.length.toLocaleString("ko-KR")}개</span>
+          </div>
           <input
             className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
             value={query}
@@ -8588,11 +8663,59 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             }}
             placeholder="거래처명 / 코드 검색"
           />
-        </FilterBar>
+        </div>
+        {customerBulkOpen && (
+          <div className="mb-3 rounded-xl border border-gray-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={modalSelectClass} value={customerBulkField} onChange={(event) => setCustomerBulkField(event.target.value as CustomerBulkField)}>
+                <option value="customer_type">속성</option>
+                <option value="business_no">사업자번호</option>
+                <option value="contact_name">담당자</option>
+                <option value="phone">전화번호</option>
+                <option value="memo">메모</option>
+              </select>
+              {customerBulkField === "customer_type" ? (
+                <select className={modalSelectClass} value={customerBulkValue || "general"} onChange={(event) => setCustomerBulkValue(event.target.value)}>
+                  <option value="general">일반</option>
+                  <option value="shopping">쇼핑몰</option>
+                </select>
+              ) : (
+                <input className={modalInputClass} value={customerBulkValue} onChange={(event) => setCustomerBulkValue(event.target.value)} placeholder="선택한 거래처에 적용할 값" />
+              )}
+              <ActionButton type="button" onClick={() => void saveCustomerBulkEdit()}>저장</ActionButton>
+            </div>
+            <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[620px] text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">거래처코드</th><th className="px-2 py-2 text-left">거래처명</th><th className="px-2 py-2 text-left">현재값</th></tr>
+                </thead>
+                <tbody>
+                  {selectedCustomers.map((customer, index) => (
+                    <tr key={customerRowKey(customer)} className="border-t border-gray-100">
+                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
+                      <td className="px-2 py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
+                      <td className="px-2 py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
+                      <td className="px-2 py-2 text-slate-600">{String(customerBulkField === "customer_type" ? customerAttributeLabel(customer.customer_type || customer.customer_type_label) : customer[customerBulkField as keyof FnCustomer] || "-")}</td>
+                    </tr>
+                  ))}
+                  {!selectedCustomers.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 거래처가 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
+                <th className="w-12 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allCustomersSelected}
+                    onChange={(event) => setSelectedCustomerKeys(event.target.checked ? customerKeys : [])}
+                    aria-label="거래처 전체선택"
+                  />
+                </th>
                 <th className="py-2 text-left">거래처코드</th>
                 <th className="py-2 text-left">거래처명</th>
                 <th className="py-2 text-left">속성</th>
@@ -8603,8 +8726,27 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer) => (
-                <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
+              {customers.map((customer, index) => {
+                const key = customerRowKey(customer);
+                const selected = selectedCustomerKeys.includes(key);
+                return (
+                <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                  <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setCustomerSelecting(true);
+                        toggleCustomerSelected(key);
+                      }}
+                      onMouseEnter={() => {
+                        if (customerSelecting) setCustomerSelected(key, true);
+                      }}
+                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                    >
+                      {index + 1}
+                    </button>
+                  </td>
                   <td className="py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
                   <td className="py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
                   <td className="py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
@@ -8613,7 +8755,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                   <td className="py-2 text-slate-500">{customer.phone || "-"}</td>
                   <td className="py-2 text-slate-500">{customer.memo || "-"}</td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
           {!customers.length && <EmptyState title={loading ? "불러오는 중..." : "거래처가 없습니다."} />}
@@ -8660,10 +8802,18 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [bomRows, setBomRows] = useState<ProductBomRow[]>([]);
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
   const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
+  const [selectedProductKeys, setSelectedProductKeys] = useState<string[]>([]);
+  const [productSelecting, setProductSelecting] = useState(false);
+  const [productBulkOpen, setProductBulkOpen] = useState(false);
+  const [productBulkField, setProductBulkField] = useState<ProductBulkField>("cost_price");
+  const [productBulkValue, setProductBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const productKeys = products.map((product) => product.id || product.product_code || product.sku || "").filter(Boolean);
+  const selectedProducts = products.filter((product) => selectedProductKeys.includes(product.id || product.product_code || product.sku || ""));
+  const allProductsSelected = Boolean(productKeys.length) && productKeys.every((key) => selectedProductKeys.includes(key));
 
   function blankDraft() {
     return {
@@ -8706,6 +8856,18 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }, [page, query, relationFilter, searchByCode]);
 
   useEffect(() => {
+    setSelectedProductKeys([]);
+  }, [page, query, relationFilter, searchByCode]);
+
+  useEffect(() => {
+    function stopSelecting() {
+      setProductSelecting(false);
+    }
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "F2") return;
       event.preventDefault();
@@ -8744,6 +8906,20 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   function updateDraft(key: string, value: string) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function productRowKey(product: FnProduct) {
+    return product.id || product.product_code || product.sku || "";
+  }
+
+  function setProductSelected(key: string, selected: boolean) {
+    if (!key) return;
+    setSelectedProductKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function toggleProductSelected(key: string) {
+    if (!key) return;
+    setSelectedProductKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]);
   }
 
   async function saveProductDraft() {
@@ -8809,6 +8985,40 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }
     setProductMessage(`품목 삭제 완료: ${productCode}`);
     setModalOpen(false);
+    await loadProducts(page, query, relationFilter, searchByCode);
+  }
+
+  async function saveProductBulkEdit() {
+    if (!selectedProducts.length) {
+      setProductMessage("수정할 품목을 먼저 선택해 주세요.");
+      return;
+    }
+    let saved = 0;
+    for (const product of selectedProducts) {
+      const productAttribute = productBulkField === "product_attribute" ? normalizeProductAttribute(productBulkValue) : productAttributeOf(product);
+      const productName = productNameWithAttribute(String(product.product_name || ""), productAttribute);
+      const res = await fetch("/api/fnos/products/master", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          product: {
+            id: product.id,
+            product_code: product.product_code || product.sku || "",
+            product_name: productName,
+            product_attribute: productAttribute,
+            product_kind: productAttribute,
+            cost_price: productBulkField === "cost_price" ? productBulkValue : product.cost_price,
+            standard_price: productBulkField === "standard_price" ? productBulkValue : product.standard_price,
+          },
+        }),
+      });
+      if (res.ok) saved += 1;
+    }
+    setProductMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
+    setProductBulkOpen(false);
+    setProductBulkValue("");
+    setSelectedProductKeys([]);
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
@@ -9000,6 +9210,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 {filter.label}
               </button>
             ))}
+            <span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">상품수 {total.toLocaleString("ko-KR")}개</span>
           </div>
         }
         action={
@@ -9025,35 +9236,77 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           </div>
         }
       >
-        <FilterBar className="mb-3 justify-between p-3">
-          <div className="text-sm font-black text-slate-700">상품수 {total.toLocaleString("ko-KR")}개</div>
-          <div className="flex w-full max-w-xl flex-wrap items-center justify-end gap-2">
-            <label className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600">
-              <input
-                type="checkbox"
-                checked={searchByCode}
-                onChange={(event) => {
-                  setPage(1);
-                  setSearchByCode(event.target.checked);
-                }}
-              />
-              상품코드 검색
-            </label>
-            <input
-              className="field-input min-w-[220px] flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm"
-              value={query}
-              onChange={(event) => {
-                setPage(1);
-                setQuery(event.target.value);
-              }}
-              placeholder={searchByCode ? "상품코드 검색" : "상품명 검색"}
-            />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen((value) => !value)}>수정</ActionButton>
+            <span className="text-xs font-bold text-slate-500">선택 {selectedProductKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
-        </FilterBar>
+          <input
+            className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={query}
+            onChange={(event) => {
+              setPage(1);
+              setSearchByCode(false);
+              setQuery(event.target.value);
+            }}
+            placeholder="품목명 검색"
+          />
+        </div>
+        {productBulkOpen && (
+          <div className="mb-3 rounded-xl border border-gray-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={modalSelectClass} value={productBulkField} onChange={(event) => setProductBulkField(event.target.value as ProductBulkField)}>
+                <option value="product_attribute">속성</option>
+                <option value="cost_price">입고단가</option>
+                <option value="standard_price">출고단가</option>
+              </select>
+              {productBulkField === "product_attribute" ? (
+                <select className={modalSelectClass} value={productBulkValue || "plain"} onChange={(event) => setProductBulkValue(event.target.value)}>
+                  <option value="plain">일반</option>
+                  <option value="set">SET</option>
+                  <option value="rg">RG</option>
+                </select>
+              ) : (
+                <input className={modalInputClass} type="number" value={productBulkValue} onChange={(event) => setProductBulkValue(event.target.value)} placeholder="선택한 품목에 적용할 값" />
+              )}
+              <ActionButton type="button" onClick={() => void saveProductBulkEdit()}>저장</ActionButton>
+            </div>
+            <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[680px] text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">품목코드</th><th className="px-2 py-2 text-left">품목명</th><th className="px-2 py-2 text-right">현재값</th></tr>
+                </thead>
+                <tbody>
+                  {selectedProducts.map((product, index) => (
+                    <tr key={productRowKey(product)} className="border-t border-gray-100">
+                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
+                      <td className="px-2 py-2 font-black">{product.product_code || product.sku || "-"}</td>
+                      <td className="px-2 py-2 font-bold">{product.product_name || "-"}</td>
+                      <td className="px-2 py-2 text-right text-slate-600">
+                        {productBulkField === "product_attribute"
+                          ? productAttributeLabel(productAttributeOf(product))
+                          : krw(Number(productBulkField === "cost_price" ? product.cost_price || 0 : product.standard_price || 0))}
+                      </td>
+                    </tr>
+                  ))}
+                  {!selectedProducts.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 품목이 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
+                <th className="w-12 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allProductsSelected}
+                    onChange={(event) => setSelectedProductKeys(event.target.checked ? productKeys : [])}
+                    aria-label="품목 전체선택"
+                  />
+                </th>
                 <th className="py-2 text-left">품목코드</th>
                 <th className="py-2 text-left">품목명</th>
                 <th className="py-2 text-right">입고가</th>
@@ -9064,8 +9317,27 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
-                <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
+              {products.map((product, index) => {
+                const key = productRowKey(product);
+                const selected = selectedProductKeys.includes(key);
+                return (
+                <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                  <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setProductSelecting(true);
+                        toggleProductSelected(key);
+                      }}
+                      onMouseEnter={() => {
+                        if (productSelecting) setProductSelected(key, true);
+                      }}
+                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                    >
+                      {index + 1}
+                    </button>
+                  </td>
                   <td className="py-2 font-black">{product.product_code || product.sku || "-"}</td>
                   <td className="py-2 font-bold">{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
@@ -9081,7 +9353,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                     <StatusBadge tone={(product.import_links || []).length ? "orange" : "muted"}>수입 {(product.import_links || []).length}</StatusBadge>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
           {!products.length && <EmptyState title={loading ? "불러오는 중..." : "품목이 없습니다."} />}
