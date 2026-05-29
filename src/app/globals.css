@@ -2,8 +2,32 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f9fafb;
+  --foreground: #111827;
+  --fn-primary-50: #fff7ed;
+  --fn-primary-100: #ffedd5;
+  --fn-primary-200: #fed7aa;
+  --fn-primary-300: #fdba74;
+  --fn-primary-400: #fb923c;
+  --fn-primary-500: #ff6a00;
+  --fn-primary-600: #ea580c;
+  --fn-primary-700: #c2410c;
+  --fn-primary-800: #9a3412;
+  --fn-primary-900: #7c2d12;
+  --fn-gray-50: #f9fafb;
+  --fn-gray-100: #f3f4f6;
+  --fn-gray-200: #e5e7eb;
+  --fn-gray-300: #d1d5db;
+  --fn-gray-400: #9ca3af;
+  --fn-gray-500: #6b7280;
+  --fn-gray-600: #4b5563;
+  --fn-gray-700: #374151;
+  --fn-gray-800: #1f2937;
+  --fn-gray-900: #111827;
+  --fn-card-radius: 14px;
+  --fn-control-radius: 8px;
+  --fn-border: #e5e7eb;
+  --fn-soft-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
 }
 
 @theme inline {
@@ -23,7 +47,7 @@ body {
 }
 
 a {
-  outline-color: #f97316;
+  outline-color: var(--fn-primary-500);
 }
 
 button,
@@ -45,7 +69,7 @@ button:disabled {
 button:focus-visible,
 a[role="button"]:focus-visible,
 a[class*="rounded"]:focus-visible {
-  outline: 2px solid #f97316;
+  outline: 2px solid var(--fn-primary-500);
   outline-offset: 2px;
 }
 
@@ -74,14 +98,14 @@ a[class*="rounded"]:focus-visible {
 
 .field-input {
   width: 100%;
-  border-radius: 6px;
-  border: 1px solid #cbd5e1;
+  border-radius: var(--fn-control-radius);
+  border: 1px solid var(--fn-gray-300);
   background: #fff;
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-  outline-color: #f97316;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fn-gray-900);
+  outline-color: var(--fn-primary-500);
 }
 
 .field-input:not(textarea) {
@@ -90,5 +114,41 @@ a[class*="rounded"]:focus-visible {
 }
 
 textarea.field-input {
-  min-height: 86px;
+  min-height: 96px;
+}
+
+.fn-card {
+  border: 1px solid var(--fn-border);
+  border-radius: var(--fn-card-radius);
+  background: #fff;
+  box-shadow: var(--fn-soft-shadow);
+}
+
+.fn-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--fn-border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+
+.fn-table-shell {
+  overflow: hidden;
+  border: 1px solid var(--fn-border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.fn-focus-ring {
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.fn-focus-ring:focus {
+  border-color: var(--fn-primary-500);
+  box-shadow: 0 0 0 3px var(--fn-primary-100);
 }

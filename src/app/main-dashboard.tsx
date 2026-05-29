@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Card, KpiCard, StatusBadge } from "@/components/fn-ui";
 
 type Row = Record<string, unknown>;
 type Point = {
@@ -142,8 +143,8 @@ function AdLineChart({ points }: { points?: Point[] }) {
   const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
 
   return (
-    <div className="relative h-28 rounded-md bg-slate-50 px-3 py-3">
-      <div className="absolute right-3 top-2 z-10 flex items-center gap-2 text-[10px] font-black">
+    <div className="relative h-28 rounded-xl bg-gray-50 px-3 py-3">
+      <div className="absolute right-3 top-2 z-10 flex items-center gap-2 text-[10px] font-semibold">
         <span className="flex items-center gap-1 text-orange-600"><span className="h-1.5 w-3 rounded-full bg-orange-500" />총비용</span>
         <span className="flex items-center gap-1 text-emerald-600"><span className="h-1.5 w-3 rounded-full bg-emerald-500" />ROAS</span>
       </div>
@@ -163,8 +164,8 @@ function AdLineChart({ points }: { points?: Point[] }) {
             <div key={`${row.date || row.label || index}`} className="group absolute top-0 h-full w-8 -translate-x-1/2" style={{ left }}>
               <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-orange-500 shadow-sm" style={{ left: "50%", top: `${costY}%` }} />
               <span className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-emerald-500 shadow-sm" style={{ left: "50%", top: `${roasY}%` }} />
-              <div className={`absolute z-10 hidden min-w-[142px] rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 shadow-lg group-hover:block ${tooltipLeft}`} style={{ top: tooltipTop }}>
-                <p className="font-black text-slate-950">{dateText(row.date || row.label)}</p>
+              <div className={`absolute z-10 hidden min-w-[142px] rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-600 shadow-lg group-hover:block ${tooltipLeft}`} style={{ top: tooltipTop }}>
+                <p className="font-semibold text-gray-900">{dateText(row.date || row.label)}</p>
                 <p className="mt-1 flex justify-between gap-3"><span>ROAS</span><span>{n(row.roas).toFixed(1)}%</span></p>
                 <p className="mt-1 flex justify-between gap-3"><span>총비용</span><span>{krw(row.cost ?? row.value)}</span></p>
               </div>
@@ -177,20 +178,8 @@ function AdLineChart({ points }: { points?: Point[] }) {
 }
 
 function Stat({ label, value, note, tone = "slate" }: { label: string; value: string; note?: string; tone?: "slate" | "orange" | "green" | "rose" }) {
-  const color = {
-    slate: "text-slate-950",
-    orange: "text-orange-600",
-    green: "text-emerald-600",
-    rose: "text-rose-600",
-  }[tone];
-
-  return (
-    <div className="min-w-0">
-      <p className="truncate text-[11px] font-black text-slate-500">{label}</p>
-      <p className={`mt-1 break-keep text-lg font-black leading-tight ${color}`}>{value}</p>
-      {note && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-400">{note}</p>}
-    </div>
-  );
+  const kpiTone = tone === "green" ? "success" : tone === "rose" ? "danger" : tone === "orange" ? "orange" : "default";
+  return <KpiCard label={label} value={value} note={note} tone={kpiTone} className="border-0 bg-transparent p-0 shadow-none" />;
 }
 
 function CollectionDate({ label, value }: { label: string; value?: string }) {
@@ -204,13 +193,13 @@ function CollectionDate({ label, value }: { label: string; value?: string }) {
 
 function Panel({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-md border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
-      <div className="mb-3">
-        <h2 className="text-sm font-black text-slate-950">{title}</h2>
-        {subtitle && <p className="mt-1 text-xs font-bold text-slate-500">{subtitle}</p>}
+    <Card className={`p-5 ${className}`}>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold leading-snug text-gray-900">{title}</h2>
+        {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
       </div>
       {children}
-    </section>
+    </Card>
   );
 }
 
@@ -224,10 +213,10 @@ function importStatusClass(status: unknown) {
 }
 
 function ImportOrderRows({ rows }: { rows: Row[] }) {
-  if (!rows.length) return <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-400">수입 발주 데이터가 없습니다.</p>;
+  if (!rows.length) return <p className="rounded-xl bg-gray-50 px-3 py-8 text-center text-sm font-medium text-gray-400">수입 발주 데이터가 없습니다.</p>;
   return (
-    <div className="overflow-hidden rounded-md border border-slate-200">
-      <div className="grid grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] gap-3 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
+    <div className="fn-table-shell">
+      <div className="grid h-11 grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] items-center gap-3 bg-gray-50 px-3 text-xs font-semibold text-gray-600">
         <span>주문날짜</span>
         <span>대표 제품</span>
         <span>공장</span>
@@ -239,7 +228,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <a
           key={`${row.id || index}`}
           href={importOrderHref(row)}
-          className="grid grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] items-center gap-3 border-t border-slate-100 px-3 py-2 text-sm transition hover:bg-orange-50"
+          className="grid min-h-13 grid-cols-[106px_minmax(0,1.35fr)_minmax(0,0.9fr)_82px_122px_82px] items-center gap-3 border-t border-gray-100 px-3 py-2 text-sm transition hover:bg-orange-50/70"
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
           <span className="grid min-w-0 grid-cols-[48px_1fr] items-center gap-3">
@@ -250,7 +239,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
           <span className="text-right font-bold text-slate-700">{n(row.total_qty).toLocaleString("ko-KR")}</span>
           <span className="text-right font-black text-slate-950">{krwLong(orderAmount(row))}</span>
           <span className="text-right">
-            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${importStatusClass(row.status)}`}>{String(row.status || "-")}</span>
+            <StatusBadge className={importStatusClass(row.status)}>{String(row.status || "-")}</StatusBadge>
           </span>
         </a>
       ))}
@@ -260,11 +249,11 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
 
 function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
   const groups = months || [];
-  if (!groups.length) return <p className="py-6 text-center text-sm font-bold text-slate-400">월별 발주금액이 없습니다.</p>;
+  if (!groups.length) return <p className="py-6 text-center text-sm font-medium text-gray-400">월별 발주금액이 없습니다.</p>;
   return (
-    <div className="divide-y divide-slate-100">
+    <div className="divide-y divide-gray-100">
       {groups.map((group) => (
-        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 px-2 py-2 text-sm transition hover:bg-orange-50/60 hover:text-orange-600">
+        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-sm transition hover:bg-orange-50/70 hover:text-orange-600">
           <span className="flex items-baseline gap-2">
             <span className="min-w-8 font-black text-slate-950">{monthTitle(group)}</span>
             <span className="text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
@@ -277,11 +266,11 @@ function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
 }
 
 function FixedCostList({ rows }: { rows: Row[] }) {
-  if (!rows.length) return <p className="rounded-md bg-slate-50 px-3 py-3 text-center text-xs font-bold text-slate-400">3일 내 예정된 고정비가 없습니다.</p>;
+  if (!rows.length) return <p className="rounded-xl bg-gray-50 px-3 py-3 text-center text-xs font-medium text-gray-400">3일 내 예정된 고정비가 없습니다.</p>;
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {rows.slice(0, 3).map((row, index) => (
-        <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs">
+        <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
           <span className="truncate font-bold text-slate-700">{titleFrom(row)}</span>
           <span className="font-black text-slate-950">{krw(amountFrom(row))}</span>
         </div>
@@ -318,13 +307,13 @@ export default function MainDashboard() {
   const inquiryTotal = (summary?.inquiry_channels || []).reduce((total, row) => total + n(row.count), 0);
 
   return (
-    <div className="space-y-3">
-      <header className="flex flex-wrap items-start justify-between gap-6 border-b border-slate-200 pb-4">
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-start justify-between gap-6 border-b border-gray-200 pb-5">
         <div>
-          <h1 className="text-5xl font-black tracking-normal text-slate-950">FN OS</h1>
-          <p className="mt-2 text-2xl font-black text-slate-700">{dateText(summary?.today)}</p>
-          {loading && <p className="mt-1 text-xs font-bold text-slate-400">대시보드 데이터를 불러오는 중입니다.</p>}
-          {summary?.ok === false && <p className="mt-1 text-xs font-bold text-rose-600">{summary.error}</p>}
+          <h1 className="text-[28px] font-bold leading-[1.3] tracking-normal text-gray-900">FN OS</h1>
+          <p className="mt-1.5 text-sm font-medium text-gray-500">{dateText(summary?.today)}</p>
+          {loading && <p className="mt-1 text-xs font-medium text-gray-400">대시보드 데이터를 불러오는 중입니다.</p>}
+          {summary?.ok === false && <p className="mt-1 text-xs font-semibold text-rose-600">{summary.error}</p>}
         </div>
         <div className="grid grid-cols-3 gap-5 pt-2">
           <CollectionDate label="주문수집" value={summary?.collection_dates?.orders} />
@@ -333,21 +322,21 @@ export default function MainDashboard() {
         </div>
       </header>
 
-      <main className="grid gap-3 xl:grid-cols-3">
+      <main className="grid gap-5 xl:grid-cols-3">
         <Panel title="매출/재고" subtitle={`매출 기준일 ${dateText(summary?.sales_latest_date)}`}>
           <div className="grid grid-cols-3 gap-3">
             <Stat label={summary?.sales_label || "매출"} value={krw(summary?.sales_latest_amount)} tone="orange" />
             <Stat label="최근 7일" value={krw(summary?.seven_day_sales)} />
             <Stat label="이번달" value={krw(summary?.month_sales)} />
           </div>
-          <div className="mt-3 rounded-md bg-slate-50 p-3">
-            <div className="mb-2 flex items-center justify-between text-[11px] font-black text-slate-500">
+          <div className="mt-4 rounded-xl bg-gray-50 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs font-semibold text-gray-500">
               <span>14일 매출</span>
               <span>{krwLong(summary?.seven_day_sales)}</span>
             </div>
             <MiniBars points={summary?.sales_daily} />
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
+          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-gray-100 pt-4">
             <Stat label="주문" value={`${n(summary?.order_count).toLocaleString("ko-KR")}건`} />
             <Stat label="문의" value={`${inquiryTotal.toLocaleString("ko-KR")}건`} />
             <Stat label="재고위험" value={`${n(summary?.inventory_risk_count).toLocaleString("ko-KR")}개`} tone={n(summary?.inventory_risk_count) ? "rose" : "green"} />
@@ -360,10 +349,10 @@ export default function MainDashboard() {
             <Stat label="전환매출" value={krw(summary?.ad_conversion_sales)} />
             <Stat label="ROAS" value={`${n(summary?.ad_roas).toFixed(1)}%`} tone={n(summary?.ad_roas) >= 300 ? "green" : "slate"} />
           </div>
-          <div className="mt-3">
+          <div className="mt-4">
             <AdLineChart points={summary?.ad_daily} />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-gray-100 pt-4">
             <Stat label="최근 7일" value={krw(summary?.ad_seven_day_spend)} note={`ROAS ${n(summary?.ad_seven_day_roas).toFixed(1)}%`} />
             <Stat label="이번달" value={krw(summary?.ad_month_spend)} note={`ROAS ${n(summary?.ad_month_roas).toFixed(1)}%`} />
           </div>
@@ -375,7 +364,7 @@ export default function MainDashboard() {
             <Stat label="통장잔고" value={summary?.bank_balance == null ? "미설정" : krw(summary.bank_balance)} />
             <Stat label="3일내 고정비" value={krw(fixedCostTotal)} tone={fixedCosts.length ? "rose" : "green"} />
           </div>
-          <div className="mt-3">
+          <div className="mt-4">
             <FixedCostList rows={fixedCosts} />
           </div>
         </Panel>
