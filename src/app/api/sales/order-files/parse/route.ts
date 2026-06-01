@@ -21,7 +21,7 @@ const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 const headers: Record<SheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  FN판매입력: ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+  FN판매입력: ["일자", "순번", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
 
 function clean(value: unknown) {
@@ -147,6 +147,24 @@ function hasKeys(row: Record<string, unknown>, keys: string[]) {
 }
 
 function asRow(row: Record<string, unknown>, sheet: SheetName) {
+  if (sheet === "FN판매입력") {
+    return [
+      clean(pick(row, ["일자", "일자*"])),
+      clean(pick(row, ["순번"])),
+      clean(pick(row, ["거래처코드"])),
+      clean(pick(row, ["거래처명", "거래처명*"])),
+      clean(pick(row, ["출하창고", "출하창고*"])) || "100",
+      clean(pick(row, ["VAT 포함/별도"])) || "포함",
+      clean(pick(row, ["품목코드", "품목코드*"])),
+      clean(pick(row, ["품목명", "품목명*"])),
+      clean(pick(row, ["수량", "수량*"])),
+      clean(pick(row, ["단가", "단가(vat포함)"])),
+      clean(pick(row, ["세액"])),
+      clean(pick(row, ["공급가액"])),
+      clean(pick(row, ["합계금액", "공급가액"])),
+      clean(pick(row, ["메모", "적요"])),
+    ];
+  }
   return headers[sheet].map((header) => clean(row[header]));
 }
 
@@ -313,20 +331,15 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
       "",
       "",
       mallName,
-      "",
       "100",
-      "",
-      "",
-      "",
+      "포함",
       productCode,
       productCode ? clean(pick(source, ["품목명(ERP)", "품목명"])) : option,
-      "",
       clean(pick(source, ["수량"])) || "1",
       unit ? comma(unit) : "",
       "",
       amount ? comma(amount) : "",
-      "",
-      "Y",
+      amount ? comma(amount) : "",
       "",
     ]);
   }
@@ -423,6 +436,17 @@ const knownHeaderNames = [
   ...headers.송장출력용,
   ...headers.FN송장입력,
   ...headers.FN판매입력,
+  ...headers.FN판매입력.map((header) => `${header}*`),
+  "담당자",
+  "거래유형",
+  "통화",
+  "환율",
+  "규격",
+  "단가(vat포함)",
+  "외화금액",
+  "적요",
+  "생산전표생성",
+  "결과",
   "수집처",
   "수집일자",
   "품목코드(ERP)",

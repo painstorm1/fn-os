@@ -5110,8 +5110,13 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  "FN판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
-  "FN구매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "입고창고", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "공급가액", "적요", "결과"],
+  "FN판매입력": ["일자", "순번", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
+  "FN구매입력": ["일자", "순번", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
+};
+
+const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
+  "FN판매입력": ["일자", "거래처명", "출하창고", "품목코드", "품목명", "수량"],
+  "FN구매입력": ["일자", "거래처명", "입고창고", "품목코드", "품목명", "수량"],
 };
 
 const visibleSalesSheetNames: SalesSheetName[] = ["발주 진행 단계", "송장출력용", "FN판매입력", "FN구매입력"];
@@ -5131,9 +5136,52 @@ function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
   return rows;
 }
 
+function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
+  if (sheet === "FN판매입력" && row.length > salesSheetHeaders[sheet].length) {
+    return [
+      row[0] || "",
+      row[1] || "",
+      row[2] || "",
+      row[3] || "",
+      row[5] || "100",
+      "포함",
+      row[9] || "",
+      row[10] || "",
+      row[12] || "",
+      row[13] || "",
+      "",
+      row[15] || "",
+      row[15] || "",
+      row[16] || "",
+    ];
+  }
+  if (sheet === "FN구매입력" && row.length > salesSheetHeaders[sheet].length) {
+    return [
+      row[0] || "",
+      row[1] || "",
+      row[2] || "",
+      row[3] || "",
+      row[5] || "100",
+      "포함",
+      row[8] || "",
+      row[9] || "",
+      row[11] || "",
+      row[12] || "",
+      "",
+      row[13] || "",
+      row[13] || "",
+      row[14] || "",
+    ];
+  }
+  return row;
+}
+
 function padSalesRows(sheet: SalesSheetName, rows: string[][], minRows = 18) {
   const headers = salesSheetHeaders[sheet];
-  const next = rows.map((row) => headers.map((_, index) => row[index] || ""));
+  const next = rows.map((row) => {
+    const migrated = migrateLegacyEntryRow(sheet, row);
+    return headers.map((_, index) => migrated[index] || "");
+  });
   while (next.length < minRows) next.push(headers.map(() => ""));
   return next;
 }
@@ -5245,10 +5293,113 @@ function salesRowObject(sheet: SalesSheetName, row: string[]) {
   return Object.fromEntries(salesSheetHeaders[sheet].map((header, index) => [header, salesCellText(row[index])]));
 }
 
+function salesSheetDisplayHeaders(sheet: SalesSheetName) {
+  const required = new Set(salesRequiredHeaders[sheet] || []);
+  return salesSheetHeaders[sheet].map((header) => (required.has(header) ? `${header}*` : header));
+}
+
+function salesSheetDisplayHeader(sheet: SalesSheetName, header: string) {
+  return (salesRequiredHeaders[sheet] || []).includes(header) ? `${header}*` : header;
+}
+
 function salesMoneyValue(value: unknown) {
   const normalized = salesCellText(value).replace(/[^\d.-]/g, "");
   const amount = Number(normalized);
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function salesQuantityValue(value: unknown) {
+  const amount = Number(salesCellText(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function normalizeEntryDateValue(value: unknown) {
+  const raw = salesCellText(value);
+  if (!raw) return "";
+  if (/^\d{8}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10).replace(/\D/g, "");
+  return raw.replace(/\D/g, "").slice(0, 8) || raw;
+}
+
+function entryVatLabel(value: unknown) {
+  const text = salesCellText(value);
+  return text || "포함";
+}
+
+function aggregateSalesEntryRows(
+  rows: Array<Record<string, string>>,
+  mode: "sales" | "purchases",
+): Array<Record<string, string>> {
+  const byLine = new Map<string, {
+    row: Record<string, string>;
+    qty: number;
+    supply: number;
+    total: number;
+    tax: number;
+    memo: Set<string>;
+    statementKey: string;
+  }>();
+  const statementNumbers = new Map<string, number>();
+
+  rows.forEach((item) => {
+    const date = normalizeEntryDateValue(item.일자);
+    const customerCode = salesCellText(item.거래처코드);
+    const customerName = salesCellText(item.거래처명);
+    const warehouse = salesCellText(mode === "sales" ? item.출하창고 : item.입고창고) || "100";
+    const productCode = salesCellText(item.품목코드);
+    const productName = salesCellText(item.품목명);
+    const qty = salesQuantityValue(item.수량) || 1;
+    const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
+    const tax = salesMoneyValue(item.세액);
+    const supply = salesMoneyValue(item.공급가액) || qty * price + tax;
+    const total = salesMoneyValue(item.합계금액) || supply;
+    const vat = entryVatLabel(item["VAT 포함/별도"]);
+    const statementKey = [date, customerCode || customerName].join("|");
+    const lineKey = [statementKey, productCode, productName].map((value) => value.replace(/\s+/g, " ").trim()).join("|");
+    const existing = byLine.get(lineKey);
+    if (existing) {
+      existing.qty += qty;
+      existing.supply += supply;
+      existing.total += total;
+      existing.tax += tax;
+      if (salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
+      return;
+    }
+    byLine.set(lineKey, {
+      row: {
+        ...item,
+        일자: date,
+        거래처코드: customerCode,
+        거래처명: customerName,
+        [mode === "sales" ? "출하창고" : "입고창고"]: warehouse,
+        "VAT 포함/별도": vat,
+        품목코드: productCode,
+        품목명: productName,
+      },
+      qty,
+      supply,
+      total,
+      tax,
+      memo: new Set([salesCellText(item.메모 || item.적요)].filter(Boolean)),
+      statementKey,
+    });
+  });
+
+  return Array.from(byLine.values()).map((entry) => {
+    if (!statementNumbers.has(entry.statementKey)) statementNumbers.set(entry.statementKey, statementNumbers.size + 1);
+    const averagePrice = entry.qty ? entry.total / entry.qty : 0;
+    return {
+      ...entry.row,
+      순번: String(statementNumbers.get(entry.statementKey) || 1),
+      수량: String(entry.qty),
+      단가: String(Math.round(averagePrice)),
+      세액: entry.tax ? String(Math.round(entry.tax)) : "",
+      공급가액: String(Math.round(entry.supply)),
+      합계금액: String(Math.round(entry.total)),
+      메모: Array.from(entry.memo).join(" / "),
+    } as Record<string, string>;
+  });
 }
 
 function salesSupplyAmountTotal(rows: string[][]) {
@@ -5844,7 +5995,7 @@ function exportSheetRowsWithHeaders(name: SalesSheetName, rows: string[][]) {
       exportRows = exportRows.map((row) => row.map((cell, index) => index === settlementIndex ? toSettlementExportValue(String(cell || "")) : cell));
     }
   }
-  return { headers, rows: exportRows };
+  return { headers: headers.map((header) => salesSheetDisplayHeader(name, header)), rows: exportRows };
 }
 
 function setWorksheetFontSize(xlsx: XlsxModule, worksheet: WorkSheet, size = 11) {
@@ -6018,6 +6169,7 @@ function SalesExcelGrid({
   highlightedRows?: number[];
 }) {
   const headers = salesSheetHeaders[sheet];
+  const displayHeaders = salesSheetDisplayHeaders(sheet);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
   const [range, setRange] = useState<SalesGridRange>({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
@@ -6136,7 +6288,14 @@ function SalesExcelGrid({
   }
   function selectProductSearchItem(item: FnOsProductSearchItem) {
     if (!item.code) return;
-    updateCell(productSearch.row, productSearch.col, item.code);
+    onChange(rows.map((row, rowIndex) => {
+      if (rowIndex !== productSearch.row) return row;
+      return row.map((cell, colIndex) => {
+        if (colIndex === productSearch.col) return item.code || cell;
+        if (headers[colIndex] === "품목명" || headers[colIndex] === "품목명(ERP)") return item.name || cell;
+        return cell;
+      });
+    }));
     setProductSearch((prev) => ({ ...prev, open: false }));
     setEditing(null);
     setAnchor({ row: productSearch.row, col: productSearch.col });
@@ -6369,7 +6528,7 @@ function SalesExcelGrid({
                   className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isSortableSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
                 >
                   <div className="flex min-w-0 items-center gap-1">
-                    <span className="truncate">{header}</span>
+                    <span className="truncate">{displayHeaders[colIndex] || header}</span>
                     {isSortableSheet && sortState?.col === colIndex && (
                       <span className="shrink-0 text-[10px] text-orange-600">{sortState.dir === "asc" ? "ASC" : "DESC"}</span>
                     )}
@@ -7698,13 +7857,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         purchase[0] = today;
         purchase[1] = String(orderIndex + 1);
         purchase[3] = partner;
-        purchase[5] = "100";
-        purchase[8] = progress ? progressValue(progress, "품목코드(ERP)") : "";
-        purchase[9] = progress ? progressValue(progress, "품목명(ERP)") : "";
-        purchase[11] = progress ? progressValue(progress, "수량") || "1" : "1";
+        purchase[4] = "100";
+        purchase[5] = "포함";
+        purchase[6] = progress ? progressValue(progress, "품목코드(ERP)") : "";
+        purchase[7] = progress ? progressValue(progress, "품목명(ERP)") : "";
+        purchase[8] = progress ? progressValue(progress, "수량") || "1" : "1";
+        purchase[9] = progress ? progressValue(progress, "정산예정금액") : "";
+        purchase[11] = progress ? progressValue(progress, "정산예정금액") : "";
         purchase[12] = progress ? progressValue(progress, "정산예정금액") : "";
-        purchase[13] = progress ? progressValue(progress, "정산예정금액") : "";
-        purchase[14] = `직송 ${partner}`;
+        purchase[13] = `직송 ${partner}`;
         purchaseRows[rowIndex] = purchase;
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
@@ -7718,32 +7879,50 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendSalesInput() {
-    const rows = sheets["FN판매입력"]
+    const sourceRows = sheets["FN판매입력"]
       .filter(rowHasValue)
       .map((row) => {
         const item = salesRowObject("FN판매입력", row);
         return {
-          sale_date: item.일자,
-          io_date: item.일자,
-          upload_ser_no: item.순번,
-          cust_code: item.거래처코드,
-          cust_name: item.거래처명,
-          emp_cd: item.담당자,
-          wh_cd: item.출하창고,
-          io_type: item.거래유형,
-          currency: item.통화,
-          exchange_rate: item.환율,
-          prod_cd: item.품목코드,
-          prod_name: item.품목명,
-          size_des: item.규격,
-          qty: item.수량,
-          price: item["단가(vat포함)"],
-          foreign_amt: item.외화금액,
-          supply_amt: item.공급가액,
-          remarks: item.적요,
-          make_flag: item.생산전표생성,
+          일자: item.일자,
+          순번: item.순번,
+          거래처코드: item.거래처코드,
+          거래처명: item.거래처명,
+          출하창고: item.출하창고 || "100",
+          "VAT 포함/별도": item["VAT 포함/별도"] || "포함",
+          품목코드: item.품목코드,
+          품목명: item.품목명,
+          수량: item.수량,
+          단가: item.단가,
+          세액: item.세액,
+          공급가액: item.공급가액,
+          합계금액: item.합계금액,
+          메모: item.메모,
         };
       });
+    const missingRequired = sourceRows.filter((item) => !item.일자 || !item.거래처명 || !item.출하창고 || !item.품목코드 || !item.품목명);
+    if (missingRequired.length) {
+      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처명, 출하창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      return;
+    }
+    const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
+    const rows = aggregatedRows.map((item) => ({
+      sale_date: item.일자,
+      io_date: item.일자,
+      upload_ser_no: item.순번,
+      cust_code: item.거래처코드,
+      cust_name: item.거래처명,
+      wh_cd: item.출하창고,
+      prod_cd: item.품목코드,
+      prod_name: item.품목명,
+      qty: item.수량,
+      price: item.단가,
+      tax_amt: item.세액,
+      supply_amt: item.공급가액,
+      total_amount: item.합계금액,
+      remarks: item.메모,
+      vat_type: item["VAT 포함/별도"],
+    }));
     if (!rows.length) {
       window.alert("전송할 판매입력 행이 없습니다.");
       return;
@@ -7752,7 +7931,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${rows.length}건을 FN OS 판매 DB에 저장합니다. 계속할까요?`);
+      const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 판매 DB에 저장합니다. 계속할까요?`);
       if (!ok) return;
     }
     setMessage("FN OS 판매 DB에 저장하는 중입니다...");
@@ -7782,26 +7961,50 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendPurchaseInput() {
-    const rows = sheets["FN구매입력"]
+    const sourceRows = sheets["FN구매입력"]
       .filter(rowHasValue)
       .map((row) => {
         const item = salesRowObject("FN구매입력", row);
         return {
-          purchase_date: item.일자,
-          io_date: item.일자,
-          upload_ser_no: item.순번,
-          cust_code: item.거래처코드,
-          cust_name: item.거래처명,
-          wh_cd: item.입고창고,
-          prod_cd: item.품목코드,
-          prod_name: item.품목명,
-          size_des: item.규격,
-          qty: item.수량,
-          price: item["단가(vat포함)"],
-          supply_amt: item.공급가액,
-          remarks: item.적요,
+          일자: item.일자,
+          순번: item.순번,
+          거래처코드: item.거래처코드,
+          거래처명: item.거래처명,
+          입고창고: item.입고창고 || "100",
+          "VAT 포함/별도": item["VAT 포함/별도"] || "포함",
+          품목코드: item.품목코드,
+          품목명: item.품목명,
+          수량: item.수량,
+          단가: item.단가,
+          세액: item.세액,
+          공급가액: item.공급가액,
+          합계금액: item.합계금액,
+          메모: item.메모,
         };
       });
+    const missingRequired = sourceRows.filter((item) => !item.일자 || !item.거래처명 || !item.입고창고 || !item.품목코드 || !item.품목명);
+    if (missingRequired.length) {
+      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처명, 입고창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      return;
+    }
+    const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
+    const rows = aggregatedRows.map((item) => ({
+      purchase_date: item.일자,
+      io_date: item.일자,
+      upload_ser_no: item.순번,
+      cust_code: item.거래처코드,
+      cust_name: item.거래처명,
+      wh_cd: item.입고창고,
+      prod_cd: item.품목코드,
+      prod_name: item.품목명,
+      qty: item.수량,
+      price: item.단가,
+      tax_amt: item.세액,
+      supply_amt: item.공급가액,
+      total_amount: item.합계금액,
+      remarks: item.메모,
+      vat_type: item["VAT 포함/별도"],
+    }));
     if (!rows.length) {
       window.alert("전송할 구매입력 행이 없습니다.");
       return;
@@ -7810,7 +8013,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("구매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${rows.length}건을 FN OS 구매 DB에 저장합니다. 계속할까요?`);
+      const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 구매 DB에 저장합니다. 계속할까요?`);
       if (!ok) return;
     }
     setMessage("FN OS 구매 DB에 저장하는 중입니다...");
