@@ -26,7 +26,12 @@ function ymd(raw: string) {
   return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
 }
 
-function reportDateFromFileName(fileName: string) {
+function isValidReportDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function reportDateFromFileName(fileName: string, fallbackDate?: string) {
+  if (fallbackDate && isValidReportDate(fallbackDate)) return fallbackDate;
   const matches = fileName.match(/20\d{6}/g);
   if (!matches?.length) return new Date().toISOString().slice(0, 10);
   if (matches.length >= 2) return ymd(matches[0]);
@@ -61,6 +66,7 @@ export async function POST(request: NextRequest) {
       const files = form.getAll("files").filter((item): item is File => item instanceof File);
       const fileChannels = form.getAll("file_channels").map(clean);
       const forceReplace = clean(form.get("force")) === "true";
+      const reportDateOverride = clean(form.get("report_date"));
       if (!files.length) {
         return NextResponse.json({ ok: false, error: "업로드할 광고 파일이 없습니다." }, { status: 400 });
       }
@@ -71,7 +77,7 @@ export async function POST(request: NextRequest) {
       for (const [index, file] of files.entries()) {
         const inferredChannel = inferAdChannel(file.name, index, files.length);
         const channel = inferredChannel || fileChannels[index] || clean(form.get("channel")) || "네이버쇼핑검색";
-        const reportDate = reportDateFromFileName(file.name);
+        const reportDate = reportDateFromFileName(file.name, reportDateOverride);
         const buffer = Buffer.from(await file.arrayBuffer());
         const fileRows = rowsFromWorkbook(buffer).map((row) => ({
           ...row,
@@ -125,7 +131,11 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ ok: false, error: "업로드할 광고 데이터가 없습니다." }, { status: 400 });
     }
-    const result = await importAdRows(rows, body.channel || "기타", body.source_file_name || body.sourceFileName, { forceReplace: body.force === true });
+    const reportDateOverride = clean(body.report_date || body.reportDate);
+    const normalizedRows = reportDateOverride && isValidReportDate(reportDateOverride)
+      ? rows.map((row) => ({ ...row, __report_date: reportDateOverride }))
+      : rows;
+    const result = await importAdRows(normalizedRows, body.channel || "기타", body.source_file_name || body.sourceFileName, { forceReplace: body.force === true });
     return NextResponse.json(result, { status: result.ok ? 200 : result.duplicate ? 409 : 400 });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

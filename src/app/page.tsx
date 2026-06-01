@@ -10926,6 +10926,7 @@ function AdsRightPanel() {
   const [rangePreset, setRangePreset] = useState<AdRangePreset | "custom">(adPresetForRange(initialFrom, initialTo));
   const [dateFrom, setDateFrom] = useState(initialFrom);
   const [dateTo, setDateTo] = useState(initialTo);
+  const [uploadReportDate, setUploadReportDate] = useState(initialFrom === initialTo ? initialFrom : defaultRange.from);
   const [replaceConfirm, setReplaceConfirm] = useState<{ message: string } | null>(null);
 
   function openAdRange(from: string, to: string) {
@@ -11015,6 +11016,7 @@ function AdsRightPanel() {
       form.append("files", item.file);
       form.append("file_channels", adSourceLabels[item.sourceKey]);
     });
+    form.append("report_date", uploadReportDate);
     if (forceReplace) form.append("force", "true");
     const res = await fetch("/api/fnos/ads/upload", { method: "POST", body: form });
     const data = await res.json();
@@ -11028,13 +11030,14 @@ function AdsRightPanel() {
     if (res.ok) {
       invalidateClientCache("/api/fnos/ads/summary");
       setUploadedAdFiles([]);
-      openAdRange(dateFrom, dateTo);
+      openAdRange(uploadReportDate, uploadReportDate);
     }
   }
 
   useEffect(() => {
     setDateFrom(initialFrom);
     setDateTo(initialTo);
+    if (initialFrom === initialTo) setUploadReportDate(initialFrom);
     setRangePreset(adPresetForRange(initialFrom, initialTo));
   }, [initialFrom, initialTo]);
 
@@ -11088,6 +11091,16 @@ function AdsRightPanel() {
           <ActionButton type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-9 w-full">
             {uploading ? "생성 중" : `데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
           </ActionButton>
+          <label className="block rounded-md border border-slate-200 bg-white px-3 py-2">
+            <span className="text-xs font-black text-slate-700">저장 기준일</span>
+            <input
+              type="date"
+              value={uploadReportDate}
+              onChange={(event) => setUploadReportDate(event.target.value)}
+              className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs font-bold text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+            />
+            <span className="mt-1 block text-[11px] font-bold text-slate-400">파일 안 날짜가 없으면 이 날짜로 광고 DB에 저장됩니다.</span>
+          </label>
           {message && <p className="rounded-md bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">{message}</p>}
           {!!uploadedAdFiles.length && (
             <div className="max-h-32 space-y-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
@@ -11107,6 +11120,7 @@ function AdsRightPanel() {
           {!!uploadedAdFiles.length && (
             <div className="rounded-md border border-orange-100 bg-orange-50/70 p-2 text-xs font-bold text-slate-600">
               <p className="font-black text-orange-700">저장 전 매칭 미리보기</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">저장 기준일 {uploadReportDate}</p>
               <div className="mt-1 grid grid-cols-2 gap-1">
                 {adSourceOrder.map((sourceKey) => {
                   const count = uploadedAdFiles.filter((item) => item.sourceKey === sourceKey).length;
