@@ -336,6 +336,8 @@ export async function mainDashboardSummary() {
     order_latest_date: iso(latestOrderDate),
     inventory_risk_count: riskItems.length,
     inventory_risk_items: riskItems.slice(0, 10),
+    inventory: inventory.slice(0, 500),
+    sales_inventory_basis: sales.slice(0, 1500),
     inquiry_channels: inquiryChannels,
     ad_label: metricTitle("광고비", latestAdDate, today, yesterday),
     ad_latest_date: iso(latestAdDate),
