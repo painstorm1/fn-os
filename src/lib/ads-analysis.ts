@@ -147,7 +147,16 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
 
   const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
-  const purchaseValue = numberValue(first(row, ["구매완료 전환매출액", "구매 전환값", "purchase_conversion_value"]));
+  const rawPurchaseValue = numberValue(first(row, [
+    "구매완료 전환매출액",
+    "구매 전환값",
+    "purchase_conversion_value",
+    "Purchase conversion value",
+    "Purchase conversion value (USD)",
+    "Website purchase conversion value",
+    "Website purchase conversion value (USD)",
+  ]));
+  const purchaseValue = isMeta && rawPurchaseValue ? Math.round(rawPurchaseValue * usdKrwRate) : rawPurchaseValue;
   const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
   const coupangSales = numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]));
 
@@ -158,7 +167,10 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
     ? coupangSales
     : purchaseValue;
   const ctr = percentValue(first(row, ["ctr", "CTR", "클릭률(%)", "CTR(링크 클릭률)", "아웃바운드 CTR(클릭률)", "클릭률"])) || pct(clicks, impressions);
-  const cpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"])) || (clicks > 0 ? cost / clicks : 0);
+  const sourceCpc = numberValue(first(row, ["cpc", "CPC", "평균 CPC"]));
+  const cpc = isMeta
+    ? (clicks > 0 ? cost / clicks : sourceCpc ? Math.round(sourceCpc * usdKrwRate) : 0)
+    : sourceCpc || (clicks > 0 ? cost / clicks : 0);
   const cvr = pct(conversions, clicks);
   const roas = percentValue(first(row, [
     "구매완료 광고수익률(%)",
