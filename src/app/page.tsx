@@ -6990,15 +6990,81 @@ function SalesQuickLookupContent() {
   );
 }
 
+type SalesPurchaseMode = "sales" | "purchases";
+type SalesPurchaseVatMode = "included" | "excluded";
+type SalesPurchaseEntryLine = {
+  id: string;
+  prod_cd: string;
+  prod_name: string;
+  qty: string;
+  price: string;
+  memo: string;
+};
+
+function entryDateToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function entryDateDaysAgo(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeEntryDate(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{8}$/.test(text)) return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+  return text.slice(0, 10);
+}
+
+function entryRowDate(row: Record<string, unknown>) {
+  return normalizeEntryDate(row.io_date || row.sale_date || row.purchase_date || row.created_at);
+}
+
+function entryRowCustomer(row: Record<string, unknown>, mode: SalesPurchaseMode) {
+  return String(row.cust_name || row.customer_name || row.supplier_name || row.cust_code || (mode === "sales" ? "거래처" : "구매처") || "-");
+}
+
+function entryRowProduct(row: Record<string, unknown>) {
+  return String(row.prod_name || row.product_name || row.prod_cd || row.sku || "-");
+}
+
+function entryRowWarehouse(row: Record<string, unknown>) {
+  return String(row.wh_cd || row.warehouse_code || row.warehouse_name || "100");
+}
+
+function entryRowAmount(row: Record<string, unknown>) {
+  return Number(row.total_amount || row.supply_amount || row.supply_amt || 0);
+}
+
+function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode, filters: Record<string, string>) {
+  const from = filters.from || "";
+  const to = filters.to || "";
+  const customerNeedle = filters.customer.trim().toLowerCase();
+  const warehouseNeedle = filters.warehouse.trim().toLowerCase();
+  const productNeedle = filters.product.trim().toLowerCase();
+  return rows.filter((row) => {
+    const date = entryRowDate(row);
+    if (from && date && date < from) return false;
+    if (to && date && date > to) return false;
+    if (customerNeedle && !entryRowCustomer(row, mode).toLowerCase().includes(customerNeedle)) return false;
+    if (warehouseNeedle && !entryRowWarehouse(row).toLowerCase().includes(warehouseNeedle)) return false;
+    if (productNeedle && !entryRowProduct(row).toLowerCase().includes(productNeedle)) return false;
+    return true;
+  });
+}
+
 function SalesInventoryWorkspace({ section }: { section: string }) {
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"sales" | "purchases">("sales");
-  const [entryModalMode, setEntryModalMode] = useState<"sales" | "purchases" | null>(null);
+  const [historyMode, setHistoryMode] = useState<SalesPurchaseMode>("sales");
+  const [entryModalMode, setEntryModalMode] = useState<SalesPurchaseMode | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
+  const [historyFilters, setHistoryFilters] = useState({ customer: "", warehouse: "", product: "", from: entryDateDaysAgo(30), to: entryDateToday() });
   const [activeSheet, setActiveSheet] = useState<SalesSheetName>("발주 진행 단계");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -7074,11 +7140,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const isInventorySection = section === "inventory";
   const isMasterSection = section === "master";
   const sectionTitle = isOnlineSection ? "온라인 발주" : isHistorySection ? "판매/구매" : isInventorySection ? "재고현황" : "기초관리";
-  const sectionDescription = isOnlineSection
-    ? "주문수집부터 송장/출고까지 한 화면에서 처리합니다."
-    : isHistorySection
-      ? "판매내역, 구매내역, 기간별 현황을 FN OS DB 기준으로 관리합니다."
-      : isInventorySection
+  const sectionDescription = isOnlineSection || isHistorySection
+    ? undefined
+    : isInventorySection
         ? "현재고와 수동 재고 조정을 확인합니다."
         : "거래처, 품목, 창고, 쇼핑몰, 인사 기준정보를 관리합니다.";
 
@@ -8012,6 +8076,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   });
 
+  const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
+  const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -8041,7 +8108,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {isOnlineSection && (
         <Panel
           title="온라인 발주"
-          subtitle="쇼핑몰 API 주문수집부터 송장번호 매칭, 판매/구매입력 저장, FN_택배시트 반영까지 한 화면에서 처리합니다."
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
@@ -8203,7 +8269,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {isHistorySection && (
         <Panel
           title="판매/구매"
-          subtitle={historyMode === "sales" ? "최근 입력한 판매내역을 기본으로 보여줍니다." : "최근 입력한 구매내역을 기본으로 보여줍니다."}
           action={
             <button
               type="button"
@@ -8217,8 +8282,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
               {[
-                ["sales", "판매"],
-                ["purchases", "구매"],
+                ["sales", "판매 관리"],
+                ["purchases", "구매 관리"],
               ].map(([mode, label]) => (
                 <button
                   key={mode}
@@ -8232,18 +8297,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
             <div className="text-xs font-black text-slate-500">단축키 F2</div>
           </div>
-          <div className="mb-3 grid gap-2 md:grid-cols-4">
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" placeholder={historyMode === "sales" ? "품목명 / 거래처명 검색" : "품목명 / 공급처명 검색"} />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" />
-            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
-              <option>전체 상태</option>
-              <option>SAVED</option>
-              <option>FAIL</option>
-            </select>
+          <div className="mb-3 grid gap-2 xl:grid-cols-[1fr_1fr_1fr_150px_150px_auto]">
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.warehouse} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} placeholder="전체 창고" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.product} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, product: event.target.value }))} placeholder="전체 품목" />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={historyFilters.from} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, from: event.target.value }))} />
+            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={historyFilters.to} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, to: event.target.value }))} />
+            <div className="flex flex-wrap gap-1">
+              {[
+                ["오늘", 0],
+                ["어제", 1],
+                ["최근7일", 7],
+                ["최근30일", 30],
+              ].map(([label, days]) => (
+                <button key={String(label)} type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => {
+                  const dayCount = Number(days);
+                  const target = entryDateDaysAgo(dayCount);
+                  setHistoryFilters((prev) => ({ ...prev, from: dayCount === 1 ? target : entryDateDaysAgo(dayCount), to: dayCount === 1 ? target : entryDateToday() }));
+                }}>{label}</button>
+              ))}
+              <button type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => {
+                const now = new Date();
+                setHistoryFilters((prev) => ({ ...prev, from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, to: entryDateToday() }));
+              }}>이번달</button>
+            </div>
           </div>
-          {historyMode === "sales" && <SalesSummaryGroups summary={summary} />}
-          <SalesInventoryTable rows={historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []} />
+          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} />
         </Panel>
       )}
 
@@ -8285,7 +8364,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {isHistorySection && (
+      {false && isHistorySection && (
         <Panel title="기간별 판매/구매 현황" subtitle="FN OS DB 기준 거래처별, 품목별, 기간별 금액을 집계합니다.">
           <div className="grid gap-4 lg:grid-cols-2">
             <SummaryGroupCard title="거래처별 판매" rows={summary?.sales_by_customer || []} />
@@ -8339,16 +8418,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {entryModalMode && (
         <SalesPurchaseEntryModal
           mode={entryModalMode}
-          draft={entryDraft}
-          rows={entryRows}
-          editingIndex={editingEntryIndex}
           onClose={() => setEntryModalMode(null)}
-          onDraftChange={updateEntryDraft}
-          onAddOrUpdate={addOrUpdateEntryRow}
-          onEdit={editEntryRow}
-          onDelete={deleteEntryRow}
-          onNew={() => setEntryDraft(makeEntryDraft(entryModalMode, entryRows.length + 1))}
-          onSave={() => void saveEntryRows()}
+          onSaved={() => {
+            setEntryModalMode(null);
+            loadSummary(true);
+          }}
         />
       )}
     </div>
@@ -8391,91 +8465,368 @@ function OrderCheckTable({ orders, items }: { orders: Array<Record<string, unkno
 
 function SalesPurchaseEntryModal({
   mode,
-  draft,
-  rows,
-  editingIndex,
   onClose,
-  onDraftChange,
-  onAddOrUpdate,
-  onEdit,
-  onDelete,
-  onNew,
-  onSave,
+  onSaved,
 }: {
-  mode: "sales" | "purchases";
-  draft: Record<string, string>;
-  rows: Array<Record<string, string>>;
-  editingIndex: number | null;
+  mode: SalesPurchaseMode;
   onClose: () => void;
-  onDraftChange: (key: string, value: string) => void;
-  onAddOrUpdate: () => void;
-  onEdit: (index: number) => void;
-  onDelete: (index: number) => void;
-  onNew: () => void;
-  onSave: () => void;
+  onSaved: () => void;
 }) {
-  const partnerLabel = mode === "sales" ? "거래처" : "공급처";
+  const partnerLabel = mode === "sales" ? "거래처" : "구매처";
+  const defaultLine = (): SalesPurchaseEntryLine => ({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, prod_cd: "", prod_name: "", qty: "1", price: "", memo: "" });
+  const [entryDate, setEntryDate] = useState(entryDateToday());
+  const [customerText, setCustomerText] = useState("");
+  const [customerCode, setCustomerCode] = useState("");
+  const [warehouseText, setWarehouseText] = useState("100");
+  const [warehouseCode, setWarehouseCode] = useState("100");
+  const [vatMode, setVatMode] = useState<SalesPurchaseVatMode>("included");
+  const [lines, setLines] = useState<SalesPurchaseEntryLine[]>([defaultLine()]);
+  const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
+  const [customers, setCustomers] = useState<FnCustomer[]>([]);
+  const [warehouses, setWarehouses] = useState<FnWarehouse[]>([]);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerIndex, setCustomerIndex] = useState(0);
+  const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
+  const [warehouseIndex, setWarehouseIndex] = useState(0);
+  const [productSearch, setProductSearch] = useState<{ open: boolean; lineIndex: number; query: string; results: FnProduct[]; selectedIndex: number; loading: boolean; error: string }>({ open: false, lineIndex: 0, query: "", results: [], selectedIndex: 0, loading: false, error: "" });
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const formRef = useRef<HTMLDivElement | null>(null);
   useEscapeToClose(true, onClose);
+
+  useEffect(() => {
+    cachedClientJson<{ customers?: FnCustomer[] }>("/api/fnos/customers?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 })
+      .then((data) => setCustomers(data.customers || []))
+      .catch(() => setCustomers([]));
+    cachedClientJson<{ warehouses?: FnWarehouse[] }>("/api/fnos/warehouses?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 })
+      .then((data) => setWarehouses(data.warehouses || []))
+      .catch(() => setWarehouses([]));
+  }, []);
+
+  const filteredCustomers = customers.filter((customer) => {
+    const needle = customerText.trim().toLowerCase();
+    if (!needle) return true;
+    return [customer.customer_code, customer.cust_code, customer.customer_name, customer.cust_name].some((value) => String(value || "").toLowerCase().includes(needle));
+  }).slice(0, 12);
+  const filteredWarehouses = warehouses.filter((warehouse) => {
+    const needle = warehouseText.trim().toLowerCase();
+    if (!needle) return true;
+    return [warehouse.warehouse_code, warehouse.warehouse_name].some((value) => String(value || "").toLowerCase().includes(needle));
+  }).slice(0, 12);
+
+  function moveToNextField(target: HTMLElement) {
+    const fields = Array.from(formRef.current?.querySelectorAll<HTMLElement>("input, select, textarea, button[data-entry-focus='true']") || [])
+      .filter((item) => !item.hasAttribute("disabled") && item.tabIndex !== -1);
+    const index = fields.indexOf(target);
+    fields[index + 1]?.focus();
+  }
+
+  function handleRequiredEnter(event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>, ready = true) {
+    if (event.key !== "Enter" || !ready) return;
+    event.preventDefault();
+    moveToNextField(event.currentTarget);
+  }
+
+  function updateLine(index: number, key: keyof SalesPurchaseEntryLine, value: string) {
+    setLines((prev) => prev.map((line, rowIndex) => rowIndex === index ? { ...line, [key]: value } : line));
+  }
+
+  function lineUnit(line: SalesPurchaseEntryLine) {
+    return Number(String(line.price || 0).replace(/[^\d.-]/g, ""));
+  }
+
+  function lineQty(line: SalesPurchaseEntryLine) {
+    return Number(String(line.qty || 0).replace(/[^\d.-]/g, ""));
+  }
+
+  function lineTax(line: SalesPurchaseEntryLine) {
+    return vatMode === "excluded" ? lineUnit(line) * 0.1 : 0;
+  }
+
+  function lineSupply(line: SalesPurchaseEntryLine) {
+    const qty = lineQty(line);
+    const unit = lineUnit(line);
+    if (!Number.isFinite(qty) || !Number.isFinite(unit)) return 0;
+    return vatMode === "excluded" ? qty * (unit + unit * 0.1) : qty * unit;
+  }
+
+  function toggleLine(lineId: string) {
+    setSelectedLineIds((prev) => prev.includes(lineId) ? prev.filter((id) => id !== lineId) : [...prev, lineId]);
+  }
+
+  function deleteSelectedLines() {
+    if (!selectedLineIds.length) {
+      window.alert("선택된 물품이 없습니다.");
+      return;
+    }
+    setLines((prev) => {
+      const next = prev.filter((line) => !selectedLineIds.includes(line.id));
+      return next.length ? next : [defaultLine()];
+    });
+    setSelectedLineIds([]);
+  }
+
+  function appendLine() {
+    setLines((prev) => [...prev, defaultLine()]);
+    window.setTimeout(() => {
+      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-code-input='true']");
+      inputs?.[inputs.length - 1]?.focus();
+    }, 0);
+  }
+
+  function selectCustomer(customer: FnCustomer) {
+    const code = String(customer.customer_code || customer.cust_code || "");
+    const name = String(customer.customer_name || customer.cust_name || code);
+    setCustomerCode(code);
+    setCustomerText(name);
+    setCustomerPickerOpen(false);
+  }
+
+  function selectWarehouse(warehouse: FnWarehouse) {
+    const code = String(warehouse.warehouse_code || "");
+    setWarehouseCode(code || "100");
+    setWarehouseText(code || warehouse.warehouse_name || "100");
+    setWarehousePickerOpen(false);
+  }
+
+  async function openProductSearch(lineIndex: number, query: string) {
+    const keyword = query.trim();
+    setProductSearch({ open: true, lineIndex, query: keyword, results: [], selectedIndex: 0, loading: Boolean(keyword), error: "" });
+    if (!keyword) return;
+    try {
+      const res = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: keyword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const rawProducts = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+      const parsePrice = (value: unknown) => Number(String(value || "").replace(/[^\d.-]/g, ""));
+      const products = rawProducts.map((item: Record<string, unknown>) => ({
+        id: String(item.id || item.code || item.product_code || item.sku || ""),
+        product_code: String(item.code || item.product_code || item.sku || ""),
+        sku: String(item.code || item.product_code || item.sku || ""),
+        product_name: String(item.name || item.product_name || ""),
+        standard_price: parsePrice(item.outPrice || item.standard_price || item.price),
+        cost_price: parsePrice(item.inPrice || item.cost_price || item.price),
+      })) as FnProduct[];
+      setProductSearch((prev) => ({ ...prev, loading: false, results: products, error: products.length ? "" : "검색 결과가 없습니다." }));
+    } catch (error) {
+      setProductSearch((prev) => ({ ...prev, loading: false, error: error instanceof Error ? error.message : "품목 검색 실패" }));
+    }
+  }
+
+  function chooseProduct(product: FnProduct) {
+    const price = mode === "sales" ? Number(product.standard_price || fnProductPrice(product)) : Number(product.cost_price || fnProductPrice(product));
+    const normalizedPrice = vatMode === "excluded" ? Math.round(price / 1.1) : price;
+    setLines((prev) => {
+      const next = prev.map((line, index) => index === productSearch.lineIndex ? {
+        ...line,
+        prod_cd: fnProductSku(product),
+        prod_name: fnProductName(product),
+        price: normalizedPrice ? String(normalizedPrice) : line.price,
+      } : line);
+      const isLast = productSearch.lineIndex === next.length - 1;
+      return isLast ? [...next, defaultLine()] : next;
+    });
+    const nextIndex = productSearch.lineIndex + 1;
+    setProductSearch((prev) => ({ ...prev, open: false }));
+    window.setTimeout(() => {
+      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-code-input='true']");
+      inputs?.[nextIndex]?.focus();
+    }, 0);
+  }
+
+  async function saveRows() {
+    setLocalError("");
+    const validLines = lines.filter((line) => line.prod_cd.trim());
+    if (!entryDate || !customerText.trim() || !warehouseCode.trim() || !validLines.length) {
+      setLocalError("날짜, 거래처, 창고, 품목코드 1개 이상은 필수입니다.");
+      return;
+    }
+    const rows = validLines.map((line, index) => ({
+      io_date: entryDate,
+      sale_date: mode === "sales" ? entryDate : "",
+      purchase_date: mode === "purchases" ? entryDate : "",
+      upload_ser_no: String(index + 1),
+      cust_code: customerCode,
+      cust_name: customerText,
+      wh_cd: warehouseCode,
+      prod_cd: line.prod_cd,
+      prod_name: line.prod_name,
+      qty: line.qty || "1",
+      price: String(Math.round(lineUnit(line))),
+      tax_amt: String(Math.round(lineTax(line) * lineQty(line))),
+      supply_amt: String(Math.round(lineSupply(line))),
+      remarks: line.memo,
+      vat_type: vatMode === "included" ? "VAT포함" : "VAT별도",
+    }));
+    setSaving(true);
+    try {
+      const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows, source_file_name: mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setLocalError(data.error || "저장 실패");
+        return;
+      }
+      invalidateClientCache("/api/dashboard/summary");
+      onSaved();
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "저장 실패");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <FormModal
       title={mode === "sales" ? "판매입력" : "구매입력"}
-      description="행 추가 후 수정/삭제하고 저장하면 FN OS DB에 반영됩니다."
       onClose={onClose}
       size="full"
       footer={
-        <>
-          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
-          <ActionButton type="button" variant="secondary" onClick={onNew}>새 입력</ActionButton>
-          <ActionButton type="button" onClick={onSave}>저장</ActionButton>
-        </>
+        <div className="flex w-full justify-between gap-2">
+          <ActionButton type="button" variant="secondary" onClick={deleteSelectedLines}>물품 삭제</ActionButton>
+          <div className="flex gap-2">
+            <ActionButton type="button" variant="secondary" onClick={onClose}>취소</ActionButton>
+            <ActionButton type="button" variant="danger" onClick={deleteSelectedLines}>삭제</ActionButton>
+            <ActionButton type="button" onClick={() => void saveRows()} disabled={saving}>{saving ? "저장 중" : "저장"}</ActionButton>
+          </div>
+        </div>
       }
     >
-      <div className="space-y-4">
-
-        <div className="grid gap-4 md:grid-cols-4">
-          <FormField label="일자"><input className={modalInputClass} type="date" value={draft.io_date || ""} onChange={(event) => onDraftChange("io_date", event.target.value)} /></FormField>
-          <FormField label={partnerLabel}><input className={modalInputClass} value={draft.cust_name || ""} onChange={(event) => onDraftChange("cust_name", event.target.value)} /></FormField>
-          <FormField label="창고"><input className={modalInputClass} value={draft.wh_cd || ""} onChange={(event) => onDraftChange("wh_cd", event.target.value)} /></FormField>
-          <FormField label="순번"><input className={modalInputClass} value={draft.upload_ser_no || ""} onChange={(event) => onDraftChange("upload_ser_no", event.target.value)} /></FormField>
-          <FormField label="품목코드"><input className={modalInputClass} value={draft.prod_cd || ""} onChange={(event) => onDraftChange("prod_cd", event.target.value)} /></FormField>
-          <FormField label="품목명"><input className={modalInputClass} value={draft.prod_name || ""} onChange={(event) => onDraftChange("prod_name", event.target.value)} /></FormField>
-          <FormField label="수량"><input className={modalInputClass} type="number" value={draft.qty || ""} onChange={(event) => onDraftChange("qty", event.target.value)} /></FormField>
-          <FormField label="단가"><input className={modalInputClass} type="number" value={draft.price || ""} onChange={(event) => onDraftChange("price", event.target.value)} /></FormField>
-          <FormField label="공급가액"><input className={modalInputClass} type="number" value={draft.supply_amt || ""} onChange={(event) => onDraftChange("supply_amt", event.target.value)} /></FormField>
-          <FormField label="메모" className="md:col-span-3"><input className={modalInputClass} value={draft.remarks || ""} onChange={(event) => onDraftChange("remarks", event.target.value)} /></FormField>
+      <div ref={formRef} className="space-y-4">
+        <div className="grid max-w-[500px] gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <FormField label="날짜" required><input className={modalInputClass} type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} onKeyDown={(event) => handleRequiredEnter(event, Boolean(entryDate))} /></FormField>
+          <FormField label={partnerLabel} required>
+            <div className="relative">
+              <input className={modalInputClass} value={customerText} onFocus={() => setCustomerPickerOpen(true)} onChange={(event) => { setCustomerText(event.target.value); setCustomerPickerOpen(true); setCustomerIndex(0); }} onKeyDown={(event) => {
+                if (event.key === "ArrowDown") { event.preventDefault(); setCustomerIndex((value) => Math.min(filteredCustomers.length - 1, value + 1)); return; }
+                if (event.key === "ArrowUp") { event.preventDefault(); setCustomerIndex((value) => Math.max(0, value - 1)); return; }
+                if (event.key === "Enter" && customerPickerOpen && filteredCustomers[customerIndex]) { event.preventDefault(); selectCustomer(filteredCustomers[customerIndex]); moveToNextField(event.currentTarget); return; }
+                handleRequiredEnter(event, Boolean(customerText.trim()));
+              }} placeholder={`${partnerLabel} 입력`} />
+              {customerPickerOpen && filteredCustomers.length > 0 && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {filteredCustomers.map((customer, index) => (
+                    <button key={customer.id || customer.customer_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === customerIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectCustomer(customer); }}>
+                      <b>{customer.customer_name || customer.cust_name || "-"}</b>
+                      <span className="ml-2 text-xs text-gray-500">{customer.customer_code || customer.cust_code || ""}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </FormField>
+          <FormField label="창고" required>
+            <div className="relative">
+              <input className={modalInputClass} value={warehouseText} onFocus={() => setWarehousePickerOpen(true)} onChange={(event) => { setWarehouseText(event.target.value); setWarehousePickerOpen(true); setWarehouseIndex(0); }} onKeyDown={(event) => {
+                if (event.key === "ArrowDown") { event.preventDefault(); setWarehouseIndex((value) => Math.min(filteredWarehouses.length - 1, value + 1)); return; }
+                if (event.key === "ArrowUp") { event.preventDefault(); setWarehouseIndex((value) => Math.max(0, value - 1)); return; }
+                if (event.key === "Enter" && warehousePickerOpen && filteredWarehouses[warehouseIndex]) { event.preventDefault(); selectWarehouse(filteredWarehouses[warehouseIndex]); moveToNextField(event.currentTarget); return; }
+                handleRequiredEnter(event, Boolean(warehouseText.trim()));
+              }} placeholder="100" />
+              {warehousePickerOpen && filteredWarehouses.length > 0 && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {filteredWarehouses.map((warehouse, index) => (
+                    <button key={warehouse.id || warehouse.warehouse_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === warehouseIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectWarehouse(warehouse); }}>
+                      <b>{warehouse.warehouse_code}</b>
+                      <span className="ml-2 text-xs text-gray-500">{warehouse.warehouse_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </FormField>
+          <FormField label="VAT 포함/별도" required>
+            <select className={modalSelectClass} value={vatMode} onChange={(event) => setVatMode(event.target.value as SalesPurchaseVatMode)} onKeyDown={(event) => handleRequiredEnter(event)}>
+              <option value="included">포함</option>
+              <option value="excluded">별도</option>
+            </select>
+          </FormField>
         </div>
 
-        <div className="flex flex-wrap justify-start gap-2">
-          <ActionButton type="button" variant="secondary" onClick={onAddOrUpdate}>
-            {editingIndex === null ? "행 추가" : "수정 반영"}
-          </ActionButton>
-        </div>
+        {localError && <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{localError}</div>}
 
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full min-w-[860px] text-sm">
+          <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 text-sm font-black text-gray-700">품목(VAT{vatMode === "included" ? "포함" : "별도"})</div>
+          <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-              <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">{partnerLabel}</th><th className="px-3 py-2 text-left">품목</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2 text-right">공급가액</th><th className="px-3 py-2 text-center">관리</th></tr>
+              <tr>
+                <th className="w-14 px-2 py-2 text-center">선택</th>
+                <th className="w-36 px-2 py-2 text-left">품목코드</th>
+                <th className="px-2 py-2 text-left">품목명</th>
+                <th className="w-24 px-2 py-2 text-right">수량</th>
+                <th className="w-28 px-2 py-2 text-right">단가</th>
+                {vatMode === "excluded" && <th className="w-28 px-2 py-2 text-right">세액</th>}
+                <th className="w-32 px-2 py-2 text-right">공급가액</th>
+                <th className="w-48 px-2 py-2 text-left">메모</th>
+              </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr key={`${row.upload_ser_no}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/40">
-                  <td className="px-3 py-2 font-bold">{row.io_date || "-"}</td>
-                  <td className="px-3 py-2">{row.cust_name || "-"}</td>
-                  <td className="px-3 py-2 font-bold">{row.prod_name || row.prod_cd || "-"}</td>
-                  <td className="px-3 py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
-                  <td className="px-3 py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
-                  <td className="px-3 py-2 text-center">
-                    <ActionButton type="button" variant="secondary" className="mr-2 h-8 px-3 text-xs" onClick={() => onEdit(index)}>수정</ActionButton>
-                    <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50" onClick={() => onDelete(index)}>삭제</ActionButton>
+              {lines.map((line, index) => {
+                const selected = selectedLineIds.includes(line.id);
+                return (
+                <tr key={line.id} className={`border-t border-gray-100 ${selected ? "bg-blue-50" : ""}`}>
+                  <td className="px-2 py-2 text-center">
+                    <button type="button" className={`inline-flex h-6 min-w-6 items-center justify-center rounded border px-1 text-xs font-black ${selected ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white text-gray-400"}`} onClick={() => toggleLine(line.id)}>{index + 1}</button>
                   </td>
+                  <td className="px-2 py-2">
+                    <input data-product-code-input="true" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_cd} onChange={(event) => updateLine(index, "prod_cd", event.target.value)} onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void openProductSearch(index, line.prod_cd || line.prod_name);
+                      }
+                    }} />
+                  </td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_name} onChange={(event) => updateLine(index, "prod_name", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  {vatMode === "excluded" && <td className="px-2 py-2 text-right font-bold text-gray-600">{Math.round(lineTax(line) * lineQty(line)).toLocaleString("ko-KR")}</td>}
+                  <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); appendLine(); } }} /></td>
                 </tr>
-              ))}
-              {!rows.length && (
-                <tr><td colSpan={6} className="px-3 py-8 text-center text-sm font-bold text-slate-400">추가된 행이 없으면 현재 입력값 1건을 바로 저장합니다.</td></tr>
-              )}
+              );})}
             </tbody>
           </table>
         </div>
+        <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>
+
+        {productSearch.open && (
+          <SelectionModal title="품목검색" onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))} size="lg" footer={<ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>}>
+            <div onKeyDown={(event) => {
+              if (event.key === "ArrowDown") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(prev.results.length - 1, prev.selectedIndex + 1) })); }
+              if (event.key === "ArrowUp") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) })); }
+              if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) { event.preventDefault(); chooseProduct(productSearch.results[productSearch.selectedIndex]); }
+            }}>
+              <div className="mb-3 flex gap-2">
+                <input autoFocus className={modalInputClass} value={productSearch.query} onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void openProductSearch(productSearch.lineIndex, productSearch.query); } }} />
+                <ActionButton type="button" onClick={() => void openProductSearch(productSearch.lineIndex, productSearch.query)}>Search(F3)</ActionButton>
+              </div>
+              {productSearch.error && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{productSearch.error}</div>}
+              <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="w-14 py-2">선택</th><th className="py-2 text-left">품목코드</th><th className="py-2 text-left">품목명</th></tr></thead>
+                  <tbody>
+                    {productSearch.results.map((product, index) => (
+                      <tr key={`${fnProductSku(product)}-${index}`} className={`cursor-pointer border-t border-gray-100 ${index === productSearch.selectedIndex ? "bg-blue-50" : "hover:bg-orange-50"}`} onMouseDown={() => chooseProduct(product)}>
+                        <td className="py-2 text-center"><span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${index === productSearch.selectedIndex ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span></td>
+                        <td className="py-2 font-black text-blue-700">{fnProductSku(product)}</td>
+                        <td className="py-2">{fnProductName(product)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </SelectionModal>
+        )}
       </div>
     </FormModal>
   );
@@ -11737,35 +12088,31 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
   );
 }
 
-function SalesInventoryTable({ rows }: { rows: Array<Record<string, unknown>> }) {
+function SalesInventoryTable({ rows, mode }: { rows: Array<Record<string, unknown>>; mode: SalesPurchaseMode }) {
   if (!rows.length) {
     return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[900px] text-sm">
-        <thead className="border-b border-slate-200 text-xs text-slate-500">
+    <div className="fn-table-shell overflow-x-auto">
+      <table className="w-full min-w-[860px] table-fixed text-sm">
+        <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
           <tr>
-            <th className="py-2 text-left">일자</th>
-            <th className="py-2 text-left">거래처</th>
-            <th className="py-2 text-left">품목코드</th>
+            <th className="w-32 py-2 pl-4 text-left">일자-NO.</th>
+            <th className="w-44 py-2 text-left">{mode === "sales" ? "거래처명" : "구매처명"}</th>
             <th className="py-2 text-left">품목명</th>
-            <th className="py-2 text-right">수량</th>
-            <th className="py-2 text-right">단가</th>
-            <th className="py-2 text-right">공급가액</th>
-            <th className="py-2 text-center">상태</th>
+            <th className="w-36 py-2 text-right">금액합계</th>
+            <th className="w-28 py-2 text-left">창고</th>
+            <th className="w-24 py-2 text-center">상태</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={String(row.id || index)} className="border-b border-slate-100">
-              <td className="py-2 font-bold">{String(row.io_date || "-")}</td>
-              <td className="py-2">{String(row.cust_name || row.cust_code || "-")}</td>
-              <td className="py-2">{String(row.prod_cd || "-")}</td>
-              <td className="py-2 font-bold">{String(row.prod_name || "-")}</td>
-              <td className="py-2 text-right">{Number(row.qty || 0).toLocaleString("ko-KR")}</td>
-              <td className="py-2 text-right">{Number(row.price || 0).toLocaleString("ko-KR")}</td>
-              <td className="py-2 text-right font-black">{krw(Number(row.supply_amt || 0))}</td>
+            <tr key={String(row.id || index)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/50">
+              <td className="truncate py-2 pl-4 font-bold text-blue-700">{entryRowDate(row) || "-"} - {String(row.upload_ser_no || row.no || index + 1)}</td>
+              <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
+              <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
+              <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
+              <td className="truncate py-2">{entryRowWarehouse(row)}</td>
               <td className="py-2 text-center"><StatusPill status={String(row.sync_status || "SAVED")} /></td>
             </tr>
           ))}
