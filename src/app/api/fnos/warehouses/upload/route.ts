@@ -34,6 +34,27 @@ function first(row: RowObject, keys: string[]) {
   return null;
 }
 
+function warehouseType(value: unknown) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["fulfillment", "풀필먼트", "3pl", "쿠팡", "네이버", "n배송", "rocket"].includes(normalized)) return "fulfillment";
+  return "general";
+}
+
+function memoText(row: RowObject) {
+  const memo = first(row, ["비고", "메모", "적요", "REMARKS"]);
+  const address = first(row, ["창고주소", "창고 주소", "주소", "warehouse_address"]);
+  const phone = first(row, ["창고연락처", "창고 연락처", "연락처", "warehouse_phone"]);
+  const managerName = first(row, ["담당자이름", "담당자 이름", "담당자", "manager_name"]);
+  const managerPhone = first(row, ["담당자연락처", "담당자 연락처", "manager_phone"]);
+  return [
+    memo,
+    address ? `창고 주소: ${address}` : "",
+    phone ? `창고 연락처: ${phone}` : "",
+    managerName ? `담당자 이름: ${managerName}` : "",
+    managerPhone ? `담당자 연락처: ${managerPhone}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -67,11 +88,11 @@ export async function POST(request: NextRequest) {
           wh_cd: code,
           warehouse_name: name,
           wh_name: name,
-          warehouse_type: first(row, ["구분", "창고구분", "warehouse_type"]),
-          wh_type: first(row, ["구분", "창고구분", "warehouse_type"]),
+          warehouse_type: warehouseType(first(row, ["속성", "구분", "창고구분", "warehouse_type"])),
+          wh_type: warehouseType(first(row, ["속성", "구분", "창고구분", "warehouse_type"])),
           process_name: first(row, ["생산공정명", "생산공정"]),
           outsource_cust_name: first(row, ["외주거래처명", "외주거래처"]),
-          memo: first(row, ["비고", "메모", "적요", "REMARKS"]),
+          memo: memoText(row),
           is_active: boolActive(first(row, ["사용구분", "사용", "상태"])),
           last_synced_at: new Date().toISOString(),
         };

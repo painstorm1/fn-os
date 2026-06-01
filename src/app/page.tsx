@@ -933,6 +933,14 @@ type WarehouseOption = {
   warehouse_name: string;
 };
 
+type FnWarehouse = WarehouseOption & {
+  warehouse_type?: string;
+  warehouse_type_label?: string;
+  memo?: string;
+  stock_product_count?: number;
+  is_active?: boolean;
+};
+
 type ProductBomRow = {
   id?: string;
   bom_id?: string;
@@ -1056,6 +1064,12 @@ function normalizeCustomerAttribute(value: unknown, fallback: CustomerAttribute 
 
 function customerAttributeLabel(value: unknown) {
   return normalizeCustomerAttribute(value) === "shopping" ? "쇼핑몰" : "일반";
+}
+
+function normalizeWarehouseAttribute(value: unknown) {
+  const textValue = String(value || "").trim().toLowerCase();
+  if (["fulfillment", "풀필먼트", "3pl", "쿠팡", "네이버", "n배송", "rocket"].includes(textValue)) return "fulfillment";
+  return "general";
 }
 
 function formatBusinessNoInput(value: string) {
@@ -8118,7 +8132,7 @@ function MasterManagementPanel({
         </div>
       </div>
 
-      {activeMasterTab !== "products" && activeMasterTab !== "customers" && (
+      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && (
         <MasterEntryPanel
           config={activeConfig}
           setMessage={setMessage}
@@ -8134,15 +8148,7 @@ function MasterManagementPanel({
         <ProductManagementPanel message={message} setMessage={setMessage} />
       )}
 
-      {activeMasterTab === "warehouses" && (
-        <Panel
-          title="창고 목록"
-          subtitle="창고는 RG/SET 같은 재고상태 또는 창고 유형 기준으로 관리합니다."
-        >
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">창고 목록 테이블은 다음 단계에서 창고 조회 API와 연결합니다.</div>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
-      )}
+      {activeMasterTab === "warehouses" && <WarehouseManagementPanel message={message} setMessage={setMessage} />}
 
       {activeMasterTab === "channels" && (
         <Panel
@@ -8640,7 +8646,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               type="button"
               variant="ghost"
               onClick={downloadCustomerTemplate}
-              className="w-10 border-0 bg-transparent px-0 text-emerald-600 shadow-none hover:bg-orange-50"
+              className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -9273,7 +9279,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               type="button"
               variant="ghost"
               onClick={downloadProductTemplate}
-              className="w-10 border-0 bg-transparent px-0 text-emerald-600 shadow-none hover:bg-orange-50"
+              className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
@@ -9446,6 +9452,369 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           onSave={() => void saveProductDraft()}
           onDelete={() => void deleteProductDraft()}
         />
+      )}
+    </div>
+  );
+}
+
+function WarehouseManagementPanel({ message, setMessage }: { message: string; setMessage: (value: string) => void }) {
+  const [warehouses, setWarehouses] = useState<FnWarehouse[]>([]);
+  const [query, setQuery] = useState("");
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function blankWarehouseDraft() {
+    return {
+      id: "",
+      warehouse_type: "general",
+      warehouse_code: "",
+      warehouse_name: "",
+      warehouse_address: "",
+      warehouse_phone: "",
+      manager_name: "",
+      manager_phone: "",
+      manager_memo: "",
+      memo: "",
+    };
+  }
+
+  function parseWarehouseMemo(memo?: string) {
+    const next = blankWarehouseDraft();
+    String(memo || "").split(/\r?\n/).forEach((line) => {
+      const [rawKey, ...rest] = line.split(":");
+      const key = rawKey.trim();
+      const value = rest.join(":").trim();
+      if (!key || !value) return;
+      if (key === "창고 주소") next.warehouse_address = value;
+      else if (key === "창고 연락처") next.warehouse_phone = value;
+      else if (key === "담당자 이름") next.manager_name = value;
+      else if (key === "담당자 연락처") next.manager_phone = value;
+      else if (key === "담당자 메모") next.manager_memo = value;
+    });
+    const plainMemo = String(memo || "")
+      .split(/\r?\n/)
+      .filter((line) => !/^(창고 주소|창고 연락처|담당자 이름|담당자 연락처|담당자 메모)\s*:/.test(line.trim()))
+      .join("\n")
+      .trim();
+    next.memo = plainMemo;
+    return next;
+  }
+
+  function composeWarehouseMemo(source: Record<string, string>) {
+    return [
+      source.memo,
+      source.warehouse_address ? `창고 주소: ${source.warehouse_address}` : "",
+      source.warehouse_phone ? `창고 연락처: ${source.warehouse_phone}` : "",
+      source.manager_name ? `담당자 이름: ${source.manager_name}` : "",
+      source.manager_phone ? `담당자 연락처: ${source.manager_phone}` : "",
+      source.manager_memo ? `담당자 메모: ${source.manager_memo}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  async function loadWarehouses(nextQuery = query) {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: "1", pageSize: "5000" });
+      if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      const endpoint = `/api/fnos/warehouses?${params.toString()}`;
+      const cached = readCachedJson<{ warehouses?: FnWarehouse[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
+      if (cached) {
+        setWarehouses(cached.warehouses || []);
+        setTotal(Number(cached.total || 0));
+        setLoading(false);
+      }
+      const data = await cachedClientJson<{ warehouses?: FnWarehouse[]; total?: number; ok?: boolean; error?: string }>(endpoint, { ttl: 5 * 60_000, storageTtl: 10 * 60_000 });
+      if (data.ok === false) {
+        setMessage(data.error || "창고 조회 실패");
+        return;
+      }
+      setWarehouses(data.warehouses || []);
+      setTotal(Number(data.total || 0));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadWarehouses(query), 0);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2") return;
+      event.preventDefault();
+      openNewWarehouse();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function openNewWarehouse() {
+    setDraft(blankWarehouseDraft());
+    setModalOpen(true);
+  }
+
+  function openWarehouse(warehouse: FnWarehouse) {
+    const memoDraft = parseWarehouseMemo(warehouse.memo);
+    setDraft({
+      ...memoDraft,
+      id: warehouse.id || "",
+      warehouse_type: warehouse.warehouse_type || "general",
+      warehouse_code: warehouse.warehouse_code || "",
+      warehouse_name: warehouse.warehouse_name || "",
+    });
+    setModalOpen(true);
+  }
+
+  function updateDraft(key: string, value: string) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveWarehouseDraft() {
+    const warehouseType = draft.warehouse_type || "general";
+    const warehouseCode = String(draft.warehouse_code || "").trim();
+    const warehouseName = String(draft.warehouse_name || "").trim();
+    if (!warehouseType || !warehouseCode || !warehouseName) {
+      setMessage("속성, 창고코드, 창고명은 필수입니다.");
+      return;
+    }
+    const res = await fetch("/api/fnos/warehouses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        warehouse: {
+          id: draft.id,
+          warehouse_type: warehouseType,
+          warehouse_code: warehouseCode,
+          warehouse_name: warehouseName,
+          memo: composeWarehouseMemo(draft),
+        },
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "창고 저장 실패");
+      return;
+    }
+    invalidateClientCache("/api/fnos/warehouses");
+    invalidateClientCache("/api/fnos/products/master");
+    setMessage(`창고 저장 완료: ${warehouseCode}`);
+    setModalOpen(false);
+    await loadWarehouses(query);
+  }
+
+  async function deleteWarehouseDraft() {
+    if (!draft.id && !draft.warehouse_code) return;
+    if (!window.confirm("이 창고를 삭제하시겠습니까?")) return;
+    const res = await fetch("/api/fnos/warehouses", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id: draft.id, warehouse_code: draft.warehouse_code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "창고 삭제 실패");
+      return;
+    }
+    invalidateClientCache("/api/fnos/warehouses");
+    invalidateClientCache("/api/fnos/products/master");
+    setMessage(`창고 삭제 완료: ${draft.warehouse_code}`);
+    setModalOpen(false);
+    await loadWarehouses(query);
+  }
+
+  function downloadWarehouseTemplate() {
+    void downloadTableXlsx(
+      "FN_OS_창고_엑셀폼.xlsx",
+      "창고",
+      ["속성", "창고코드", "창고명", "창고 주소", "창고 연락처", "담당자 이름", "담당자 연락처", "메모"],
+      [["일반", "100", "에프엔 본사창고", "서울", "010-0000-0000", "", "", ""]],
+    );
+  }
+
+  async function uploadWarehouses(file: File) {
+    const rows = await readXlsxObjects(file);
+    const allData = await cachedClientJson<{ warehouses?: FnWarehouse[] }>("/api/fnos/warehouses?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
+    const existing = new Map<string, FnWarehouse>((allData.warehouses || []).map((warehouse) => [String(warehouse.warehouse_code || ""), warehouse]));
+    const normalized = rows
+      .map((row) => ({
+        warehouse_type: normalizeWarehouseAttribute(row["속성"] || row["창고속성"] || row["구분"] || row["warehouse_type"]),
+        warehouse_code: String(row["창고코드"] || row["창고 코드"] || row["코드"] || row["warehouse_code"] || "").trim(),
+        warehouse_name: String(row["창고명"] || row["창고명칭"] || row["warehouse_name"] || "").trim(),
+        warehouse_address: String(row["창고 주소"] || row["창고주소"] || row["주소"] || "").trim(),
+        warehouse_phone: String(row["창고 연락처"] || row["창고연락처"] || row["연락처"] || "").trim(),
+        manager_name: String(row["담당자 이름"] || row["담당자이름"] || row["담당자"] || "").trim(),
+        manager_phone: String(row["담당자 연락처"] || row["담당자연락처"] || "").trim(),
+        memo: String(row["메모"] || row["비고"] || row["적요"] || "").trim(),
+      }))
+      .filter((row) => row.warehouse_code && row.warehouse_name);
+    const exactMatches = normalized.filter((row) => {
+      const found = existing.get(row.warehouse_code);
+      return found && String(found.warehouse_name || "").trim() === row.warehouse_name;
+    });
+    const overwrite = exactMatches.length
+      ? window.confirm(`${exactMatches.length}개 창고의 창고코드와 창고명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      : false;
+    let saved = 0;
+    let skipped = 0;
+    for (const row of normalized) {
+      const found = existing.get(row.warehouse_code);
+      if (found && !overwrite) {
+        skipped += 1;
+        continue;
+      }
+      if (found && String(found.warehouse_name || "").trim() !== row.warehouse_name) {
+        skipped += 1;
+        continue;
+      }
+      const res = await fetch("/api/fnos/warehouses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          warehouse: {
+            id: found?.id,
+            warehouse_type: row.warehouse_type,
+            warehouse_code: row.warehouse_code,
+            warehouse_name: row.warehouse_name,
+            memo: composeWarehouseMemo(row),
+          },
+        }),
+      });
+      if (res.ok) saved += 1;
+    }
+    invalidateClientCache("/api/fnos/warehouses");
+    invalidateClientCache("/api/fnos/products/master");
+    setMessage(`창고 엑셀등록 완료: 저장 ${saved.toLocaleString("ko-KR")}건 / 스킵 ${skipped.toLocaleString("ko-KR")}건`);
+    await loadWarehouses(query);
+  }
+
+  async function downloadWarehouses() {
+    const params = new URLSearchParams({ page: "1", pageSize: "5000" });
+    if (query.trim()) params.set("q", query.trim());
+    const data = await cachedClientJson<{ warehouses?: FnWarehouse[]; ok?: boolean; error?: string }>(`/api/fnos/warehouses?${params.toString()}`, { ttl: 60_000, storageTtl: 5 * 60_000 }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : "창고정보 다운로드 실패", warehouses: [] }));
+    if (data.ok === false) {
+      setMessage(data.error || "창고정보 다운로드 실패");
+      return;
+    }
+    const rows = (data.warehouses || []).map((warehouse) => [
+      warehouse.warehouse_code || "",
+      warehouse.warehouse_name || "",
+      warehouse.warehouse_type_label || (warehouse.warehouse_type === "fulfillment" ? "풀필먼트" : "일반"),
+      String(Number(warehouse.stock_product_count || 0)),
+      warehouse.memo || "",
+    ]);
+    void downloadTableXlsx(`FN_OS_창고_${rows.length}건_${todayMmdd()}.xlsx`, "창고", ["창고코드", "창고명", "속성", "보유품목", "메모"], rows);
+  }
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="창고관리"
+        subtitle={
+          <div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
+            <button type="button" className="font-black text-orange-600 underline underline-offset-4">전체창고</button>
+            <span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">창고수 {total.toLocaleString("ko-KR")}개</span>
+          </div>
+        }
+        action={
+          <div className="flex flex-wrap gap-2">
+            <ActionButton type="button" onClick={openNewWarehouse}>F2 새 창고</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => void downloadWarehouses()}>창고정보 다운로드</ActionButton>
+            <button type="button" onClick={downloadWarehouseTemplate} className="inline-flex h-10 w-10 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드">
+              <ExcelFormIcon />
+            </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadWarehouses(file);
+              event.target.value = "";
+            }} />
+          </div>
+        }
+      >
+        <div className="mb-3 flex justify-end">
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="창고명 / 코드 검색" />
+        </div>
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
+          <table className="w-full min-w-[760px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+              <tr>
+                <th className="w-36 py-2 text-left">창고 코드</th>
+                <th className="w-56 py-2 text-left">창고명</th>
+                <th className="w-24 py-2 text-right">보유품목</th>
+                <th className="py-2 text-left">메모</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warehouses.map((warehouse) => (
+                <tr key={warehouse.id || warehouse.warehouse_code} onClick={() => openWarehouse(warehouse)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
+                  <td className="truncate py-2 font-black">{warehouse.warehouse_code || "-"}</td>
+                  <td className="truncate py-2 font-bold" title={warehouse.warehouse_name || ""}>{warehouse.warehouse_name || "-"}</td>
+                  <td className="py-2 text-right font-black">{Number(warehouse.stock_product_count || 0).toLocaleString("ko-KR")}</td>
+                  <td className="truncate py-2 text-slate-500" title={warehouse.memo || ""}>{warehouse.memo ? `${warehouse.memo.slice(0, 30)}${warehouse.memo.length > 30 ? "..." : ""}` : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!warehouses.length && <EmptyState title={loading ? "불러오는 중..." : "창고가 없습니다."} />}
+        </div>
+        {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+      </Panel>
+
+      {modalOpen && (
+        <FormModal
+          title={draft.id ? "창고 수정" : "새 창고"}
+          description="속성, 창고코드, 창고명은 필수입니다."
+          onClose={() => setModalOpen(false)}
+          size="xl"
+          footer={
+            <>
+              {draft.id && <ActionButton type="button" variant="secondary" className="mr-auto border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteWarehouseDraft()}>삭제</ActionButton>}
+              <ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveWarehouseDraft()}>저장</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-5">
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["general", "일반"],
+                ["fulfillment", "풀필먼트"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => updateDraft("warehouse_type", value)}
+                  className={`h-10 rounded-md px-4 text-sm font-black ${draft.warehouse_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="창고코드"><input className={modalInputClass} value={draft.warehouse_code || ""} onChange={(event) => updateDraft("warehouse_code", event.target.value)} placeholder="100" /></FormField>
+              <FormField label="창고명"><input className={modalInputClass} value={draft.warehouse_name || ""} onChange={(event) => updateDraft("warehouse_name", event.target.value)} placeholder="에프엔 본사창고" /></FormField>
+              <FormField label="창고 주소"><input className={modalInputClass} value={draft.warehouse_address || ""} onChange={(event) => updateDraft("warehouse_address", event.target.value)} placeholder="창고 주소" /></FormField>
+              <FormField label="창고 연락처"><input className={modalInputClass} value={draft.warehouse_phone || ""} onChange={(event) => updateDraft("warehouse_phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} placeholder="창고 관련 메모" /></FormField>
+            </div>
+            {draft.warehouse_type === "fulfillment" && (
+              <div className="grid gap-4 border-t border-gray-200 pt-4 md:grid-cols-2">
+                <div className="md:col-span-2 text-sm font-black text-slate-900">담당자 정보</div>
+                <FormField label="담당자 이름"><input className={modalInputClass} value={draft.manager_name || ""} onChange={(event) => updateDraft("manager_name", event.target.value)} placeholder="담당자 이름" /></FormField>
+                <FormField label="담당자 연락처"><input className={modalInputClass} value={draft.manager_phone || ""} onChange={(event) => updateDraft("manager_phone", event.target.value)} placeholder="담당자 연락처" /></FormField>
+                <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.manager_memo || ""} onChange={(event) => updateDraft("manager_memo", event.target.value)} placeholder="풀필먼트 담당자 관련 메모" /></FormField>
+              </div>
+            )}
+          </div>
+        </FormModal>
       )}
     </div>
   );
@@ -9970,7 +10339,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       subtitle="개별 입력 또는 엑셀 업로드로 기초 데이터를 관리합니다."
       action={
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={downloadTemplate} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700">엑셀 서식 다운로드</button>
+          <button type="button" onClick={downloadTemplate} className="inline-flex h-10 w-10 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></button>
           <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">
             {uploading ? "업로드 중" : "엑셀 업로드"}
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
@@ -11359,11 +11728,13 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
 
 function ExcelFormIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
-      <path d="M6 3.5h8.2L19 8.3V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V5a1.5 1.5 0 0 1 1-1.5Z" fill="#16a34a" />
-      <path d="M14 3.7V8h4.3" fill="#bbf7d0" />
-      <path d="m8.2 10 2.4 3-2.4 3m5.1-6-2.4 3 2.4 3" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15.7 11h1.4m-1.4 2h1.4m-1.4 2h1.4" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+    <svg viewBox="0 0 32 32" className="h-8 w-8" aria-hidden="true">
+      <rect x="4" y="3" width="20" height="26" rx="3" fill="#16a34a" />
+      <path d="M19 3v7h7" fill="#bbf7d0" />
+      <path d="M19 3v7h7" stroke="#15803d" strokeWidth="1.2" strokeLinejoin="round" />
+      <rect x="9" y="12" width="14" height="12" rx="1.5" fill="#dcfce7" opacity=".95" />
+      <path d="M12 15h8M12 18h8M12 21h8M15 13v11" stroke="#16a34a" strokeWidth="1" />
+      <path d="m10.4 15.2 3.1 3.8-3.1 3.8m6.5-7.6-3.1 3.8 3.1 3.8" fill="none" stroke="#166534" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
