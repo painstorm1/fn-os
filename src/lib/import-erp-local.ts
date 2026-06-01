@@ -57,6 +57,17 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseJsonRecord(value: unknown): AnyRecord | null {
+  const raw = text(value);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as AnyRecord : null;
+  } catch {
+    return null;
+  }
+}
+
 function hasMeaningfulDate(value: unknown) {
   return Boolean(text(value));
 }
@@ -273,6 +284,30 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
   };
 }
 
+function orderCostSnapshotPayload(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materialUnitCosts: Map<number, number>) {
+  const totals = productTotals(order, lines, rates);
+  const totalWon = orderTotalWon(order, lines, rates);
+  return {
+    version: 1,
+    frozen_at: nowIso(),
+    order_id: order.id,
+    fn_arrived: order.fn_arrived || null,
+    fx_rates: rates,
+    cost_grid: costGrid(order, lines, rates, materialUnitCosts),
+    total_won: totalWon,
+    self_total_won: totalWon,
+    native_totals: totals.nativeTotals,
+    product_won: totals.productWon,
+    display_product_won: totals.displayProductWon,
+  };
+}
+
+function lockedCostSnapshot(order: AnyRecord) {
+  if (!hasMeaningfulDate(order.fn_arrived)) return null;
+  const snapshot = parseJsonRecord(order.cost_snapshot_json);
+  return snapshot?.cost_grid ? snapshot : null;
+}
+
 async function materialUnitCostsForProducts(productIds: Array<number | string>) {
   const ids = Array.from(new Set(productIds.map(Number).filter((id) => Number.isFinite(id) && id > 0)));
   const map = new Map<number, number>();
@@ -471,7 +506,8 @@ async function orderRows(filters: { q?: string; dateFrom?: string; dateTo?: stri
   const lineMap = await linesByOrder(rows.map((row) => row.id));
   return rows.map((row) => {
     const normalized = { ...row, status: normalizeOrderStatus(row.status, row) };
-    return { ...normalized, total_won: orderTotalWon(normalized, lineMap.get(String(row.id)) || [], rates) };
+    const snapshot = lockedCostSnapshot(normalized);
+    return { ...normalized, total_won: numberValue(snapshot?.total_won) || orderTotalWon(normalized, lineMap.get(String(row.id)) || [], rates) };
   });
 }
 
@@ -646,6 +682,9 @@ async function orderDetail(id: number) {
   const attachments = await db(`select * from ${q(TABLES.attachments)} where order_id=$1 order by uploaded_at desc nulls last, id desc`, [id]);
   const rates = await ratesMap();
   const materialUnitCosts = await materialUnitCostsForProducts(lines.map((line) => line.product_id));
+  const liveCost = orderCostSnapshotPayload(order, lines, rates, materialUnitCosts);
+  const frozenCost = lockedCostSnapshot(order);
+  const cost = frozenCost || liveCost;
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const itemTotal = lines.reduce((sum, line) => sum + numberValue(line.quantity) * numberValue(line.unit_price), 0);
   return {
@@ -653,16 +692,31 @@ async function orderDetail(id: number) {
     order: { ...order, attachment_count: attachments.length },
     items: lines,
     attachments,
-    fx_rates: rates,
+    fx_rates: cost.fx_rates || rates,
     total_qty: totalQty,
     item_total: itemTotal,
-    total_won: orderTotalWon(order, lines, rates),
-    cost_grid: costGrid(order, lines, rates, materialUnitCosts),
-    self_total_won: orderTotalWon(order, lines, rates),
-    native_totals: productTotals(order, lines, rates).nativeTotals,
-    product_won: productTotals(order, lines, rates).productWon,
-    display_product_won: productTotals(order, lines, rates).displayProductWon,
+    total_won: numberValue(cost.total_won),
+    cost_grid: cost.cost_grid,
+    self_total_won: numberValue(cost.self_total_won),
+    native_totals: cost.native_totals || {},
+    product_won: numberValue(cost.product_won),
+    display_product_won: numberValue(cost.display_product_won),
+    cost_snapshot_locked: Boolean(frozenCost),
+    cost_snapshot_at: frozenCost?.frozen_at || order.cost_snapshot_at || null,
   };
+}
+
+async function saveOrderCostSnapshot(orderId: number) {
+  const [order] = await db(`select * from ${q(TABLES.orders)} where id=$1`, [orderId]);
+  if (!order || !hasMeaningfulDate(order.fn_arrived)) return;
+  const lines = (await linesByOrder([orderId])).get(String(orderId)) || [];
+  const rates = await ratesMap();
+  const materialUnitCosts = await materialUnitCostsForProducts(lines.map((line) => line.product_id));
+  const snapshot = orderCostSnapshotPayload(order, lines, rates, materialUnitCosts);
+  await db(
+    `update ${q(TABLES.orders)} set cost_snapshot_json=$1, cost_snapshot_at=$2 where id=$3`,
+    [JSON.stringify(snapshot), snapshot.frozen_at, orderId],
+  );
 }
 
 async function generateOrderCode(orderDate: string) {
@@ -676,6 +730,9 @@ async function saveOrder(request: NextRequest, id?: number) {
   const body = await request.json();
   const minimalResponse = request.nextUrl.searchParams.get("minimal") === "1";
   const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(body, field);
+  const [existingOrder] = id
+    ? await db(`select fn_arrived, cost_snapshot_json from ${q(TABLES.orders)} where id=$1`, [id])
+    : [];
   const orderFields = [
     "order_code", "parent_order_id", "factory_id", "platform", "currency", "fx_rate", "order_date",
     "payment_method", "first_payment_date", "paid_date", "factory_ship_date", "badaeji_arrived",
@@ -703,6 +760,8 @@ async function saveOrder(request: NextRequest, id?: number) {
   if ("status" in values || "fn_arrived" in values || "customs_cleared" in values || "badaeji_arrived" in values || "factory_ship_date" in values || "paid_date" in values || "first_payment_date" in values || "order_date" in values) {
     values.status = normalizeOrderStatus(values.status, { ...body, ...values });
   }
+  const nextFnArrived = "fn_arrived" in values ? values.fn_arrived : existingOrder?.fn_arrived;
+  const shouldFreezeCostSnapshot = hasMeaningfulDate(nextFnArrived) && (!hasMeaningfulDate(existingOrder?.fn_arrived) || !text(existingOrder?.cost_snapshot_json));
   values.updated_at = nowIso();
   let shouldReplaceItems = Array.isArray(body.items);
   if (id && shouldReplaceItems && body.items.length === 0 && !body.allow_empty_items) {
@@ -770,6 +829,7 @@ async function saveOrder(request: NextRequest, id?: number) {
   await insertRows(TABLES.orderItems, itemRows);
   const movementIds = await nextIds(TABLES.materialMovements, movementRows.length);
   await insertRows(TABLES.materialMovements, movementRows.map((row, index) => ({ id: movementIds[index], ...row })));
+  if (shouldFreezeCostSnapshot) await saveOrderCostSnapshot(savedId);
   if (minimalResponse) return json({ ok: true, order: { id: savedId, ...values }, items: itemRows });
   const detail = await orderDetail(savedId);
   return json(detail || { ok: true, order: { id: savedId }, items: [] });

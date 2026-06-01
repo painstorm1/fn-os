@@ -2915,6 +2915,8 @@ function NativeProductDetail({ id }: { id: number }) {
       invalidateApiCache("/api/fnos/products");
       invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
       window.location.href = importHref("/products");
     } catch {
       alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
@@ -3492,6 +3494,8 @@ function NativeProductForm({ id }: { id?: number }) {
       invalidateApiCache("/api/fnos/products");
       invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
@@ -3517,6 +3521,8 @@ function NativeProductForm({ id }: { id?: number }) {
       invalidateApiCache("/api/fnos/products");
       invalidateApiCache("/api/fnos/products/search");
       invalidateApiCache("/api/fnos/form-data");
+      invalidateApiCache("/api/fnos/orders");
+      invalidateApiCache("/api/fnos/dashboard");
       window.location.href = importHref("/products");
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 삭제에 실패했습니다.");
