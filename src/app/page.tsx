@@ -8417,7 +8417,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     const code = String(draft.customer_code || "").trim();
     const name = String(draft.customer_name || "").trim();
     if (!code || !name) {
-      setCustomerMessage("거래처코드와 거래처명은 필수입니다.");
+      window.alert("거래처코드와 거래처명은 필수입니다.");
       return;
     }
     const res = await fetch("/api/fnos/customers", {
@@ -8428,7 +8428,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      setCustomerMessage(data.error || "거래처 저장 실패");
+      window.alert(data.error || "거래처 저장 실패");
       return;
     }
     invalidateClientCache("/api/fnos/customers");
@@ -8451,7 +8451,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       });
       const channelData = await channelRes.json().catch(() => ({}));
       if (!channelRes.ok || channelData.ok === false) {
-        setCustomerMessage(channelData.error || "쇼핑몰 채널 저장 실패");
+        window.alert(channelData.error || "쇼핑몰 채널 저장 실패");
         return;
       }
       invalidateClientCache("/api/fnos/sales-channels");
@@ -8471,7 +8471,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         });
         const credentialData = await credentialRes.json().catch(() => ({}));
         if (!credentialRes.ok || credentialData.ok === false) {
-          setCustomerMessage(credentialData.error || "쇼핑몰 credential 저장 실패");
+          window.alert(credentialData.error || "쇼핑몰 credential 저장 실패");
           return;
         }
         invalidateClientCache("/api/fnos/sales-channel-credentials");
@@ -8998,7 +8998,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const productAttribute = normalizeProductAttribute(draft.product_attribute ?? draft.product_kind);
     const productName = productNameWithAttribute(rawProductName, productAttribute);
     if (!productCode || !rawProductName) {
-      setProductMessage("품목코드와 품목명은 필수입니다.");
+      window.alert("품목코드와 품목명은 필수입니다.");
       return;
     }
     const inventory = usableWarehouses
@@ -9028,7 +9028,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      setProductMessage(data.error || "품목 저장 실패");
+      window.alert(data.error || "품목 저장 실패");
       return;
     }
     setProductMessage(`품목 저장 완료: ${productCode}`);
@@ -9625,7 +9625,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     const warehouseCode = String(draft.warehouse_code || "").trim();
     const warehouseName = String(draft.warehouse_name || "").trim();
     if (!warehouseType || !warehouseCode || !warehouseName) {
-      setMessage("속성, 창고코드, 창고명은 필수입니다.");
+      window.alert("속성, 창고코드, 창고명은 필수입니다.");
       return;
     }
     const res = await fetch("/api/fnos/warehouses", {
@@ -9644,7 +9644,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      setMessage(data.error || "창고 저장 실패");
+      window.alert(data.error || "창고 저장 실패");
       return;
     }
     invalidateClientCache("/api/fnos/warehouses");
