@@ -6211,7 +6211,7 @@ function SalesExcelGrid({
 
   useEffect(() => {
     onSelectionChange?.(sheet, range, selectedRows);
-  }, [sheet, range, selectedRows, onSelectionChange]);
+  }, [sheet, range, selectedRows]);
 
   useEffect(() => {
     return () => rowDragCleanupRef.current?.();
@@ -7146,6 +7146,48 @@ function SalesQuickLookupContent() {
   );
 }
 
+function DirectShippingPreviewGrid({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  return (
+    <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+      <table className="w-full min-w-[980px] table-fixed text-xs">
+        <colgroup>
+          <col className="w-[54px]" />
+          {headers.map((header) => <col key={header} className="w-[120px]" />)}
+        </colgroup>
+        <thead className="sticky top-0 z-10 bg-slate-100">
+          <tr>
+            <th className="border border-slate-200 px-2 py-2 text-slate-400">#</th>
+            {headers.map((header) => (
+              <th key={header} className="border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
+                <span className="truncate">{header}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex} className="h-8">
+              <td className="border border-slate-200 bg-slate-50 px-2 text-center font-black text-slate-400">{rowIndex + 1}</td>
+              {headers.map((header, colIndex) => (
+                <td key={`${header}-${colIndex}`} className="border border-slate-200 px-2 py-1 align-middle">
+                  <div className="truncate">{row[colIndex] || ""}</div>
+                </td>
+              ))}
+            </tr>
+          ))}
+          {!rows.length && (
+            <tr>
+              <td colSpan={headers.length + 1} className="border border-slate-200 px-4 py-12 text-center text-sm font-bold text-slate-400">
+                생성된 직송파일 데이터가 없습니다.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 type SalesPurchaseMode = "sales" | "purchases";
 type SalesPurchaseVatMode = "included" | "excluded";
 type SalesPurchaseEntryLine = {
@@ -7240,11 +7282,24 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
   const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed"; message: string }>>([]);
+  const [shippingPreviewTab, setShippingPreviewTab] = useState<"shipping" | DirectShippingPartner>("shipping");
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
+
+  useEffect(() => {
+    function closeOnlineSheetPreviews(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      ["online-shipping-sheet-toggle", "online-sales-sheet-toggle", "online-purchase-sheet-toggle"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input instanceof HTMLInputElement) input.checked = false;
+      });
+    }
+    window.addEventListener("keydown", closeOnlineSheetPreviews, true);
+    return () => window.removeEventListener("keydown", closeOnlineSheetPreviews, true);
+  }, []);
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
@@ -7720,6 +7775,37 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)) });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
+  }
+
+  function exportShippingBundleFromModal() {
+    if (!hasSalesRows(sheets.송장출력용) && !directShippingRows.JB.length && !directShippingRows.케이모아.length) {
+      window.alert("내보낼 송장 엑셀 데이터가 없습니다.");
+      return;
+    }
+    if (completedSalesTasks.exportShipping) {
+      const ok = window.confirm("송장 엑셀을 이미 내보낸 것으로 보입니다. 다시 내보내시겠습니까?");
+      if (!ok) return;
+    } else {
+      const ok = window.confirm("송장출력용과 직송파일을 내보내시겠습니까?");
+      if (!ok) return;
+    }
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const directIndexes = new Set(
+      exportSheets["발주 진행 단계"]
+        .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
+        .filter((index) => index >= 0),
+    );
+    if (hasSalesRows(exportSheets.송장출력용)) {
+      void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, {
+        송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
+      });
+    }
+    if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
+    if (directShippingRows.케이모아.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, directShippingRows.케이모아);
+    setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
+    setMessage("송장 엑셀 내보내기를 실행했습니다.");
+    const toggle = document.getElementById("online-shipping-sheet-toggle");
+    if (toggle instanceof HTMLInputElement) toggle.checked = false;
   }
 
   function selectedShippingRows() {
@@ -8206,7 +8292,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (!progressRows[index]) return;
         setProgressValue(progressRows[index], "주문상태", status);
       });
-      if (status === "출고대기") setActiveSheet("송장출력용");
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
       return next;
     });
@@ -8260,17 +8345,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEffect(() => {
     if (section !== "online") return undefined;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!/^F[1-6]$/.test(event.key)) return;
+      if (!/^F[1-3]$/.test(event.key)) return;
       if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
       if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "F1") runOrderCollectionFlow();
-      if (event.key === "F2") exportAllSheets();
-      if (event.key === "F3") void sendSalesInput();
-      if (event.key === "F4") void sendPurchaseInput();
-      if (event.key === "F5") openInvoiceUpload();
-      if (event.key === "F6") void applyFnParcelSheet();
+      if (event.key === "F2") openInvoiceUpload();
+      if (event.key === "F3") void applyFnParcelSheet();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -8309,6 +8391,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <Panel
           title="온라인 발주"
         >
+          <input id="online-shipping-sheet-toggle" type="checkbox" className="peer/shipping-sheet hidden" />
+          <input id="online-sales-sheet-toggle" type="checkbox" className="peer/sales-sheet hidden" />
+          <input id="online-purchase-sheet-toggle" type="checkbox" className="peer/purchase-sheet hidden" />
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
               {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
@@ -8319,29 +8404,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1. 주문수집</button>
-              <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={exportAllSheets}>F2. 엑셀 내보내기</button>
-              <button type="button" className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F3. FN판매입력 저장</button>
-              <button type="button" className="rounded-md border border-violet-300 bg-white px-3 py-2 text-sm font-black text-violet-700" onClick={sendPurchaseInput}>F4. FN구매입력 저장</button>
-              <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F5. 송장번호 업로드</button>
-              <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
+              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1 주문수집</button>
+              <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F2 송장 업로드</button>
+              <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F3 FN택배시트 반영</button>
               <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>
               <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
             </div>
           </div>
-          <div className="mb-0 flex flex-wrap items-end gap-0 border-b border-slate-200">
-            {[visibleSalesSheetNames[0]].map((sheet) => (
-              <button
-                key={sheet}
-                type="button"
-                onClick={() => setActiveSheet(sheet)}
-                className={`relative -mb-px h-10 rounded-t-lg border px-4 text-sm font-black transition ${activeSheet === sheet ? "border-slate-200 border-b-white bg-white text-slate-950 shadow-[inset_0_3px_0_#FF6A00]" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-white hover:text-orange-600"}`}
-              >
-                {sheet}
-              </button>
-            ))}
-            {activeSheet === "발주 진행 단계" && (
-              <div className="mx-3 flex flex-wrap items-center gap-2 pb-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+            <h3 className="mr-2 text-base font-black text-slate-950">발주진행상태</h3>
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
               if (status) changeSelectedOrderStatus(status);
@@ -8363,43 +8434,77 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="케이모아">케이모아</option>
             </select>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
-              </div>
-            )}
-            {visibleSalesSheetNames.slice(1).map((sheet) => (
-              <button
-                key={sheet}
-                type="button"
-                onClick={() => setActiveSheet(sheet)}
-                className={`relative -mb-px h-10 rounded-t-lg border px-4 text-sm font-black transition ${activeSheet === sheet ? "border-slate-200 border-b-white bg-white text-slate-950 shadow-[inset_0_3px_0_#FF6A00]" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-white hover:text-orange-600"}`}
-              >
-                {sheet}
-              </button>
-            ))}
-            <div className="ml-auto flex items-center gap-2 pb-1">
-            {activeSheet === "FN판매입력" && (
-              <span className="inline-flex items-center rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">
-                판매입력 총 금액 : {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원
-              </span>
-            )}
-            {activeSheet === "FN구매입력" && (
-              <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">
-                구매입력 총 금액 : {Math.round(purchaseSupplyTotal).toLocaleString("ko-KR")}원
-              </span>
-            )}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-orange-50" onMouseDown={() => setShippingPreviewTab("shipping")}>송장 엑셀</label>
+              <label htmlFor="online-sales-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-blue-300 bg-white px-3 text-sm font-black text-blue-600 hover:bg-blue-50">FN판매입력</label>
+              <label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50">FN구매입력</label>
             </div>
           </div>
+          <h3 className="mb-2 text-base font-black text-slate-950">발주 진행 단계</h3>
           <SalesExcelGrid
-            sheet={activeSheet}
-            rows={sheets[activeSheet]}
-            onChange={(rows) => setSheets((prev) => ({ ...prev, [activeSheet]: rows }))}
+            sheet="발주 진행 단계"
+            rows={sheets["발주 진행 단계"]}
+            onChange={(rows) => setSheets((prev) => ({ ...prev, "발주 진행 단계": rows }))}
             onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
             resetKey={salesGridResetKey}
-            highlightedRows={salesSheetHighlightedRows[activeSheet] || []}
+            highlightedRows={salesSheetHighlightedRows["발주 진행 단계"] || []}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
-            참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, F2 엑셀 내보내기 때 거래처별 직송파일과 FN구매입력 시트에 반영됩니다.
+            참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, 송장 엑셀 모달에서 거래처별 직송파일과 함께 내보낼 수 있습니다.
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
+            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div><h2 className="text-lg font-black">송장 엑셀</h2><p className="mt-1 text-sm font-bold text-slate-500">송장출력용과 직송파일 현재 값을 확인하고 내보냅니다.</p></div>
+                <label htmlFor="online-shipping-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>송장출력용</button>
+                  {directShippingRows.JB.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일</button>}
+                  {directShippingRows.케이모아.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일</button>}
+                </div>
+                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={sheets.송장출력용} onChange={(rows) => setSheets((prev) => ({ ...prev, 송장출력용: rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} />}
+                {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} />}
+                {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} />}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+                <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label>
+                <ActionButton type="button" onClick={exportShippingBundleFromModal}>내보내기</ActionButton>
+              </div>
+            </div>
+          </div>
+          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/sales-sheet:flex">
+            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div><h2 className="text-lg font-black">FN판매입력</h2><p className="mt-1 text-sm font-bold text-slate-500">현재 FN판매입력 값을 확인하고 FN OS 판매입력으로 저장합니다.</p></div>
+                <label htmlFor="online-sales-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                <SalesExcelGrid sheet="FN판매입력" rows={sheets["FN판매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN판매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN판매입력"] || []} />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
+                <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원</span>
+                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
+              </div>
+            </div>
+          </div>
+          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/purchase-sheet:flex">
+            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div><h2 className="text-lg font-black">FN구매입력</h2><p className="mt-1 text-sm font-bold text-slate-500">현재 FN구매입력 값을 확인하고 FN OS 구매입력으로 저장합니다.</p></div>
+                <label htmlFor="online-purchase-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                <SalesExcelGrid sheet="FN구매입력" rows={sheets["FN구매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN구매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN구매입력"] || []} />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
+                <span className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">구매입력 총 금액: {Math.round(purchaseSupplyTotal).toLocaleString("ko-KR")}원</span>
+                <div className="flex gap-2"><label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendPurchaseInput()}>저장</ActionButton></div>
+              </div>
+            </div>
+          </div>
           {collectionPopupOpen && (
             <FormModal
               title="주문수집"
