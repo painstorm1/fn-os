@@ -53,7 +53,6 @@ type AutoArchiveDraft = {
   category_name: string;
   warning?: string;
   project_name?: string;
-  project_draft?: string;
 };
 
 type CategoryGroup = "교육" | "업무" | "개인";
@@ -270,7 +269,8 @@ export default function ArchiveWorkspace() {
   const [activeSubCategory, setActiveSubCategory] = useState("");
   const [activeProject, setActiveProject] = useState("");
   const [localProjects, setLocalProjects] = useState<string[]>([]);
-  const [toolbarProjectDraft, setToolbarProjectDraft] = useState("");
+  const [projectCreateTarget, setProjectCreateTarget] = useState<"toolbar" | number | null>(null);
+  const [projectCreateName, setProjectCreateName] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
@@ -425,6 +425,30 @@ export default function ArchiveWorkspace() {
     return cleanName;
   }
 
+  function openProjectCreateModal(target: "toolbar" | number) {
+    setProjectCreateTarget(target);
+    setProjectCreateName("");
+  }
+
+  function closeProjectCreateModal() {
+    setProjectCreateTarget(null);
+    setProjectCreateName("");
+  }
+
+  function createProjectFromModal() {
+    const project = rememberProject(projectCreateName);
+    if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
+    if (projectCreateTarget === "toolbar") {
+      setActiveProject(project);
+      setActiveMenu("project");
+      setActiveSubCategory("");
+      setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+    } else if (typeof projectCreateTarget === "number") {
+      setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === projectCreateTarget ? { ...item, project_name: project } : item));
+    }
+    closeProjectCreateModal();
+  }
+
   async function moveArchiveItemsToProject(ids: string[], projectName: string) {
     const cleanName = rememberProject(projectName);
     if (!ids.length || !cleanName) return setMessage("프로젝트로 이동할 항목과 프로젝트명을 선택해 주세요.");
@@ -527,11 +551,6 @@ export default function ArchiveWorkspace() {
 
   async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
-    autoImageFileRef.current = file;
-    setAutoImagePreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(file);
-    });
     setAutoWorking(true);
     setMessage("이미지에서 링크를 읽는 중입니다.");
     try {
@@ -549,6 +568,24 @@ export default function ArchiveWorkspace() {
     }
   }
 
+  function selectAutoImageFile(file?: File | null) {
+    if (!file) return;
+    autoImageFileRef.current = file;
+    setAutoImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  }
+
+  function clearAutoImageFile() {
+    autoImageFileRef.current = null;
+    setAutoImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return "";
+    });
+    if (autoImageRef.current) autoImageRef.current.value = "";
+  }
+
   function imageFromClipboard(data: DataTransfer) {
     const fileImage = Array.from(data.files).find((file) => file.type.startsWith("image/"));
     if (fileImage) return fileImage;
@@ -561,7 +598,7 @@ export default function ArchiveWorkspace() {
     if (!image) return;
     event.preventDefault();
     event.stopPropagation();
-    await processImageFile(image);
+    selectAutoImageFile(image);
   }
 
   async function saveAutoDrafts() {
@@ -570,7 +607,7 @@ export default function ArchiveWorkspace() {
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
       const results = await Promise.all(autoDrafts.map((draft) => {
-        const { warning: _warning, project_name: _projectName, project_draft: _projectDraft, ...saveDraft } = draft;
+        const { warning: _warning, project_name: _projectName, ...saveDraft } = draft;
         const payload = {
           ...saveDraft,
           category_id: categoryIdByName.get(draft.category_name) || null,
@@ -600,12 +637,7 @@ export default function ArchiveWorkspace() {
       const savedCount = autoDrafts.length;
       setAutoDrafts([]);
       setAutoText("");
-      autoImageFileRef.current = null;
-      setAutoImagePreview((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return "";
-      });
-      if (autoImageRef.current) autoImageRef.current.value = "";
+      clearAutoImageFile();
       setMessage(`${savedCount.toLocaleString("ko-KR")}개 항목을 아카이브에 저장했습니다.`);
       await refresh();
       setActiveMenu("all");
@@ -731,14 +763,7 @@ export default function ArchiveWorkspace() {
             )}
             {activeMenu !== "save" && (
               <>
-                <input className="field-input h-10 !w-44 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={toolbarProjectDraft} onChange={(event) => setToolbarProjectDraft(event.target.value)} />
-                <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => {
-                  const project = rememberProject(toolbarProjectDraft);
-                  if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
-                  setToolbarProjectDraft("");
-                  setActiveProject(project);
-                  setActiveMenu("project");
-                }}>
+                <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
                   프로젝트 생성
                 </ActionButton>
               </>
@@ -803,7 +828,10 @@ export default function ArchiveWorkspace() {
                   onChange={(event) => setAutoText(event.target.value)}
                 />
                 {autoImagePreview && (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="relative rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <button type="button" className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-black text-slate-500 shadow-sm hover:border-orange-300 hover:text-orange-600" onClick={clearAutoImageFile} aria-label="이미지 삭제" title="이미지 삭제">
+                      ×
+                    </button>
                     <div className="mb-2 text-xs font-black text-slate-500">붙여넣은 이미지 미리보기</div>
                     <img src={autoImagePreview} alt="붙여넣은 이미지 미리보기" className="max-h-48 w-full rounded border border-slate-200 bg-white object-contain" />
                   </div>
@@ -811,7 +839,7 @@ export default function ArchiveWorkspace() {
                 <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
                   <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:border-orange-300 hover:text-orange-600">
                     이미지 선택
-                    <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => void processImageFile(event.target.files?.[0])} />
+                    <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => selectAutoImageFile(event.target.files?.[0])} />
                   </label>
                   <ActionButton type="button" variant="secondary" onClick={() => void processImageFile(autoImageRef.current?.files?.[0] || autoImageFileRef.current || undefined)} disabled={autoWorking} className="border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100">이미지에서 추출</ActionButton>
                   <ActionButton type="button" variant="primary" onClick={() => void organizeTextWithAi()} disabled={autoWorking}>텍스트 정리</ActionButton>
@@ -875,17 +903,12 @@ export default function ArchiveWorkspace() {
                       {categoryTree[draft.category_group].map((category) => <option key={category}>{category}</option>)}
                     </select>
                   </div>
-                  <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                    <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.project_name || ""} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_name: event.target.value, project_draft: "" } : item))}>
+                  <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                    <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.project_name || ""} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_name: event.target.value } : item))}>
                       <option value="">프로젝트 없음</option>
                       {projects.map((project) => <option key={project} value={project}>{project}</option>)}
                     </select>
-                    <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={draft.project_draft || ""} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_draft: event.target.value } : item))} />
-                    <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => {
-                      const project = rememberProject(draft.project_draft || "");
-                      if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
-                      setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_name: project, project_draft: "" } : item));
-                    }}>
+                    <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => openProjectCreateModal(index)}>
                       새 프로젝트 생성
                     </ActionButton>
                   </div>
@@ -918,6 +941,26 @@ export default function ArchiveWorkspace() {
           onDeleteItems={deleteArchiveItems}
           projects={projects}
         />
+      )}
+
+      {projectCreateTarget !== null && (
+        <FormModal
+          title="새 프로젝트 생성"
+          onClose={closeProjectCreateModal}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={closeProjectCreateModal}>취소</ActionButton>
+              <ActionButton type="button" onClick={createProjectFromModal}>생성</ActionButton>
+            </>
+          }
+        >
+          <FormField label="프로젝트명">
+            <input className={modalInputClass} value={projectCreateName} placeholder="새 프로젝트명" autoFocus onChange={(event) => setProjectCreateName(event.target.value)} onKeyDown={(event) => {
+              if (event.key === "Enter") createProjectFromModal();
+            }} />
+          </FormField>
+        </FormModal>
       )}
 
       {noticeMessage && (
@@ -975,7 +1018,6 @@ function ArchiveList({
   const [bulkCategoryGroup, setBulkCategoryGroup] = useState<CategoryGroup | "">("");
   const [bulkCategoryName, setBulkCategoryName] = useState("");
   const [bulkProjectName, setBulkProjectName] = useState("");
-  const [bulkProjectDraft, setBulkProjectDraft] = useState("");
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
   const allSelected = Boolean(items.length) && selectedIds.length === items.length;
   const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
@@ -1014,12 +1056,11 @@ function ArchiveList({
   }
 
   async function moveSelectedProject() {
-    const project = cleanProjectName(bulkProjectDraft || bulkProjectName);
+    const project = cleanProjectName(bulkProjectName);
     if (!project || !selectedIds.length) return;
     await onMoveItemsToProject(selectedIds, project);
     setSelectedIds([]);
     setBulkProjectName(project);
-    setBulkProjectDraft("");
   }
 
   function toggleAllSelected() {
@@ -1063,8 +1104,7 @@ function ArchiveList({
             <option value="">프로젝트</option>
             {projects.map((project) => <option key={project} value={project}>{project}</option>)}
           </select>
-          <input className="field-input h-9 !w-40 rounded-md border border-slate-200 bg-white px-3 font-bold" placeholder="새 프로젝트" value={bulkProjectDraft} onChange={(event) => setBulkProjectDraft(event.target.value)} />
-          <ActionButton type="button" onClick={() => void moveSelectedProject()} disabled={!(bulkProjectName || bulkProjectDraft) || !selectedIds.length} className="h-9 min-w-24 whitespace-nowrap px-4 text-xs">
+          <ActionButton type="button" onClick={() => void moveSelectedProject()} disabled={!bulkProjectName || !selectedIds.length} className="h-9 min-w-24 whitespace-nowrap px-4 text-xs">
             프로젝트 이동
           </ActionButton>
           <span className="whitespace-nowrap text-xs font-black text-slate-500">선택 {selectedIds.length.toLocaleString("ko-KR")}개</span>
