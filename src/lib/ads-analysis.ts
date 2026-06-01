@@ -64,6 +64,33 @@ function percentValue(value: unknown) {
   return raw.includes("%") || parsed > 1 ? parsed : parsed * 100;
 }
 
+function metaPurchaseValue(row: AnyRecord) {
+  const explicit = numberValue(first(row, [
+    "구매완료 전환매출액",
+    "구매 전환값",
+    "purchase_conversion_value",
+    "Purchase conversion value",
+    "Purchase conversion value (USD)",
+    "Website purchase conversion value",
+    "Website purchase conversion value (USD)",
+    "결과 값",
+  ]));
+  if (explicit > 0) return explicit;
+  for (const [key, value] of Object.entries(row)) {
+    const label = key.toLowerCase();
+    const isPurchaseValue =
+      key.includes("구매 전환값") ||
+      key.includes("구매완료 전환매출") ||
+      key === "결과 값" ||
+      /purchase.*conversion.*value/.test(label) ||
+      /website.*purchase.*value/.test(label);
+    if (!isPurchaseValue) continue;
+    const parsed = numberValue(value);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
 function dateValue(value: unknown) {
   const raw = text(value);
   if (!raw) return new Date().toISOString().slice(0, 10);
@@ -147,15 +174,9 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
 
   const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
-  const rawPurchaseValue = numberValue(first(row, [
-    "구매완료 전환매출액",
-    "구매 전환값",
-    "purchase_conversion_value",
-    "Purchase conversion value",
-    "Purchase conversion value (USD)",
-    "Website purchase conversion value",
-    "Website purchase conversion value (USD)",
-  ]));
+  const rawPurchaseValue = isMeta
+    ? metaPurchaseValue(row)
+    : numberValue(first(row, ["구매완료 전환매출액", "구매 전환값", "purchase_conversion_value"]));
   const purchaseValue = isMeta && rawPurchaseValue ? Math.round(rawPurchaseValue * usdKrwRate) : rawPurchaseValue;
   const coupangOrders = numberValue(first(row, ["총 주문수(14일)", "총 주문수(1일)", "직접주문수(14일)", "직접 주문수(1일)"]));
   const coupangSales = numberValue(first(row, ["총 전환매출액(14일)", "총 전환매출액(1일)", "직접 전환매출액(14일)", "직접 전환매출액(1일)"]));
