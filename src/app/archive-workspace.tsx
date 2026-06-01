@@ -294,6 +294,7 @@ export default function ArchiveWorkspace() {
   const projectLinks = useMemo(() => data.links.filter((link) => link.linked_type === PROJECT_LINK_TYPE && link.archive_item_id && link.linked_id), [data.links]);
   const projects = useMemo(() => Array.from(new Set([...projectLinks.map((link) => String(link.linked_id)), ...localProjects].map(cleanProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko")), [localProjects, projectLinks]);
   const activeProjectItemIds = useMemo(() => new Set(projectLinks.filter((link) => link.linked_id === activeProject).map((link) => String(link.archive_item_id))), [activeProject, projectLinks]);
+  const emptyFilters: ArchiveFilters = { q: "", categoryGroup: "", category: "", source: "", dateFrom: "", dateTo: "" };
 
   const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
     if (activeMenu === "project") return activeProjectItemIds.has(item.id);
@@ -309,6 +310,7 @@ export default function ArchiveWorkspace() {
     const itemProjects = projectLinks.filter((link) => link.archive_item_id === item.id).map((link) => link.linked_id).join(" ");
     const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName} ${itemProjects}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
+    if (activeMenu === "project") return true;
     if (filters.categoryGroup && categoryGroupOf(categoryName) !== filters.categoryGroup) return false;
     if (filters.category && categoryName !== filters.category) return false;
     if (filters.source && item.source_type !== filters.source) return false;
@@ -435,14 +437,18 @@ export default function ArchiveWorkspace() {
     setProjectCreateName("");
   }
 
+  function openProject(project: string) {
+    setActiveProject(project);
+    setActiveSubCategory("");
+    setFilters(emptyFilters);
+    setActiveMenu(project ? "project" : "all");
+  }
+
   function createProjectFromModal() {
     const project = rememberProject(projectCreateName);
     if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
     if (projectCreateTarget === "toolbar") {
-      setActiveProject(project);
-      setActiveMenu("project");
-      setActiveSubCategory("");
-      setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+      openProject(project);
     } else if (projectCreateTarget === "manualLink") {
       setLinkForm((prev) => ({ ...prev, project_name: project }));
     } else if (projectCreateTarget === "manualFile") {
@@ -702,6 +708,8 @@ export default function ArchiveWorkspace() {
     if (menu === "save") setSaveMode("auto");
     if (menu === "all" || menu === "save") {
       setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+    } else if (menu === "project") {
+      setFilters(emptyFilters);
     } else {
       setFilters((prev) => ({ ...prev, categoryGroup: menu, category: "" }));
     }
@@ -757,25 +765,13 @@ export default function ArchiveWorkspace() {
                 <option value="list">리스트보기</option>
               </select>
             )}
-            {activeMenu !== "save" && (
-              <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => {
-                const project = event.target.value;
-                setActiveProject(project);
-                setActiveSubCategory("");
-                setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
-                setActiveMenu(project ? "project" : "all");
-              }}>
-                <option value="">프로젝트 바로가기</option>
-                {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
-              </select>
-            )}
-            {activeMenu !== "save" && (
-              <>
-                <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
-                  프로젝트 생성
-                </ActionButton>
-              </>
-            )}
+            <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
+              <option value="">프로젝트 바로가기</option>
+              {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
+            </select>
+            <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
+              프로젝트 생성
+            </ActionButton>
           </div>
           {activeMenu !== "save" && (
             <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
@@ -787,6 +783,7 @@ export default function ArchiveWorkspace() {
                 const group = event.target.value;
                 setFilters({ ...filters, categoryGroup: group, category: "" });
                 setActiveMenu(group ? group as CategoryGroup : "all");
+                setActiveProject("");
                 setActiveSubCategory("");
               }}>
                 <option value="">카테고리1</option>
@@ -953,7 +950,7 @@ export default function ArchiveWorkspace() {
         </section>
       )}
 
-      {(activeMenu === "all" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
+      {(activeMenu === "all" || activeMenu === "project" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
         <ArchiveList
           items={filteredItems}
           categoryById={categoryById}
