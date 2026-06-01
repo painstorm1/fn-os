@@ -220,9 +220,11 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
   const koreaExtra = koreaExtraCost(order);
   const convertedOrderTotal = productBaseTotal + chinaExtraCost;
   const actualKrw = actualPaymentKrw(order, rates);
-  const supplierPaymentTotal = actualKrw || convertedOrderTotal;
-  const paymentDelta = actualKrw ? actualKrw - convertedOrderTotal : 0;
-  const totalWon = supplierPaymentTotal + koreaExtra;
+  const materialLineWon = lines.reduce((sum, line) => {
+    return text(line.item_type).toUpperCase() === "MATERIAL"
+      ? sum + numberValue(line.quantity) * numberValue(line.unit_price) * lineRate(order, line, rates)
+      : sum;
+  }, 0);
   const hasProductLines = lines.some((line) => text(line.item_type).toUpperCase() !== "MATERIAL");
   const allocationLines = hasProductLines
     ? lines.filter((line) => text(line.item_type).toUpperCase() !== "MATERIAL")
@@ -231,6 +233,16 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
     return sum + numberValue(line.quantity) * numberValue(line.unit_price) * lineRate(order, line, rates);
   }, 0);
   const allocationQty = allocationLines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
+  const productAllocationBase = hasProductLines ? allocationTotal : productBaseTotal;
+  const convertedProductTotal = productAllocationBase + chinaExtraCost;
+  const fullSupplierPaymentTotal = actualKrw || convertedOrderTotal;
+  const supplierPaymentTotal = hasProductLines && materialLineWon > 0
+    ? convertedProductTotal
+    : fullSupplierPaymentTotal;
+  const paymentDelta = actualKrw && !(hasProductLines && materialLineWon > 0)
+    ? supplierPaymentTotal - convertedProductTotal
+    : 0;
+  const totalWon = fullSupplierPaymentTotal + koreaExtra;
   const rows = lines.map((line) => {
     const qty = numberValue(line.quantity);
     const lineBaseWon = qty * numberValue(line.unit_price) * lineRate(order, line, rates);
@@ -239,7 +251,7 @@ function costGrid(order: AnyRecord, lines: AnyRecord[], rates: AnyRecord, materi
     const costRatio = excludeFromAllocation
       ? 0
       : (allocationTotal > 0 ? lineBaseWon / allocationTotal : (allocationQty ? qty / allocationQty : 0));
-    const allocatedProductWon = productBaseTotal * costRatio;
+    const allocatedProductWon = productAllocationBase * costRatio;
     const allocatedChinaExtraWon = chinaExtraCost * costRatio;
     const allocatedPaymentDelta = paymentDelta * costRatio;
     const allocatedSupplierPaymentWon = supplierPaymentTotal * costRatio;
