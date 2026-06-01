@@ -791,7 +791,12 @@ export default function ArchiveWorkspace() {
             </ActionButton>
           </div>
           <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
-              <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "whitespace-nowrap px-4" : "whitespace-nowrap border-slate-950 bg-slate-950 px-4 text-white hover:bg-slate-800"}>
+              <ActionButton
+                type="button"
+                onClick={() => setSelectMode((prev) => !prev)}
+                className="whitespace-nowrap px-4 text-white hover:opacity-90"
+                style={{ backgroundColor: selectMode ? "#FF6A00" : "#020617", borderColor: selectMode ? "#FF6A00" : "#020617", color: "#FFFFFF" }}
+              >
                 선택
               </ActionButton>
               <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
