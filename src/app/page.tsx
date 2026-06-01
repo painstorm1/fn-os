@@ -8766,7 +8766,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
           </div>
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
-            <h3 className="mr-2 text-base font-black text-slate-950">발주진행상태</h3>
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
               if (status) changeSelectedOrderStatus(status);
@@ -8794,7 +8793,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50">FN구매입력</label>
             </div>
           </div>
-          <h3 className="mb-2 text-base font-black text-slate-950">발주 진행 단계</h3>
           <SalesExcelGrid
             sheet="발주 진행 단계"
             rows={sheets["발주 진행 단계"]}
