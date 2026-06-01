@@ -8940,6 +8940,26 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     return product.id || product.product_code || product.sku || "";
   }
 
+  function productChannelStock(product: FnProduct, target: "fn" | "coupang" | "naver") {
+    return (product.inventory || []).reduce((sum, stock) => {
+      const code = String(stock.warehouse_code || "").trim();
+      const name = String(stock.warehouse_name || "").trim().toLowerCase();
+      const isMatch =
+        target === "fn"
+          ? code === "100" || name.includes("에프엔") || name.includes("본사") || name === "fn"
+          : target === "coupang"
+            ? code === "101" || name.includes("쿠팡") || name.includes("로켓")
+            : code === "102" || name.includes("네이버") || name.includes("n배송");
+      return isMatch ? sum + Number(stock.qty || 0) : sum;
+    }, 0);
+  }
+
+  function productChannelStockText(product: FnProduct) {
+    return (["fn", "coupang", "naver"] as const)
+      .map((target) => productChannelStock(product, target).toLocaleString("ko-KR"))
+      .join(" ｜ ");
+  }
+
   function setProductSelected(key: string, selected: boolean) {
     if (!key) return;
     setSelectedProductKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
@@ -9284,7 +9304,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1100px] table-fixed text-sm">
+          <table className="w-full min-w-[1040px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
                 <th className="w-16 py-2 text-center">
@@ -9300,8 +9320,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 <th className="w-80 py-2 text-left">품목명</th>
                 <th className="w-28 py-2 text-right">입고가</th>
                 <th className="w-28 py-2 text-right">출고가</th>
-                <th className="w-24 py-2 text-right">현재고</th>
-                <th className="w-48 py-2 text-left">창고별 재고</th>
+                <th className="w-44 py-2 text-center">재고 현황(FN ｜ C ｜ N)</th>
                 <th className="w-36 py-2 text-left">BOM / 수입연동</th>
               </tr>
             </thead>
@@ -9333,12 +9352,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                   <td className="truncate py-2 font-bold" title={product.product_name || ""}>{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
                   <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
-                  <td className="py-2 text-right font-black">{Number(product.current_stock || 0).toLocaleString("ko-KR")}</td>
-                  <td className="truncate py-2 text-xs font-bold text-slate-500">
-                    {(product.inventory || []).length
-                      ? (product.inventory || []).map((stock) => `${stock.warehouse_name || stock.warehouse_code}: ${Number(stock.qty || 0).toLocaleString("ko-KR")}`).join(" / ")
-                      : "-"}
-                  </td>
+                  <td className="py-2 text-center font-black text-slate-900">{productChannelStockText(product)}</td>
                   <td className="py-2 text-xs font-black">
                     <StatusBadge tone={(product.bom || []).length ? "success" : "muted"} className="mr-2">BOM {(product.bom || []).length}</StatusBadge>
                     <StatusBadge tone={(product.import_links || []).length ? "orange" : "muted"}>수입 {(product.import_links || []).length}</StatusBadge>
