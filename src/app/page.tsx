@@ -8978,7 +8978,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   function productChannelStockText(product: FnProduct) {
     return (["fn", "coupang", "naver"] as const)
-      .map((target) => productChannelStock(product, target).toLocaleString("ko-KR"))
+      .map((target) => {
+        const qty = productChannelStock(product, target);
+        return qty === 0 ? "-" : qty.toLocaleString("ko-KR");
+      })
       .join(" ｜ ");
   }
 
@@ -9338,12 +9341,12 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                     aria-label="품목 전체선택"
                   />
                 </th>
-                <th className="w-36 py-2 pl-3 text-left">품목코드</th>
-                <th className="w-80 py-2 text-left">품목명</th>
-                <th className="w-28 py-2 text-right">입고가</th>
-                <th className="w-28 py-2 text-right">출고가</th>
-                <th className="w-44 py-2 text-center">재고 현황(FN ｜ C ｜ N)</th>
-                <th className="w-36 py-2 text-left">BOM / 수입연동</th>
+                <th className="w-32 py-2 pl-3 text-left">품목코드</th>
+                <th className="w-72 py-2 text-left">품목명</th>
+                <th className="w-24 py-2 text-right">입고가</th>
+                <th className="w-24 py-2 text-right">출고가</th>
+                <th className="w-60 py-2 text-center">재고 현황(FN ｜ C ｜ N)</th>
+                <th className="w-32 py-2 text-left">BOM / 수입연동</th>
               </tr>
             </thead>
             <tbody>
@@ -9374,7 +9377,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                   <td className="truncate py-2 font-bold" title={product.product_name || ""}>{product.product_name || "-"}</td>
                   <td className="py-2 text-right">{krw(Number(product.cost_price || 0))}</td>
                   <td className="py-2 text-right">{krw(Number(product.standard_price || 0))}</td>
-                  <td className="py-2 text-center font-black text-slate-900">{productChannelStockText(product)}</td>
+                  <td className="whitespace-nowrap py-2 text-center font-normal tabular-nums text-slate-700">{productChannelStockText(product)}</td>
                   <td className="py-2 text-xs font-black">
                     <StatusBadge tone={(product.bom || []).length ? "success" : "muted"} className="mr-2">BOM {(product.bom || []).length}</StatusBadge>
                     <StatusBadge tone={(product.import_links || []).length ? "orange" : "muted"}>수입 {(product.import_links || []).length}</StatusBadge>
