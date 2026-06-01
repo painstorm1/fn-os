@@ -9968,7 +9968,9 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
           }
         >
           <div className="space-y-5">
-            <div className="flex flex-wrap gap-2">
+            <div>
+              <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 선택 <span className="text-[#ff6a00]">*</span></div>
+              <div className="flex flex-wrap gap-2">
               {[
                 ["general", "일반"],
                 ["fulfillment", "풀필먼트"],
@@ -9982,10 +9984,11 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
                   {label}
                 </button>
               ))}
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="창고코드"><input className={modalInputClass} value={draft.warehouse_code || ""} onChange={(event) => updateDraft("warehouse_code", event.target.value)} placeholder="100" /></FormField>
-              <FormField label="창고명"><input className={modalInputClass} value={draft.warehouse_name || ""} onChange={(event) => updateDraft("warehouse_name", event.target.value)} placeholder="에프엔 본사창고" /></FormField>
+              <FormField label="창고코드" required><input className={modalInputClass} value={draft.warehouse_code || ""} onChange={(event) => updateDraft("warehouse_code", event.target.value)} placeholder="100" /></FormField>
+              <FormField label="창고명" required><input className={modalInputClass} value={draft.warehouse_name || ""} onChange={(event) => updateDraft("warehouse_name", event.target.value)} placeholder="에프엔 본사창고" /></FormField>
               <FormField label="창고 주소"><input className={modalInputClass} value={draft.warehouse_address || ""} onChange={(event) => updateDraft("warehouse_address", event.target.value)} placeholder="창고 주소" /></FormField>
               <FormField label="창고 연락처"><input className={modalInputClass} value={draft.warehouse_phone || ""} onChange={(event) => updateDraft("warehouse_phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
               <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} placeholder="창고 관련 메모" /></FormField>
