@@ -1004,8 +1004,10 @@ type ProductRelationFilter = "plain" | "set" | "rg" | "import" | "all";
 type ProductAttribute = "plain" | "set" | "rg";
 type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
+type WarehouseAttribute = "general" | "fulfillment";
 type ProductBulkField = "product_attribute" | "cost_price" | "standard_price";
 type CustomerBulkField = "customer_type" | "business_no" | "contact_name" | "phone" | "memo";
+type WarehouseBulkField = "warehouse_type" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
 
 const salesChannelCredentialKeys = [
   "seller_password",
@@ -1066,10 +1068,14 @@ function customerAttributeLabel(value: unknown) {
   return normalizeCustomerAttribute(value) === "shopping" ? "쇼핑몰" : "일반";
 }
 
-function normalizeWarehouseAttribute(value: unknown) {
+function normalizeWarehouseAttribute(value: unknown): WarehouseAttribute {
   const textValue = String(value || "").trim().toLowerCase();
   if (["fulfillment", "풀필먼트", "3pl", "쿠팡", "네이버", "n배송", "rocket"].includes(textValue)) return "fulfillment";
   return "general";
+}
+
+function warehouseAttributeLabel(value: unknown) {
+  return normalizeWarehouseAttribute(value) === "fulfillment" ? "풀필먼트" : "일반";
 }
 
 function formatBusinessNoInput(value: string) {
@@ -9464,7 +9470,16 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [selectedWarehouseKeys, setSelectedWarehouseKeys] = useState<string[]>([]);
+  const [warehouseSelecting, setWarehouseSelecting] = useState(false);
+  const [warehouseBulkOpen, setWarehouseBulkOpen] = useState(false);
+  const [warehouseBulkField, setWarehouseBulkField] = useState<WarehouseBulkField>("warehouse_type");
+  const [warehouseBulkValue, setWarehouseBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const warehouseSelectModeRef = useRef<"select" | "deselect">("select");
+  const warehouseKeys = warehouses.map((warehouse) => warehouseRowKey(warehouse)).filter(Boolean);
+  const selectedWarehouses = warehouses.filter((warehouse) => selectedWarehouseKeys.includes(warehouseRowKey(warehouse)));
+  const allWarehousesSelected = Boolean(warehouseKeys.length) && warehouseKeys.every((key) => selectedWarehouseKeys.includes(key));
 
   function blankWarehouseDraft() {
     return {
@@ -9544,6 +9559,18 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
   }, [query]);
 
   useEffect(() => {
+    setSelectedWarehouseKeys([]);
+  }, [query]);
+
+  useEffect(() => {
+    function stopSelecting() {
+      setWarehouseSelecting(false);
+    }
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "F2") return;
       event.preventDefault();
@@ -9572,6 +9599,15 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
 
   function updateDraft(key: string, value: string) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function warehouseRowKey(warehouse: FnWarehouse) {
+    return warehouse.id || warehouse.warehouse_code || "";
+  }
+
+  function setWarehouseSelected(key: string, selected: boolean) {
+    if (!key) return;
+    setSelectedWarehouseKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
   }
 
   async function saveWarehouseDraft() {
@@ -9626,6 +9662,47 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     invalidateClientCache("/api/fnos/products/master");
     setMessage(`창고 삭제 완료: ${draft.warehouse_code}`);
     setModalOpen(false);
+    await loadWarehouses(query);
+  }
+
+  async function saveWarehouseBulkEdit() {
+    if (!selectedWarehouses.length) {
+      setMessage("수정할 창고를 먼저 선택해 주세요.");
+      return;
+    }
+    let saved = 0;
+    for (const warehouse of selectedWarehouses) {
+      const memoDraft = parseWarehouseMemo(warehouse.memo);
+      const nextDraft = {
+        ...memoDraft,
+        id: warehouse.id || "",
+        warehouse_type: warehouse.warehouse_type || "general",
+        warehouse_code: warehouse.warehouse_code || "",
+        warehouse_name: warehouse.warehouse_name || "",
+        [warehouseBulkField]: warehouseBulkField === "warehouse_type" ? normalizeWarehouseAttribute(warehouseBulkValue) : warehouseBulkValue,
+      };
+      const res = await fetch("/api/fnos/warehouses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          warehouse: {
+            id: nextDraft.id,
+            warehouse_type: nextDraft.warehouse_type,
+            warehouse_code: nextDraft.warehouse_code,
+            warehouse_name: nextDraft.warehouse_name,
+            memo: composeWarehouseMemo(nextDraft),
+          },
+        }),
+      });
+      if (res.ok) saved += 1;
+    }
+    invalidateClientCache("/api/fnos/warehouses");
+    invalidateClientCache("/api/fnos/products/master");
+    setMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
+    setWarehouseBulkOpen(false);
+    setWarehouseBulkValue("");
+    setSelectedWarehouseKeys([]);
     await loadWarehouses(query);
   }
 
@@ -9739,34 +9816,132 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
           </div>
         }
       >
-        <div className="mb-3 flex justify-end">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={() => setWarehouseBulkOpen(true)}>수정</ActionButton>
+            <span className="text-xs font-bold text-slate-500">선택 {selectedWarehouseKeys.length.toLocaleString("ko-KR")}개</span>
+          </div>
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="창고명 / 코드 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[760px] table-fixed text-sm">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
-                <th className="w-36 py-2 text-left">창고 코드</th>
+                <th className="w-20 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={allWarehousesSelected}
+                    onChange={(event) => setSelectedWarehouseKeys(event.target.checked ? warehouseKeys : [])}
+                    aria-label="창고 전체선택"
+                  />
+                </th>
+                <th className="w-36 py-2 pl-4 text-left">창고 코드</th>
                 <th className="w-56 py-2 text-left">창고명</th>
-                <th className="w-24 py-2 text-right">보유품목</th>
-                <th className="py-2 text-left">메모</th>
+                <th className="w-28 py-2 text-left">창고 속성</th>
+                <th className="w-28 py-2 text-right">보유 품목</th>
+                <th className="w-56 py-2 text-left">메모</th>
               </tr>
             </thead>
             <tbody>
-              {warehouses.map((warehouse) => (
-                <tr key={warehouse.id || warehouse.warehouse_code} onClick={() => openWarehouse(warehouse)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60">
-                  <td className="truncate py-2 font-black">{warehouse.warehouse_code || "-"}</td>
-                  <td className="truncate py-2 font-bold" title={warehouse.warehouse_name || ""}>{warehouse.warehouse_name || "-"}</td>
-                  <td className="py-2 text-right font-black">{Number(warehouse.stock_product_count || 0).toLocaleString("ko-KR")}</td>
-                  <td className="truncate py-2 text-slate-500" title={warehouse.memo || ""}>{warehouse.memo ? `${warehouse.memo.slice(0, 30)}${warehouse.memo.length > 30 ? "..." : ""}` : "-"}</td>
-                </tr>
-              ))}
+              {warehouses.map((warehouse, index) => {
+                const key = warehouseRowKey(warehouse);
+                const selected = selectedWarehouseKeys.includes(key);
+                return (
+                  <tr key={warehouse.id || warehouse.warehouse_code} onClick={() => openWarehouse(warehouse)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          const mode = selected ? "deselect" : "select";
+                          warehouseSelectModeRef.current = mode;
+                          setWarehouseSelecting(true);
+                          setWarehouseSelected(key, mode === "select");
+                        }}
+                        onMouseEnter={() => {
+                          if (warehouseSelecting) setWarehouseSelected(key, warehouseSelectModeRef.current === "select");
+                        }}
+                        className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                      >
+                        {index + 1}
+                      </button>
+                    </td>
+                    <td className="truncate py-2 pl-4 font-black">{warehouse.warehouse_code || "-"}</td>
+                    <td className="truncate py-2 font-bold" title={warehouse.warehouse_name || ""}>{warehouse.warehouse_name || "-"}</td>
+                    <td className="truncate py-2 text-slate-500">{warehouse.warehouse_type_label || warehouseAttributeLabel(warehouse.warehouse_type)}</td>
+                    <td className="py-2 text-right font-black">{Number(warehouse.stock_product_count || 0).toLocaleString("ko-KR")}</td>
+                    <td className="truncate py-2 text-slate-500" title={warehouse.memo || ""}>{warehouse.memo ? `${warehouse.memo.slice(0, 10)}${warehouse.memo.length > 10 ? "..." : ""}` : "-"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {!warehouses.length && <EmptyState title={loading ? "불러오는 중..." : "창고가 없습니다."} />}
         </div>
         {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
       </Panel>
+
+      {warehouseBulkOpen && (
+        <FormModal
+          title="창고 선택수정"
+          description={`선택 ${selectedWarehouses.length.toLocaleString("ko-KR")}개 창고에 같은 값을 적용합니다.`}
+          onClose={() => setWarehouseBulkOpen(false)}
+          size="xl"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setWarehouseBulkOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveWarehouseBulkEdit()}>저장</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+              <select className={modalSelectClass} value={warehouseBulkField} onChange={(event) => setWarehouseBulkField(event.target.value as WarehouseBulkField)}>
+                <option value="warehouse_type">창고 속성</option>
+                <option value="warehouse_address">창고 주소</option>
+                <option value="warehouse_phone">창고 연락처</option>
+                <option value="manager_name">담당자 이름</option>
+                <option value="manager_phone">담당자 연락처</option>
+                <option value="manager_memo">담당자 메모</option>
+                <option value="memo">메모</option>
+              </select>
+              {warehouseBulkField === "warehouse_type" ? (
+                <select className={modalSelectClass} value={warehouseBulkValue || "general"} onChange={(event) => setWarehouseBulkValue(event.target.value)}>
+                  <option value="general">일반</option>
+                  <option value="fulfillment">풀필먼트</option>
+                </select>
+              ) : (
+                <input className={modalInputClass} value={warehouseBulkValue} onChange={(event) => setWarehouseBulkValue(event.target.value)} placeholder="선택한 창고에 적용할 값" />
+              )}
+            </div>
+            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[620px] text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">창고코드</th><th className="px-2 py-2 text-left">창고명</th><th className="px-2 py-2 text-left">현재값</th></tr>
+                </thead>
+                <tbody>
+                  {selectedWarehouses.map((warehouse, index) => {
+                    const memoDraft = parseWarehouseMemo(warehouse.memo);
+                    const currentValue = warehouseBulkField === "warehouse_type"
+                      ? warehouse.warehouse_type_label || warehouseAttributeLabel(warehouse.warehouse_type)
+                      : memoDraft[warehouseBulkField] || "-";
+                    return (
+                      <tr key={warehouseRowKey(warehouse)} className="border-t border-gray-100">
+                        <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
+                        <td className="px-2 py-2 font-black">{warehouse.warehouse_code || "-"}</td>
+                        <td className="px-2 py-2 font-bold">{warehouse.warehouse_name || "-"}</td>
+                        <td className="px-2 py-2 text-slate-600">{currentValue}</td>
+                      </tr>
+                    );
+                  })}
+                  {!selectedWarehouses.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 창고가 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </FormModal>
+      )}
 
       {modalOpen && (
         <FormModal
