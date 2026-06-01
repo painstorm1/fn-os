@@ -5080,10 +5080,14 @@ function LegacyNativeSettings() {
   );
 }
 
-function Panel({ title, subtitle, action, children, className = "" }: { title: string; subtitle?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+function Panel({ title, subtitle, action, children, className = "" }: { title?: React.ReactNode; subtitle?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <Card className={`p-5 ${className}`}>
-      <SectionHeader title={title} description={subtitle} actions={action} />
+      {(title || subtitle) ? (
+        <SectionHeader title={title} description={subtitle} actions={action} />
+      ) : action ? (
+        <div className="mb-4 flex justify-end">{action}</div>
+      ) : null}
       {children}
     </Card>
   );
@@ -8388,9 +8392,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </FormModal>
       )}
       {isOnlineSection && (
-        <Panel
-          title="온라인 발주"
-        >
+        <Panel>
           <input id="online-shipping-sheet-toggle" type="checkbox" className="peer/shipping-sheet hidden" />
           <input id="online-sales-sheet-toggle" type="checkbox" className="peer/sales-sheet hidden" />
           <input id="online-purchase-sheet-toggle" type="checkbox" className="peer/purchase-sheet hidden" />
@@ -8573,7 +8575,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
       {isHistorySection && (
         <Panel
-          title="판매/구매"
           action={
             <button
               type="button"
