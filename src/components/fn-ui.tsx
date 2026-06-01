@@ -7,6 +7,10 @@ function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
+function visualDescription(value?: ReactNode) {
+  return typeof value === "string" ? null : value;
+}
+
 export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <section className={cn("rounded-[14px] border border-gray-200 bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)]", className)} {...props} />;
 }
@@ -22,11 +26,12 @@ export function PageHeader({
   actions?: ReactNode;
   className?: string;
 }) {
+  const visual = visualDescription(description);
   return (
     <header className={cn("mb-5 flex flex-wrap items-start justify-between gap-4", className)}>
       <div className="min-w-0">
         <h1 className="text-[28px] font-bold leading-[1.3] text-gray-900">{title}</h1>
-        {description && <div className="mt-1.5 text-sm leading-6 text-gray-500">{description}</div>}
+        {visual && <div className="mt-1.5 text-sm leading-6 text-gray-500">{visual}</div>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
@@ -39,11 +44,12 @@ export function SectionHeader({ title, description, actions, className }: {
   actions?: ReactNode;
   className?: string;
 }) {
+  const visual = visualDescription(description);
   return (
     <div className={cn("mb-4 flex flex-wrap items-start justify-between gap-3", className)}>
       <div className="min-w-0">
         <h2 className="text-[18px] font-semibold leading-[1.4] text-gray-900">{title}</h2>
-        {description && <div className="mt-1 text-sm text-gray-500">{description}</div>}
+        {visual && <div className="mt-1 text-sm text-gray-500">{visual}</div>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
