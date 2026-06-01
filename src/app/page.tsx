@@ -8042,31 +8042,40 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <Panel
           title="온라인 발주"
           subtitle="쇼핑몰 API 주문수집부터 송장번호 매칭, 판매/구매입력 저장, FN_택배시트 반영까지 한 화면에서 처리합니다."
-          action={
-            <div className="flex gap-2">
-              <button type="button" className="rounded-md border border-slate-300 px-4 py-2 text-sm font-black text-slate-700" onClick={resetSalesWorkspace}>초기화</button>
-              <button type="button" className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" onClick={exportAllSheets}>전체 엑셀 내보내기</button>
-            </div>
-          }
         >
-          <div className="mb-4 flex flex-wrap gap-2">
-            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1. 주문수집</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportAllSheets}>F2. 엑셀 내보내기</button>
-            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F3. FN판매입력 저장</button>
-            <button type="button" className="rounded-md border border-violet-300 px-3 py-2 text-sm font-black text-violet-700" onClick={sendPurchaseInput}>F4. FN구매입력 저장</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F5. 송장번호 업로드</button>
-            <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
-            <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
+                <button key={label} type="button" className="h-12 min-w-20 rounded-md border border-slate-200 bg-white px-3 text-center text-xs font-black text-slate-700 hover:border-orange-200 hover:bg-orange-50">
+                  <span className="block text-sm text-blue-600">{orderStatusCount(label)}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1. 주문수집</button>
+              <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={exportAllSheets}>F2. 엑셀 내보내기</button>
+              <button type="button" className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F3. FN판매입력 저장</button>
+              <button type="button" className="rounded-md border border-violet-300 bg-white px-3 py-2 text-sm font-black text-violet-700" onClick={sendPurchaseInput}>F4. FN구매입력 저장</button>
+              <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F5. 송장번호 업로드</button>
+              <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
+              <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>
+              <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
+            </div>
           </div>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
-              <button key={label} type="button" className="h-12 min-w-20 rounded-md border border-slate-200 bg-white px-3 text-center text-xs font-black text-slate-700 hover:border-orange-200 hover:bg-orange-50">
-                <span className="block text-sm text-blue-600">{orderStatusCount(label)}</span>
-                {label}
+          <div className="mb-0 flex flex-wrap items-end gap-0 border-b border-slate-200">
+            {[visibleSalesSheetNames[0]].map((sheet) => (
+              <button
+                key={sheet}
+                type="button"
+                onClick={() => setActiveSheet(sheet)}
+                className={`relative -mb-px h-10 rounded-t-lg border px-4 text-sm font-black transition ${activeSheet === sheet ? "border-slate-200 border-b-white bg-white text-slate-950 shadow-[inset_0_3px_0_#FF6A00]" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-white hover:text-orange-600"}`}
+              >
+                {sheet}
               </button>
             ))}
-          </div>
-          <div className="mb-3 flex flex-wrap gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+            {activeSheet === "발주 진행 단계" && (
+              <div className="mx-3 flex flex-wrap items-center gap-2 pb-1">
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
               if (status) changeSelectedOrderStatus(status);
@@ -8088,18 +8097,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="케이모아">케이모아</option>
             </select>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
-          </div>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {visibleSalesSheetNames.map((sheet) => (
+              </div>
+            )}
+            {visibleSalesSheetNames.slice(1).map((sheet) => (
               <button
                 key={sheet}
                 type="button"
                 onClick={() => setActiveSheet(sheet)}
-                className={`rounded-md px-3 py-2 text-sm font-black ${activeSheet === sheet ? "bg-orange-500 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
+                className={`relative -mb-px h-10 rounded-t-lg border px-4 text-sm font-black transition ${activeSheet === sheet ? "border-slate-200 border-b-white bg-white text-slate-950 shadow-[inset_0_3px_0_#FF6A00]" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-white hover:text-orange-600"}`}
               >
                 {sheet}
               </button>
             ))}
+            <div className="ml-auto flex items-center gap-2 pb-1">
             {activeSheet === "FN판매입력" && (
               <span className="inline-flex items-center rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">
                 판매입력 총 금액 : {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원
@@ -8110,6 +8120,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 구매입력 총 금액 : {Math.round(purchaseSupplyTotal).toLocaleString("ko-KR")}원
               </span>
             )}
+            </div>
           </div>
           <SalesExcelGrid
             sheet={activeSheet}
