@@ -5131,13 +5131,13 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  "FN판매입력": ["일자", "순번", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
-  "FN구매입력": ["일자", "순번", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
+  "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
+  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
 
 const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
-  "FN판매입력": ["일자", "거래처명", "출하창고", "품목코드", "품목명", "수량"],
-  "FN구매입력": ["일자", "거래처명", "입고창고", "품목코드", "품목명", "수량"],
+  "FN판매입력": ["일자", "출하창고", "품목코드", "품목명", "수량"],
+  "FN구매입력": ["일자", "입고창고", "품목코드", "품목명", "수량"],
 };
 
 const visibleSalesSheetNames: SalesSheetName[] = ["발주 진행 단계", "송장출력용", "FN판매입력", "FN구매입력"];
@@ -5158,10 +5158,12 @@ function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
 }
 
 function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
+  if ((sheet === "FN판매입력" || sheet === "FN구매입력") && row.length === salesSheetHeaders[sheet].length + 1) {
+    return [row[0] || "", ...row.slice(2)];
+  }
   if (sheet === "FN판매입력" && row.length > salesSheetHeaders[sheet].length) {
     return [
       row[0] || "",
-      row[1] || "",
       row[2] || "",
       row[3] || "",
       row[5] || "100",
@@ -5179,7 +5181,6 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
   if (sheet === "FN구매입력" && row.length > salesSheetHeaders[sheet].length) {
     return [
       row[0] || "",
-      row[1] || "",
       row[2] || "",
       row[3] || "",
       row[5] || "100",
@@ -5412,7 +5413,6 @@ function aggregateSalesEntryRows(
     const averagePrice = entry.qty ? entry.total / entry.qty : 0;
     return {
       ...entry.row,
-      순번: String(statementNumbers.get(entry.statementKey) || 1),
       수량: String(entry.qty),
       단가: String(Math.round(averagePrice)),
       세액: entry.tax ? String(Math.round(entry.tax)) : "",
@@ -7460,7 +7460,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
-    "순번": "1",
     "거래처코드": "",
     "거래처명": "",
     "출하창고": "100",
@@ -8124,18 +8123,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const progress = progressRows[rowIndex];
         const purchase = salesSheetHeaders["FN구매입력"].map(() => "");
         const today = salesWorkspaceDayKey().replace(/\D/g, "");
-        purchase[0] = today;
-        purchase[1] = String(orderIndex + 1);
-        purchase[3] = partner;
-        purchase[4] = "100";
-        purchase[5] = "포함";
-        purchase[6] = progress ? progressValue(progress, "품목코드(ERP)") : "";
-        purchase[7] = progress ? progressValue(progress, "품목명(ERP)") : "";
-        purchase[8] = progress ? progressValue(progress, "수량") || "1" : "1";
-        purchase[9] = progress ? progressValue(progress, "정산예정금액") : "";
-        purchase[11] = progress ? progressValue(progress, "정산예정금액") : "";
-        purchase[12] = progress ? progressValue(progress, "정산예정금액") : "";
-        purchase[13] = `직송 ${partner}`;
+        const setPurchase = (header: string, value: string) => {
+          const index = salesSheetHeaders["FN구매입력"].indexOf(header);
+          if (index >= 0) purchase[index] = value;
+        };
+        setPurchase("일자", today);
+        setPurchase("거래처명", partner);
+        setPurchase("입고창고", "100");
+        setPurchase("VAT 포함/별도", "포함");
+        setPurchase("품목코드", progress ? progressValue(progress, "품목코드(ERP)") : "");
+        setPurchase("품목명", progress ? progressValue(progress, "품목명(ERP)") : "");
+        setPurchase("수량", progress ? progressValue(progress, "수량") || "1" : "1");
+        setPurchase("단가", progress ? progressValue(progress, "정산예정금액") : "");
+        setPurchase("공급가액", progress ? progressValue(progress, "정산예정금액") : "");
+        setPurchase("합계금액", progress ? progressValue(progress, "정산예정금액") : "");
+        setPurchase("메모", `직송 ${partner}`);
         purchaseRows[rowIndex] = purchase;
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
@@ -8155,7 +8157,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const item = salesRowObject("FN판매입력", row);
         return {
           일자: item.일자,
-          순번: item.순번,
           거래처코드: item.거래처코드,
           거래처명: item.거래처명,
           출하창고: item.출하창고 || "100",
@@ -8170,16 +8171,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    const missingRequired = sourceRows.filter((item) => !item.일자 || !item.거래처명 || !item.출하창고 || !item.품목코드 || !item.품목명);
+    const missingRequired = sourceRows.filter((item) => !item.일자 || !(item.거래처코드 || item.거래처명) || !item.출하창고 || !item.품목코드 || !item.품목명);
     if (missingRequired.length) {
-      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처명, 출하창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
-    const rows = aggregatedRows.map((item) => ({
+    const rows = aggregatedRows.map((item, index) => ({
       sale_date: item.일자,
       io_date: item.일자,
-      upload_ser_no: item.순번,
+      upload_ser_no: String(index + 1),
       cust_code: item.거래처코드,
       cust_name: item.거래처명,
       wh_cd: item.출하창고,
@@ -8237,7 +8238,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const item = salesRowObject("FN구매입력", row);
         return {
           일자: item.일자,
-          순번: item.순번,
           거래처코드: item.거래처코드,
           거래처명: item.거래처명,
           입고창고: item.입고창고 || "100",
@@ -8252,16 +8252,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    const missingRequired = sourceRows.filter((item) => !item.일자 || !item.거래처명 || !item.입고창고 || !item.품목코드 || !item.품목명);
+    const missingRequired = sourceRows.filter((item) => !item.일자 || !(item.거래처코드 || item.거래처명) || !item.입고창고 || !item.품목코드 || !item.품목명);
     if (missingRequired.length) {
-      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처명, 입고창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
-    const rows = aggregatedRows.map((item) => ({
+    const rows = aggregatedRows.map((item, index) => ({
       purchase_date: item.일자,
       io_date: item.일자,
-      upload_ser_no: item.순번,
+      upload_ser_no: String(index + 1),
       cust_code: item.거래처코드,
       cust_name: item.거래처명,
       wh_cd: item.입고창고,
@@ -9302,7 +9302,7 @@ function SalesPurchaseEntryModal({
   }, []);
 
   const filteredCustomers = customers.filter((customer) => {
-    const needle = customerText.trim().toLowerCase();
+    const needle = (customerText.trim() || customerCode.trim()).toLowerCase();
     if (!needle) return true;
     return [customer.customer_code, customer.cust_code, customer.customer_name, customer.cust_name].some((value) => String(value || "").toLowerCase().includes(needle));
   }).slice(0, 12);
@@ -9439,8 +9439,8 @@ function SalesPurchaseEntryModal({
   async function saveRows() {
     setLocalError("");
     const validLines = lines.filter((line) => line.prod_cd.trim());
-    if (!entryDate || !customerText.trim() || !warehouseCode.trim() || !validLines.length) {
-      setLocalError("날짜, 거래처, 창고, 품목코드 1개 이상은 필수입니다.");
+    if (!entryDate || !(customerText.trim() || customerCode.trim()) || !warehouseCode.trim() || !validLines.length) {
+      setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 1개 이상은 필수입니다.");
       return;
     }
     const rows = validLines.map((line, index) => ({
@@ -9502,13 +9502,16 @@ function SalesPurchaseEntryModal({
       <div ref={formRef} className="space-y-4">
         <div className="grid max-w-[500px] gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <FormField label="날짜" required><input className={modalInputClass} type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} onKeyDown={(event) => handleRequiredEnter(event, Boolean(entryDate))} /></FormField>
-          <FormField label={partnerLabel} required>
+          <FormField label="거래처코드">
+            <input className={modalInputClass} value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} onKeyDown={(event) => handleRequiredEnter(event, Boolean(customerCode.trim() || customerText.trim()))} placeholder="거래처코드" />
+          </FormField>
+          <FormField label={partnerLabel}>
             <div className="relative">
               <input className={modalInputClass} value={customerText} onFocus={() => setCustomerPickerOpen(true)} onChange={(event) => { setCustomerText(event.target.value); setCustomerPickerOpen(true); setCustomerIndex(0); }} onKeyDown={(event) => {
                 if (event.key === "ArrowDown") { event.preventDefault(); setCustomerIndex((value) => Math.min(filteredCustomers.length - 1, value + 1)); return; }
                 if (event.key === "ArrowUp") { event.preventDefault(); setCustomerIndex((value) => Math.max(0, value - 1)); return; }
                 if (event.key === "Enter" && customerPickerOpen && filteredCustomers[customerIndex]) { event.preventDefault(); selectCustomer(filteredCustomers[customerIndex]); moveToNextField(event.currentTarget); return; }
-                handleRequiredEnter(event, Boolean(customerText.trim()));
+                handleRequiredEnter(event, Boolean(customerText.trim() || customerCode.trim()));
               }} placeholder={`${partnerLabel} 입력`} />
               {customerPickerOpen && filteredCustomers.length > 0 && (
                 <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
