@@ -87,12 +87,6 @@ function inRange(date: string, range?: SummaryRange) {
   return true;
 }
 
-function todayKstStartIso() {
-  const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const ymd = kstNow.toISOString().slice(0, 10);
-  return new Date(`${ymd}T00:00:00+09:00`).toISOString();
-}
-
 async function optionalRows(table: string, query?: Record<string, string | number | boolean | null | undefined>) {
   return selectRows<AnyRecord>(table, query).catch(() => []);
 }
@@ -217,12 +211,6 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
 
   const normalizedChannel = text(channel) || "기타";
   const fileName = text(sourceFileName) || null;
-  const recentBatches = await optionalRows("ad_upload_batches", {
-    channel: `eq.${normalizedChannel}`,
-    status: "eq.SAVED",
-    uploaded_at: `gte.${todayKstStartIso()}`,
-    limit: 30,
-  });
 
   const usdKrwRate = await getUsdKrwRate();
   const previewReports = rows
@@ -232,6 +220,7 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
   const reportDates = Array.from(new Set(previewReports.map((row) => text(row.report_date)).filter(Boolean))).sort();
   let replacedCount = 0;
   const replacedReportIds = new Set<string>();
+  const replacedBatchIds = new Set<string>();
   if (reportDates.length) {
     const existingReports = await optionalRows("ad_reports", {
       channel: `eq.${normalizedChannel}`,
@@ -240,14 +229,7 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
     });
     existingReports.forEach((row) => {
       if (row.id) replacedReportIds.add(text(row.id));
-    });
-  }
-  for (const recentBatch of recentBatches) {
-    const batchId = text(recentBatch.id);
-    if (!batchId) continue;
-    const existingReports = await optionalRows("ad_reports", { batch_id: `eq.${batchId}`, limit: 5000 });
-    existingReports.forEach((row) => {
-      if (row.id) replacedReportIds.add(text(row.id));
+      if (row.batch_id) replacedBatchIds.add(text(row.batch_id));
     });
   }
   replacedCount = replacedReportIds.size;
@@ -279,11 +261,9 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
       report_date: `in.(${reportDates.join(",")})`,
     }).catch(() => []);
   }
-  for (const recentBatch of recentBatches) {
-    const batchId = text(recentBatch.id);
+  for (const batchId of replacedBatchIds) {
     if (!batchId) continue;
-    await deleteRows("ad_reports", { batch_id: `eq.${batchId}` }).catch(() => []);
-    await patchRows("ad_upload_batches", { id: `eq.${batchId}` }, { status: "REPLACED", memo: `새 ${normalizedChannel} 업로드로 교체됨` }).catch(() => []);
+    await patchRows("ad_upload_batches", { id: `eq.${batchId}` }, { status: "REPLACED", memo: `${reportDates.join(", ")} ${normalizedChannel} 업로드로 교체됨` }).catch(() => []);
   }
 
   const reports = previewReports.map((row) => ({ ...row, batch_id: batch.id }));
