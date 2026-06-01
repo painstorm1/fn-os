@@ -72,47 +72,29 @@ function unavailableReason(sourceType: string, title = "", description = "") {
   return "";
 }
 
-function inferEducationalCategory(text: string): { group: CategoryGroup; categoryName: string } | null {
-  const value = text.toLowerCase();
-  if (/photoshop|포토샵|psd|합성|보정|누끼|목업|mockup|자막|색조합|컬러팔레트|color palette|튜토리얼|tutorial|강좌|팁|tip/.test(value)) {
-    return { group: "교육", categoryName: "포토샵" };
-  }
-  if (/illustrator|일러스트|로고|logo|벡터|vector|아이콘|icon|브랜딩|branding/.test(value)) {
-    return { group: "교육", categoryName: "일러스트" };
-  }
-  if (/\bai\b|chatgpt|gpt|midjourney|미드저니|프롬프트|prompt|자동화/.test(value)) {
-    return { group: "교육", categoryName: "AI" };
-  }
-  if (/english|영어|회화|voca|grammar|토익/.test(value)) {
-    return { group: "교육", categoryName: "영어" };
-  }
-  return null;
+function countMatches(value: string, pattern: RegExp) {
+  return value.match(pattern)?.length || 0;
 }
 
-function inferPersonalCategory(text: string): { group: CategoryGroup; categoryName: string } | null {
+function inferCategoryBySignals(text: string): { group: CategoryGroup; categoryName: string } | null {
   const value = text.toLowerCase();
-  if (/캠핑|캠핑장|글램핑|카라반|차박|오토캠핑|백패킹|camping|glamping|caravan/.test(value)) {
-    return { group: "개인", categoryName: "캠핑" };
-  }
-  if (/여행|숙소|펜션|호텔|리조트|가평|양양|제주|강릉|속초|travel|trip|hotel|resort/.test(value)) {
-    return { group: "개인", categoryName: "여행" };
-  }
-  if (/요리|레시피|맛집|음식|반찬|recipe|cook/.test(value)) {
-    return { group: "개인", categoryName: "요리" };
-  }
-  if (/육아|아이|아기|유아|키즈|kids|baby/.test(value)) {
-    return { group: "개인", categoryName: "육아" };
-  }
-  if (/살림|청소|정리|수납|생활팁|housekeeping/.test(value)) {
-    return { group: "개인", categoryName: "살림" };
-  }
-  if (/동기부여|명언|자기계발|motivation/.test(value)) {
-    return { group: "개인", categoryName: "동기부여" };
-  }
-  if (/유머|웃긴|밈|meme|funny/.test(value)) {
-    return { group: "개인", categoryName: "유머" };
-  }
-  return null;
+  const candidates = [
+    { group: "개인" as CategoryGroup, categoryName: "캠핑", score: countMatches(value, /캠핑장|글램핑|카라반|차박|오토캠핑|백패킹|camping|glamping|caravan/g) * 3 + countMatches(value, /캠핑/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "여행", score: countMatches(value, /여행|숙소|펜션|호텔|리조트|travel|trip|hotel|resort/g) * 2 + countMatches(value, /가평|양양|제주|강릉|속초/g) },
+    { group: "개인" as CategoryGroup, categoryName: "요리", score: countMatches(value, /요리|레시피|맛집|음식|반찬|recipe|cook/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "육아", score: countMatches(value, /육아|아이|아기|유아|키즈|kids|baby/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "살림", score: countMatches(value, /살림|청소|정리|수납|생활팁|housekeeping/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "동기부여", score: countMatches(value, /동기부여|명언|자기계발|motivation/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "유머", score: countMatches(value, /유머|웃긴|밈|meme|funny/g) * 2 },
+    { group: "교육" as CategoryGroup, categoryName: "포토샵", score: countMatches(value, /photoshop|포토샵|psd|합성|보정|누끼|목업|mockup|자막|색조합|컬러팔레트|color palette|튜토리얼|tutorial|강좌/g) * 2 + countMatches(value, /팁|tip/g) },
+    { group: "교육" as CategoryGroup, categoryName: "일러스트", score: countMatches(value, /illustrator|일러스트|로고|logo|벡터|vector|아이콘|icon|브랜딩|branding/g) * 2 },
+    { group: "교육" as CategoryGroup, categoryName: "AI", score: countMatches(value, /\bai\b|chatgpt|gpt|midjourney|미드저니|프롬프트|prompt|자동화/g) * 2 },
+    { group: "교육" as CategoryGroup, categoryName: "영어", score: countMatches(value, /english|영어|회화|voca|grammar|토익/g) * 2 },
+  ].filter((candidate) => candidate.score > 0).sort((a, b) => b.score - a.score);
+
+  if (!candidates[0] || candidates[0].score < 2) return null;
+  if (candidates[1] && candidates[0].score === candidates[1].score) return null;
+  return { group: candidates[0].group, categoryName: candidates[0].categoryName };
 }
 
 function normalizeUrl(url: string) {
@@ -134,16 +116,15 @@ function fallbackDrafts(text: string): ArchiveAiDraft[] {
     if (seen.has(url)) return [];
     seen.add(url);
     const sourceType = sourceFromUrl(url);
-    const personal = inferPersonalCategory(`${compactText} ${url}`);
-    const education = inferEducationalCategory(`${compactText} ${url}`);
+    const category = inferCategoryBySignals(`${compactText} ${url}`);
     return [{
       url,
       title: shortTitle(sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url), sourceType),
       memo: "",
       source_type: sourceType,
       content_type: sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : "link",
-      category_group: personal?.group || education?.group || "업무",
-      category_name: personal?.categoryName || education?.categoryName || (sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법"),
+      category_group: category?.group || "업무",
+      category_name: category?.categoryName || (sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법"),
     }];
   });
 }
@@ -163,14 +144,10 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
     const title = String(item.title || "");
     const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
     const categoryContext = `${title} ${memo} ${fallbackText} ${url}`;
-    const personal = inferPersonalCategory(categoryContext);
-    const education = inferEducationalCategory(categoryContext);
-    if (personal) {
-      group = personal.group;
-      categoryName = personal.categoryName;
-    } else if (education) {
-      group = education.group;
-      categoryName = education.categoryName;
+    const category = inferCategoryBySignals(categoryContext);
+    if (category) {
+      group = category.group;
+      categoryName = category.categoryName;
     } else if ((sourceType === "instagram" || sourceType === "youtube") && group === "개인" && categoryName === "기타") {
       group = "업무";
       categoryName = "광고소재";
@@ -204,13 +181,12 @@ async function attachMetadata(drafts: ArchiveAiDraft[]) {
       const metadataTitle = titleFromMetadata(metadata.title || "");
       const warning = unavailableReason(draft.source_type, metadataTitle || metadata.title, metadata.description);
       const categoryContext = `${metadata.title} ${metadata.description} ${draft.title} ${draft.memo}`;
-      const personal = inferPersonalCategory(categoryContext);
-      const education = inferEducationalCategory(categoryContext);
+      const category = inferCategoryBySignals(categoryContext);
       return {
         ...draft,
         title: warning && !metadataTitle ? "접근불가 콘텐츠" : metadataTitle || draft.title,
         memo: draft.memo,
-        ...(personal ? { category_group: personal.group, category_name: personal.categoryName } : education ? { category_group: education.group, category_name: education.categoryName } : {}),
+        ...(category ? { category_group: category.group, category_name: category.categoryName } : {}),
         ...(warning ? { warning } : {}),
         og_title: metadata.title || "",
         og_description: metadata.description || "",
@@ -230,15 +206,11 @@ function mergeWarnings(refined: ArchiveAiDraft[], metadataDrafts: DraftMetadata[
   });
 }
 
-function applyCategoryOverrides(drafts: ArchiveAiDraft[], contextText: string) {
-  const globalPersonal = inferPersonalCategory(contextText);
-  const strongCampingContext = (contextText.match(/캠핑장|캠핑|글램핑|카라반|차박/g) || []).length >= 2;
+function applyCategoryOverrides(drafts: ArchiveAiDraft[], _contextText: string) {
   return drafts.map((draft) => {
     const itemContext = `${draft.title} ${draft.memo} ${draft.url}`;
-    const personal = inferPersonalCategory(itemContext) || (globalPersonal?.categoryName === "캠핑" && strongCampingContext ? globalPersonal : null) || (globalPersonal?.categoryName === "캠핑" && !inferEducationalCategory(itemContext) ? globalPersonal : null);
-    if (personal) return { ...draft, category_group: personal.group, category_name: personal.categoryName };
-    const education = inferEducationalCategory(itemContext);
-    if (education) return { ...draft, category_group: education.group, category_name: education.categoryName };
+    const itemCategory = inferCategoryBySignals(itemContext);
+    if (itemCategory) return { ...draft, category_group: itemCategory.group, category_name: itemCategory.categoryName };
     return draft;
   });
 }
@@ -273,11 +245,10 @@ async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMe
               "memo는 사용자가 직접 남긴 의미 있는 메모만 유지해. likes/comments/view/date/time 숫자는 버려.",
               "warning이 있으면 그대로 유지해. warning이 있으면 제목을 접근 불가 상태가 드러나게 짧게 정리해.",
               `허용 category_group/category_name: ${JSON.stringify(categoryTree)}`,
-              "분류 우선순위: 캠핑장/글램핑/카라반/차박/가평 등 개인 관심 장소 정보는 instagram/youtube여도 개인/캠핑 또는 개인/여행이 우선이다.",
-              "분류 우선순위: 포토샵/일러스트/AI/영어 튜토리얼, 팁, 강좌, 목업, 로고, 색조합, 자막, 디자인 방법론은 instagram/youtube여도 교육 카테고리가 우선이다.",
-              "포토샵 튜토리얼/목업/합성/자막/색조합/컬러팔레트는 교육/포토샵. 로고/벡터/일러스트레이터/아이콘은 교육/일러스트. AI 도구/프롬프트는 교육/AI.",
-              "캠핑장 소개/캠핑장 정보/글램핑장/카라반/차박지는 개인/캠핑. 여행지/숙소/펜션/호텔은 개인/여행.",
-              "instagram/youtube 링크는 위 개인/교육 단서가 없을 때만 업무/광고소재로 분류해.",
+              "분류 기준: 출처보다 실제 내용 단서를 더 중요하게 보되, 특정 키워드 하나만으로 무조건 단정하지 말고 제목/본문/OG/주변 문구를 함께 비교해.",
+              "예: 캠핑장 소개/글램핑/카라반/차박은 개인/캠핑 후보, 여행지/숙소/펜션/호텔은 개인/여행 후보, 포토샵 튜토리얼/목업/합성/자막/색조합은 교육/포토샵 후보야.",
+              "예: 로고/벡터/일러스트레이터/아이콘은 교육/일러스트 후보, AI 도구/프롬프트는 교육/AI 후보야.",
+              "instagram/youtube 링크는 개인/교육/소싱/상세페이지 등 더 적절한 단서가 없을 때만 업무/광고소재로 분류해.",
               `이미지/스크린샷에서 읽은 원문: ${visibleText}`,
               `후보와 OG 메타데이터: ${JSON.stringify(drafts)}`,
               '반환 형식: {"drafts":[{"url":"","title":"","memo":"","source_type":"","content_type":"","category_group":"","category_name":"","warning":""}]}',
