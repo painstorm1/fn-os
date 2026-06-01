@@ -1460,6 +1460,12 @@ function importHref(path: string) {
   return `/?menu=import&section=${encodeURIComponent(path)}`;
 }
 
+type ImportProductTab = "products" | "materials";
+
+function isImportProductTab(value: unknown): value is ImportProductTab {
+  return value === "products" || value === "materials";
+}
+
 function assetUrl(path?: string) {
   if (!path) return "";
   if (path.startsWith("http") || path.startsWith("data:image/")) return path;
@@ -1932,6 +1938,8 @@ function NativeImportWorkspace({ path }: { path: string }) {
   const orderMatch = basePath.match(/^\/orders\/(\d+)/);
   const productEditMatch = basePath.match(/^\/products\/(\d+)\/edit/);
   const productMatch = basePath.match(/^\/products\/(\d+)/);
+  const requestedImportProductTab = query.get("tab");
+  const importProductTab = isImportProductTab(requestedImportProductTab) ? requestedImportProductTab : undefined;
   useEffect(() => {
     if (!basePath.startsWith("/orders") && !basePath.startsWith("/products") && !basePath.startsWith("/settings")) {
       void ensureImportErpServer().catch(() => undefined);
@@ -1951,12 +1959,12 @@ function NativeImportWorkspace({ path }: { path: string }) {
   };
   const content = (() => {
     if (basePath.startsWith("/orders/new")) return <NativeOrderForm copyId={copyOrderId} />;
-    if (basePath.startsWith("/products/new")) return <NativeProductForm />;
+    if (basePath.startsWith("/products/new")) return <NativeProductForm listTab={importProductTab} />;
     if (orderEditMatch) return <NativeOrderForm id={Number(orderEditMatch[1])} />;
     if (orderMatch) return <NativeOrderDetail id={Number(orderMatch[1])} />;
-    if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} />;
-    if (productMatch) return <NativeProductForm id={Number(productMatch[1])} />;
-    if (basePath.startsWith("/products")) return <NativeProducts />;
+    if (productEditMatch) return <NativeProductForm id={Number(productEditMatch[1])} listTab={importProductTab} />;
+    if (productMatch) return <NativeProductForm id={Number(productMatch[1])} listTab={importProductTab} />;
+    if (basePath.startsWith("/products")) return <NativeProducts initialTab={importProductTab} />;
     if (basePath.startsWith("/settings")) return <NativeSettings />;
     return <NativeOrders initialOpenOrderId={openOrderId} initialFilters={initialOrderFilters} />;
   })();
@@ -2813,13 +2821,19 @@ function LegacyNativeOrders() {
   );
 }
 
-function NativeProducts() {
-  useF2Navigate(true, importHref("/products/new"));
+function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProductTab }) {
+  useF2Navigate(true, importHref(`/products/new?tab=${initialTab}`));
   const initialProducts = readInitialImportCache<{ products?: ImportProduct[] }>("/api/fnos/products");
   const [products, setProducts] = useState<ImportProduct[]>(initialProducts?.products || []);
   const [loading, setLoading] = useState(!initialProducts?.products?.length);
-  const [tab, setTab] = useState<"products" | "materials">("products");
+  const [tab, setTab] = useState<ImportProductTab>(initialTab);
   const [query, setQuery] = useState("");
+
+  function switchTab(nextTab: ImportProductTab) {
+    setTab(nextTab);
+    if (typeof window === "undefined") return;
+    window.history.replaceState(window.history.state, "", importHref(`/products?tab=${nextTab}`));
+  }
 
   useEffect(() => {
     let alive = true;
@@ -2858,19 +2872,19 @@ function NativeProducts() {
         <>
         <div className="mb-4 grid gap-3">
           <div className="grid gap-2 md:grid-cols-[120px_1fr]">
-            <Link className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/products/new")}>F2 새 제품</Link>
+            <Link className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref(`/products/new?tab=${tab}`)}>F2 새 제품</Link>
             <input className="field-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명 or 거래처명" />
           </div>
           <div className="flex items-center gap-3 text-sm font-black">
-            <button type="button" onClick={() => setTab("products")} className={!query.trim() && tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
+            <button type="button" onClick={() => switchTab("products")} className={!query.trim() && tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
             <span className="text-slate-300">|</span>
-            <button type="button" onClick={() => setTab("materials")} className={!query.trim() && tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
+            <button type="button" onClick={() => switchTab("materials")} className={!query.trim() && tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
             {query.trim() && <span className="text-xs text-slate-500">검색 중에는 상품/부자재 전체에서 찾습니다.</span>}
           </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
           {visibleProducts.map((product) => (
-            <Link key={product.id} href={importHref(`/products/${product.id}/edit`)} className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-orange-200 hover:bg-orange-50/60">
+            <Link key={product.id} href={importHref(`/products/${product.id}/edit?tab=${isMaterial(product) ? "materials" : tab}`)} className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-orange-200 hover:bg-orange-50/60">
               <div className="aspect-square w-full overflow-hidden rounded-md bg-slate-100">
                 {product.image_path && <img src={assetUrl(product.image_path)} alt={product.name} className="h-full w-full object-cover" />}
               </div>
@@ -2963,7 +2977,7 @@ function NativeProductDetail({ id }: { id: number }) {
       invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/dashboard");
-      window.location.href = importHref("/products");
+      window.location.href = importHref(`/products?tab=${isMaterial(product) ? "materials" : "products"}`);
     } catch {
       alert("삭제 요청이 서버에 닿지 않았습니다. 수입관리 서버를 확인해주세요.");
     }
@@ -2976,7 +2990,7 @@ function NativeProductDetail({ id }: { id: number }) {
       subtitle={product ? `${product.factory_name || "-"}` : "수입관리 제품 데이터"}
       action={<div className="flex gap-2">
         <button type="button" className="rounded-md border border-rose-300 px-4 py-2 text-sm font-black text-rose-600" onClick={deleteProduct}>삭제</button>
-        <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit`)}>수정</Link>
+        <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit?tab=${isMaterial(product) ? "materials" : "products"}`)}>수정</Link>
       </div>}
     >
       {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : product ? (
@@ -3010,7 +3024,7 @@ function NativeProductDetail({ id }: { id: number }) {
                   <h3 className="font-black">옵션/연동 SKU</h3>
                   <p className="mt-1 text-xs font-bold text-slate-500">연동 SKU {skuLinks.length.toLocaleString("ko-KR")}개</p>
                 </div>
-                <Link className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-600" href={importHref(`/products/${id}/edit`)}>SKU 추가</Link>
+                <Link className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-600" href={importHref(`/products/${id}/edit?tab=${isMaterial(product) ? "materials" : "products"}`)}>SKU 추가</Link>
               </div>
               <div className="overflow-x-auto p-4">
                 <table className="w-full min-w-[680px] text-sm">
@@ -3294,7 +3308,7 @@ function FnProductPickerModal({
   );
 }
 
-function NativeProductForm({ id }: { id?: number }) {
+function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProductTab }) {
   const { data, loading } = useImportFormData();
   const [product, setProduct] = useState<ImportProduct | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(id));
@@ -3315,6 +3329,11 @@ function NativeProductForm({ id }: { id?: number }) {
   const [fnProductPickerOpen, setFnProductPickerOpen] = useState(false);
   const [fnProductPickerOption, setFnProductPickerOption] = useState("");
   const [fnSkuLinks, setFnSkuLinks] = useState<ImportSkuLink[]>([]);
+
+  function productListHref() {
+    const targetTab: ImportProductTab = itemType === "MATERIAL" || listTab === "materials" ? "materials" : "products";
+    return importHref(`/products?tab=${targetTab}`);
+  }
 
   useEscapeToClose(productLinkOpen, () => setProductLinkOpen(false));
   useEscapeToClose(fnProductPickerOpen, () => setFnProductPickerOpen(false));
@@ -3542,7 +3561,7 @@ function NativeProductForm({ id }: { id?: number }) {
       invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/dashboard");
-      window.location.href = importHref("/products");
+      window.location.href = productListHref();
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 저장에 실패했습니다.");
     } finally {
@@ -3569,7 +3588,7 @@ function NativeProductForm({ id }: { id?: number }) {
       invalidateApiCache("/api/fnos/form-data");
       invalidateApiCache("/api/fnos/orders");
       invalidateApiCache("/api/fnos/dashboard");
-      window.location.href = importHref("/products");
+      window.location.href = productListHref();
     } catch (err) {
       setError(err instanceof Error ? err.message : "제품 삭제에 실패했습니다.");
     } finally {
@@ -3818,7 +3837,7 @@ function NativeProductForm({ id }: { id?: number }) {
                 )}
               </div>
               <div className="flex gap-2">
-                <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref("/products")}>취소</Link>
+                <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={productListHref()}>취소</Link>
                 <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{saving ? "저장 중..." : "저장"}</button>
               </div>
             </div>
