@@ -52,6 +52,8 @@ type AutoArchiveDraft = {
   category_group: CategoryGroup;
   category_name: string;
   warning?: string;
+  project_name?: string;
+  project_draft?: string;
 };
 
 type CategoryGroup = "교육" | "업무" | "개인";
@@ -268,8 +270,7 @@ export default function ArchiveWorkspace() {
   const [activeSubCategory, setActiveSubCategory] = useState("");
   const [activeProject, setActiveProject] = useState("");
   const [localProjects, setLocalProjects] = useState<string[]>([]);
-  const [saveProject, setSaveProject] = useState("");
-  const [saveProjectDraft, setSaveProjectDraft] = useState("");
+  const [toolbarProjectDraft, setToolbarProjectDraft] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
@@ -569,7 +570,7 @@ export default function ArchiveWorkspace() {
     setMessage("자동 정리 항목을 저장 중입니다.");
     try {
       const results = await Promise.all(autoDrafts.map((draft) => {
-        const { warning: _warning, ...saveDraft } = draft;
+        const { warning: _warning, project_name: _projectName, project_draft: _projectDraft, ...saveDraft } = draft;
         const payload = {
           ...saveDraft,
           category_id: categoryIdByName.get(draft.category_name) || null,
@@ -587,8 +588,14 @@ export default function ArchiveWorkspace() {
           return result;
         });
       }));
-      const savedIds = results.map((result) => String(result?.saved?.id || "")).filter(Boolean);
-      if (saveProject && savedIds.length) await moveArchiveItemsToProject(savedIds, saveProject);
+      const idsByProject = new Map<string, string[]>();
+      results.forEach((result, index) => {
+        const id = String(result?.saved?.id || "");
+        const project = cleanProjectName(autoDrafts[index]?.project_name || "");
+        if (!id || !project) return;
+        idsByProject.set(project, [...(idsByProject.get(project) || []), id]);
+      });
+      await Promise.all(Array.from(idsByProject.entries()).map(([project, ids]) => moveArchiveItemsToProject(ids, project)));
       void Promise.all(results.map((result) => requestPreview(result?.saved?.id)));
       const savedCount = autoDrafts.length;
       setAutoDrafts([]);
@@ -615,7 +622,6 @@ export default function ArchiveWorkspace() {
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
       const result = await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
-      if (saveProject && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], saveProject);
       void requestPreview(result?.saved?.id);
       setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
       setMessage("링크를 저장했습니다.");
@@ -639,7 +645,6 @@ export default function ArchiveWorkspace() {
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
       invalidateClientCache("/api/fnos/archive");
-      if (saveProject && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], saveProject);
       void requestPreview(result?.saved?.id);
       setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";
@@ -724,6 +729,20 @@ export default function ArchiveWorkspace() {
                 {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
               </select>
             )}
+            {activeMenu !== "save" && (
+              <>
+                <input className="field-input h-10 !w-44 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={toolbarProjectDraft} onChange={(event) => setToolbarProjectDraft(event.target.value)} />
+                <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => {
+                  const project = rememberProject(toolbarProjectDraft);
+                  if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
+                  setToolbarProjectDraft("");
+                  setActiveProject(project);
+                  setActiveMenu("project");
+                }}>
+                  프로젝트 생성
+                </ActionButton>
+              </>
+            )}
           </div>
           {activeMenu !== "save" && (
             <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
@@ -772,21 +791,6 @@ export default function ArchiveWorkspace() {
                 <button type="button" onClick={() => setSaveMode("auto")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "auto" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>자동정리</button>
                 <button type="button" onClick={() => setSaveMode("manual")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "manual" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>수동업로드</button>
               </div>
-            </div>
-            <div className="grid gap-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-              <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={saveProject} onChange={(event) => setSaveProject(event.target.value)}>
-                <option value="">프로젝트 없음</option>
-                {projects.map((project) => <option key={project} value={project}>{project}</option>)}
-              </select>
-              <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={saveProjectDraft} onChange={(event) => setSaveProjectDraft(event.target.value)} />
-              <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => {
-                const project = rememberProject(saveProjectDraft);
-                if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
-                setSaveProject(project);
-                setSaveProjectDraft("");
-              }}>
-                새 프로젝트 생성
-              </ActionButton>
             </div>
 
             {saveMode === "auto" ? (
@@ -870,6 +874,20 @@ export default function ArchiveWorkspace() {
                     <select className="field-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={draft.category_name} onChange={(event) => setAutoDraftCategory(index, event.target.value)}>
                       {categoryTree[draft.category_group].map((category) => <option key={category}>{category}</option>)}
                     </select>
+                  </div>
+                  <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={draft.project_name || ""} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_name: event.target.value, project_draft: "" } : item))}>
+                      <option value="">프로젝트 없음</option>
+                      {projects.map((project) => <option key={project} value={project}>{project}</option>)}
+                    </select>
+                    <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={draft.project_draft || ""} onChange={(event) => setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_draft: event.target.value } : item))} />
+                    <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => {
+                      const project = rememberProject(draft.project_draft || "");
+                      if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
+                      setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, project_name: project, project_draft: "" } : item));
+                    }}>
+                      새 프로젝트 생성
+                    </ActionButton>
                   </div>
                   <a className="mt-2 block truncate text-sm font-black text-orange-600" href={draft.url} target="_blank" rel="noreferrer">{draft.url}</a>
                   {draft.warning && (
