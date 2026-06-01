@@ -286,11 +286,17 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const image = formData.get("image");
     const text = String(formData.get("text") || "");
-    if (!(image instanceof File)) return NextResponse.json({ ok: false, error: "분석할 이미지가 없습니다." }, { status: 400 });
+    if (!(image instanceof File) && !text.trim()) return NextResponse.json({ ok: false, error: "분석할 이미지나 텍스트가 없습니다." }, { status: 400 });
+    const model = process.env.ARCHIVE_AI_MODEL || "gpt-4.1-mini";
+
+    if (!(image instanceof File)) {
+      const drafts = await attachMetadata(fallbackDrafts(text));
+      const refinedDrafts = normalizeArchiveDrafts(await refineDraftsWithAi(apiKey, model, drafts, text), text, drafts);
+      return NextResponse.json({ ok: true, text, drafts: refinedDrafts });
+    }
 
     const bytes = Buffer.from(await image.arrayBuffer());
     const imageUrl = `data:${image.type || "image/png"};base64,${bytes.toString("base64")}`;
-    const model = process.env.ARCHIVE_AI_MODEL || "gpt-4.1-mini";
 
     const controller = new AbortController();
     timeout = setTimeout(() => controller.abort(), 45_000);

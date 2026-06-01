@@ -483,10 +483,30 @@ export default function ArchiveWorkspace() {
     }));
   }
 
-  function extractFromText(nextText = autoText) {
+  function applyTextDraftFallback(nextText = autoText) {
     const drafts = extractArchiveDrafts(nextText);
     setAutoDrafts(drafts);
     setMessage(drafts.length ? `${drafts.length.toLocaleString("ko-KR")}개 링크를 자동 정리했습니다.` : "추출된 링크가 없습니다.");
+  }
+
+  async function organizeTextWithAi(nextText = autoText) {
+    if (!nextText.trim()) return setMessage("정리할 텍스트를 입력해 주세요.");
+    setAutoWorking(true);
+    setMessage("텍스트를 AI로 정리 중입니다.");
+    try {
+      const formData = new FormData();
+      formData.set("text", nextText);
+      const res = await fetch("/api/fnos/archive/ai-organize", { method: "POST", body: formData });
+      const result = await res.json();
+      if (!res.ok || result.ok === false) throw new Error(result.error || "AI 텍스트 정리 실패");
+      const drafts = Array.isArray(result.drafts) ? result.drafts as AutoArchiveDraft[] : [];
+      setAutoDrafts(drafts);
+      setMessage(drafts.length ? `AI가 ${drafts.length.toLocaleString("ko-KR")}개 링크를 정리했습니다.` : "AI가 추출한 링크가 없습니다.");
+    } catch {
+      applyTextDraftFallback(nextText);
+    } finally {
+      setAutoWorking(false);
+    }
   }
 
   async function organizeImageWithAi(file: File) {
@@ -519,7 +539,7 @@ export default function ArchiveWorkspace() {
       } catch {
         const text = await runOcr(file);
         setAutoText((prev) => [prev, text].filter(Boolean).join("\n\n"));
-        extractFromText(text);
+        applyTextDraftFallback(text);
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "이미지 링크 추출 실패");
@@ -790,7 +810,7 @@ export default function ArchiveWorkspace() {
                     <input ref={autoImageRef} className="hidden" type="file" accept="image/*" onChange={(event) => void processImageFile(event.target.files?.[0])} />
                   </label>
                   <ActionButton type="button" variant="secondary" onClick={() => void processImageFile(autoImageRef.current?.files?.[0] || autoImageFileRef.current || undefined)} disabled={autoWorking} className="border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100">이미지에서 추출</ActionButton>
-                  <ActionButton type="button" variant="primary" onClick={() => extractFromText()} disabled={autoWorking}>텍스트 정리</ActionButton>
+                  <ActionButton type="button" variant="primary" onClick={() => void organizeTextWithAi()} disabled={autoWorking}>텍스트 정리</ActionButton>
                 </div>
               </>
             ) : (
