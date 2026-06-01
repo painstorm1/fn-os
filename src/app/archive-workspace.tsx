@@ -263,7 +263,8 @@ function cleanProjectName(value: string) {
 }
 
 export default function ArchiveWorkspace() {
-  const [activeMenu, setActiveMenu] = useState<ActiveMenu>("save");
+  const [activeMenu, setActiveMenu] = useState<ActiveMenu>("all");
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
   const [manualType, setManualType] = useState<"link" | "file">("link");
   const [activeSubCategory, setActiveSubCategory] = useState("");
@@ -351,6 +352,17 @@ export default function ArchiveWorkspace() {
       setLocalProjects([]);
     }
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "F2") return;
+      event.preventDefault();
+      setSaveMode("auto");
+      setSaveModalOpen(true);
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
   useEffect(() => {
@@ -651,6 +663,7 @@ export default function ArchiveWorkspace() {
       setMessage(`${savedCount.toLocaleString("ko-KR")}개 항목을 아카이브에 저장했습니다.`);
       await refresh();
       setActiveMenu("all");
+      setSaveModalOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "자동 정리 저장 실패");
     } finally {
@@ -670,6 +683,7 @@ export default function ArchiveWorkspace() {
       setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "", project_name: "" });
       setMessage("링크를 저장했습니다.");
       await refresh();
+      setSaveModalOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "링크 저장 실패");
     }
@@ -696,17 +710,22 @@ export default function ArchiveWorkspace() {
       if (fileRef.current) fileRef.current.value = "";
       setMessage("파일을 저장했습니다.");
       await refresh();
+      setSaveModalOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "파일 저장 실패");
     }
   }
 
   function openMenu(menu: ActiveMenu) {
+    if (menu === "save") {
+      setSaveMode("auto");
+      setSaveModalOpen(true);
+      return;
+    }
     setActiveMenu(menu);
     setActiveSubCategory("");
     if (menu !== "project") setActiveProject("");
-    if (menu === "save") setSaveMode("auto");
-    if (menu === "all" || menu === "save") {
+    if (menu === "all") {
       setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
     } else if (menu === "project") {
       setFilters(emptyFilters);
@@ -716,7 +735,7 @@ export default function ArchiveWorkspace() {
   }
 
   const menuItems: Array<[ActiveMenu, string]> = [
-    ["save", "새로 저장"],
+    ["save", "F2 새 자료"],
     ["all", "전체"],
     ["교육", "교육"],
     ["업무", "업무"],
@@ -744,7 +763,7 @@ export default function ArchiveWorkspace() {
     : categoryOptionEntries().map((entry) => entry.category);
 
   return (
-    <div className="space-y-4" onPaste={activeMenu === "save" && saveMode === "auto" ? onPasteAuto : undefined}>
+    <div className="space-y-4">
       <PageHeader
         title="아카이브"
         description="링크, 이미지, 파일, 아이디어를 정리하고 업무 자료로 다시 꺼내 씁니다."
@@ -755,16 +774,14 @@ export default function ArchiveWorkspace() {
         <Card className="space-y-3 p-3">
           <div className="flex flex-wrap items-center gap-2 pl-4">
             {menuItems.map(([key, label]) => (
-              <ActionButton key={key} type="button" variant={activeMenu === key ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
+              <ActionButton key={key} type="button" variant={(key === "save" ? saveModalOpen : activeMenu === key) ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
                 {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
               </ActionButton>
             ))}
-            {activeMenu !== "save" && (
-              <select className="field-input h-10 !w-40 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
-                <option value="preview">미리보기</option>
-                <option value="list">리스트보기</option>
-              </select>
-            )}
+            <select className="field-input h-10 !w-40 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
+              <option value="preview">미리보기</option>
+              <option value="list">리스트보기</option>
+            </select>
             <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
               <option value="">프로젝트 바로가기</option>
               {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
@@ -773,8 +790,7 @@ export default function ArchiveWorkspace() {
               프로젝트 생성
             </ActionButton>
           </div>
-          {activeMenu !== "save" && (
-            <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
+          <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
               <ActionButton type="button" variant={selectMode ? "primary" : "secondary"} onClick={() => setSelectMode((prev) => !prev)} className={selectMode ? "whitespace-nowrap px-4" : "whitespace-nowrap border-slate-950 bg-slate-950 px-4 text-white hover:bg-slate-800"}>
                 선택
               </ActionButton>
@@ -804,12 +820,18 @@ export default function ArchiveWorkspace() {
               <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
               <span className="text-center text-sm font-black text-slate-400">~</span>
               <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
-            </FilterBar>
-          )}
+          </FilterBar>
         </Card>
       </section>
 
-      {activeMenu === "save" && (
+      {saveModalOpen && (
+        <FormModal
+          title="새 자료"
+          description="이미지, 링크, 파일을 아카이브에 저장합니다."
+          onClose={() => setSaveModalOpen(false)}
+          size="full"
+          className="max-h-[92vh] overflow-y-auto"
+        >
         <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
           <Card className="space-y-4 p-5" onPaste={onPasteAuto}>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -948,6 +970,7 @@ export default function ArchiveWorkspace() {
             </div>
           </Card>
         </section>
+        </FormModal>
       )}
 
       {(activeMenu === "all" || activeMenu === "project" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
@@ -1098,17 +1121,14 @@ function ArchiveList({
     <div className="space-y-4">
       {selectMode && (
         <section className="flex flex-wrap items-center gap-2 text-xs">
-          <label className="flex h-9 min-w-28 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={allSelected} onChange={toggleAllSelected} aria-label={allSelected ? "모두해제" : "모두선택"} />
-            {allSelected ? "모두해제" : "모두선택"}
-          </label>
+          <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={allSelected} onChange={toggleAllSelected} aria-label={allSelected ? "모두해제" : "모두선택"} title={allSelected ? "모두해제" : "모두선택"} />
           <ActionButton type="button" variant="secondary" onClick={() => void regenerateSelectedPreviews()} disabled={!selectedIds.length} className="h-9 min-w-32 whitespace-nowrap border-orange-200 bg-white px-4 text-xs text-orange-700">
             미리보기 재생성
           </ActionButton>
           <ActionButton type="button" variant="secondary" onClick={() => void deleteSelectedItems()} disabled={!selectedIds.length} className="h-9 min-w-16 whitespace-nowrap border-red-200 px-4 text-xs text-red-600">
             삭제
           </ActionButton>
-          <select className="field-input h-9 !w-32 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryGroup} onChange={(event) => {
+          <select className="field-input h-9 !w-36 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryGroup} onChange={(event) => {
             const group = event.target.value as CategoryGroup | "";
             setBulkCategoryGroup(group);
             setBulkCategoryName("");
@@ -1116,7 +1136,7 @@ function ArchiveList({
             <option value="">카테고리1</option>
             {(Object.keys(categoryTree) as CategoryGroup[]).map((group) => <option key={group} value={group}>{group}</option>)}
           </select>
-          <select className="field-input h-9 !w-40 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
+          <select className="field-input h-9 !w-36 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkCategoryName} onChange={(event) => setBulkCategoryName(event.target.value)}>
             <option value="">카테고리2</option>
             {bulkCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
           </select>
