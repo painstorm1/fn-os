@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, KpiCard, StatusBadge } from "@/components/fn-ui";
-import { cachedJson, readCachedJson } from "@/lib/client-cache";
+import { cachedJson, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
 type Row = Record<string, unknown>;
 type Point = {
@@ -281,8 +281,9 @@ function FixedCostList({ rows }: { rows: Row[] }) {
 }
 
 export default function MainDashboard() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialSummary = readInitialCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+  const [summary, setSummary] = useState<DashboardSummary | null>(initialSummary);
+  const [loading, setLoading] = useState(!initialSummary);
 
   useEffect(() => {
     let alive = true;

@@ -19,6 +19,7 @@ const memoryCache = new Map<string, CacheEntry<unknown>>();
 const DEFAULT_TTL = 60_000;
 const DEFAULT_STORAGE_TTL = 5 * 60_000;
 const STORAGE_PREFIX = "fnos-client-cache:";
+let initialCacheReadEnabled = false;
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -64,6 +65,14 @@ export function readCachedJson<T>(url: string, options: Pick<CachedJsonOptions<T
   const cached = memoryCache.get(key) as CacheEntry<T> | undefined;
   if (cached?.data !== undefined) return cached.data;
   return readStorage<T>(key, options.storageTtl ?? DEFAULT_STORAGE_TTL);
+}
+
+export function markClientCacheReady() {
+  initialCacheReadEnabled = true;
+}
+
+export function readInitialCachedJson<T>(url: string, options: Pick<CachedJsonOptions<T>, "key" | "storageTtl"> = {}) {
+  return initialCacheReadEnabled ? readCachedJson<T>(url, options) : null;
 }
 
 export function cachedJson<T>(url: string, options: CachedJsonOptions<T> = {}): Promise<T> {

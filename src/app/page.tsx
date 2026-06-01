@@ -24,7 +24,7 @@ import {
   modalTextareaClass,
   useEscapeToClose,
 } from "@/components/fn-ui";
-import { cachedJson as cachedClientJson, invalidateClientCache, readCachedJson } from "@/lib/client-cache";
+import { cachedJson as cachedClientJson, invalidateClientCache, markClientCacheReady, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
@@ -1413,6 +1413,10 @@ function readImportCache<T>(path: string, maxAge = 5 * 60_000) {
   return readCachedJson<T>(apiUrl(path), { storageTtl: maxAge });
 }
 
+function readInitialImportCache<T>(path: string, maxAge = 5 * 60_000) {
+  return readInitialCachedJson<T>(apiUrl(path), { storageTtl: maxAge });
+}
+
 function invalidateApiCache(match?: string) {
   if (!match) {
     invalidateClientCache();
@@ -2141,11 +2145,12 @@ function NativeOrders({
   initialFilters?: { q: string; dateFrom: string; dateTo: string };
 }) {
   useF2Navigate(true, importHref("/orders/new"));
-  const [orders, setOrders] = useState<ImportOrder[]>([]);
+  const initialOrders = readInitialImportCache<{ orders?: ImportOrder[] }>("/api/fnos/orders");
+  const [orders, setOrders] = useState<ImportOrder[]>(initialOrders?.orders || []);
   const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [folderOrder, setFolderOrder] = useState<ImportOrder | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialOrders?.orders?.length);
   const [filters, setFilters] = useState(initialFilters);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
 
@@ -2796,8 +2801,9 @@ function LegacyNativeOrders() {
 
 function NativeProducts() {
   useF2Navigate(true, importHref("/products/new"));
-  const [products, setProducts] = useState<ImportProduct[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialProducts = readInitialImportCache<{ products?: ImportProduct[] }>("/api/fnos/products");
+  const [products, setProducts] = useState<ImportProduct[]>(initialProducts?.products || []);
+  const [loading, setLoading] = useState(!initialProducts?.products?.length);
   const [tab, setTab] = useState<"products" | "materials">("products");
   const [query, setQuery] = useState("");
 
@@ -8183,12 +8189,15 @@ function MasterManagementPanel({
 }
 
 function CustomerManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
-  const [customers, setCustomers] = useState<FnCustomer[]>([]);
+  const pageSize = 20;
+  const initialCustomerEndpoint = `/api/fnos/customers?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: "general" }).toString()}`;
+  const initialCustomerData = readInitialCachedJson<{ customers?: FnCustomer[]; total?: number; ok?: boolean; error?: string }>(initialCustomerEndpoint, { storageTtl: 5 * 60_000 });
+  const [customers, setCustomers] = useState<FnCustomer[]>(initialCustomerData?.customers || []);
   const [query, setQuery] = useState("");
   const [relationFilter, setRelationFilter] = useState<CustomerRelationFilter>("general");
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(Number(initialCustomerData?.total || 0));
+  const [loading, setLoading] = useState(!initialCustomerData);
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [channelDraft, setChannelDraft] = useState<SalesChannelDraft>(blankSalesChannelDraft());
@@ -8204,7 +8213,6 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [customerBulkValue, setCustomerBulkValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const customerSelectModeRef = useRef<"select" | "deselect">("select");
-  const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const customerKeys = customers.map((customer) => customer.id || customer.customer_code || customer.cust_code || "").filter(Boolean);
   const selectedCustomers = customers.filter((customer) => selectedCustomerKeys.includes(customer.id || customer.customer_code || customer.cust_code || ""));
@@ -8821,13 +8829,16 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 }
 
 function ProductManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
-  const [products, setProducts] = useState<FnProduct[]>([]);
-  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const pageSize = 20;
+  const initialProductEndpoint = `/api/fnos/products/master?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: "plain" }).toString()}`;
+  const initialProductData = readInitialCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(initialProductEndpoint, { storageTtl: 10 * 60_000 });
+  const [products, setProducts] = useState<FnProduct[]>(initialProductData?.products || []);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>(initialProductData?.warehouses || []);
   const [query, setQuery] = useState("");
   const [searchByCode, setSearchByCode] = useState(false);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(Number(initialProductData?.total || 0));
+  const [loading, setLoading] = useState(!initialProductData);
   const [modalOpen, setModalOpen] = useState(false);
   const [productMessage, setProductMessage] = useState("");
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -8842,7 +8853,6 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const productSelectModeRef = useRef<"select" | "deselect">("select");
   const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
-  const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const productKeys = products.map((product) => product.id || product.product_code || product.sku || "").filter(Boolean);
   const selectedProducts = products.filter((product) => selectedProductKeys.includes(product.id || product.product_code || product.sku || ""));
@@ -11321,15 +11331,25 @@ function AdsAnalysisWorkspace() {
   const defaultRange = adRangeForPreset("yesterday");
   const dateFrom = searchParams.get("adsFrom") || defaultRange.from;
   const dateTo = searchParams.get("adsTo") || defaultRange.to;
-  const [summary, setSummary] = useState<AdsSummary | null>(null);
-  const [chartSummary, setChartSummary] = useState<AdsSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const selectedRange = { from: dateFrom, to: dateTo };
+  const graphRange = adChartRange(dateFrom, dateTo);
+  const initialSummary = readInitialCachedJson<AdsSummary>(adsSummaryUrl(selectedRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+  const initialChartSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
+    ? initialSummary
+    : readInitialCachedJson<AdsSummary>(adsSummaryUrl(graphRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+  const [summary, setSummary] = useState<AdsSummary | null>(initialSummary);
+  const [chartSummary, setChartSummary] = useState<AdsSummary | null>(initialChartSummary);
+  const [loading, setLoading] = useState(!initialSummary || !initialChartSummary);
   const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
   const loadSummary = () => {
-    setLoading(true);
-    const selectedRange = { from: dateFrom, to: dateTo };
-    const graphRange = adChartRange(dateFrom, dateTo);
+    const cachedSummary = readCachedJson<AdsSummary>(adsSummaryUrl(selectedRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+    const cachedChartSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
+      ? cachedSummary
+      : readCachedJson<AdsSummary>(adsSummaryUrl(graphRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+    if (cachedSummary) setSummary(cachedSummary);
+    if (cachedChartSummary) setChartSummary(cachedChartSummary);
+    setLoading(!cachedSummary || !cachedChartSummary);
     const selectedSummary = cachedAdsSummary(selectedRange);
     const graphSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
       ? selectedSummary
@@ -12052,9 +12072,10 @@ function invalidateAccountingCache() {
 }
 
 function AccountingWorkspace() {
+  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const [activeTab, setActiveTab] = useState(accountingTabs[0]);
-  const [summary, setSummary] = useState<AccountingSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
+  const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
@@ -12611,7 +12632,8 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
 }
 
 function AccountingRightPanel() {
-  const [summary, setSummary] = useState<AccountingSummary | null>(null);
+  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+  const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
 
   useEffect(() => {
     let alive = true;
@@ -12685,8 +12707,9 @@ function AccountingRightPanel() {
 }
 
 function DashboardNew() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialSummary = readInitialCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+  const [summary, setSummary] = useState<DashboardSummary | null>(initialSummary);
+  const [loading, setLoading] = useState(!initialSummary);
 
   useEffect(() => {
     let alive = true;
@@ -12760,6 +12783,10 @@ function HomeContent() {
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
+
+  useEffect(() => {
+    markClientCacheReady();
+  }, []);
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
