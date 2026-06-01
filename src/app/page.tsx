@@ -9086,7 +9086,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
             <ActionButton type="button" onClick={openNewEmployee}>F2 새 직원</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={downloadPersonnel}>인사정보 다운로드</ActionButton>
-            <ActionButton type="button" variant="ghost" onClick={downloadPersonnelTemplate} className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></ActionButton>
+            <button type="button" onClick={downloadPersonnelTemplate} className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></button>
             <ActionButton type="button" variant="secondary" onClick={onLock}>잠금</ActionButton>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
@@ -9751,16 +9751,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             <ActionButton type="button" onClick={openNewCustomer}>F2 새 거래처</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => void downloadCustomers()}>거래처정보 다운로드</ActionButton>
-            <ActionButton
+            <button
               type="button"
-              variant="ghost"
               onClick={downloadCustomerTemplate}
-              className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
               <ExcelFormIcon />
-            </ActionButton>
+            </button>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadCustomers(file);
@@ -10389,16 +10388,15 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             <ActionButton type="button" onClick={openNewProduct}>F2 새 품목</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={downloadVisibleProducts}>상품정보 다운로드</ActionButton>
-            <ActionButton
+            <button
               type="button"
-              variant="ghost"
               onClick={downloadProductTemplate}
-              className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
               aria-label="엑셀폼 다운로드"
               title="엑셀폼 다운로드"
             >
               <ExcelFormIcon />
-            </ActionButton>
+            </button>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadProducts(file);
@@ -10913,7 +10911,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
             <ActionButton type="button" onClick={openNewWarehouse}>F2 새 창고</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
             <ActionButton type="button" variant="secondary" onClick={() => void downloadWarehouses()}>창고정보 다운로드</ActionButton>
-            <button type="button" onClick={downloadWarehouseTemplate} className="inline-flex h-10 w-10 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드">
+            <button type="button" onClick={downloadWarehouseTemplate} className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드">
               <ExcelFormIcon />
             </button>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
@@ -11625,7 +11623,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       subtitle="개별 입력 또는 엑셀 업로드로 기초 데이터를 관리합니다."
       action={
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={downloadTemplate} className="inline-flex h-10 w-10 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></button>
+          <button type="button" onClick={downloadTemplate} className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></button>
           <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">
             {uploading ? "업로드 중" : "엑셀 업로드"}
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
@@ -13024,7 +13022,7 @@ function DashboardList({ title, rows, primaryKey, amountKey }: { title: string; 
 
 function ExcelFormIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="h-8 w-8" aria-hidden="true">
+    <svg viewBox="0 0 32 32" className="h-9 w-9" aria-hidden="true">
       <rect x="4" y="3" width="20" height="26" rx="3" fill="#16a34a" />
       <path d="M19 3v7h7" fill="#bbf7d0" />
       <path d="M19 3v7h7" stroke="#15803d" strokeWidth="1.2" strokeLinejoin="round" />
