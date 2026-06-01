@@ -128,13 +128,6 @@ function compactDateLabel(value: string) {
   return `${match[1].slice(2)}.${match[2]}.${match[3]}`;
 }
 
-function parseCompactDateInput(value: string) {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-  if (digits.length === 6) return `20${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`;
-  return null;
-}
-
 type CalendarServerMemo = {
   memo: string;
   order_id?: number;
@@ -10948,8 +10941,6 @@ function AdsRightPanel() {
   const [rangePreset, setRangePreset] = useState<AdRangePreset | "custom">(adPresetForRange(initialFrom, initialTo));
   const [dateFrom, setDateFrom] = useState(initialFrom);
   const [dateTo, setDateTo] = useState(initialTo);
-  const [dateFromText, setDateFromText] = useState(compactDateLabel(initialFrom));
-  const [dateToText, setDateToText] = useState(compactDateLabel(initialTo));
   const [uploadReportDate, setUploadReportDate] = useState(initialFrom === initialTo ? initialFrom : defaultRange.from);
   const [replaceConfirm, setReplaceConfirm] = useState<{ message: string } | null>(null);
 
@@ -10963,8 +10954,6 @@ function AdsRightPanel() {
     setRangePreset(preset);
     setDateFrom(range.from);
     setDateTo(range.to);
-    setDateFromText(compactDateLabel(range.from));
-    setDateToText(compactDateLabel(range.to));
     openAdRange(range.from, range.to);
   }
 
@@ -10973,24 +10962,7 @@ function AdsRightPanel() {
     setRangePreset("custom");
     setDateFrom(next.from);
     setDateTo(next.to);
-    setDateFromText(compactDateLabel(next.from));
-    setDateToText(compactDateLabel(next.to));
     openAdRange(next.from, next.to);
-  }
-
-  function updateDateInput(target: "from" | "to", value: string) {
-    if (target === "from") setDateFromText(value);
-    if (target === "to") setDateToText(value);
-    const parsed = parseCompactDateInput(value);
-    if (!parsed) return;
-    setRangePreset("custom");
-    if (target === "from") setDateFrom(parsed);
-    if (target === "to") setDateTo(parsed);
-  }
-
-  function resetDateInput(target: "from" | "to") {
-    if (target === "from") setDateFromText(compactDateLabel(dateFrom));
-    if (target === "to") setDateToText(compactDateLabel(dateTo));
   }
 
   function pickAdFiles(files: FileList | File[] | null, forcedSource?: AdSourceKey) {
@@ -11080,8 +11052,6 @@ function AdsRightPanel() {
   useEffect(() => {
     setDateFrom(initialFrom);
     setDateTo(initialTo);
-    setDateFromText(compactDateLabel(initialFrom));
-    setDateToText(compactDateLabel(initialTo));
     if (initialFrom === initialTo) setUploadReportDate(initialFrom);
     setRangePreset(adPresetForRange(initialFrom, initialTo));
   }, [initialFrom, initialTo]);
@@ -11224,25 +11194,35 @@ function AdsRightPanel() {
             ))}
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={dateFromText}
-              onChange={(event) => updateDateInput("from", event.target.value)}
-              onBlur={() => resetDateInput("from")}
-              placeholder="26.05.31"
-              className="field-input h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-center text-xs font-black tracking-tight"
-            />
+            <label className="relative block min-w-0">
+              <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-xs font-black tracking-tight text-slate-800">
+                {compactDateLabel(dateFrom)}
+              </span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(event) => {
+                  setRangePreset("custom");
+                  setDateFrom(event.target.value);
+                }}
+                className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-black tracking-tight text-transparent caret-transparent [color-scheme:light] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-datetime-edit]:opacity-0"
+              />
+            </label>
             <span className="text-xs font-black text-slate-400">~</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={dateToText}
-              onChange={(event) => updateDateInput("to", event.target.value)}
-              onBlur={() => resetDateInput("to")}
-              placeholder="26.05.31"
-              className="field-input h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-center text-xs font-black tracking-tight"
-            />
+            <label className="relative block min-w-0">
+              <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-xs font-black tracking-tight text-slate-800">
+                {compactDateLabel(dateTo)}
+              </span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(event) => {
+                  setRangePreset("custom");
+                  setDateTo(event.target.value);
+                }}
+                className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-black tracking-tight text-transparent caret-transparent [color-scheme:light] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-datetime-edit]:opacity-0"
+              />
+            </label>
           </div>
           <ActionButton type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full text-xs">조회</ActionButton>
         </div>
