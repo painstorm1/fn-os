@@ -55,8 +55,9 @@ type AutoArchiveDraft = {
 };
 
 type CategoryGroup = "교육" | "업무" | "개인";
-type ActiveMenu = "save" | "all" | CategoryGroup;
+type ActiveMenu = "save" | "all" | "project" | CategoryGroup;
 type ArchiveViewMode = "preview" | "list";
+const PROJECT_LINK_TYPE = "archive_project";
 
 const categoryTree: Record<CategoryGroup, string[]> = {
   교육: ["영어", "포토샵", "일러스트", "AI"],
@@ -256,11 +257,19 @@ function displayDateInput(value: string) {
   return `${year}.${month}.${day}`;
 }
 
+function cleanProjectName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 export default function ArchiveWorkspace() {
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>("save");
   const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
   const [manualType, setManualType] = useState<"link" | "file">("link");
   const [activeSubCategory, setActiveSubCategory] = useState("");
+  const [activeProject, setActiveProject] = useState("");
+  const [localProjects, setLocalProjects] = useState<string[]>([]);
+  const [saveProject, setSaveProject] = useState("");
+  const [saveProjectDraft, setSaveProjectDraft] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
   const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
@@ -281,18 +290,23 @@ export default function ArchiveWorkspace() {
 
   const categoryById = useMemo(() => new Map(data.categories.map((category) => [category.id, category])), [data.categories]);
   const categoryIdByName = useMemo(() => new Map(data.categories.map((category) => [category.category_name, category.id])), [data.categories]);
+  const projectLinks = useMemo(() => data.links.filter((link) => link.linked_type === PROJECT_LINK_TYPE && link.archive_item_id && link.linked_id), [data.links]);
+  const projects = useMemo(() => Array.from(new Set([...projectLinks.map((link) => String(link.linked_id)), ...localProjects].map(cleanProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko")), [localProjects, projectLinks]);
+  const activeProjectItemIds = useMemo(() => new Set(projectLinks.filter((link) => link.linked_id === activeProject).map((link) => String(link.archive_item_id))), [activeProject, projectLinks]);
 
   const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
+    if (activeMenu === "project") return activeProjectItemIds.has(item.id);
     if (filters.categoryGroup) return true;
     if (activeMenu === "all" || activeMenu === "save") return true;
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
     const allowed = activeSubCategory ? [activeSubCategory] : categoryNamesForGroup(activeMenu);
     return allowed.includes(categoryName);
-  }), [activeMenu, activeSubCategory, categoryById, data.items, filters.categoryGroup]);
+  }), [activeMenu, activeProjectItemIds, activeSubCategory, categoryById, data.items, filters.categoryGroup]);
 
   const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
-    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName}`.toLowerCase();
+    const itemProjects = projectLinks.filter((link) => link.archive_item_id === item.id).map((link) => link.linked_id).join(" ");
+    const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName} ${itemProjects}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
     if (filters.categoryGroup && categoryGroupOf(categoryName) !== filters.categoryGroup) return false;
     if (filters.category && categoryName !== filters.category) return false;
@@ -303,7 +317,7 @@ export default function ArchiveWorkspace() {
     if (dateFrom && createdDate < dateFrom) return false;
     if (dateTo && createdDate > dateTo) return false;
     return true;
-  }), [categoryById, categoryFilteredItems, filters]);
+  }), [categoryById, categoryFilteredItems, filters, projectLinks]);
 
   async function refresh() {
     setLoading(true);
@@ -327,6 +341,12 @@ export default function ArchiveWorkspace() {
     const timer = window.setTimeout(() => {
       void refresh();
     }, 0);
+    try {
+      const savedProjects = JSON.parse(window.localStorage.getItem("fnos-archive-local-projects") || "[]");
+      if (Array.isArray(savedProjects)) setLocalProjects(savedProjects.map(String).map(cleanProjectName).filter(Boolean));
+    } catch {
+      setLocalProjects([]);
+    }
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -386,6 +406,41 @@ export default function ArchiveWorkspace() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 수정 실패");
+    }
+  }
+
+  function rememberProject(name: string) {
+    const cleanName = cleanProjectName(name);
+    if (!cleanName) return "";
+    setLocalProjects((prev) => {
+      const next = Array.from(new Set([...prev, cleanName])).sort((a, b) => a.localeCompare(b, "ko"));
+      try {
+        window.localStorage.setItem("fnos-archive-local-projects", JSON.stringify(next));
+      } catch {
+        // Local project names are only a convenience list; ignore storage failures.
+      }
+      return next;
+    });
+    return cleanName;
+  }
+
+  async function moveArchiveItemsToProject(ids: string[], projectName: string) {
+    const cleanName = rememberProject(projectName);
+    if (!ids.length || !cleanName) return setMessage("프로젝트로 이동할 항목과 프로젝트명을 선택해 주세요.");
+    try {
+      const targetIds = new Set(ids);
+      const oldProjectLinks = data.links.filter((link) => link.linked_type === PROJECT_LINK_TYPE && link.id && link.archive_item_id && targetIds.has(link.archive_item_id));
+      await Promise.all(oldProjectLinks.map(async (link) => {
+        const res = await fetch(`/api/fnos/archive/links?id=${encodeURIComponent(link.id)}`, { method: "DELETE" });
+        const result = await res.json();
+        if (!res.ok || result.ok === false) throw new Error(result.error || "프로젝트 이동 실패");
+      }));
+      await Promise.all(ids.map((id) => postJson("/api/fnos/archive/links", { archive_item_id: id, linked_type: PROJECT_LINK_TYPE, linked_id: cleanName })));
+      invalidateClientCache("/api/fnos/archive");
+      setMessage(`${ids.length.toLocaleString("ko-KR")}개 항목을 '${cleanName}' 프로젝트로 이동했습니다.`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "프로젝트 이동 실패");
     }
   }
 
@@ -512,6 +567,8 @@ export default function ArchiveWorkspace() {
           return result;
         });
       }));
+      const savedIds = results.map((result) => String(result?.saved?.id || "")).filter(Boolean);
+      if (saveProject && savedIds.length) await moveArchiveItemsToProject(savedIds, saveProject);
       void Promise.all(results.map((result) => requestPreview(result?.saved?.id)));
       const savedCount = autoDrafts.length;
       setAutoDrafts([]);
@@ -538,6 +595,7 @@ export default function ArchiveWorkspace() {
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
       const result = await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
+      if (saveProject && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], saveProject);
       void requestPreview(result?.saved?.id);
       setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
       setMessage("링크를 저장했습니다.");
@@ -561,6 +619,7 @@ export default function ArchiveWorkspace() {
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
       invalidateClientCache("/api/fnos/archive");
+      if (saveProject && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], saveProject);
       void requestPreview(result?.saved?.id);
       setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
       if (fileRef.current) fileRef.current.value = "";
@@ -574,6 +633,7 @@ export default function ArchiveWorkspace() {
   function openMenu(menu: ActiveMenu) {
     setActiveMenu(menu);
     setActiveSubCategory("");
+    if (menu !== "project") setActiveProject("");
     if (menu === "save") setSaveMode("auto");
     if (menu === "all" || menu === "save") {
       setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
@@ -602,6 +662,7 @@ export default function ArchiveWorkspace() {
   function menuCount(menu: ActiveMenu) {
     if (menu === "all") return data.items.length;
     if (menu === "save") return null;
+    if (menu === "project") return activeProjectItemIds.size;
     return groupCount(menu);
   }
 
@@ -629,6 +690,18 @@ export default function ArchiveWorkspace() {
               <select className="field-input h-10 !w-40 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
                 <option value="preview">미리보기</option>
                 <option value="list">리스트보기</option>
+              </select>
+            )}
+            {activeMenu !== "save" && (
+              <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => {
+                const project = event.target.value;
+                setActiveProject(project);
+                setActiveSubCategory("");
+                setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+                setActiveMenu(project ? "project" : "all");
+              }}>
+                <option value="">프로젝트 바로가기</option>
+                {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
               </select>
             )}
           </div>
@@ -679,6 +752,21 @@ export default function ArchiveWorkspace() {
                 <button type="button" onClick={() => setSaveMode("auto")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "auto" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>자동정리</button>
                 <button type="button" onClick={() => setSaveMode("manual")} className={`h-8 rounded-lg px-3 text-xs font-black ${saveMode === "manual" ? "bg-white text-[#ff6a00] shadow-sm" : "text-gray-500"}`}>수동업로드</button>
               </div>
+            </div>
+            <div className="grid gap-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={saveProject} onChange={(event) => setSaveProject(event.target.value)}>
+                <option value="">프로젝트 없음</option>
+                {projects.map((project) => <option key={project} value={project}>{project}</option>)}
+              </select>
+              <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm" placeholder="새 프로젝트명" value={saveProjectDraft} onChange={(event) => setSaveProjectDraft(event.target.value)} />
+              <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => {
+                const project = rememberProject(saveProjectDraft);
+                if (!project) return setMessage("새 프로젝트명을 입력해 주세요.");
+                setSaveProject(project);
+                setSaveProjectDraft("");
+              }}>
+                새 프로젝트 생성
+              </ActionButton>
             </div>
 
             {saveMode === "auto" ? (
@@ -788,7 +876,9 @@ export default function ArchiveWorkspace() {
           onRegeneratePreview={requestPreview}
           onUpdateItem={updateArchiveItem}
           onUpdateItems={updateArchiveItems}
+          onMoveItemsToProject={moveArchiveItemsToProject}
           onDeleteItems={deleteArchiveItems}
+          projects={projects}
         />
       )}
 
@@ -826,7 +916,9 @@ function ArchiveList({
   onRegeneratePreview,
   onUpdateItem,
   onUpdateItems,
+  onMoveItemsToProject,
   onDeleteItems,
+  projects,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
@@ -836,12 +928,16 @@ function ArchiveList({
   onRegeneratePreview: (id?: string, force?: boolean) => void;
   onUpdateItem: (item: ArchiveItem) => Promise<void>;
   onUpdateItems: (items: ArchiveItem[]) => Promise<void>;
+  onMoveItemsToProject: (ids: string[], projectName: string) => Promise<void>;
   onDeleteItems: (ids: string[]) => Promise<void>;
+  projects: string[];
 }) {
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkCategoryGroup, setBulkCategoryGroup] = useState<CategoryGroup | "">("");
   const [bulkCategoryName, setBulkCategoryName] = useState("");
+  const [bulkProjectName, setBulkProjectName] = useState("");
+  const [bulkProjectDraft, setBulkProjectDraft] = useState("");
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
   const allSelected = Boolean(items.length) && selectedIds.length === items.length;
   const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
@@ -877,6 +973,15 @@ function ArchiveList({
   async function deleteSelectedItems() {
     await onDeleteItems(selectedIds);
     setSelectedIds([]);
+  }
+
+  async function moveSelectedProject() {
+    const project = cleanProjectName(bulkProjectDraft || bulkProjectName);
+    if (!project || !selectedIds.length) return;
+    await onMoveItemsToProject(selectedIds, project);
+    setSelectedIds([]);
+    setBulkProjectName(project);
+    setBulkProjectDraft("");
   }
 
   function toggleAllSelected() {
@@ -915,6 +1020,14 @@ function ArchiveList({
           </select>
           <ActionButton type="button" onClick={() => void moveSelectedCategory()} disabled={!bulkCategoryName || !selectedIds.length} className="h-9 min-w-16 whitespace-nowrap px-4 text-xs">
             이동
+          </ActionButton>
+          <select className="field-input h-9 !w-40 rounded-md border border-slate-200 bg-white px-3 font-bold" value={bulkProjectName} onChange={(event) => setBulkProjectName(event.target.value)}>
+            <option value="">프로젝트</option>
+            {projects.map((project) => <option key={project} value={project}>{project}</option>)}
+          </select>
+          <input className="field-input h-9 !w-40 rounded-md border border-slate-200 bg-white px-3 font-bold" placeholder="새 프로젝트" value={bulkProjectDraft} onChange={(event) => setBulkProjectDraft(event.target.value)} />
+          <ActionButton type="button" onClick={() => void moveSelectedProject()} disabled={!(bulkProjectName || bulkProjectDraft) || !selectedIds.length} className="h-9 min-w-24 whitespace-nowrap px-4 text-xs">
+            프로젝트 이동
           </ActionButton>
           <span className="whitespace-nowrap text-xs font-black text-slate-500">선택 {selectedIds.length.toLocaleString("ko-KR")}개</span>
         </section>
