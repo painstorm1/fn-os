@@ -269,7 +269,7 @@ export default function ArchiveWorkspace() {
   const [activeSubCategory, setActiveSubCategory] = useState("");
   const [activeProject, setActiveProject] = useState("");
   const [localProjects, setLocalProjects] = useState<string[]>([]);
-  const [projectCreateTarget, setProjectCreateTarget] = useState<"toolbar" | number | null>(null);
+  const [projectCreateTarget, setProjectCreateTarget] = useState<"toolbar" | "manualLink" | "manualFile" | number | null>(null);
   const [projectCreateName, setProjectCreateName] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
@@ -283,8 +283,8 @@ export default function ArchiveWorkspace() {
   const [autoImagePreview, setAutoImagePreview] = useState("");
   const [autoWorking, setAutoWorking] = useState(false);
   const [filters, setFilters] = useState<ArchiveFilters>({ q: "", categoryGroup: "", category: "", source: "", dateFrom: "", dateTo: "" });
-  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
-  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
+  const [linkForm, setLinkForm] = useState({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "", project_name: "" });
+  const [fileForm, setFileForm] = useState({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "", project_name: "" });
   const fileRef = useRef<HTMLInputElement | null>(null);
   const autoImageRef = useRef<HTMLInputElement | null>(null);
   const autoImageFileRef = useRef<File | null>(null);
@@ -425,7 +425,7 @@ export default function ArchiveWorkspace() {
     return cleanName;
   }
 
-  function openProjectCreateModal(target: "toolbar" | number) {
+  function openProjectCreateModal(target: "toolbar" | "manualLink" | "manualFile" | number) {
     setProjectCreateTarget(target);
     setProjectCreateName("");
   }
@@ -443,6 +443,10 @@ export default function ArchiveWorkspace() {
       setActiveMenu("project");
       setActiveSubCategory("");
       setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
+    } else if (projectCreateTarget === "manualLink") {
+      setLinkForm((prev) => ({ ...prev, project_name: project }));
+    } else if (projectCreateTarget === "manualFile") {
+      setFileForm((prev) => ({ ...prev, project_name: project }));
     } else if (typeof projectCreateTarget === "number") {
       setAutoDrafts((prev) => prev.map((item, itemIndex) => itemIndex === projectCreateTarget ? { ...item, project_name: project } : item));
     }
@@ -653,9 +657,11 @@ export default function ArchiveWorkspace() {
     setMessage("링크 저장 중...");
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
-      const result = await postJson("/api/fnos/archive", { ...linkForm, title, status: "active" });
+      const { project_name: projectName, ...saveLinkForm } = linkForm;
+      const result = await postJson("/api/fnos/archive", { ...saveLinkForm, title, status: "active" });
+      if (projectName && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], projectName);
       void requestPreview(result?.saved?.id);
-      setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "" });
+      setLinkForm({ url: "", title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "link", source_type: "", project_name: "" });
       setMessage("링크를 저장했습니다.");
       await refresh();
     } catch (error) {
@@ -671,14 +677,16 @@ export default function ArchiveWorkspace() {
     try {
       const formData = new FormData();
       formData.set("file", file);
-      Object.entries(fileForm).forEach(([key, value]) => formData.set(key, value));
+      const { project_name: projectName, ...saveFileForm } = fileForm;
+      Object.entries(saveFileForm).forEach(([key, value]) => formData.set(key, value));
       if (!fileForm.title) formData.set("title", shortenTitle(file.name.replace(/\.[^.]+$/, ""), "파일"));
       const res = await fetch("/api/fnos/archive", { method: "POST", body: formData });
       const result = await res.json();
       if (!res.ok || result.ok === false) throw new Error(result.error || "파일 저장 실패");
       invalidateClientCache("/api/fnos/archive");
+      if (projectName && result?.saved?.id) await moveArchiveItemsToProject([String(result.saved.id)], projectName);
       void requestPreview(result?.saved?.id);
-      setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "" });
+      setFileForm({ title: "", memo: "", category_id: "", category_name: "업무방법", content_type: "", project_name: "" });
       if (fileRef.current) fileRef.current.value = "";
       setMessage("파일을 저장했습니다.");
       await refresh();
@@ -858,6 +866,15 @@ export default function ArchiveWorkspace() {
                     <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={linkForm.category_name} onChange={(event) => setLinkForm({ ...linkForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
                       {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
                     </select>
+                    <div className="grid gap-2 lg:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={linkForm.project_name} onChange={(event) => setLinkForm({ ...linkForm, project_name: event.target.value })}>
+                        <option value="">프로젝트 없음</option>
+                        {projects.map((project) => <option key={project} value={project}>{project}</option>)}
+                      </select>
+                      <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => openProjectCreateModal("manualLink")}>
+                        새 프로젝트 생성
+                      </ActionButton>
+                    </div>
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={linkForm.memo} onChange={(event) => setLinkForm({ ...linkForm, memo: event.target.value })} />
                     <ActionButton className="lg:col-span-2">링크 저장</ActionButton>
                   </form>
@@ -871,6 +888,15 @@ export default function ArchiveWorkspace() {
                     <select className="field-input h-10 rounded-md border border-slate-200 px-3 text-sm" value={fileForm.category_name} onChange={(event) => setFileForm({ ...fileForm, category_name: event.target.value, category_id: categoryIdByName.get(event.target.value) || "" })}>
                       {categoryOptionEntries().map((entry) => <option key={`${entry.group}-${entry.category}`} value={entry.category}>{entry.label}</option>)}
                     </select>
+                    <div className="grid gap-2 lg:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" value={fileForm.project_name} onChange={(event) => setFileForm({ ...fileForm, project_name: event.target.value })}>
+                        <option value="">프로젝트 없음</option>
+                        {projects.map((project) => <option key={project} value={project}>{project}</option>)}
+                      </select>
+                      <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-orange-700" onClick={() => openProjectCreateModal("manualFile")}>
+                        새 프로젝트 생성
+                      </ActionButton>
+                    </div>
                     <textarea className="field-input min-h-24 rounded-md border border-slate-200 p-3 text-sm lg:col-span-2" placeholder="메모" value={fileForm.memo} onChange={(event) => setFileForm({ ...fileForm, memo: event.target.value })} />
                     <ActionButton className="lg:col-span-2">파일 저장</ActionButton>
                   </form>
