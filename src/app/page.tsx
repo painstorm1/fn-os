@@ -1078,6 +1078,20 @@ function warehouseAttributeLabel(value: unknown) {
   return normalizeWarehouseAttribute(value) === "fulfillment" ? "풀필먼트" : "일반";
 }
 
+function normalizePersonnelStatus(value: unknown): PersonnelStatus {
+  const textValue = String(value || "").trim().toLowerCase();
+  if (["leave", "휴직", "휴가"].includes(textValue)) return "leave";
+  if (["resigned", "퇴사", "퇴직"].includes(textValue)) return "resigned";
+  return "working";
+}
+
+function personnelStatusLabel(value: unknown) {
+  const status = normalizePersonnelStatus(value);
+  if (status === "leave") return "휴직";
+  if (status === "resigned") return "퇴사";
+  return "근무";
+}
+
 function formatBusinessNoInput(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
   if (digits.length <= 3) return digits;
@@ -6846,7 +6860,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ? "판매내역, 구매내역, 기간별 현황을 FN OS DB 기준으로 관리합니다."
       : isInventorySection
         ? "현재고와 수동 재고 조정을 확인합니다."
-        : "거래처, 품목, 창고, 쇼핑몰, 근태 기준정보를 관리합니다.";
+        : "거래처, 품목, 창고, 쇼핑몰, 인사 기준정보를 관리합니다.";
 
   function makeEntryDraft(mode: "sales" | "purchases", sequence = entryRows.length + 1) {
     const date = new Date().toISOString().slice(0, 10);
@@ -8055,6 +8069,33 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
 }
 
 type MasterTabKey = "customers" | "products" | "warehouses" | "channels" | "attendance";
+type PersonnelStatus = "working" | "leave" | "resigned";
+type PersonnelBulkField = "status" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
+
+type PersonnelEmployee = {
+  id: string;
+  status: PersonnelStatus;
+  name: string;
+  resident_no: string;
+  phone: string;
+  address: string;
+  email: string;
+  joined_at: string;
+  department: string;
+  rank: string;
+  position: string;
+  bank_name: string;
+  bank_account_holder: string;
+  bank_account_no: string;
+  memo: string;
+  leave_reason?: string;
+  leave_from?: string;
+  leave_to?: string;
+  leave_memo?: string;
+  resigned_reason?: string;
+  resigned_at?: string;
+  resigned_memo?: string;
+};
 
 const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploadEndpoint?: string; templateHeaders: string[]; sampleRow: string[] }> = [
   {
@@ -8089,10 +8130,10 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
   },
   {
     key: "attendance",
-    label: "근태관리",
-    title: "근태",
-    templateHeaders: ["직원코드", "직원명", "근무일", "출근시간", "퇴근시간", "근태구분", "휴게시간", "메모"],
-    sampleRow: ["EMP001", "홍길동", "2026-05-27", "09:00", "18:00", "정상", "1", ""],
+    label: "인사관리",
+    title: "인사",
+    templateHeaders: ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모"],
+    sampleRow: ["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "국민은행", "홍길동", "000000-00-000000", ""],
   },
 ];
 
@@ -8123,7 +8164,47 @@ function MasterManagementPanel({
   loadSummary: () => void;
 }) {
   const [activeMasterTab, setActiveMasterTab] = useState<MasterTabKey>("customers");
+  const [personnelUnlocked, setPersonnelUnlocked] = useState(false);
+  const [personnelAuthOpen, setPersonnelAuthOpen] = useState(false);
   const activeConfig = masterTemplate(activeMasterTab);
+
+  function personnelPassword() {
+    if (typeof window === "undefined") return "0310";
+    return localStorage.getItem("fnos-personnel-password") || "0310";
+  }
+
+  function openMasterTab(tab: MasterTabKey) {
+    if (tab === "attendance" && !personnelUnlocked) {
+      setPersonnelAuthOpen(true);
+      return;
+    }
+    setActiveMasterTab(tab);
+  }
+
+  function unlockPersonnel(password: string) {
+    if (password !== personnelPassword()) {
+      window.alert("비밀번호가 일치하지 않습니다.");
+      return false;
+    }
+    setPersonnelUnlocked(true);
+    setActiveMasterTab("attendance");
+    setPersonnelAuthOpen(false);
+    return true;
+  }
+
+  function changePersonnelPassword(currentPassword: string, newPassword: string, confirmPassword: string) {
+    if (currentPassword !== personnelPassword()) {
+      window.alert("현재 비밀번호가 일치하지 않습니다.");
+      return false;
+    }
+    if (!newPassword || newPassword !== confirmPassword) {
+      window.alert("새 비밀번호와 확인값을 다시 확인해 주세요.");
+      return false;
+    }
+    localStorage.setItem("fnos-personnel-password", newPassword);
+    window.alert("인사관리 비밀번호를 변경했습니다.");
+    return true;
+  }
 
   return (
     <div className="space-y-4">
@@ -8133,7 +8214,7 @@ function MasterManagementPanel({
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveMasterTab(tab.key)}
+              onClick={() => openMasterTab(tab.key)}
               className={`h-10 rounded-md px-4 text-sm font-black ${
                 activeMasterTab === tab.key ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"
               }`}
@@ -8144,7 +8225,15 @@ function MasterManagementPanel({
         </div>
       </div>
 
-      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && (
+      {personnelAuthOpen && (
+        <PersonnelAuthModal
+          onClose={() => setPersonnelAuthOpen(false)}
+          onUnlock={unlockPersonnel}
+          onChangePassword={changePersonnelPassword}
+        />
+      )}
+
+      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && activeMasterTab !== "attendance" && (
         <MasterEntryPanel
           config={activeConfig}
           setMessage={setMessage}
@@ -8162,6 +8251,13 @@ function MasterManagementPanel({
 
       {activeMasterTab === "warehouses" && <WarehouseManagementPanel message={message} setMessage={setMessage} />}
 
+      {activeMasterTab === "attendance" && (
+        <PersonnelManagementPanel onLock={() => {
+          setPersonnelUnlocked(false);
+          setActiveMasterTab("customers");
+        }} />
+      )}
+
       {activeMasterTab === "channels" && (
         <Panel
           title="쇼핑몰 목록"
@@ -8178,11 +8274,547 @@ function MasterManagementPanel({
         </Panel>
       )}
 
-      {activeMasterTab === "attendance" && (
-        <Panel title="근태 목록" subtitle="근태는 직원별 일자, 출근/퇴근, 근태구분 기준으로 관리합니다.">
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">근태 저장 테이블은 다음 단계에서 DB 스키마와 저장 API를 연결합니다.</div>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
-        </Panel>
+    </div>
+  );
+}
+
+function PersonnelAuthModal({
+  onClose,
+  onUnlock,
+  onChangePassword,
+}: {
+  onClose: () => void;
+  onUnlock: (password: string) => boolean;
+  onChangePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => boolean;
+}) {
+  const [password, setPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  return (
+    <FormModal
+      title="인사관리 권한 확인"
+      description="인사정보 보호를 위해 비밀번호를 한 번 더 입력해 주세요."
+      onClose={onClose}
+      size="sm"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+          <ActionButton type="button" onClick={() => onUnlock(password)}>확인</ActionButton>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <FormField label="비밀번호" required>
+          <input
+            className={modalInputClass}
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onUnlock(password);
+            }}
+            autoFocus
+          />
+        </FormField>
+        <div className="border-t border-gray-200 pt-4">
+          <div className="mb-3 text-sm font-black text-slate-900">비밀번호 설정</div>
+          <div className="space-y-3">
+            <FormField label="현재 비밀번호" required>
+              <input className={modalInputClass} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="현재 비밀번호를 한 번 더 입력" />
+            </FormField>
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField label="새 비밀번호" required>
+                <input className={modalInputClass} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+              </FormField>
+              <FormField label="새 비밀번호 확인" required>
+                <input className={modalInputClass} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+              </FormField>
+            </div>
+            <ActionButton
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (onChangePassword(currentPassword, newPassword, confirmPassword)) {
+                  setCurrentPassword("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                }
+              }}
+            >
+              비밀번호 수정
+            </ActionButton>
+          </div>
+        </div>
+      </div>
+    </FormModal>
+  );
+}
+
+function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
+  const [employees, setEmployees] = useState<PersonnelEmployee[]>([]);
+  const [query, setQuery] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<PersonnelEmployee>(blankPersonnelEmployee());
+  const [personnelMessage, setPersonnelMessage] = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkField, setBulkField] = useState<PersonnelBulkField>("status");
+  const [bulkValue, setBulkValue] = useState("");
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [addressQuery, setAddressQuery] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const selectModeRef = useRef<"select" | "deselect">("select");
+  const storageKey = "fnos-personnel-employees";
+  const pageSize = 20;
+
+  function blankPersonnelEmployee(): PersonnelEmployee {
+    return {
+      id: "",
+      status: "working",
+      name: "",
+      resident_no: "",
+      phone: "",
+      address: "",
+      email: "",
+      joined_at: "",
+      department: "",
+      rank: "",
+      position: "",
+      bank_name: "",
+      bank_account_holder: "",
+      bank_account_no: "",
+      memo: "",
+      leave_reason: "",
+      leave_from: "",
+      leave_to: "",
+      leave_memo: "",
+      resigned_reason: "",
+      resigned_at: "",
+      resigned_memo: "",
+    };
+  }
+
+  function employeeKey(employee: PersonnelEmployee) {
+    return employee.id;
+  }
+
+  function saveEmployees(nextEmployees: PersonnelEmployee[]) {
+    setEmployees(nextEmployees);
+    localStorage.setItem(storageKey, JSON.stringify(nextEmployees));
+  }
+
+  function filteredEmployees() {
+    const needle = query.trim().toLowerCase().replace(/\s+/g, "");
+    if (!needle) return employees;
+    return employees.filter((employee) => [
+      employee.name,
+      employee.resident_no,
+      employee.phone,
+      employee.email,
+      employee.address,
+      employee.memo,
+    ].some((value) => String(value || "").toLowerCase().replace(/\s+/g, "").includes(needle)));
+  }
+
+  const visibleEmployees = filteredEmployees().slice(0, pageSize);
+  const visibleKeys = visibleEmployees.map(employeeKey).filter(Boolean);
+  const selectedEmployees = employees.filter((employee) => selectedKeys.includes(employeeKey(employee)));
+  const allSelected = Boolean(visibleKeys.length) && visibleKeys.every((key) => selectedKeys.includes(key));
+
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "[]") as PersonnelEmployee[];
+    setEmployees(Array.isArray(saved) ? saved.map(normalizePersonnelEmployee) : []);
+  }, []);
+
+  useEffect(() => {
+    setSelectedKeys([]);
+  }, [query]);
+
+  useEffect(() => {
+    function stopSelecting() {
+      setSelecting(false);
+    }
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2" || modalOpen || bulkOpen || addressOpen) return;
+      event.preventDefault();
+      openNewEmployee();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modalOpen, bulkOpen, addressOpen]);
+
+  function normalizePersonnelEmployee(value: Partial<PersonnelEmployee>): PersonnelEmployee {
+    return {
+      ...blankPersonnelEmployee(),
+      ...value,
+      id: value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      status: normalizePersonnelStatus(value.status),
+    };
+  }
+
+  function openNewEmployee() {
+    setDraft(blankPersonnelEmployee());
+    setModalOpen(true);
+  }
+
+  function openEmployee(employee: PersonnelEmployee) {
+    setDraft(normalizePersonnelEmployee(employee));
+    setModalOpen(true);
+  }
+
+  function updateDraft(key: keyof PersonnelEmployee, value: string) {
+    setDraft((prev) => ({ ...prev, [key]: key === "status" ? normalizePersonnelStatus(value) : value }));
+  }
+
+  function setSelected(key: string, selected: boolean) {
+    if (!key) return;
+    setSelectedKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function validateDraft() {
+    if (!draft.status || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim()) {
+      window.alert("속성, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자는 필수입니다.");
+      return false;
+    }
+    return true;
+  }
+
+  function saveDraft() {
+    if (!validateDraft()) return;
+    const nextDraft = normalizePersonnelEmployee(draft);
+    const nextEmployees = draft.id
+      ? employees.map((employee) => employee.id === draft.id ? nextDraft : employee)
+      : [nextDraft, ...employees];
+    saveEmployees(nextEmployees);
+    setPersonnelMessage(`직원 저장 완료: ${nextDraft.name}`);
+    setModalOpen(false);
+  }
+
+  function deleteDraft() {
+    if (!draft.id) return;
+    if (!window.confirm("이 직원을 삭제할까요?")) return;
+    saveEmployees(employees.filter((employee) => employee.id !== draft.id));
+    setPersonnelMessage(`직원 삭제 완료: ${draft.name}`);
+    setModalOpen(false);
+  }
+
+  function saveBulkEdit() {
+    if (!selectedEmployees.length) {
+      window.alert("수정할 직원을 먼저 선택해 주세요.");
+      return;
+    }
+    const nextEmployees = employees.map((employee) => {
+      if (!selectedKeys.includes(employee.id)) return employee;
+      return {
+        ...employee,
+        [bulkField]: bulkField === "status" ? normalizePersonnelStatus(bulkValue) : bulkValue,
+      };
+    });
+    saveEmployees(nextEmployees);
+    setSelectedKeys([]);
+    setBulkOpen(false);
+    setBulkValue("");
+    setPersonnelMessage(`선택수정 완료: ${selectedEmployees.length.toLocaleString("ko-KR")}건`);
+  }
+
+  function downloadPersonnelTemplate() {
+    void downloadTableXlsx(
+      "FN_OS_인사_엑셀폼.xlsx",
+      "인사",
+      ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"],
+      [["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "국민은행", "홍길동", "000000-00-000000", "", "", "", "", "", ""]],
+    );
+  }
+
+  async function uploadPersonnel(file: File) {
+    const rows = await readXlsxObjects(file);
+    const normalized = rows.map((row) => normalizePersonnelEmployee({
+      status: normalizePersonnelStatus(row["속성"] || row["상태"] || row["구분"]),
+      name: String(row["성명"] || row["직원명"] || "").trim(),
+      resident_no: String(row["주민등록번호"] || row["주민번호"] || "").trim(),
+      phone: String(row["전화번호"] || row["연락처"] || "").trim(),
+      address: String(row["주소"] || "").trim(),
+      email: String(row["이메일"] || row["Email"] || "").trim(),
+      joined_at: String(row["입사일자"] || row["입사일"] || "").trim(),
+      department: String(row["부서"] || "").trim(),
+      rank: String(row["직급"] || "").trim(),
+      position: String(row["직책"] || "").trim(),
+      bank_name: String(row["은행"] || "").trim(),
+      bank_account_holder: String(row["예금주"] || "").trim(),
+      bank_account_no: String(row["계좌번호"] || "").trim(),
+      memo: String(row["메모"] || "").trim(),
+      leave_reason: String(row["휴직사유"] || "").trim(),
+      leave_from: String(row["휴직시작"] || "").trim(),
+      leave_to: String(row["휴직종료"] || "").trim(),
+      resigned_reason: String(row["퇴사사유"] || "").trim(),
+      resigned_at: String(row["퇴사일자"] || row["퇴사일"] || "").trim(),
+    })).filter((employee) => employee.name && employee.resident_no);
+    const exactMatches = normalized.filter((row) => employees.some((employee) => employee.name === row.name && employee.resident_no === row.resident_no));
+    const overwrite = exactMatches.length
+      ? window.confirm(`${exactMatches.length}개 직원의 성명과 주민등록번호가 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      : false;
+    let saved = 0;
+    let skipped = 0;
+    const nextEmployees = [...employees];
+    normalized.forEach((row) => {
+      const index = nextEmployees.findIndex((employee) => employee.name === row.name && employee.resident_no === row.resident_no);
+      if (index >= 0 && !overwrite) {
+        skipped += 1;
+        return;
+      }
+      if (index >= 0) nextEmployees[index] = { ...row, id: nextEmployees[index].id };
+      else nextEmployees.unshift(row);
+      saved += 1;
+    });
+    saveEmployees(nextEmployees);
+    setPersonnelMessage(`인사 엑셀등록 완료: 저장 ${saved.toLocaleString("ko-KR")}건 / 스킵 ${skipped.toLocaleString("ko-KR")}건`);
+  }
+
+  function downloadPersonnel() {
+    const rows = filteredEmployees().map((employee) => [
+      personnelStatusLabel(employee.status),
+      employee.name,
+      employee.resident_no,
+      employee.phone,
+      employee.address,
+      employee.email,
+      employee.joined_at,
+      employee.department,
+      employee.rank,
+      employee.position,
+      employee.bank_name,
+      employee.bank_account_holder,
+      employee.bank_account_no,
+      employee.memo,
+      employee.leave_reason || "",
+      employee.leave_from || "",
+      employee.leave_to || "",
+      employee.resigned_reason || "",
+      employee.resigned_at || "",
+    ]);
+    void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
+  }
+
+  const addressSuggestions = [
+    "서울특별시",
+    "경기도",
+    "인천광역시",
+    "부산광역시",
+    "대구광역시",
+    "대전광역시",
+    "광주광역시",
+  ].filter((item) => !addressQuery.trim() || item.includes(addressQuery.trim()));
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="인사관리"
+        subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체직원</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">직원수 {employees.length.toLocaleString("ko-KR")}명</span></div>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <ActionButton type="button" onClick={openNewEmployee}>F2 새 직원</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>엑셀등록</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={downloadPersonnel}>인사정보 다운로드</ActionButton>
+            <ActionButton type="button" variant="ghost" onClick={downloadPersonnelTemplate} className="h-10 w-10 border-0 bg-transparent p-0 text-emerald-600 shadow-none hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={onLock}>잠금</ActionButton>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadPersonnel(file);
+              event.target.value = "";
+            }} />
+          </div>
+        }
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={() => setBulkOpen(true)}>수정</ActionButton>
+            <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
+          </div>
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="성명 / 전화번호 / 이메일 검색" />
+        </div>
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
+          <table className="w-full min-w-[1040px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+              <tr>
+                <th className="w-16 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? visibleKeys : [])} aria-label="직원 전체선택" /></th>
+                <th className="w-24 py-2 text-left">속성</th>
+                <th className="w-28 py-2 text-left">성명</th>
+                <th className="w-40 py-2 text-left">주민등록번호</th>
+                <th className="w-36 py-2 text-left">전화번호</th>
+                <th className="w-48 py-2 text-left">이메일</th>
+                <th className="w-28 py-2 text-left">입사일자</th>
+                <th className="w-40 py-2 text-left">메모</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleEmployees.map((employee, index) => {
+                const key = employeeKey(employee);
+                const selected = selectedKeys.includes(key);
+                return (
+                  <tr key={key} onClick={() => openEmployee(employee)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          const mode = selected ? "deselect" : "select";
+                          selectModeRef.current = mode;
+                          setSelecting(true);
+                          setSelected(key, mode === "select");
+                        }}
+                        onMouseEnter={() => {
+                          if (selecting) setSelected(key, selectModeRef.current === "select");
+                        }}
+                        className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                      >
+                        {index + 1}
+                      </button>
+                    </td>
+                    <td className="truncate py-2"><StatusBadge tone={employee.status === "working" ? "success" : employee.status === "leave" ? "orange" : "muted"}>{personnelStatusLabel(employee.status)}</StatusBadge></td>
+                    <td className="truncate py-2 font-bold">{employee.name || "-"}</td>
+                    <td className="truncate py-2 text-slate-600">{employee.resident_no || "-"}</td>
+                    <td className="truncate py-2 text-slate-600">{employee.phone || "-"}</td>
+                    <td className="truncate py-2 text-slate-600">{employee.email || "-"}</td>
+                    <td className="truncate py-2 text-slate-600">{employee.joined_at || "-"}</td>
+                    <td className="truncate py-2 text-slate-500" title={employee.memo || ""}>{employee.memo ? `${employee.memo.slice(0, 10)}${employee.memo.length > 10 ? "..." : ""}` : "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!visibleEmployees.length && <EmptyState title="등록된 직원이 없습니다." />}
+        </div>
+        {personnelMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{personnelMessage}</div>}
+      </Panel>
+
+      {bulkOpen && (
+        <FormModal title="직원 선택수정" description={`선택 ${selectedEmployees.length.toLocaleString("ko-KR")}개 직원에 같은 값을 적용합니다.`} onClose={() => setBulkOpen(false)} size="xl" footer={<><ActionButton type="button" variant="secondary" onClick={() => setBulkOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveBulkEdit}>저장</ActionButton></>}>
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+              <select className={modalSelectClass} value={bulkField} onChange={(event) => setBulkField(event.target.value as PersonnelBulkField)}>
+                <option value="status">속성</option>
+                <option value="phone">전화번호</option>
+                <option value="address">주소</option>
+                <option value="email">이메일</option>
+                <option value="joined_at">입사일자</option>
+                <option value="department">부서</option>
+                <option value="rank">직급</option>
+                <option value="position">직책</option>
+                <option value="bank_name">은행</option>
+                <option value="bank_account_holder">예금주</option>
+                <option value="bank_account_no">계좌번호</option>
+                <option value="memo">메모</option>
+              </select>
+              {bulkField === "status" ? (
+                <select className={modalSelectClass} value={bulkValue || "working"} onChange={(event) => setBulkValue(event.target.value)}>
+                  <option value="working">근무</option>
+                  <option value="leave">휴직</option>
+                  <option value="resigned">퇴사</option>
+                </select>
+              ) : bulkField === "joined_at" ? (
+                <input className={modalInputClass} type="date" value={bulkValue} onChange={(event) => setBulkValue(event.target.value)} />
+              ) : (
+                <input className={modalInputClass} value={bulkValue} onChange={(event) => setBulkValue(event.target.value)} placeholder="선택한 직원에 적용할 값" />
+              )}
+            </div>
+          </div>
+        </FormModal>
+      )}
+
+      {modalOpen && (
+        <FormModal
+          title={draft.id ? "직원 수정" : "새 직원 등록"}
+          description="필수 항목은 빨간 별표로 표시됩니다."
+          onClose={() => setModalOpen(false)}
+          size="xl"
+          footer={<><div className="mr-auto">{draft.id && <ActionButton type="button" variant="danger" onClick={deleteDraft}>삭제</ActionButton>}</div><ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveDraft}>저장</ActionButton></>}
+        >
+          <div className="space-y-5">
+            <div>
+              <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ["working", "근무"],
+                  ["leave", "휴직"],
+                  ["resigned", "퇴사"],
+                ].map(([value, label]) => (
+                  <button key={value} type="button" onClick={() => updateDraft("status", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.status === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="성명" required><input className={modalInputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} /></FormField>
+              <FormField label="주민등록번호" required><input className={modalInputClass} value={draft.resident_no} onChange={(event) => updateDraft("resident_no", event.target.value)} placeholder="900101-1234567" /></FormField>
+              <FormField label="전화번호" required><input className={modalInputClass} value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+              <FormField label="이메일" required><input className={modalInputClass} value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} placeholder="name@example.com" /></FormField>
+              <FormField label="주소" required className="md:col-span-2">
+                <div className="grid gap-2 md:grid-cols-[1fr_120px]">
+                  <input className={modalInputClass} value={draft.address} onChange={(event) => updateDraft("address", event.target.value)} placeholder="주소" />
+                  <ActionButton type="button" variant="secondary" onClick={() => {
+                    setAddressQuery(draft.address);
+                    setAddressOpen(true);
+                  }}>주소검색</ActionButton>
+                </div>
+              </FormField>
+              <FormField label="입사일자" required><input className={modalInputClass} type="date" value={draft.joined_at} onChange={(event) => updateDraft("joined_at", event.target.value)} /></FormField>
+              <div className="grid gap-2 md:grid-cols-3">
+                <FormField label="부서"><input className={modalInputClass} value={draft.department} onChange={(event) => updateDraft("department", event.target.value)} /></FormField>
+                <FormField label="직급"><input className={modalInputClass} value={draft.rank} onChange={(event) => updateDraft("rank", event.target.value)} /></FormField>
+                <FormField label="직책"><input className={modalInputClass} value={draft.position} onChange={(event) => updateDraft("position", event.target.value)} /></FormField>
+              </div>
+              <div className="grid gap-2 md:col-span-2 md:grid-cols-3">
+                <FormField label="은행"><input className={modalInputClass} value={draft.bank_name} onChange={(event) => updateDraft("bank_name", event.target.value)} /></FormField>
+                <FormField label="예금주"><input className={modalInputClass} value={draft.bank_account_holder} onChange={(event) => updateDraft("bank_account_holder", event.target.value)} /></FormField>
+                <FormField label="계좌번호"><input className={modalInputClass} value={draft.bank_account_no} onChange={(event) => updateDraft("bank_account_no", event.target.value)} /></FormField>
+              </div>
+              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
+            </div>
+            {draft.status === "leave" && (
+              <div className="grid gap-4 border-t border-gray-200 pt-4 md:grid-cols-2">
+                <div className="md:col-span-2 text-sm font-black text-slate-900">휴직 정보</div>
+                <FormField label="휴직 사유"><input className={modalInputClass} value={draft.leave_reason || ""} onChange={(event) => updateDraft("leave_reason", event.target.value)} /></FormField>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <FormField label="휴직 시작"><input className={modalInputClass} type="date" value={draft.leave_from || ""} onChange={(event) => updateDraft("leave_from", event.target.value)} /></FormField>
+                  <FormField label="휴직 종료"><input className={modalInputClass} type="date" value={draft.leave_to || ""} onChange={(event) => updateDraft("leave_to", event.target.value)} /></FormField>
+                </div>
+                <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.leave_memo || ""} onChange={(event) => updateDraft("leave_memo", event.target.value)} /></FormField>
+              </div>
+            )}
+            {draft.status === "resigned" && (
+              <div className="grid gap-4 border-t border-gray-200 pt-4 md:grid-cols-2">
+                <div className="md:col-span-2 text-sm font-black text-slate-900">퇴사 정보</div>
+                <FormField label="퇴사 사유"><input className={modalInputClass} value={draft.resigned_reason || ""} onChange={(event) => updateDraft("resigned_reason", event.target.value)} /></FormField>
+                <FormField label="퇴사일자"><input className={modalInputClass} type="date" value={draft.resigned_at || ""} onChange={(event) => updateDraft("resigned_at", event.target.value)} /></FormField>
+                <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.resigned_memo || ""} onChange={(event) => updateDraft("resigned_memo", event.target.value)} /></FormField>
+              </div>
+            )}
+          </div>
+        </FormModal>
+      )}
+
+      {addressOpen && (
+        <FormModal title="주소검색" description="외부 주소 API 연결 전까지 직접 검색어를 입력해 주소로 적용합니다." onClose={() => setAddressOpen(false)} size="sm" footer={<><ActionButton type="button" variant="secondary" onClick={() => setAddressOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={() => {
+          updateDraft("address", addressQuery);
+          setAddressOpen(false);
+        }}>적용</ActionButton></>}>
+          <div className="space-y-3">
+            <input className={modalInputClass} value={addressQuery} onChange={(event) => setAddressQuery(event.target.value)} placeholder="주소 검색 또는 직접 입력" autoFocus />
+            <div className="max-h-52 overflow-auto rounded-lg border border-gray-200">
+              {addressSuggestions.map((address) => (
+                <button key={address} type="button" onClick={() => setAddressQuery(address)} className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm font-bold hover:bg-orange-50">{address}</button>
+              ))}
+              {!addressSuggestions.length && <div className="px-3 py-6 text-center text-sm font-bold text-slate-400">입력한 주소를 그대로 적용할 수 있습니다.</div>}
+            </div>
+          </div>
+        </FormModal>
       )}
     </div>
   );
@@ -10469,9 +11101,9 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
     }
 
     if (config.key === "attendance") {
-      const saved = JSON.parse(localStorage.getItem("fnos-attendance-draft-rows") || "[]") as Record<string, unknown>[];
-      localStorage.setItem("fnos-attendance-draft-rows", JSON.stringify([...saved, ...rows]));
-      setMessage(`근태 ${rows.length}건을 임시 저장했습니다. DB 저장은 근태 테이블 생성 후 연결합니다.`);
+      const saved = JSON.parse(localStorage.getItem("fnos-personnel-draft-rows") || "[]") as Record<string, unknown>[];
+      localStorage.setItem("fnos-personnel-draft-rows", JSON.stringify([...saved, ...rows]));
+      setMessage(`인사 ${rows.length}건을 임시 저장했습니다. DB 저장은 인사 테이블 생성 후 연결합니다.`);
       return;
     }
   }
