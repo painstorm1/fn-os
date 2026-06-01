@@ -5101,18 +5101,24 @@ function StatusPill({ status }: { status?: string }) {
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }
 
-type SalesSheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
+type SalesSheetName = "발주 진행 단계" | "송장출력용" | "FN송장입력" | "FN판매입력" | "FN구매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
+  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "FN판매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "출하창고", "거래유형", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "외화금액", "공급가액", "적요", "생산전표생성", "결과"],
+  "FN구매입력": ["일자", "순번", "거래처코드", "거래처명", "담당자", "입고창고", "통화", "환율", "품목코드", "품목명", "규격", "수량", "단가(vat포함)", "공급가액", "적요", "결과"],
 };
 
+const visibleSalesSheetNames: SalesSheetName[] = ["발주 진행 단계", "송장출력용", "FN판매입력", "FN구매입력"];
+
 const salesInitialRows: Record<SalesSheetName, string[][]> = {
+  "발주 진행 단계": [],
   송장출력용: [],
   FN송장입력: [],
   "FN판매입력": [],
+  "FN구매입력": [],
 };
 
 function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
@@ -5244,6 +5250,12 @@ function salesMoneyValue(value: unknown) {
 
 function salesSupplyAmountTotal(rows: string[][]) {
   const supplyIndex = salesSheetHeaders["FN판매입력"].indexOf("공급가액");
+  if (supplyIndex < 0) return 0;
+  return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
+}
+
+function salesPurchaseAmountTotal(rows: string[][]) {
+  const supplyIndex = salesSheetHeaders["FN구매입력"].indexOf("공급가액");
   if (supplyIndex < 0) return 0;
   return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
 }
@@ -5577,10 +5589,97 @@ type SalesWorkspaceFileBucket = typeof SALES_WORKSPACE_FILE_BUCKETS[number];
 
 function salesInitialSheets(): Record<SalesSheetName, string[][]> {
   return {
+    "발주 진행 단계": makeSheetRows("발주 진행 단계"),
     송장출력용: makeSheetRows("송장출력용"),
     FN송장입력: makeSheetRows("FN송장입력"),
     "FN판매입력": makeSheetRows("FN판매입력"),
+    "FN구매입력": makeSheetRows("FN구매입력"),
   };
+}
+
+function progressIndex(header: string) {
+  return salesSheetHeaders["발주 진행 단계"].indexOf(header);
+}
+
+function progressValue(row: string[], header: string) {
+  const index = progressIndex(header);
+  return index >= 0 ? salesCellText(row[index]) : "";
+}
+
+function setProgressValue(row: string[], header: string, value: string) {
+  const index = progressIndex(header);
+  if (index >= 0) row[index] = value;
+}
+
+function shippingCodeParts(value: unknown) {
+  const code = salesCellText(value);
+  const parts = code.split("-");
+  return {
+    raw: code,
+    mallAlias: parts[1] || code,
+    sequence: Number((parts[2] || "").replace(/\D/g, "")) || 0,
+  };
+}
+
+function makeShoppingProductKey(productCode: string, optionText: string) {
+  return `${salesCellText(productCode)}${salesCellText(optionText).replace(/\s+/g, " ")}`.trim();
+}
+
+function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
+  const shippingRows = sheets.송장출력용.filter(rowHasValue);
+  const invoiceRows = sheets.FN송장입력.filter(rowHasValue);
+  const salesRows = sheets["FN판매입력"].filter(rowHasValue);
+  const rows = shippingRows.map((shippingRow, index) => {
+    const shipping = salesRowObject("송장출력용", shippingRow);
+    const codeParts = shippingCodeParts(shipping.쇼핑몰코드);
+    const invoice = invoiceRows[index] ? salesRowObject("FN송장입력", invoiceRows[index]) : {};
+    const sale = salesRows[index] ? salesRowObject("FN판매입력", salesRows[index]) : {};
+    const productCode = salesCellText(sale.품목코드);
+    const optionText = salesCellText(shipping.주문옵션);
+    const progress = salesSheetHeaders["발주 진행 단계"].map(() => "");
+    setProgressValue(progress, "쇼핑몰(거래처)", salesCellText(sale.거래처명 || codeParts.mallAlias));
+    setProgressValue(progress, "수집일자", salesCellText(sale.일자) || salesWorkspaceDayKey().replace(/\D/g, ""));
+    setProgressValue(progress, "품목코드(ERP)", productCode);
+    setProgressValue(progress, "쇼핑몰상품코드", productCode || salesCellText(shipping.쇼핑몰코드));
+    setProgressValue(progress, "품목명(ERP)", salesCellText(sale.품목명) || optionText);
+    setProgressValue(progress, "쇼핑몰품목key", makeShoppingProductKey(productCode || salesCellText(shipping.쇼핑몰코드), optionText));
+    setProgressValue(progress, "쇼핑몰명", salesCellText(sale.거래처명 || codeParts.mallAlias));
+    setProgressValue(progress, "쇼핑몰코드", salesCellText(invoice.쇼핑몰코드 || shipping.쇼핑몰코드));
+    setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
+    setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
+    setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드));
+    setProgressValue(progress, "송장번호", salesCellText(shipping.송장번호 || invoice.송장번호));
+    setProgressValue(progress, "주문상태", salesCellText(invoice.송장번호 || shipping.송장번호) ? "출고대기" : "신규주문");
+    setProgressValue(progress, "수취인", salesCellText(shipping.수취인));
+    setProgressValue(progress, "수취인연락처1", salesCellText(shipping.수취인연락처1));
+    setProgressValue(progress, "수취인연락처2", salesCellText(shipping.수취인연락처2));
+    setProgressValue(progress, "우편번호", salesCellText(shipping.우편번호));
+    setProgressValue(progress, "주소", salesCellText(shipping.주소));
+    setProgressValue(progress, "수량", salesCellText(shipping.수량 || sale.수량));
+    setProgressValue(progress, "배송요청사항", salesCellText(shipping.배송요청사항));
+    setProgressValue(progress, "정산예정금액", salesCellText(shipping.정산예정금액 || sale.공급가액));
+    setProgressValue(progress, "배송방법", "택배");
+    setProgressValue(progress, "배송비", "선불");
+    return progress;
+  });
+  return padSalesRows("발주 진행 단계", rows);
+}
+
+function applyProgressTrackingToShipping(currentSheets: Record<SalesSheetName, string[][]>) {
+  const progressRows = currentSheets["발주 진행 단계"].filter(rowHasValue);
+  if (!progressRows.length) return currentSheets;
+  const nextShipping = currentSheets.송장출력용.map((row, index) => {
+    const progress = progressRows[index];
+    if (!progress) return row;
+    const tracking = progressValue(progress, "송장번호");
+    const directPartner = progressValue(progress, "직송거래처");
+    if (!tracking && !directPartner) return row;
+    const next = [...row];
+    const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
+    if (trackingIndex >= 0) next[trackingIndex] = directPartner || tracking;
+    return next;
+  });
+  return { ...currentSheets, 송장출력용: nextShipping };
 }
 
 function salesWorkspaceDayKey(date = new Date()) {
@@ -5723,6 +5822,13 @@ function toSettlementExportValue(value: string) {
 function exportSheetRowsWithHeaders(name: SalesSheetName, rows: string[][]) {
   let headers = [...salesSheetHeaders[name]];
   let exportRows: Array<Array<string | number>> = rows.map((row) => headers.map((_, index) => row[index] || ""));
+  if (name === "발주 진행 단계") {
+    const directIndex = headers.indexOf("직송거래처");
+    const trackingIndex = headers.indexOf("송장번호");
+    if (directIndex >= 0 && trackingIndex >= 0) {
+      exportRows = exportRows.map((row) => row.map((cell, index) => (index === trackingIndex && row[directIndex] ? row[directIndex] : cell)));
+    }
+  }
   if (name === "송장출력용") {
     const trackingIndex = headers.indexOf("송장번호");
     const hasTracking = trackingIndex >= 0 && exportRows.some((row) => salesCellText(row[trackingIndex]));
@@ -5775,6 +5881,19 @@ async function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSh
         for (let rowIndex = 1; rowIndex <= exportRows.length; rowIndex += 1) {
           const address = xlsx.utils.encode_cell({ r: rowIndex, c: settlementIndex });
           if (worksheet[address]?.t === "n") worksheet[address].z = "#,##0";
+        }
+      }
+    }
+    if (name === "발주 진행 단계") {
+      const directIndex = headers.indexOf("직송거래처");
+      if (directIndex >= 0) {
+        for (let rowIndex = 1; rowIndex <= exportRows.length; rowIndex += 1) {
+          if (!salesCellText(exportRows[rowIndex - 1]?.[directIndex])) continue;
+          for (let colIndex = 0; colIndex < headers.length; colIndex += 1) {
+            const address = xlsx.utils.encode_cell({ r: rowIndex, c: colIndex });
+            if (!worksheet[address]) continue;
+            worksheet[address].s = { ...(worksheet[address].s || {}), fill: { fgColor: { rgb: "FFC000" } } };
+          }
         }
       }
     }
@@ -5863,6 +5982,7 @@ function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
 }
 
 function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[][], colIndex: number) {
+  if (sheet === "발주 진행 단계") return 100;
   if (sheet === "송장출력용" && header !== "주문옵션") return 95;
   const longest = [header, ...rows.map((row) => row[colIndex] || "")].reduce((max, value) => Math.max(max, String(value).length), 0);
   return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
@@ -5902,12 +6022,13 @@ function SalesExcelGrid({
   const [selecting, setSelecting] = useState(false);
   const [editing, setEditing] = useState<SalesGridCell | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
-  const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => 30));
+  const defaultRowHeight = sheet === "발주 진행 단계" ? 72 : 30;
+  const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => defaultRowHeight));
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
-  const productCodeCol = headers.indexOf("품목코드");
+  const productCodeCol = headers.includes("품목코드(ERP)") ? headers.indexOf("품목코드(ERP)") : headers.indexOf("품목코드");
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
     open: false,
     row: 0,
@@ -5928,11 +6049,11 @@ function SalesExcelGrid({
     setSortState(null);
     setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: productCodeCol, query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
-    setRowHeights(rows.map(() => 30));
+    setRowHeights(rows.map(() => (sheet === "발주 진행 단계" ? 72 : 30)));
   }, [sheet, resetKey]);
 
   useEffect(() => {
-    setRowHeights((prev) => rows.map((_, index) => prev[index] || 30));
+    setRowHeights((prev) => rows.map((_, index) => prev[index] || defaultRowHeight));
   }, [rows.length]);
 
   useEffect(() => {
@@ -6054,6 +6175,21 @@ function SalesExcelGrid({
     setEditing(null);
     gridRef.current?.focus();
   }
+  function toggleAllRows() {
+    const selectableRows = rows
+      .map((row, index) => ({ row, index }))
+      .filter((item) => rowHasValue(item.row))
+      .map((item) => item.index);
+    const allSelected = selectableRows.length > 0 && selectableRows.every((rowIndex) => selectedRows.includes(rowIndex));
+    const nextRows = allSelected ? [] : selectableRows;
+    setSelectedRows(nextRows);
+    if (nextRows.length) {
+      setAnchor({ row: nextRows[0], col: 0 });
+      setRange({ startRow: nextRows[0], endRow: nextRows[nextRows.length - 1], startCol: 0, endCol: headers.length - 1 });
+    }
+    setEditing(null);
+    gridRef.current?.focus();
+  }
   function isSelected(row: number, col: number) {
     return selectedRows.includes(row) || (row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
   }
@@ -6139,16 +6275,20 @@ function SalesExcelGrid({
         onMouseUp={() => setSelecting(false)}
         className="max-h-[560px] overflow-auto outline-none"
       >
-        <table className="table-fixed border-collapse text-xs" style={{ width: 40 + colWidths.reduce((sum, width) => sum + width, 0) }}>
+        <table className="table-fixed border-collapse text-xs" style={{ width: 54 + colWidths.reduce((sum, width) => sum + width, 0) }}>
           <colgroup>
-            <col style={{ width: 40 }} />
+            <col style={{ width: 54 }} />
             {headers.map((header, colIndex) => (
               <col key={header} style={{ width: colWidths[colIndex] || 95 }} />
             ))}
           </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100">
             <tr>
-              <th className="w-10 border border-slate-200 px-2 py-2 text-slate-400">#</th>
+              <th className="w-[54px] border border-slate-200 px-2 py-2 text-slate-400">
+                <button type="button" onClick={toggleAllRows} className="inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-[10px] font-black text-slate-500 hover:border-orange-300 hover:bg-orange-50">
+                  {selectedRows.length ? "✓" : ""}
+                </button>
+              </th>
               {headers.map((header, colIndex) => (
                 <th
                   key={header}
@@ -6179,7 +6319,7 @@ function SalesExcelGrid({
               const isHighlightedRow = highlightedRowSet.has(rowIndex);
               return (
               <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
-                <td className={`relative border px-2 py-1 text-center font-bold text-slate-400 ${isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-slate-50"}`}>
+                <td className={`relative border px-1 py-1 text-center font-bold text-slate-400 ${isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-slate-50"}`}>
                   <button
                     type="button"
                     onMouseDown={(event) => {
@@ -6194,9 +6334,10 @@ function SalesExcelGrid({
                       setRange({ startRow: rowIndex, endRow: rowIndex, startCol: 0, endCol: headers.length - 1 });
                       gridRef.current?.focus();
                     }}
-                    className="w-full text-center"
+                    className="flex w-full items-center justify-center gap-1 text-center"
                   >
-                    {rowIndex + 1}
+                    <span className={`inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] ${selectedRows.includes(rowIndex) ? "border-orange-400 bg-orange-500 text-white" : "border-slate-300 bg-white text-transparent"}`}>✓</span>
+                    <span>{rowIndex + 1}</span>
                   </button>
                   <button
                     type="button"
@@ -6235,7 +6376,7 @@ function SalesExcelGrid({
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             const value = (event.currentTarget as HTMLInputElement).value.trim();
-                            if (sheet === "FN판매입력" && colIndex === productCodeCol && value) {
+                            if ((sheet === "FN판매입력" || sheet === "발주 진행 단계" || sheet === "FN구매입력") && colIndex === productCodeCol && value) {
                               event.preventDefault();
                               openProductSearch(rowIndex, colIndex, value);
                               setEditing(null);
@@ -6248,7 +6389,7 @@ function SalesExcelGrid({
                         className="h-full w-full bg-white px-2 text-xs outline-orange-400"
                       />
                     ) : (
-                      <div className="h-full w-full select-none overflow-hidden whitespace-nowrap px-2 py-1 leading-5">{row[colIndex] || ""}</div>
+                      <div className={`h-full w-full select-none overflow-hidden px-2 py-1 leading-5 ${sheet === "발주 진행 단계" ? "whitespace-normal break-words" : "whitespace-nowrap"}`}>{row[colIndex] || ""}</div>
                     )}
                   </td>
                 ))}
@@ -6785,7 +6926,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
-  const [activeSheet, setActiveSheet] = useState<SalesSheetName>("송장출력용");
+  const [activeSheet, setActiveSheet] = useState<SalesSheetName>("발주 진행 단계");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [completedSalesTasks, setCompletedSalesTasks] = useState<Record<string, boolean>>({});
@@ -6800,13 +6941,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
   const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
+  const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
+  const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed"; message: string }>>([]);
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
+  useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
+  const purchaseSupplyTotal = salesPurchaseAmountTotal(sheets["FN구매입력"]);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -6989,9 +7135,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (snapshot.activeSheet && salesSheetHeaders[snapshot.activeSheet]) setActiveSheet(snapshot.activeSheet);
         if (snapshot.sheets) {
           setSheets({
+            "발주 진행 단계": padSalesRows("발주 진행 단계", snapshot.sheets["발주 진행 단계"] || []),
             송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
             FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
             "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
+            "FN구매입력": padSalesRows("FN구매입력", snapshot.sheets["FN구매입력"] || []),
           });
         }
         setCompletedSalesTasks(snapshot.completedSalesTasks || {});
@@ -7179,11 +7327,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSheets((prev) => {
       const nextSheets = { ...prev };
       (Object.keys(salesSheetHeaders) as SalesSheetName[]).forEach((sheet) => {
+        if (sheet === "발주 진행 단계" || sheet === "FN구매입력") return;
         const rows = sheet === "송장출력용"
           ? sortShippingRowsByOption(parsedSheets?.[sheet] || [])
           : parsedSheets?.[sheet] || [];
         if (rows.length) nextSheets[sheet] = padSalesRows(sheet, rows);
       });
+      nextSheets["발주 진행 단계"] = buildOrderProgressRows(nextSheets);
       return nextSheets;
     });
     setSalesGridResetKey((value) => value + 1);
@@ -7193,15 +7343,41 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (kind === "orders") window.alert("작업 완료됨!");
   }
 
-  function runOrderMacroFlow() {
+  function runOrderCollectionFlow() {
+    const ok = window.confirm("주문 수집하시겠습니까?");
+    if (!ok) return;
+    const channelNames = ["네이버 스마트스토어", "쿠팡", "11번가", "ESM/G마켓/옥션", "카카오톡스토어", "SSG", "롯데ON", "오늘의집", "토스", "현대이지웰", "기타몰"];
+    setCollectionStatuses(channelNames.map((name) => ({ name, status: "waiting", message: "대기" })));
+    setCollectionPopupOpen(true);
+    channelNames.forEach((name, index) => {
+      window.setTimeout(() => {
+        setCollectionStatuses((prev) => prev.map((item) => item.name === name ? {
+          ...item,
+          status: ["네이버 스마트스토어", "쿠팡"].includes(name) ? "running" : "failed",
+          message: ["네이버 스마트스토어", "쿠팡"].includes(name) ? "API 연결 준비 중" : "연동 API 미연결",
+        } : item));
+      }, index * 120);
+      window.setTimeout(() => {
+        setCollectionStatuses((prev) => prev.map((item) => item.name === name && item.status === "running" ? {
+          ...item,
+          status: "done",
+          message: "현재 어댑터 준비됨, 실제 수집 API 연결 예정",
+        } : item));
+      }, index * 120 + 600);
+    });
     if (completedSalesTasks.orderFlow) {
-      const ok = window.confirm("이미 발주파일 작업을 실행한 것으로 보입니다. 중복 작업일 수 있는데 계속할까요?");
-      if (!ok) {
-        setMessage("발주파일 작업 실행을 취소했습니다.");
+      const retry = window.confirm("이미 주문수집 작업을 실행한 것으로 보입니다. 중복 작업일 수 있는데 계속할까요?");
+      if (!retry) {
+        setMessage("주문수집 작업 실행을 취소했습니다.");
         return;
       }
     }
-    void parseWaitingFiles("orders");
+    if (pendingOrderFiles.length) {
+      void parseWaitingFiles("orders");
+      return;
+    }
+    setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
+    setMessage("쇼핑몰 API 주문수집 화면을 준비했습니다. 실제 채널 API 저장은 별도 API 연결 후 반영됩니다.");
   }
 
   function exportAllSheets() {
@@ -7214,7 +7390,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("전체 엑셀을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    void downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, sheets);
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const directIndexes = new Set(
+      exportSheets["발주 진행 단계"]
+        .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
+        .filter((index) => index >= 0),
+    );
+    void downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, {
+      "발주 진행 단계": exportSheets["발주 진행 단계"],
+      송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
+      "FN판매입력": exportSheets["FN판매입력"],
+      "FN구매입력": exportSheets["FN구매입력"],
+    });
+    if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
+    if (directShippingRows.케이모아.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, directShippingRows.케이모아);
     setCompletedSalesTasks((prev) => ({ ...prev, exportAll: true }));
     setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
   }
@@ -7228,12 +7417,26 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("송장출력용을 이미 내보낸 것으로 보입니다. 다른 이름으로 다시 다운로드될 수 있습니다. 계속할까요?");
       if (!ok) return;
     }
-    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: sheets.송장출력용 });
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const directIndexes = new Set(
+      exportSheets["발주 진행 단계"]
+        .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
+        .filter((index) => index >= 0),
+    );
+    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)) });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
 
   function selectedShippingRows() {
+    if (selectedSalesRange?.sheet === "발주 진행 단계") {
+      const indexes = selectedSalesRange.rowIndexes?.length
+        ? selectedSalesRange.rowIndexes
+        : Array.from({ length: selectedSalesRange.range.endRow - selectedSalesRange.range.startRow + 1 }, (_, index) => selectedSalesRange.range.startRow + index);
+      return indexes
+        .map((rowIndex) => sheets.송장출력용[rowIndex])
+        .filter((row): row is string[] => Boolean(row && row.some(Boolean)));
+    }
     if (selectedSalesRange?.sheet !== "송장출력용") return [];
     if (selectedSalesRange.rowIndexes?.length) {
       return selectedSalesRange.rowIndexes
@@ -7243,14 +7446,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return sheets.송장출력용.slice(selectedSalesRange.range.startRow, selectedSalesRange.range.endRow + 1).filter((row) => row.some(Boolean));
   }
 
+  function selectedOrderRowIndexes() {
+    if (!selectedSalesRange) return [] as number[];
+    if (!["발주 진행 단계", "송장출력용"].includes(selectedSalesRange.sheet)) return [];
+    if (selectedSalesRange.rowIndexes?.length) return selectedSalesRange.rowIndexes;
+    return Array.from({ length: selectedSalesRange.range.endRow - selectedSalesRange.range.startRow + 1 }, (_, index) => selectedSalesRange.range.startRow + index);
+  }
+
   function openDirectPartnerPicker() {
     if (!hasSalesRows(sheets.송장출력용)) {
-      window.alert("직송파일을 만들 송장출력용 데이터가 없습니다.");
+      window.alert("직송 저장할 주문 데이터가 없습니다.");
       return;
     }
     const selectedRows = selectedShippingRows();
     if (!selectedRows.length) {
-      window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요. 예: 2행과 5행을 드래그 또는 Shift 선택");
+      window.alert("직송 저장할 주문건을 먼저 선택해 주세요.");
       return;
     }
     setDirectPartnerPickerOpen(true);
@@ -7303,8 +7513,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function makeDirectShippingFile(partner: DirectShippingPartner) {
     const selectedRows = selectedShippingRows();
+    const selectedIndexes = selectedOrderRowIndexes();
     if (!selectedRows.length) {
-      window.alert("직송파일로 만들 송장출력용 행을 먼저 선택해 주세요.");
+      window.alert("직송 저장할 주문건을 먼저 선택해 주세요.");
       setDirectPartnerPickerOpen(false);
       return;
     }
@@ -7328,24 +7539,73 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
 
     const nextRows = [...previousRows, ...appendRows];
-    let savedRows = nextRows;
-    try {
-      savedRows = await saveDirectShippingWorkbook(partner, headers, nextRows);
-    } catch {
-      setDirectPartnerPickerOpen(false);
-      setMessage("직송파일 저장을 취소했습니다.");
-      return;
-    }
+    const savedRows = nextRows;
     setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
+    setSheets((prev) => {
+      const next = { ...prev };
+      const progressRows = next["발주 진행 단계"].map((row) => [...row]);
+      const shippingRows = next.송장출력용.map((row) => [...row]);
+      const purchaseRows = next["FN구매입력"].map((row) => [...row]);
+      const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
+      selectedIndexes.forEach((rowIndex, orderIndex) => {
+        if (progressRows[rowIndex]) {
+          setProgressValue(progressRows[rowIndex], "직송거래처", partner);
+          setProgressValue(progressRows[rowIndex], "주문상태", "출고대기");
+          setProgressValue(progressRows[rowIndex], "송장번호", partner);
+        }
+        if (shippingRows[rowIndex] && trackingIndex >= 0) shippingRows[rowIndex][trackingIndex] = partner;
+        const progress = progressRows[rowIndex];
+        const purchase = salesSheetHeaders["FN구매입력"].map(() => "");
+        const today = salesWorkspaceDayKey().replace(/\D/g, "");
+        purchase[0] = today;
+        purchase[1] = String(orderIndex + 1);
+        purchase[3] = partner;
+        purchase[5] = "100";
+        purchase[8] = progress ? progressValue(progress, "품목코드(ERP)") : "";
+        purchase[9] = progress ? progressValue(progress, "품목명(ERP)") : "";
+        purchase[11] = progress ? progressValue(progress, "수량") || "1" : "1";
+        purchase[12] = progress ? progressValue(progress, "정산예정금액") : "";
+        purchase[13] = progress ? progressValue(progress, "정산예정금액") : "";
+        purchase[14] = `직송 ${partner}`;
+        purchaseRows[rowIndex] = purchase;
+      });
+      next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+      next.송장출력용 = padSalesRows("송장출력용", shippingRows);
+      next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+      return next;
+    });
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
-    setMessage(`${partner} 직송파일에 ${appendRows.length}개 행을 추가했습니다. 총 ${savedRows.length}개 행입니다.`);
+    setMessage(`${partner} 직송 주문 ${appendRows.length}건을 저장했습니다. 엑셀 내보내기 때 직송파일과 FN구매입력에 반영됩니다.`);
     setDirectPartnerPickerOpen(false);
   }
 
   async function sendSalesInput() {
     const rows = sheets["FN판매입력"]
       .filter(rowHasValue)
-      .map((row) => salesRowObject("FN판매입력", row));
+      .map((row) => {
+        const item = salesRowObject("FN판매입력", row);
+        return {
+          sale_date: item.일자,
+          io_date: item.일자,
+          upload_ser_no: item.순번,
+          cust_code: item.거래처코드,
+          cust_name: item.거래처명,
+          emp_cd: item.담당자,
+          wh_cd: item.출하창고,
+          io_type: item.거래유형,
+          currency: item.통화,
+          exchange_rate: item.환율,
+          prod_cd: item.품목코드,
+          prod_name: item.품목명,
+          size_des: item.규격,
+          qty: item.수량,
+          price: item["단가(vat포함)"],
+          foreign_amt: item.외화금액,
+          supply_amt: item.공급가액,
+          remarks: item.적요,
+          make_flag: item.생산전표생성,
+        };
+      });
     if (!rows.length) {
       window.alert("전송할 판매입력 행이 없습니다.");
       return;
@@ -7383,9 +7643,68 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
-  async function matchInvoiceNumbers() {
+  async function sendPurchaseInput() {
+    const rows = sheets["FN구매입력"]
+      .filter(rowHasValue)
+      .map((row) => {
+        const item = salesRowObject("FN구매입력", row);
+        return {
+          purchase_date: item.일자,
+          io_date: item.일자,
+          upload_ser_no: item.순번,
+          cust_code: item.거래처코드,
+          cust_name: item.거래처명,
+          wh_cd: item.입고창고,
+          prod_cd: item.품목코드,
+          prod_name: item.품목명,
+          size_des: item.규격,
+          qty: item.수량,
+          price: item["단가(vat포함)"],
+          supply_amt: item.공급가액,
+          remarks: item.적요,
+        };
+      });
+    if (!rows.length) {
+      window.alert("전송할 구매입력 행이 없습니다.");
+      return;
+    }
+    if (completedSalesTasks.purchaseSent) {
+      const ok = window.confirm("구매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(`${rows.length}건을 FN OS 구매 DB에 저장합니다. 계속할까요?`);
+      if (!ok) return;
+    }
+    setMessage("FN OS 구매 DB에 저장하는 중입니다...");
+    try {
+      const res = await fetch("/api/purchases/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows, source_file_name: "FN_OS_DIRECT_SHIPPING_PURCHASE" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const popup = importResultText(data, "FN OS 구매입력 결과");
+      window.alert(popup);
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || data.message || "구매입력 전송 실패");
+      } else {
+        setCompletedSalesTasks((prev) => ({ ...prev, purchaseSent: true }));
+        setMessage(`구매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
+      }
+      invalidateSalesInventoryCaches();
+      loadSummary(true);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "알 수 없는 오류";
+      window.alert(`FN OS 구매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
+      setMessage(`구매입력 전송 실패: ${reason}`);
+    }
+  }
+
+  async function matchInvoiceNumbers(filesOverride?: File[]) {
     setSalesSheetHighlightedRows({});
-    if (!pendingInvoiceFiles.length) {
+    const filesToMatch = filesOverride?.length ? filesOverride : pendingInvoiceFiles;
+    if (!filesToMatch.length) {
       window.alert("먼저 송장파일을 업로드해 주세요.");
       return;
     }
@@ -7398,11 +7717,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
 
-    setMessage(`${pendingInvoiceFiles.length}개 송장파일을 읽어서 기존 시트에 매칭하는 중입니다...`);
+    setMessage(`${filesToMatch.length}개 송장파일을 읽어서 기존 시트에 매칭하는 중입니다...`);
     const formData = new FormData();
     formData.append("kind", "invoices");
     if (orderFilePassword) formData.append("order_file_password", orderFilePassword);
-    pendingInvoiceFiles.forEach((file) => formData.append("files", file));
+    filesToMatch.forEach((file) => formData.append("files", file));
     const res = await fetch("/api/sales/order-files/parse", {
       method: "POST",
       credentials: "include",
@@ -7437,7 +7756,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
 
-    setSheets(result.sheets);
+    setSheets({
+      ...result.sheets,
+      "발주 진행 단계": buildOrderProgressRows(result.sheets),
+    });
     setSalesGridResetKey((value) => value + 1);
     if (!result.failedShipping.length && !result.failedInvoice.length) {
       setPendingInvoiceFiles([]);
@@ -7465,7 +7787,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function applyFnParcelSheet() {
-    const shippingRows = sheets.송장출력용.filter((row) => row.some((cell) => String(cell || "").trim()));
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const shippingRows = exportSheets.송장출력용.filter((row) => row.some((cell) => String(cell || "").trim()));
     if (!shippingRows.length) {
       window.alert("FN_택배시트에 반영할 송장출력용 데이터가 없습니다.");
       return;
@@ -7504,6 +7827,75 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
+  function openInvoiceUpload() {
+    invoiceUploadInputRef.current?.click();
+  }
+
+  function pickInvoiceFilesAndMatch(files: FileList | null) {
+    const incoming = Array.from(files || []);
+    if (!incoming.length) return;
+    pickOrderFiles(incoming, "invoices");
+    const ok = window.confirm(`${incoming.length}개 송장번호 엑셀을 업로드했습니다. 출고대기 주문건에 매칭하시겠습니까?`);
+    if (ok) void matchInvoiceNumbers(incoming);
+  }
+
+  function orderProgressRows() {
+    return sheets["발주 진행 단계"].filter(rowHasValue);
+  }
+
+  function orderStatusCount(label: string) {
+    const rows = orderProgressRows();
+    if (label === "전체") return rows.length;
+    if (label === "신규주문") return rows.filter((row) => !progressValue(row, "주문상태") || progressValue(row, "주문상태") === "신규주문").length;
+    return rows.filter((row) => progressValue(row, "주문상태") === label).length;
+  }
+
+  function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
+    const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
+    if (!indexes.length) {
+      window.alert("선택값이 없습니다.");
+      return;
+    }
+    const eligibleIndexes = status === "출고완료"
+      ? indexes.filter((index) => salesCellText(progressValue(sheets["발주 진행 단계"][index], "송장번호")) && !salesCellText(progressValue(sheets["발주 진행 단계"][index], "직송거래처")))
+      : indexes;
+    const ok = window.confirm(`${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`);
+    if (!ok) return;
+    setSheets((prev) => {
+      const next = { ...prev };
+      const progressRows = next["발주 진행 단계"].map((row) => [...row]);
+      eligibleIndexes.forEach((index) => {
+        if (!progressRows[index]) return;
+        setProgressValue(progressRows[index], "주문상태", status);
+      });
+      if (status === "출고대기") setActiveSheet("송장출력용");
+      next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+      return next;
+    });
+    setMessage(`${status} 처리 준비 완료: ${eligibleIndexes.length}건. 쇼핑몰 상태 변경 API는 채널별 연결 후 이 단계에서 호출합니다.`);
+  }
+
+  function deleteSelectedOrderRows() {
+    const indexes = new Set(selectedOrderRowIndexes());
+    if (!indexes.size) {
+      window.alert("선택값이 없습니다.");
+      return;
+    }
+    const ok = window.confirm(`${indexes.size}건을 선택 삭제하시겠습니까?`);
+    if (!ok) return;
+    setSheets((prev) => ({
+      ...prev,
+      "발주 진행 단계": padSalesRows("발주 진행 단계", prev["발주 진행 단계"].filter((_, index) => !indexes.has(index))),
+      송장출력용: padSalesRows("송장출력용", prev.송장출력용.filter((_, index) => !indexes.has(index))),
+      FN송장입력: padSalesRows("FN송장입력", prev.FN송장입력.filter((_, index) => !indexes.has(index))),
+      "FN판매입력": padSalesRows("FN판매입력", prev["FN판매입력"].filter((_, index) => !indexes.has(index))),
+      "FN구매입력": padSalesRows("FN구매입력", prev["FN구매입력"].filter((_, index) => !indexes.has(index))),
+    }));
+    setSelectedSalesRange(null);
+    setSalesGridResetKey((value) => value + 1);
+    setMessage(`선택 주문 ${indexes.size}건을 삭제했습니다.`);
+  }
+
   function resetSalesWorkspace() {
     const hasAnyRows = (Object.keys(salesSheetHeaders) as SalesSheetName[]).some((sheet) => hasSalesRows(sheets[sheet]));
     if (hasAnyRows || uploadedFiles.length) {
@@ -7520,7 +7912,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSalesSheetHighlightedRows({});
     setDirectShippingRows({ JB: [], 케이모아: [] });
     directShippingFileHandles.current = {};
-    setActiveSheet("송장출력용");
+    setActiveSheet("발주 진행 단계");
     setSheets(salesInitialSheets());
     clearSalesWorkspaceStorage();
     setSalesGridResetKey((value) => value + 1);
@@ -7535,11 +7927,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === "F1") runOrderMacroFlow();
-      if (event.key === "F2") exportShippingSheet();
-      if (event.key === "F3") openDirectPartnerPicker();
-      if (event.key === "F4") void sendSalesInput();
-      if (event.key === "F5") matchInvoiceNumbers();
+      if (event.key === "F1") runOrderCollectionFlow();
+      if (event.key === "F2") exportAllSheets();
+      if (event.key === "F3") void sendSalesInput();
+      if (event.key === "F4") void sendPurchaseInput();
+      if (event.key === "F5") openInvoiceUpload();
       if (event.key === "F6") void applyFnParcelSheet();
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -7552,7 +7944,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {isOnlineSection && (
         <Panel
           title="온라인 발주"
-          subtitle="기존 발주통합매크로 흐름을 FN OS 화면에서 실행합니다. 업로드 파일은 작업 대기 상태로 보관하고, 결과 시트는 아래 그리드에서 편집합니다."
+          subtitle="쇼핑몰 API 주문수집부터 송장번호 매칭, 판매/구매입력 저장, FN_택배시트 반영까지 한 화면에서 처리합니다."
           action={
             <div className="flex gap-2">
               <button type="button" className="rounded-md border border-slate-300 px-4 py-2 text-sm font-black text-slate-700" onClick={resetSalesWorkspace}>초기화</button>
@@ -7561,74 +7953,47 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }
         >
           <div className="mb-4 flex flex-wrap gap-2">
-            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderMacroFlow}>F1. 발주 작업 실행</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportShippingSheet}>F2. 송장출력용 엑셀</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openDirectPartnerPicker}>F3. 직송파일 생성</button>
-            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F4. FN 판매입력 저장</button>
-            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={matchInvoiceNumbers}>F5. 송장번호 매칭</button>
+            <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1. 주문수집</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={exportAllSheets}>F2. 엑셀 내보내기</button>
+            <button type="button" className="rounded-md border border-blue-300 px-3 py-2 text-sm font-black text-blue-600" onClick={sendSalesInput}>F3. FN판매입력 저장</button>
+            <button type="button" className="rounded-md border border-violet-300 px-3 py-2 text-sm font-black text-violet-700" onClick={sendPurchaseInput}>F4. FN구매입력 저장</button>
+            <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F5. 송장번호 업로드</button>
             <button type="button" className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F6. FN_택배시트 반영</button>
-          </div>
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              void pickOrderFiles(event.dataTransfer.files, "orders");
-            }}
-            className={`mb-4 rounded-md border p-4 ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
-          >
-            <div className="grid gap-3 lg:grid-cols-[180px_180px_1fr]">
-              <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 hover:bg-orange-50">
-                발주파일 업로드
-                <input type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { void pickOrderFiles(event.target.files, "orders"); event.target.value = ""; }} />
-              </label>
-              <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-blue-200 bg-white px-4 text-sm font-black text-blue-600 hover:bg-blue-50">
-                송장파일 업로드
-                <input type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { void pickOrderFiles(event.target.files, "invoices"); event.target.value = ""; }} />
-              </label>
-              <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-500">
-                파일을 여러 개 끌어다 놓을 수 있습니다. 드래그앤드랍은 발주파일만 가능
-              </div>
-            </div>
-            {uploadedFiles.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {uploadedFiles.map((file) => {
-                  const key = salesUploadFileKey(file);
-                  const kind = pendingInvoiceFiles.some((invoiceFile) => salesUploadFileKey(invoiceFile) === key) ? "invoices" : "orders";
-                  const badge = salesUploadBadge(file.name, kind);
-                  return (
-                    <span
-                      key={key}
-                      title={`${badge.label} · ${file.name}`}
-                      className={`inline-flex h-8 w-[200px] items-center gap-2 rounded-md border px-2 text-xs font-black ${badge.className}`}
-                    >
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded bg-white/80 px-1 text-[10px] font-black">{badge.mark}</span>
-                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                      <button
-                        type="button"
-                        aria-label={`${file.name} 업로드 취소`}
-                        onClick={() => removeUploadedSalesFile(file)}
-                        className="shrink-0 rounded px-1 text-xs font-black opacity-70 hover:bg-white hover:opacity-100"
-                      >
-                        X
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-            {(pendingOrderFiles.length > 0 || pendingInvoiceFiles.length > 0) && (
-              <p className="mt-2 text-xs font-bold text-slate-500">
-                대기 중: 발주파일 {pendingOrderFiles.length}개 / 송장파일 {pendingInvoiceFiles.length}개
-              </p>
-            )}
+            <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
           </div>
           <div className="mb-3 flex flex-wrap gap-2">
-            {(Object.keys(salesSheetHeaders) as SalesSheetName[]).map((sheet) => (
+            {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
+              <button key={label} type="button" className="h-12 min-w-20 rounded-md border border-slate-200 bg-white px-3 text-center text-xs font-black text-slate-700 hover:border-orange-200 hover:bg-orange-50">
+                <span className="block text-sm text-blue-600">{orderStatusCount(label)}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
+              const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
+              if (status) changeSelectedOrderStatus(status);
+              event.currentTarget.value = "";
+            }}>
+              <option value="">진행 상태</option>
+              <option value="주문확인">주문확인</option>
+              <option value="출고대기">출고대기</option>
+              <option value="출고완료">출고완료</option>
+            </select>
+            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => window.alert("품목 연결 DB 저장은 쇼핑몰품목key 매핑 테이블 확정 후 연결됩니다. 현재는 품목코드(ERP) 셀에서 Enter로 품목검색을 사용할 수 있습니다.")}>품목 연결</button>
+            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
+              const partner = event.target.value as DirectShippingPartner;
+              if (partner) void makeDirectShippingFile(partner);
+              event.currentTarget.value = "";
+            }}>
+              <option value="">직송 저장</option>
+              <option value="JB">제이비JB</option>
+              <option value="케이모아">케이모아</option>
+            </select>
+            <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {visibleSalesSheetNames.map((sheet) => (
               <button
                 key={sheet}
                 type="button"
@@ -7643,6 +8008,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 판매입력 총 금액 : {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원
               </span>
             )}
+            {activeSheet === "FN구매입력" && (
+              <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">
+                구매입력 총 금액 : {Math.round(purchaseSupplyTotal).toLocaleString("ko-KR")}원
+              </span>
+            )}
           </div>
           <SalesExcelGrid
             sheet={activeSheet}
@@ -7653,9 +8023,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             highlightedRows={salesSheetHighlightedRows[activeSheet] || []}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
-            참고: 직송파일은 기본 다운로드 위치에 바로 생성됩니다. 같은 거래처로 다시 생성하면 현재 작업에 누적된 행까지 포함해 다시 내려받습니다.
+            참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, F2 엑셀 내보내기 때 거래처별 직송파일과 FN구매입력 시트에 반영됩니다.
           </p>
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
+          {collectionPopupOpen && (
+            <FormModal
+              title="주문수집"
+              onClose={() => setCollectionPopupOpen(false)}
+              size="lg"
+              footer={<ActionButton type="button" onClick={() => setCollectionPopupOpen(false)}>확인</ActionButton>}
+            >
+              <div className="grid gap-2 md:grid-cols-2">
+                {collectionStatuses.map((item) => (
+                  <div key={item.name} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                    <span className={`h-3 w-3 rounded-full ${
+                      item.status === "done" ? "bg-emerald-500" : item.status === "running" ? "bg-amber-400" : item.status === "failed" ? "bg-rose-500" : "bg-slate-300"
+                    }`} />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
+                      <div className="truncate text-xs font-semibold text-gray-500">{item.message}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </FormModal>
+          )}
           {directPartnerPickerOpen && (
             <SelectionModal
               title="거래처"
@@ -7785,26 +8177,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </Panel>
       )}
 
-      {isOnlineSection && (
-        <Panel title="주문확인" subtitle="수집된 주문을 출고 가능 상태로 정리합니다. 미매칭, 재고부족, 중복, 보류/제외 상태를 확인하는 작업대입니다.">
-          <div className="mb-3 grid gap-2 md:grid-cols-5">
-            <select className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm">
-              <option>전체 주문상태</option>
-              <option>collected</option>
-              <option>confirmed</option>
-              <option>hold</option>
-              <option>excluded</option>
-              <option>ready_to_ship</option>
-            </select>
-            <button type="button" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-700">미매칭 상품</button>
-            <button type="button" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700">재고부족</button>
-            <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">중복 확인</button>
-            <button type="button" className="rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white">확정 저장</button>
-          </div>
-          <OrderCheckTable orders={summary?.recent_orders || []} items={summary?.recent_order_items || []} />
-        </Panel>
-      )}
-
       {isHistorySection && (
         <Panel title="기간별 판매/구매 현황" subtitle="FN OS DB 기준 거래처별, 품목별, 기간별 금액을 집계합니다.">
           <div className="grid gap-4 lg:grid-cols-2">
@@ -7855,20 +8227,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         />
       )}
 
-      {isOnlineSection && (
-        <Panel title="송장/출고" subtitle="송장출력용, FN송장입력 시트 구조를 웹 DB로 옮기는 영역입니다.">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-black">송장출력용</h3>
-              <p className="mt-2 text-sm text-slate-600">쇼핑몰코드, 수취인, 연락처, 우편번호, 주소, 주문옵션, 수량, 배송요청사항, 정산예정금액을 저장할 예정입니다.</p>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-black">FN송장입력</h3>
-              <p className="mt-2 text-sm text-slate-600">주문번호, 묶음주문번호, 배송방법코드, 송장번호 매칭 및 입력 상태를 관리합니다.</p>
-            </div>
-          </div>
-        </Panel>
-      )}
 
       {entryModalMode && (
         <SalesPurchaseEntryModal
@@ -8068,7 +8426,7 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   );
 }
 
-type MasterTabKey = "customers" | "products" | "warehouses" | "channels" | "attendance";
+type MasterTabKey = "customers" | "products" | "warehouses" | "channelMappings" | "channels" | "attendance";
 type PersonnelStatus = "working" | "leave" | "resigned";
 type PersonnelBulkField = "status" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
 
@@ -8127,6 +8485,13 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     title: "쇼핑몰",
     templateHeaders: ["쇼핑몰코드", "쇼핑몰명", "ID", "거래처명", "수집처구분", "사용구분", "진행상태", "판매자사이트 URL", "API 연동 여부"],
     sampleRow: ["NAVER", "네이버 스마트스토어", "seller-id", "네이버", "api", "사용", "planned", "https://sell.smartstore.naver.com/", "Y"],
+  },
+  {
+    key: "channelMappings",
+    label: "쇼핑몰 코드연결",
+    title: "쇼핑몰 코드연결",
+    templateHeaders: ["쇼핑몰명", "품목코드", "품목명", "쇼핑몰품목key"],
+    sampleRow: ["네이버_에프앤FN", "DNA007_BK", "다이나믹 스포츠 선글라스_블랙", "13155418629제품선택: 다이나믹 스포츠 선글라스 / 선글라스 색상: 블랙"],
   },
   {
     key: "attendance",
@@ -8233,7 +8598,7 @@ function MasterManagementPanel({
         />
       )}
 
-      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && activeMasterTab !== "attendance" && (
+      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && activeMasterTab !== "attendance" && activeMasterTab !== "channelMappings" && (
         <MasterEntryPanel
           config={activeConfig}
           setMessage={setMessage}
@@ -8250,6 +8615,8 @@ function MasterManagementPanel({
       )}
 
       {activeMasterTab === "warehouses" && <WarehouseManagementPanel message={message} setMessage={setMessage} />}
+
+      {activeMasterTab === "channelMappings" && <ChannelProductMappingPanel />}
 
       {activeMasterTab === "attendance" && (
         <PersonnelManagementPanel onLock={() => {
@@ -8349,6 +8716,78 @@ function PersonnelAuthModal({
         </div>
       </div>
     </FormModal>
+  );
+}
+
+type ChannelProductMappingRow = {
+  mallName: string;
+  productCode: string;
+  productName: string;
+  mallProductKey: string;
+};
+
+function ChannelProductMappingPanel() {
+  const storageKey = "fnos-channel-product-mappings";
+  const [rows, setRows] = useState<ChannelProductMappingRow[]>([]);
+  const [draft, setDraft] = useState<ChannelProductMappingRow>({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "[]") as ChannelProductMappingRow[];
+      setRows(Array.isArray(saved) ? saved : []);
+    } catch {
+      setRows([]);
+    }
+  }, []);
+
+  function saveRows(nextRows: ChannelProductMappingRow[]) {
+    setRows(nextRows);
+    localStorage.setItem(storageKey, JSON.stringify(nextRows));
+  }
+
+  function addMapping() {
+    if (!draft.mallName || !draft.productCode || !draft.mallProductKey) {
+      window.alert("쇼핑몰명, 품목코드, 쇼핑몰품목key를 입력해 주세요.");
+      return;
+    }
+    const nextRows = [
+      draft,
+      ...rows.filter((row) => !(row.mallName === draft.mallName && row.mallProductKey === draft.mallProductKey)),
+    ];
+    saveRows(nextRows);
+    setDraft({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+  }
+
+  return (
+    <Card className="p-4">
+      <SectionHeader title="쇼핑몰 코드연결" description="쇼핑몰품목key와 FN OS 품목코드를 연결합니다. 운영 DB 저장은 매핑 테이블 확정 후 연결합니다." />
+      <div className="mt-4 grid gap-2 lg:grid-cols-[160px_140px_180px_1fr_88px]">
+        <input className={modalInputClass} placeholder="쇼핑몰명" value={draft.mallName} onChange={(event) => setDraft((prev) => ({ ...prev, mallName: event.target.value }))} />
+        <input className={modalInputClass} placeholder="품목코드" value={draft.productCode} onChange={(event) => setDraft((prev) => ({ ...prev, productCode: event.target.value }))} />
+        <input className={modalInputClass} placeholder="품목명" value={draft.productName} onChange={(event) => setDraft((prev) => ({ ...prev, productName: event.target.value }))} />
+        <input className={modalInputClass} placeholder="쇼핑몰품목key" value={draft.mallProductKey} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductKey: event.target.value }))} />
+        <ActionButton type="button" onClick={addMapping}>등록</ActionButton>
+      </div>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-gray-50 text-xs font-black text-gray-500">
+            <tr><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`${row.mallName}-${row.mallProductKey}-${index}`} className="border-t border-gray-100">
+                <td className="px-3 py-2 font-semibold">{row.mallName}</td>
+                <td className="px-3 py-2">{row.productCode}</td>
+                <td className="px-3 py-2">{row.productName}</td>
+                <td className="px-3 py-2">{row.mallProductKey}</td>
+                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={() => saveRows(rows.filter((_, rowIndex) => rowIndex !== index))}>삭제</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && <EmptyState title="연결된 쇼핑몰 코드가 없습니다." />}
+      </div>
+    </Card>
   );
 }
 
