@@ -761,7 +761,12 @@ async function saveOrder(request: NextRequest, id?: number) {
     values.status = normalizeOrderStatus(values.status, { ...body, ...values });
   }
   const nextFnArrived = "fn_arrived" in values ? values.fn_arrived : existingOrder?.fn_arrived;
+  const shouldClearCostSnapshot = hasBodyField("fn_arrived") && !hasMeaningfulDate(values.fn_arrived);
   const shouldFreezeCostSnapshot = hasMeaningfulDate(nextFnArrived) && (!hasMeaningfulDate(existingOrder?.fn_arrived) || !text(existingOrder?.cost_snapshot_json));
+  if (shouldClearCostSnapshot) {
+    values.cost_snapshot_json = null;
+    values.cost_snapshot_at = null;
+  }
   values.updated_at = nowIso();
   let shouldReplaceItems = Array.isArray(body.items);
   if (id && shouldReplaceItems && body.items.length === 0 && !body.allow_empty_items) {
