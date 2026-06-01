@@ -197,7 +197,7 @@ function Panel({ title, subtitle, children, className = "" }: { title: string; s
     <Card className={`p-5 ${className}`}>
       <div className="mb-4">
         <h2 className="text-lg font-semibold leading-snug text-gray-900">{title}</h2>
-        {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
+        {subtitle && <div className="mt-1 text-sm text-gray-500">{subtitle}</div>}
       </div>
       {children}
     </Card>

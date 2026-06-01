@@ -26,7 +26,7 @@ export function PageHeader({
     <header className={cn("mb-5 flex flex-wrap items-start justify-between gap-4", className)}>
       <div className="min-w-0">
         <h1 className="text-[28px] font-bold leading-[1.3] text-gray-900">{title}</h1>
-        {description && <p className="mt-1.5 text-sm leading-6 text-gray-500">{description}</p>}
+        {description && <div className="mt-1.5 text-sm leading-6 text-gray-500">{description}</div>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
@@ -43,7 +43,7 @@ export function SectionHeader({ title, description, actions, className }: {
     <div className={cn("mb-4 flex flex-wrap items-start justify-between gap-3", className)}>
       <div className="min-w-0">
         <h2 className="text-[18px] font-semibold leading-[1.4] text-gray-900">{title}</h2>
-        {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+        {description && <div className="mt-1 text-sm text-gray-500">{description}</div>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -132,7 +132,7 @@ export function EmptyState({
     <div className={cn("flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-center", className)}>
       <div className="mb-3 h-10 w-10 rounded-xl bg-white shadow-sm" />
       <p className="text-sm font-semibold text-gray-900">{title}</p>
-      {description && <p className="mt-1 max-w-md text-sm text-gray-500">{description}</p>}
+      {description && <div className="mt-1 max-w-md text-sm text-gray-500">{description}</div>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -197,7 +197,7 @@ export function ModalHeader({
     <div className={cn("flex items-start justify-between gap-4 border-b border-gray-200 pb-4", className)}>
       <div className="min-w-0">
         <h3 className="text-xl font-bold leading-tight text-gray-900">{title}</h3>
-        {description && <p className="mt-1 text-[13px] font-medium leading-5 text-gray-500">{description}</p>}
+        {description && <div className="mt-1 text-[13px] font-medium leading-5 text-gray-500">{description}</div>}
       </div>
       {onClose && <ModalCloseButton onClick={onClose} />}
     </div>
