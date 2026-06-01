@@ -89,6 +89,32 @@ function inferEducationalCategory(text: string): { group: CategoryGroup; categor
   return null;
 }
 
+function inferPersonalCategory(text: string): { group: CategoryGroup; categoryName: string } | null {
+  const value = text.toLowerCase();
+  if (/캠핑|캠핑장|글램핑|카라반|차박|오토캠핑|백패킹|camping|glamping|caravan/.test(value)) {
+    return { group: "개인", categoryName: "캠핑" };
+  }
+  if (/여행|숙소|펜션|호텔|리조트|가평|양양|제주|강릉|속초|travel|trip|hotel|resort/.test(value)) {
+    return { group: "개인", categoryName: "여행" };
+  }
+  if (/요리|레시피|맛집|음식|반찬|recipe|cook/.test(value)) {
+    return { group: "개인", categoryName: "요리" };
+  }
+  if (/육아|아이|아기|유아|키즈|kids|baby/.test(value)) {
+    return { group: "개인", categoryName: "육아" };
+  }
+  if (/살림|청소|정리|수납|생활팁|housekeeping/.test(value)) {
+    return { group: "개인", categoryName: "살림" };
+  }
+  if (/동기부여|명언|자기계발|motivation/.test(value)) {
+    return { group: "개인", categoryName: "동기부여" };
+  }
+  if (/유머|웃긴|밈|meme|funny/.test(value)) {
+    return { group: "개인", categoryName: "유머" };
+  }
+  return null;
+}
+
 function normalizeUrl(url: string) {
   return url
     .trim()
@@ -108,6 +134,7 @@ function fallbackDrafts(text: string): ArchiveAiDraft[] {
     if (seen.has(url)) return [];
     seen.add(url);
     const sourceType = sourceFromUrl(url);
+    const personal = inferPersonalCategory(`${compactText} ${url}`);
     const education = inferEducationalCategory(`${compactText} ${url}`);
     return [{
       url,
@@ -115,8 +142,8 @@ function fallbackDrafts(text: string): ArchiveAiDraft[] {
       memo: "",
       source_type: sourceType,
       content_type: sourceType === "instagram" || sourceType === "youtube" ? "ad_reference" : "link",
-      category_group: education?.group || "업무",
-      category_name: education?.categoryName || (sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법"),
+      category_group: personal?.group || education?.group || "업무",
+      category_name: personal?.categoryName || education?.categoryName || (sourceType === "instagram" || sourceType === "youtube" ? "광고소재" : "업무방법"),
     }];
   });
 }
@@ -135,8 +162,13 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
     let categoryName = categoryOptions.includes(String(item.category_name || "")) ? String(item.category_name) : categoryOptions[0];
     const title = String(item.title || "");
     const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
-    const education = inferEducationalCategory(`${title} ${memo} ${fallbackText} ${url}`);
-    if (education) {
+    const categoryContext = `${title} ${memo} ${fallbackText} ${url}`;
+    const personal = inferPersonalCategory(categoryContext);
+    const education = inferEducationalCategory(categoryContext);
+    if (personal) {
+      group = personal.group;
+      categoryName = personal.categoryName;
+    } else if (education) {
       group = education.group;
       categoryName = education.categoryName;
     } else if ((sourceType === "instagram" || sourceType === "youtube") && group === "개인" && categoryName === "기타") {
@@ -171,12 +203,14 @@ async function attachMetadata(drafts: ArchiveAiDraft[]) {
       const metadata = await withTimeout(fetchOpenGraph(draft.url), 7000);
       const metadataTitle = titleFromMetadata(metadata.title || "");
       const warning = unavailableReason(draft.source_type, metadataTitle || metadata.title, metadata.description);
-      const education = inferEducationalCategory(`${metadata.title} ${metadata.description} ${draft.title} ${draft.memo}`);
+      const categoryContext = `${metadata.title} ${metadata.description} ${draft.title} ${draft.memo}`;
+      const personal = inferPersonalCategory(categoryContext);
+      const education = inferEducationalCategory(categoryContext);
       return {
         ...draft,
         title: warning && !metadataTitle ? "접근불가 콘텐츠" : metadataTitle || draft.title,
         memo: draft.memo,
-        ...(education ? { category_group: education.group, category_name: education.categoryName } : {}),
+        ...(personal ? { category_group: personal.group, category_name: personal.categoryName } : education ? { category_group: education.group, category_name: education.categoryName } : {}),
         ...(warning ? { warning } : {}),
         og_title: metadata.title || "",
         og_description: metadata.description || "",
@@ -194,6 +228,23 @@ function mergeWarnings(refined: ArchiveAiDraft[], metadataDrafts: DraftMetadata[
     const warning = warningByUrl.get(draft.url);
     return warning ? { ...draft, warning } : draft;
   });
+}
+
+function applyCategoryOverrides(drafts: ArchiveAiDraft[], contextText: string) {
+  const globalPersonal = inferPersonalCategory(contextText);
+  const strongCampingContext = (contextText.match(/캠핑장|캠핑|글램핑|카라반|차박/g) || []).length >= 2;
+  return drafts.map((draft) => {
+    const itemContext = `${draft.title} ${draft.memo} ${draft.url}`;
+    const personal = inferPersonalCategory(itemContext) || (globalPersonal?.categoryName === "캠핑" && strongCampingContext ? globalPersonal : null) || (globalPersonal?.categoryName === "캠핑" && !inferEducationalCategory(itemContext) ? globalPersonal : null);
+    if (personal) return { ...draft, category_group: personal.group, category_name: personal.categoryName };
+    const education = inferEducationalCategory(itemContext);
+    if (education) return { ...draft, category_group: education.group, category_name: education.categoryName };
+    return draft;
+  });
+}
+
+function normalizeArchiveDrafts(drafts: ArchiveAiDraft[], contextText: string, metadataDrafts: DraftMetadata[]) {
+  return applyCategoryOverrides(mergeWarnings(drafts, metadataDrafts), contextText);
 }
 
 async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMetadata[], visibleText: string) {
@@ -222,9 +273,11 @@ async function refineDraftsWithAi(apiKey: string, model: string, drafts: DraftMe
               "memo는 사용자가 직접 남긴 의미 있는 메모만 유지해. likes/comments/view/date/time 숫자는 버려.",
               "warning이 있으면 그대로 유지해. warning이 있으면 제목을 접근 불가 상태가 드러나게 짧게 정리해.",
               `허용 category_group/category_name: ${JSON.stringify(categoryTree)}`,
+              "분류 우선순위: 캠핑장/글램핑/카라반/차박/가평 등 개인 관심 장소 정보는 instagram/youtube여도 개인/캠핑 또는 개인/여행이 우선이다.",
               "분류 우선순위: 포토샵/일러스트/AI/영어 튜토리얼, 팁, 강좌, 목업, 로고, 색조합, 자막, 디자인 방법론은 instagram/youtube여도 교육 카테고리가 우선이다.",
               "포토샵 튜토리얼/목업/합성/자막/색조합/컬러팔레트는 교육/포토샵. 로고/벡터/일러스트레이터/아이콘은 교육/일러스트. AI 도구/프롬프트는 교육/AI.",
-              "instagram/youtube 링크는 위 교육/개인 단서가 없을 때만 업무/광고소재로 분류해.",
+              "캠핑장 소개/캠핑장 정보/글램핑장/카라반/차박지는 개인/캠핑. 여행지/숙소/펜션/호텔은 개인/여행.",
+              "instagram/youtube 링크는 위 개인/교육 단서가 없을 때만 업무/광고소재로 분류해.",
               `이미지/스크린샷에서 읽은 원문: ${visibleText}`,
               `후보와 OG 메타데이터: ${JSON.stringify(drafts)}`,
               '반환 형식: {"drafts":[{"url":"","title":"","memo":"","source_type":"","content_type":"","category_group":"","category_name":"","warning":""}]}',
@@ -309,7 +362,8 @@ export async function POST(request: NextRequest) {
     const parsed = JSON.parse(output || "{}") as Record<string, unknown>;
     const visibleText = String(parsed.text || text);
     const drafts = await attachMetadata(sanitizeDrafts(parsed, text));
-    const refinedDrafts = mergeWarnings(await refineDraftsWithAi(apiKey, model, drafts, visibleText), drafts);
+    const contextText = `${visibleText} ${text}`;
+    const refinedDrafts = normalizeArchiveDrafts(await refineDraftsWithAi(apiKey, model, drafts, contextText), contextText, drafts);
     return NextResponse.json({ ok: true, text: visibleText, drafts: refinedDrafts });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "AI 이미지 정리 실패" }, { status: 500 });
