@@ -10467,6 +10467,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
   const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
   const labelColumns = Math.min(points.length || 1, range.mode === "month" ? 6 : 10);
+  const showPointDateLabels = range.mode === "month" || points.length <= 7;
   const axisTicks = [
     { y: 20, cost: maxCost, roas: maxRoas },
     { y: 56, cost: maxCost / 2, roas: maxRoas / 2 },
@@ -10539,13 +10540,15 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 );
               })}
             </div>
-            <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
-              {points.map((row, index) => (
-                <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-xs">
-                  <p className="truncate font-black text-slate-600">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
-                </div>
-              ))}
-            </div>
+            {showPointDateLabels && (
+              <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
+                {points.map((row, index) => (
+                  <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-xs">
+                    <p className="truncate font-black text-slate-600">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         ) : (
           <EmptyState title="광고 파일을 올리면 그래프가 표시됩니다." className="min-h-40 border-0 bg-gray-50" />
