@@ -9270,6 +9270,10 @@ function masterTemplate(tab: MasterTabKey) {
   return masterTabs.find((item) => item.key === tab) || masterTabs[0];
 }
 
+function isMasterTabKey(value: unknown): value is MasterTabKey {
+  return typeof value === "string" && masterTabs.some((tab) => tab.key === value);
+}
+
 async function readXlsxObjects(file: File) {
   const buffer = await file.arrayBuffer();
   const xlsx = await loadXlsxModule();
@@ -9292,10 +9296,26 @@ function MasterManagementPanel({
   sync: (target: "products" | "inventory") => void;
   loadSummary: () => void;
 }) {
-  const [activeMasterTab, setActiveMasterTab] = useState<MasterTabKey>("customers");
+  const searchParams = useSearchParams();
+  const requestedMasterTab = searchParams.get("masterTab");
+  const initialMasterTab = isMasterTabKey(requestedMasterTab) ? requestedMasterTab : "customers";
+  const [activeMasterTab, setActiveMasterTab] = useState<MasterTabKey>(initialMasterTab);
   const [personnelUnlocked, setPersonnelUnlocked] = useState(false);
   const [personnelAuthOpen, setPersonnelAuthOpen] = useState(false);
   const activeConfig = masterTemplate(activeMasterTab);
+
+  function rememberMasterTab(tab: MasterTabKey) {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("menu", "sales");
+    params.set("salesSection", "master");
+    params.set("masterTab", tab);
+    window.history.replaceState(window.history.state, "", `/?${params.toString()}`);
+  }
+
+  useEffect(() => {
+    if (isMasterTabKey(requestedMasterTab) && requestedMasterTab !== activeMasterTab) setActiveMasterTab(requestedMasterTab);
+  }, [requestedMasterTab, activeMasterTab]);
 
   function personnelPassword() {
     if (typeof window === "undefined") return "0310";
@@ -9308,6 +9328,7 @@ function MasterManagementPanel({
       return;
     }
     setActiveMasterTab(tab);
+    rememberMasterTab(tab);
   }
 
   function unlockPersonnel(password: string) {
@@ -9317,6 +9338,7 @@ function MasterManagementPanel({
     }
     setPersonnelUnlocked(true);
     setActiveMasterTab("attendance");
+    rememberMasterTab("attendance");
     setPersonnelAuthOpen(false);
     return true;
   }
@@ -9386,6 +9408,7 @@ function MasterManagementPanel({
         <PersonnelManagementPanel onLock={() => {
           setPersonnelUnlocked(false);
           setActiveMasterTab("customers");
+          rememberMasterTab("customers");
         }} />
       )}
 
