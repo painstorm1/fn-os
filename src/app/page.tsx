@@ -6023,6 +6023,7 @@ function SalesExcelGrid({
   const [range, setRange] = useState<SalesGridRange>({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [selecting, setSelecting] = useState(false);
+  const rowDragCleanupRef = useRef<(() => void) | null>(null);
   const [editing, setEditing] = useState<SalesGridCell | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
   const defaultRowHeight = sheet === "발주 진행 단계" ? 72 : 30;
@@ -6062,6 +6063,10 @@ function SalesExcelGrid({
   useEffect(() => {
     onSelectionChange?.(sheet, range, selectedRows);
   }, [sheet, range, selectedRows, onSelectionChange]);
+
+  useEffect(() => {
+    return () => rowDragCleanupRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (!resize) return;
@@ -6181,11 +6186,60 @@ function SalesExcelGrid({
     setEditing(null);
     gridRef.current?.focus();
   }
+  function setRowSelected(row: number, selected: boolean) {
+    setSelectedRows((prev) => {
+      const alreadySelected = prev.includes(row);
+      if (selected && alreadySelected) return prev;
+      if (!selected && !alreadySelected) return prev;
+      return selected ? [...prev, row].sort((a, b) => a - b) : prev.filter((value) => value !== row);
+    });
+    setAnchor({ row, col: 0 });
+    setRange({ startRow: row, endRow: row, startCol: 0, endCol: headers.length - 1 });
+    setEditing(null);
+    gridRef.current?.focus();
+  }
+  function setRowSelectionRangeFrom(startRow: number, row: number, selected: boolean) {
+    const start = Math.max(0, Math.min(startRow, row));
+    const end = Math.min(rows.length - 1, Math.max(startRow, row));
+    const affectedRows = Array.from({ length: end - start + 1 }, (_, index) => start + index);
+    const affectedSet = new Set(affectedRows);
+    setSelectedRows((prev) => {
+      if (selected) return Array.from(new Set([...prev, ...affectedRows])).sort((a, b) => a - b);
+      return prev.filter((value) => !affectedSet.has(value));
+    });
+    setAnchor({ row, col: 0 });
+    setRange({ startRow: start, endRow: end, startCol: 0, endCol: headers.length - 1 });
+    setEditing(null);
+    gridRef.current?.focus();
+  }
+  function startRowSelection(row: number, selected: boolean) {
+    rowDragCleanupRef.current?.();
+    const shouldSelect = !selected;
+    const startRow = row;
+    const applyAtPointer = (event: globalThis.MouseEvent) => {
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const selectorCell = target instanceof HTMLElement ? target.closest<HTMLElement>("[data-sales-row-selector]") : null;
+      const rowIndex = Number(selectorCell?.dataset.salesRowSelector);
+      if (Number.isInteger(rowIndex) && rowIndex >= 0) {
+        setRowSelectionRangeFrom(startRow, rowIndex, shouldSelect);
+      }
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", applyAtPointer);
+      window.removeEventListener("mouseup", onPointerUp);
+      rowDragCleanupRef.current = null;
+    };
+    const onPointerUp = (event: globalThis.MouseEvent) => {
+      applyAtPointer(event);
+      cleanup();
+    };
+    rowDragCleanupRef.current = cleanup;
+    setRowSelectionRangeFrom(startRow, row, shouldSelect);
+    window.addEventListener("mousemove", applyAtPointer);
+    window.addEventListener("mouseup", onPointerUp);
+  }
   function toggleAllRows() {
-    const selectableRows = rows
-      .map((row, index) => ({ row, index }))
-      .filter((item) => rowHasValue(item.row))
-      .map((item) => item.index);
+    const selectableRows = rows.map((_, index) => index);
     const allSelected = selectableRows.length > 0 && selectableRows.every((rowIndex) => selectedRows.includes(rowIndex));
     const nextRows = allSelected ? [] : selectableRows;
     setSelectedRows(nextRows);
@@ -6281,7 +6335,9 @@ function SalesExcelGrid({
         onCopy={copyRange}
         onPaste={pasteRange}
         onKeyDown={onGridKeyDown}
-        onMouseUp={() => setSelecting(false)}
+        onMouseUp={() => {
+          setSelecting(false);
+        }}
         className="max-h-[560px] overflow-auto outline-none"
       >
         <table className="table-fixed border-collapse text-xs" style={{ width: 54 + colWidths.reduce((sum, width) => sum + width, 0) }}>
@@ -6294,7 +6350,13 @@ function SalesExcelGrid({
           <thead className="sticky top-0 z-10 bg-slate-100">
             <tr>
               <th className="w-[54px] border border-slate-200 px-2 py-2 text-slate-400">
-                <button type="button" onClick={toggleAllRows} className="inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-[10px] font-black text-slate-500 hover:border-orange-300 hover:bg-orange-50">
+                <button
+                  type="button"
+                  onClick={toggleAllRows}
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-black ${rows.length > 0 && rows.every((_, rowIndex) => selectedRows.includes(rowIndex)) ? "border-blue-600 bg-blue-600 text-white" : selectedRows.length ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-300 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50"}`}
+                  aria-label="전체 행 선택"
+                  aria-pressed={rows.length > 0 && rows.every((_, rowIndex) => selectedRows.includes(rowIndex))}
+                >
                   {selectedRows.length ? "✓" : ""}
                 </button>
               </th>
@@ -6326,22 +6388,22 @@ function SalesExcelGrid({
           <tbody>
             {rows.map((row, rowIndex) => {
               const isHighlightedRow = highlightedRowSet.has(rowIndex);
-              const isRowSelected = selectedRows.includes(rowIndex) || (
-                rowIndex >= range.startRow &&
-                rowIndex <= range.endRow &&
-                range.startCol === 0 &&
-                range.endCol === headers.length - 1
-              );
+              const isRowSelected = selectedRows.includes(rowIndex);
+              const isRowRangeActive = range.startCol === 0 && range.endCol === headers.length - 1;
               return (
               <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
-                <td className={`relative border px-1 py-1 text-center font-bold ${isRowSelected ? "border-blue-200 bg-blue-50 text-blue-700" : isHighlightedRow ? "border-yellow-200 bg-yellow-50 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-400"}`}>
+                <td
+                  data-sales-row-selector={rowIndex}
+                  onMouseDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    const pressed = event.currentTarget.querySelector("button")?.getAttribute("aria-pressed") === "true";
+                    startRowSelection(rowIndex, pressed);
+                  }}
+                  className={`relative border px-1 py-1 text-center font-bold ${isRowSelected ? "border-blue-200 bg-blue-50 text-blue-700" : isHighlightedRow ? "border-yellow-200 bg-yellow-50 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                >
                   <button
                     type="button"
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return;
-                      event.preventDefault();
-                      toggleRow(rowIndex);
-                    }}
                     className="flex w-full items-center justify-center text-center"
                     aria-pressed={isRowSelected}
                     aria-label={`${rowIndex + 1}행 선택`}
@@ -6376,7 +6438,7 @@ function SalesExcelGrid({
                       if (selecting) setRange(normalizeRange(anchor, { row: rowIndex, col: colIndex }));
                     }}
                     onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
-                    className={`border p-0 align-middle ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
+                    className={`border p-0 align-middle ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
                   >
                     {editing?.row === rowIndex && editing?.col === colIndex ? (
                       <input
