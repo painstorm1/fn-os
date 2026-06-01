@@ -8085,7 +8085,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         title={sectionTitle}
         description={sectionDescription}
         actions={
-          <ActionButton type="button" variant="secondary" onClick={() => setQuickLookupOpen(true)}>
+          <ActionButton type="button" variant="primary" onClick={() => setQuickLookupOpen(true)}>
             상품 간편 조회
           </ActionButton>
         }
