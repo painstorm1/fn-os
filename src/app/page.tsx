@@ -6172,6 +6172,9 @@ function SalesExcelGrid({
       if (next.length) {
         setRange({ startRow: row, endRow: row, startCol: 0, endCol: headers.length - 1 });
         setAnchor({ row, col: 0 });
+      } else {
+        setRange({ startRow: row, endRow: row, startCol: 0, endCol: 0 });
+        setAnchor({ row, col: 0 });
       }
       return next;
     });
@@ -6189,6 +6192,9 @@ function SalesExcelGrid({
     if (nextRows.length) {
       setAnchor({ row: nextRows[0], col: 0 });
       setRange({ startRow: nextRows[0], endRow: nextRows[nextRows.length - 1], startCol: 0, endCol: headers.length - 1 });
+    } else {
+      setAnchor({ row: 0, col: 0 });
+      setRange({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
     }
     setEditing(null);
     gridRef.current?.focus();
@@ -6320,27 +6326,29 @@ function SalesExcelGrid({
           <tbody>
             {rows.map((row, rowIndex) => {
               const isHighlightedRow = highlightedRowSet.has(rowIndex);
+              const isRowSelected = selectedRows.includes(rowIndex) || (
+                rowIndex >= range.startRow &&
+                rowIndex <= range.endRow &&
+                range.startCol === 0 &&
+                range.endCol === headers.length - 1
+              );
               return (
               <tr key={rowIndex} style={{ height: rowHeights[rowIndex] || 30 }}>
-                <td className={`relative border px-1 py-1 text-center font-bold text-slate-400 ${isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-slate-50"}`}>
+                <td className={`relative border px-1 py-1 text-center font-bold ${isRowSelected ? "border-blue-200 bg-blue-50 text-blue-700" : isHighlightedRow ? "border-yellow-200 bg-yellow-50 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-400"}`}>
                   <button
                     type="button"
                     onMouseDown={(event) => {
                       if (event.button !== 0) return;
                       event.preventDefault();
-                      if (event.ctrlKey || event.metaKey) {
-                        toggleRow(rowIndex);
-                        return;
-                      }
-                      setSelectedRows([]);
-                      setAnchor({ row: rowIndex, col: 0 });
-                      setRange({ startRow: rowIndex, endRow: rowIndex, startCol: 0, endCol: headers.length - 1 });
-                      gridRef.current?.focus();
+                      toggleRow(rowIndex);
                     }}
-                    className="flex w-full items-center justify-center gap-1 text-center"
+                    className="flex w-full items-center justify-center text-center"
+                    aria-pressed={isRowSelected}
+                    aria-label={`${rowIndex + 1}행 선택`}
                   >
-                    <span className={`inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] ${selectedRows.includes(rowIndex) ? "border-orange-400 bg-orange-500 text-white" : "border-slate-300 bg-white text-transparent"}`}>✓</span>
-                    <span>{rowIndex + 1}</span>
+                    <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded border px-1 text-[11px] font-black leading-none ${isRowSelected ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-300 bg-white text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
+                      {rowIndex + 1}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -6368,7 +6376,7 @@ function SalesExcelGrid({
                       if (selecting) setRange(normalizeRange(anchor, { row: rowIndex, col: colIndex }));
                     }}
                     onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
-                    className={`border p-0 align-middle ${isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
+                    className={`border p-0 align-middle ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
                   >
                     {editing?.row === rowIndex && editing?.col === colIndex ? (
                       <input
