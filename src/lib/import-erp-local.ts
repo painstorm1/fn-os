@@ -696,7 +696,12 @@ async function orderDetail(id: number) {
   const materialUnitCosts = await materialUnitCostsForProducts(lines.map((line) => line.product_id));
   const liveCost = orderCostSnapshotPayload(order, lines, rates, materialUnitCosts);
   const frozenCost = lockedCostSnapshot(order);
-  const cost = frozenCost || liveCost;
+  const backfilledSnapshot = !frozenCost && hasMeaningfulDate(order.fn_arrived) ? liveCost : null;
+  if (backfilledSnapshot) {
+    await saveOrderCostSnapshotPayload(id, backfilledSnapshot);
+    order.cost_snapshot_at = backfilledSnapshot.frozen_at;
+  }
+  const cost = frozenCost || backfilledSnapshot || liveCost;
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const itemTotal = lines.reduce((sum, line) => sum + numberValue(line.quantity) * numberValue(line.unit_price), 0);
   return {
@@ -713,9 +718,16 @@ async function orderDetail(id: number) {
     native_totals: cost.native_totals || {},
     product_won: numberValue(cost.product_won),
     display_product_won: numberValue(cost.display_product_won),
-    cost_snapshot_locked: Boolean(frozenCost),
-    cost_snapshot_at: frozenCost?.frozen_at || order.cost_snapshot_at || null,
+    cost_snapshot_locked: Boolean(frozenCost || backfilledSnapshot),
+    cost_snapshot_at: frozenCost?.frozen_at || backfilledSnapshot?.frozen_at || order.cost_snapshot_at || null,
   };
+}
+
+async function saveOrderCostSnapshotPayload(orderId: number, snapshot: AnyRecord) {
+  await db(
+    `update ${q(TABLES.orders)} set cost_snapshot_json=$1, cost_snapshot_at=$2 where id=$3`,
+    [JSON.stringify(snapshot), snapshot.frozen_at || nowIso(), orderId],
+  );
 }
 
 async function saveOrderCostSnapshot(orderId: number) {
@@ -725,10 +737,7 @@ async function saveOrderCostSnapshot(orderId: number) {
   const rates = await ratesMap();
   const materialUnitCosts = await materialUnitCostsForProducts(lines.map((line) => line.product_id));
   const snapshot = orderCostSnapshotPayload(order, lines, rates, materialUnitCosts);
-  await db(
-    `update ${q(TABLES.orders)} set cost_snapshot_json=$1, cost_snapshot_at=$2 where id=$3`,
-    [JSON.stringify(snapshot), snapshot.frozen_at, orderId],
-  );
+  await saveOrderCostSnapshotPayload(orderId, snapshot);
 }
 
 async function generateOrderCode(orderDate: string) {
