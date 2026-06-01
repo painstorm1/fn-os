@@ -6780,7 +6780,7 @@ function SalesRightTools() {
   );
 }
 
-function SalesSyncTools() {
+function SalesQuickLookupContent() {
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<{
@@ -6841,7 +6841,7 @@ function SalesSyncTools() {
   }
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+    <div className="grid gap-3">
       <ToolSection title="상품 간편조회" defaultOpen showChevron={false}>
         <input
           value={lookupQuery}
@@ -6913,7 +6913,7 @@ function SalesSyncTools() {
         )}
       </ToolSection>
 
-    </aside>
+    </div>
   );
 }
 
@@ -6942,6 +6942,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
   const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed"; message: string }>>([]);
 
@@ -7940,7 +7941,30 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={sectionTitle} description={sectionDescription} />
+      <PageHeader
+        title={sectionTitle}
+        description={sectionDescription}
+        actions={
+          <ActionButton type="button" variant="secondary" onClick={() => setQuickLookupOpen(true)}>
+            상품 간편 조회
+          </ActionButton>
+        }
+      />
+      {quickLookupOpen && (
+        <FormModal
+          title="상품 간편 조회"
+          description="매출/재고 어디서든 품목명으로 상품과 창고별 재고를 빠르게 확인합니다."
+          onClose={() => setQuickLookupOpen(false)}
+          size="lg"
+          footer={
+            <ActionButton type="button" variant="secondary" onClick={() => setQuickLookupOpen(false)}>
+              닫기
+            </ActionButton>
+          }
+        >
+          <SalesQuickLookupContent />
+        </FormModal>
+      )}
       {isOnlineSection && (
         <Panel
           title="온라인 발주"
@@ -13905,7 +13929,6 @@ function HomeContent() {
           )}
         </section>
         {activeSlug === "import" && <RightTools />}
-        {activeSlug === "sales" && <SalesSyncTools />}
         {activeSlug === "accounting" && <AccountingRightPanel />}
         {activeSlug === "ads" && <AdsRightPanel />}
       </div>
