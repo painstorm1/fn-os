@@ -1595,6 +1595,10 @@ function isExcelAttachment(item: OrderAttachment) {
   return /\.(xlsx|xlsm|xls|csv)$/i.test(item.file_name || "");
 }
 
+function attachmentFileUrl(item: OrderAttachment) {
+  return String(item.file_url || item.file_path || "").trim();
+}
+
 function FileTypeIcon({ name }: { name?: string }) {
   const type = fileIconType(name);
   const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
@@ -1611,15 +1615,21 @@ function FileTypeIcon({ name }: { name?: string }) {
 }
 
 function attachmentViewerUrl(item: OrderAttachment) {
-  if (!item.file_url) return "";
+  const fileUrl = attachmentFileUrl(item);
+  if (!fileUrl) return "";
   const params = new URLSearchParams({
-    url: item.file_url,
+    url: fileUrl,
     name: item.file_name || "첨부파일",
   });
   return `/attachment-viewer?${params.toString()}`;
 }
 
 async function openAttachment(item: OrderAttachment) {
+  const fileUrl = attachmentFileUrl(item);
+  if (!fileUrl) {
+    alert("첨부파일 URL이 없습니다. 파일을 다시 업로드해 주세요.");
+    return;
+  }
   if (isExcelAttachment(item)) {
     const popup = window.open("", "_blank", "noopener,noreferrer");
     if (popup) {
@@ -1632,7 +1642,7 @@ async function openAttachment(item: OrderAttachment) {
         body: JSON.stringify({
           attachmentId: item.id,
           fileName: item.file_name,
-          fileUrl: item.file_url,
+          fileUrl,
           mimeType: item.mime_type,
         }),
       });
