@@ -12638,8 +12638,8 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
                 <th className="w-36 py-2 pl-4 text-left">창고 코드</th>
                 <th className="w-56 py-2 text-left">창고명</th>
                 <th className="w-28 py-2 text-left">창고 속성</th>
-                <th className="w-28 py-2 text-right">보유 품목</th>
-                <th className="w-56 py-2 text-left">메모</th>
+                <th className="w-24 py-2 text-left">보유 품목</th>
+                <th className="w-80 py-2 text-left">메모</th>
               </tr>
             </thead>
             <tbody>
@@ -12669,8 +12669,8 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
                     <td className="truncate py-2 pl-4 font-black">{warehouse.warehouse_code || "-"}</td>
                     <td className="truncate py-2 font-bold" title={warehouse.warehouse_name || ""}>{warehouse.warehouse_name || "-"}</td>
                     <td className="truncate py-2 text-slate-500">{warehouse.warehouse_type_label || warehouseAttributeLabel(warehouse.warehouse_type)}</td>
-                    <td className="py-2 text-right font-black">{Number(warehouse.stock_product_count || 0).toLocaleString("ko-KR")}</td>
-                    <td className="truncate py-2 text-slate-500" title={warehouse.memo || ""}>{warehouse.memo ? `${warehouse.memo.slice(0, 10)}${warehouse.memo.length > 10 ? "..." : ""}` : "-"}</td>
+                    <td className="py-2 text-left font-black">{Number(warehouse.stock_product_count || 0).toLocaleString("ko-KR")}</td>
+                    <td className="truncate py-2 text-slate-500" title={warehouse.memo || ""}>{warehouse.memo ? `${warehouse.memo.slice(0, 20)}${warehouse.memo.length > 20 ? "..." : ""}` : "-"}</td>
                   </tr>
                 );
               })}
