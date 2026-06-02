@@ -95,7 +95,7 @@ function settlementFor(cardName: string, date: string) {
       settlement_start: dateText(startBase.year, startBase.month, 6),
       settlement_end: dateText(endBase.year, endBase.month, 5),
       payment_due_date: dateText(dueBase.year, dueBase.month, 20),
-      card_limit: null,
+      card_limit: 10000000,
     };
   }
   return null;

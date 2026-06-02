@@ -15843,7 +15843,9 @@ function AccountingRightPanel() {
   const pendingSettlements = settlements.filter((row) => row.paid !== true);
   const nextSettlement = pendingSettlements[0];
   const gaonSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "가온글로벌카드");
+  const kbSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "국민기업카드");
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
+  const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
@@ -15860,7 +15862,7 @@ function AccountingRightPanel() {
         <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
         <AccountingMetric label="검토필요" value={`${asNumber(totals.review_count).toLocaleString("ko-KR")}건`} note="KCP/네이버/미분류 확인" tone="rose" />
         <AccountingMetric label="가온글로벌카드" value="20,000,000원" note={`사용률 ${gaonUsage}`} tone="green" />
-        <AccountingMetric label="국민기업카드" value="한도 미입력" note="한도 입력 전 사용률 계산 안 함" tone="orange" />
+        <AccountingMetric label="국민기업카드" value="10,000,000원" note={`사용률 ${kbUsage}`} tone="orange" />
         <AccountingMetric label="카드대금 처리" value="현금흐름" note="손익 비용으로 중복 반영하지 않음" />
       </div>
       <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">

@@ -898,7 +898,7 @@ where is_active is true;
 insert into accounting_transaction_sources (source_name, source_type, institution_name, account_name, card_name, source_profile, card_limit, cutoff_start_day, cutoff_end_day, payment_day, payment_month_offset, memo)
 values
   ('가온글로벌카드', 'card', 'KB국민카드', '가온글로벌카드', '가온글로벌카드', 'gaon_global_card', 20000000, 22, 21, 5, 1, '매월 22일~다음달 21일 사용, 다음달 5일 출금'),
-  ('국민기업카드', 'card', 'KB국민카드', '국민기업카드', '국민기업카드', 'kb_business_card', null, 6, 5, 20, 0, '매월 6일~다음달 5일 사용, 마감달 20일 출금'),
+  ('국민기업카드', 'card', 'KB국민카드', '국민기업카드', '국민기업카드', 'kb_business_card', 10000000, 6, 5, 20, 0, '매월 6일~다음달 5일 사용, 마감달 20일 출금, 한도 10,000,000원'),
   ('국민은행 통장', 'bank', 'KB국민은행', '국민은행 사업자통장', null, 'kb_bank_account', null, null, null, null, null, '통장 입출금은 실제 현금흐름'),
   ('기업은행 통장', 'bank', 'IBK기업은행', '기업은행 사업자통장', null, 'ibk_bank_account', null, null, null, null, null, '통장 입출금은 실제 현금흐름')
 on conflict (source_name) do update set
