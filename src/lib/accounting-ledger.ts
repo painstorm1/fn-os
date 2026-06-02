@@ -512,6 +512,70 @@ export async function deactivateAccountingFixedCost(id: string) {
   return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
 }
 
+function cleanBankAccountPayload(row: RawRow) {
+  return {
+    account_type: text(row.account_type || row.accountType) || "business",
+    bank_name: text(row.bank_name || row.bankName),
+    account_holder: text(row.account_holder || row.accountHolder) || null,
+    account_number: text(row.account_number || row.accountNumber) || null,
+    password_hint: text(row.password_hint || row.passwordHint) || null,
+    list_enabled: row.list_enabled ?? row.listEnabled ?? true,
+    memo: text(row.memo) || null,
+    is_active: row.is_active ?? row.isActive ?? true,
+    sort_order: numberValue(row.sort_order ?? row.sortOrder),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertAccountingBankAccount(row: RawRow) {
+  const id = text(row.id);
+  const payload = cleanBankAccountPayload(row);
+  if (!payload.bank_name) throw new Error("은행명이 필요합니다.");
+  if (id) return patchRows("accounting_bank_accounts", { id: `eq.${id}` }, payload);
+  return insertRows("accounting_bank_accounts", { ...payload, created_at: new Date().toISOString() });
+}
+
+export async function deactivateAccountingBankAccount(id: string) {
+  if (!id) throw new Error("통장 id가 필요합니다.");
+  return patchRows("accounting_bank_accounts", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
+function cleanCardAccountPayload(row: RawRow) {
+  return {
+    card_type: text(row.card_type || row.cardType) || "business",
+    card_name: text(row.card_name || row.cardName),
+    card_number: text(row.card_number || row.cardNumber) || null,
+    expiry_date: isoDate(row.expiry_date || row.expiryDate) || null,
+    cvc_hint: text(row.cvc_hint || row.cvcHint) || null,
+    secure_message: text(row.secure_message || row.secureMessage) || null,
+    payment_password_hint: text(row.payment_password_hint || row.paymentPasswordHint) || null,
+    cutoff_start_day: numberValue(row.cutoff_start_day ?? row.cutoffStartDay) || null,
+    cutoff_end_day: numberValue(row.cutoff_end_day ?? row.cutoffEndDay) || null,
+    payment_day: numberValue(row.payment_day ?? row.paymentDay) || null,
+    card_limit: numberValue(row.card_limit ?? row.cardLimit) || null,
+    withdrawal_account_name: text(row.withdrawal_account_name || row.withdrawalAccountName) || null,
+    list_enabled: row.list_enabled ?? row.listEnabled ?? true,
+    physical_owner: text(row.physical_owner || row.physicalOwner) || null,
+    memo: text(row.memo) || null,
+    is_active: row.is_active ?? row.isActive ?? true,
+    sort_order: numberValue(row.sort_order ?? row.sortOrder),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertAccountingCardAccount(row: RawRow) {
+  const id = text(row.id);
+  const payload = cleanCardAccountPayload(row);
+  if (!payload.card_name) throw new Error("카드명이 필요합니다.");
+  if (id) return patchRows("accounting_card_accounts", { id: `eq.${id}` }, payload);
+  return upsertRows("accounting_card_accounts", { ...payload, created_at: new Date().toISOString() }, "card_name");
+}
+
+export async function deactivateAccountingCardAccount(id: string) {
+  if (!id) throw new Error("카드 id가 필요합니다.");
+  return patchRows("accounting_card_accounts", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
 export async function updateAccountingTransaction(id: string, row: RawRow) {
   if (!id) throw new Error("거래 id가 필요합니다.");
   const category = await categoryFor(row);
