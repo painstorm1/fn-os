@@ -14816,14 +14816,20 @@ type AccountingSummary = {
   ok?: boolean;
   error?: string;
   categories?: Array<Record<string, unknown>>;
+  rules?: Array<Record<string, unknown>>;
   expenses?: Array<Record<string, unknown>>;
+  transactions?: Array<Record<string, unknown>>;
   batches?: Array<Record<string, unknown>>;
   payables?: Array<Record<string, unknown>>;
   payments?: Array<Record<string, unknown>>;
   import_orders?: Array<Record<string, unknown>>;
+  review_queue?: Array<Record<string, unknown>>;
+  card_settlements?: Array<Record<string, unknown>>;
   totals?: Record<string, unknown>;
   by_category?: Array<Record<string, unknown>>;
+  by_category_large?: Array<Record<string, unknown>>;
   by_vendor?: Array<Record<string, unknown>>;
+  by_card?: Array<Record<string, unknown>>;
   by_month?: Array<Record<string, unknown>>;
 };
 
@@ -14832,9 +14838,9 @@ type ExpenseUploadItem = {
   sourceType: string;
 };
 
-const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
-const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙", "카테고리 설정"];
-const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/summary";
+const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
+const accountingTabs = ["대시보드", "거래 DB", "업로드", "검토필요", "카테고리 설정", "자동분류 규칙", "카드 정산"];
+const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 
@@ -14852,6 +14858,7 @@ function fetchCachedAccountingSummary(force = false) {
 
 function invalidateAccountingCache() {
   invalidateClientCache(ACCOUNTING_SUMMARY_ENDPOINT);
+  invalidateClientCache("/api/accounting/ledger/summary");
 }
 
 function AccountingWorkspace() {
@@ -14868,8 +14875,38 @@ function AccountingWorkspace() {
   const [message, setMessage] = useState("");
   const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
-  const [filters, setFilters] = useState({ q: "", category: "", from: "", to: "" });
-  const [categoryDraft, setCategoryDraft] = useState({ id: "", category_name: "", parent_category_id: "", is_active: true });
+  const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
+  const [transactionDraft, setTransactionDraft] = useState({ category_id: "", memo: "", save_rule: false });
+  const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
+  const [categoryDraft, setCategoryDraft] = useState({
+    id: "",
+    category_large: "",
+    category_middle: "",
+    category_small: "",
+    is_active: true,
+    affects_profit: true,
+    affects_cashflow: true,
+    affects_card_settlement: false,
+    sort_order: "0",
+    memo: "",
+  });
+  const [ruleDraft, setRuleDraft] = useState({
+    id: "",
+    priority: "100",
+    source_type: "",
+    source_name: "",
+    condition_field: "merchant_name",
+    condition_operator: "contains",
+    keyword: "",
+    amount_condition: "",
+    direction_condition: "",
+    category_id: "",
+    auto_confirm: false,
+    review_required: true,
+    review_reason: "",
+    is_active: true,
+    memo: "",
+  });
   const [manual, setManual] = useState({
     expense_date: new Date().toISOString().slice(0, 10),
     vendor_name: "",
@@ -14906,13 +14943,11 @@ function AccountingWorkspace() {
 
   function inferExpenseSourceType(fileName: string, fallback = sourceType) {
     const name = fileName.toLowerCase();
-    if (/국민.*카드|kb.*card|kbcard|국민카드/.test(name)) return "국민카드";
+    if (/가온|gaon|global/.test(name)) return "가온글로벌카드";
+    if (/국민.*카드|kb.*card|kbcard|국민카드|기업카드/.test(name)) return "국민기업카드";
     if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
     if (/기업.*은행|ibk|기업은행/.test(name)) return "기업은행";
-    if (/세금계산서|전자세금|tax/.test(name)) return "세금계산서";
-    if (/광고|ad|ads|naver|meta|google/.test(name)) return "광고비";
-    if (/택배|배송|운임|물류|cj|대한통운/.test(name)) return "택배비";
-    return fallback === "자동 분류" ? "기타" : fallback;
+    return fallback === "자동 분류" ? "자동 분류" : fallback;
   }
 
   function addExpenseFiles(files: FileList | File[] | null, nextSourceType = sourceType) {
@@ -14963,7 +14998,7 @@ function AccountingWorkspace() {
     form.append("source_type", sourceType);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
     uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
-    const res = await fetch("/api/accounting/files/parse", { method: "POST", body: form });
+    const res = await fetch("/api/accounting/ledger/parse", { method: "POST", body: form });
     const data = await res.json();
     setParsing(false);
     if (!res.ok || data.ok === false) {
@@ -14987,7 +15022,7 @@ function AccountingWorkspace() {
     form.append("source_type", sourceType);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
     uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
-    const res = await fetch("/api/accounting/upload", {
+    const res = await fetch("/api/accounting/ledger/upload", {
       method: "POST",
       body: form,
     });
@@ -15027,7 +15062,7 @@ function AccountingWorkspace() {
   async function saveExpenseCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = categoryDraft.id ? "PATCH" : "POST";
-    const res = await fetch("/api/accounting/categories", {
+    const res = await fetch("/api/accounting/ledger/categories", {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(categoryDraft),
@@ -15038,21 +15073,96 @@ function AccountingWorkspace() {
       return;
     }
     setMessage(categoryDraft.id ? "카테고리를 수정했습니다." : "카테고리를 추가했습니다.");
-    setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true });
+    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
     invalidateAccountingCache();
     loadSummary(true);
   }
 
   async function deleteExpenseCategory(id: string) {
     if (!id) return;
-    const res = await fetch(`/api/accounting/categories?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const res = await fetch(`/api/accounting/ledger/categories?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
       setMessage(data.error || "카테고리 삭제 실패");
       return;
     }
     setMessage(data.mode === "deactivated" ? "사용 중인 카테고리라 비활성화했습니다." : "카테고리를 삭제했습니다.");
-    if (categoryDraft.id === id) setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true });
+    if (categoryDraft.id === id) setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function saveAccountingRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const category = categories.find((row) => String(row.id || "") === ruleDraft.category_id);
+    const method = ruleDraft.id ? "PATCH" : "POST";
+    const res = await fetch("/api/accounting/ledger/rules", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...ruleDraft,
+        priority: Number(ruleDraft.priority || 100),
+        category_large: category?.category_large,
+        category_middle: category?.category_middle,
+        category_small: category?.category_small,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "자동분류 규칙 저장 실패");
+      return;
+    }
+    setMessage(ruleDraft.id ? "자동분류 규칙을 수정했습니다." : "자동분류 규칙을 추가했습니다.");
+    setRuleDraft({ id: "", priority: "100", source_type: "", source_name: "", condition_field: "merchant_name", condition_operator: "contains", keyword: "", amount_condition: "", direction_condition: "", category_id: "", auto_confirm: false, review_required: true, review_reason: "", is_active: true, memo: "" });
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function deactivateAccountingRuleFromUi(id: string) {
+    if (!id) return;
+    const res = await fetch(`/api/accounting/ledger/rules?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "자동분류 규칙 비활성화 실패");
+      return;
+    }
+    setMessage("자동분류 규칙을 비활성화했습니다.");
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  function openTransaction(row: Record<string, unknown>) {
+    setEditingTransaction(row);
+    setTransactionDraft({
+      category_id: String(row.category_id || ""),
+      memo: String(row.memo || ""),
+      save_rule: false,
+    });
+  }
+
+  async function saveTransactionDraft() {
+    if (!editingTransaction?.id) return;
+    const endpoint = transactionDraft.save_rule ? "/api/accounting/ledger/review" : "/api/accounting/ledger/transactions";
+    const method = transactionDraft.save_rule ? "PATCH" : "PATCH";
+    const res = await fetch(endpoint, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingTransaction.id,
+        transaction_id: editingTransaction.id,
+        category_id: transactionDraft.category_id,
+        memo: transactionDraft.memo,
+        review_status: "confirmed",
+        create_rule: transactionDraft.save_rule,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "거래 저장 실패");
+      return;
+    }
+    setMessage(transactionDraft.save_rule ? "거래를 확정하고 같은 패턴 규칙을 저장했습니다." : "이 거래만 수정했습니다.");
+    setEditingTransaction(null);
     invalidateAccountingCache();
     loadSummary(true);
   }
@@ -15066,25 +15176,29 @@ function AccountingWorkspace() {
   }
 
   const categories = summary?.categories || [];
-  const expenses = summary?.expenses || [];
-  const categoryById = new Map(categories.map((row) => [String(row.id || ""), String(row.category_name || "")]));
+  const expenses = summary?.transactions || summary?.expenses || [];
+  const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
   const filteredExpenses = expenses.filter((row) => {
     const q = filters.q.trim().toLowerCase();
-    const rowDate = String(row.expense_date || "");
-    const category = categoryById.get(String(row.category_id || "")) || String(row.category || "");
-    if (q && !`${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""}`.toLowerCase().includes(q)) return false;
+    const rowDate = String(row.transaction_date || row.expense_date || "");
+    const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "");
+    if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${row.source_name || ""}`.toLowerCase().includes(q)) return false;
     if (filters.category && category !== filters.category) return false;
+    if (filters.source && String(row.source_name || row.source_type || "") !== filters.source) return false;
+    if (filters.review && String(row.review_status || "") !== filters.review) return false;
     if (filters.from && rowDate < filters.from) return false;
     if (filters.to && rowDate > filters.to) return false;
     return true;
   });
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
+  const rules = summary?.rules || [];
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
+  const sourceOptions = Array.from(new Set(expenses.map((row) => String(row.source_name || row.source_type || "")).filter(Boolean)));
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
@@ -15148,7 +15262,7 @@ function AccountingWorkspace() {
         <AccountingCategoryChart rows={categoryRows} />
       </section>
 
-      {activeTab === "작업실" && (
+      {activeTab === "업로드" && (
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -15241,11 +15355,11 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "비용 내역" && (
+      {activeTab === "거래 DB" && (
         <Card className="p-5">
           <SectionHeader
-            title="비용 내역"
-            description="기간, 카테고리, 업체명을 기준으로 비용을 빠르게 좁혀봅니다."
+            title="거래 DB"
+            description="accounting_transactions 기준으로 카드/통장 거래를 함께 조회합니다."
             actions={<ActionButton type="button" variant="secondary" onClick={exportExpenses}>엑셀 내보내기</ActionButton>}
           />
           <FilterBar className="mb-4 p-3 shadow-none">
@@ -15253,49 +15367,142 @@ function AccountingWorkspace() {
               <input className="field-input px-3 py-2 text-sm" placeholder="업체/내용/메모" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} />
               <select className="field-input px-3 py-2 text-sm" value={filters.category} onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value }))}>
                 <option value="">전체 카테고리</option>
-                {categories.map((row) => <option key={String(row.id)}>{String(row.category_name)}</option>)}
+                {categories.map((row) => <option key={String(row.id)}>{categoryById.get(String(row.id))}</option>)}
+              </select>
+              <select className="field-input px-3 py-2 text-sm" value={filters.source} onChange={(event) => setFilters((prev) => ({ ...prev, source: event.target.value }))}>
+                <option value="">전체 출처</option>
+                {sourceOptions.map((source) => <option key={source}>{source}</option>)}
+              </select>
+              <select className="field-input px-3 py-2 text-sm" value={filters.review} onChange={(event) => setFilters((prev) => ({ ...prev, review: event.target.value }))}>
+                <option value="">전체 검토상태</option>
+                <option value="pending">검토필요</option>
+                <option value="confirmed">확정</option>
               </select>
               <input className="field-input px-3 py-2 text-sm" type="date" value={filters.from} onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))} />
               <input className="field-input px-3 py-2 text-sm" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
             </div>
           </FilterBar>
-          <ExpenseTable rows={filteredExpenses} categoryById={categoryById} />
+          <ExpenseTable rows={filteredExpenses} categoryById={categoryById} onOpen={openTransaction} />
         </Card>
       )}
 
-      {activeTab === "분류 규칙" && (
+      {activeTab === "자동분류 규칙" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Card className="p-5">
-            <SectionHeader title="규칙 기반 분류 결과" description="업체명과 설명 패턴으로 자동 분류한 후보를 확인합니다." />
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {["KCP(결제대행) -> 세부분류 우선: 박스구매/네이버/구독료 확인", "KCP(자동과금) -> 반복금액이면 광고/구독 자동 후보", "네이버파이낸셜(주) -> 카드 결제는 구매/광고 구분 필요, 통장 입금은 판매 정산금", "네이버파이낸셜 + 스마트스토어정 -> 판매 정산금", "쿠팡/쿠팡페이/쿠팡풀필먼트 -> 판매 정산금 또는 수수료 후보", "CJ대한통운 -> 택배비", "관세사/관부과세 -> 통관수수료/관세/부가세", "카드사 해외결제 -> 원화 청구액 연결 필요"].map((rule) => (
-                <div key={rule} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-gray-700">
-                  <span>{rule}</span>
-                  <StatusBadge tone="orange">규칙</StatusBadge>
-                </div>
-              ))}
-            </div>
-            <div className="mt-5">
-              <ExpenseTable rows={expenses.slice(0, 20)} categoryById={categoryById} compact />
+            <SectionHeader title="자동분류 규칙" description="accounting_category_rules 기준으로 우선순위와 조건을 관리합니다." />
+            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                  <tr><th className="px-3 py-2 text-left">우선순위</th><th className="px-3 py-2 text-left">조건</th><th className="px-3 py-2 text-left">출처</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-center">상태</th><th className="px-3 py-2 text-right">관리</th></tr>
+                </thead>
+                <tbody>
+                  {rules.map((row) => (
+                    <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2 font-semibold text-gray-800">{String(row.priority || 100)}</td>
+                      <td className="px-3 py-2 text-gray-600">{String(row.condition_field || "merchant_name")} {String(row.condition_operator || "contains")} <b>{String(row.keyword || "-")}</b>{row.amount_condition ? ` / ${String(row.amount_condition)}` : ""}</td>
+                      <td className="px-3 py-2 text-gray-600">{String(row.source_name || row.source_type || "전체")}</td>
+                      <td className="px-3 py-2"><StatusBadge tone="orange">{[row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</StatusBadge></td>
+                      <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : row.review_required ? "검토필요" : "사용"}</StatusBadge></td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-2">
+                          <ActionButton
+                            type="button"
+                            variant="secondary"
+                            className="h-8 px-3 text-xs"
+                            onClick={() => setRuleDraft({
+                              id: String(row.id || ""),
+                              priority: String(row.priority || 100),
+                              source_type: String(row.source_type || ""),
+                              source_name: String(row.source_name || ""),
+                              condition_field: String(row.condition_field || "merchant_name"),
+                              condition_operator: String(row.condition_operator || "contains"),
+                              keyword: String(row.keyword || ""),
+                              amount_condition: String(row.amount_condition || ""),
+                              direction_condition: String(row.direction_condition || ""),
+                              category_id: String(row.category_id || ""),
+                              auto_confirm: row.auto_confirm === true,
+                              review_required: row.review_required !== false,
+                              review_reason: String(row.review_reason || ""),
+                              is_active: row.is_active !== false,
+                              memo: String(row.memo || ""),
+                            })}
+                          >
+                            수정
+                          </ActionButton>
+                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deactivateAccountingRuleFromUi(String(row.id || ""))}>비활성화</ActionButton>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!rules.length && <tr><td colSpan={6} className="px-3 py-8"><EmptyState title="자동분류 규칙 없음" className="min-h-24" /></td></tr>}
+                </tbody>
+              </table>
             </div>
           </Card>
           <Card className="p-5">
-            <SectionHeader
-              title="수동 비용 입력"
-              description="단건 비용은 공통 모달에서 입력합니다."
-              actions={<ActionButton type="button" onClick={() => setManualExpenseModalOpen(true)}>비용 등록</ActionButton>}
-            />
-            <EmptyState
-              title="비용 등록 모달"
-              description="저장 로직은 기존 수동 비용 저장 API를 그대로 사용합니다."
-              action={<ActionButton type="button" onClick={() => setManualExpenseModalOpen(true)}>열기</ActionButton>}
-              className="min-h-44"
-            />
+            <SectionHeader title={ruleDraft.id ? "규칙 수정" : "규칙 추가"} />
+            <form onSubmit={saveAccountingRule} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <FormField label="우선순위">
+                  <input className={modalInputClass} type="number" value={ruleDraft.priority} onChange={(event) => setRuleDraft((prev) => ({ ...prev, priority: event.target.value }))} />
+                </FormField>
+                <FormField label="출처 유형">
+                  <select className={modalSelectClass} value={ruleDraft.source_type} onChange={(event) => setRuleDraft((prev) => ({ ...prev, source_type: event.target.value }))}>
+                    <option value="">전체</option>
+                    <option value="card">카드</option>
+                    <option value="bank">통장</option>
+                  </select>
+                </FormField>
+              </div>
+              <FormField label="출처명">
+                <input className={modalInputClass} value={ruleDraft.source_name} onChange={(event) => setRuleDraft((prev) => ({ ...prev, source_name: event.target.value }))} placeholder="가온글로벌카드, 국민은행 통장 등" />
+              </FormField>
+              <div className="grid grid-cols-2 gap-2">
+                <FormField label="조건 필드">
+                  <select className={modalSelectClass} value={ruleDraft.condition_field} onChange={(event) => setRuleDraft((prev) => ({ ...prev, condition_field: event.target.value }))}>
+                    <option value="merchant_name">거래처명</option>
+                    <option value="description">내용</option>
+                    <option value="merchant_amount">거래처+금액</option>
+                  </select>
+                </FormField>
+                <FormField label="입출금">
+                  <select className={modalSelectClass} value={ruleDraft.direction_condition} onChange={(event) => setRuleDraft((prev) => ({ ...prev, direction_condition: event.target.value }))}>
+                    <option value="">전체</option>
+                    <option value="income">입금</option>
+                    <option value="expense">출금/비용</option>
+                    <option value="card_payment">카드대금</option>
+                    <option value="transfer">자금이동</option>
+                  </select>
+                </FormField>
+              </div>
+              <FormField label="키워드">
+                <input className={modalInputClass} value={ruleDraft.keyword} onChange={(event) => setRuleDraft((prev) => ({ ...prev, keyword: event.target.value }))} />
+              </FormField>
+              <FormField label="금액 조건">
+                <input className={modalInputClass} value={ruleDraft.amount_condition} onChange={(event) => setRuleDraft((prev) => ({ ...prev, amount_condition: event.target.value }))} placeholder="예: 300000 또는 비워두기" />
+              </FormField>
+              <FormField label="적용 카테고리">
+                <select className={modalSelectClass} value={ruleDraft.category_id} onChange={(event) => setRuleDraft((prev) => ({ ...prev, category_id: event.target.value }))}>
+                  <option value="">미지정</option>
+                  {categories.map((row) => <option key={String(row.id)} value={String(row.id)}>{categoryById.get(String(row.id))}</option>)}
+                </select>
+              </FormField>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={ruleDraft.auto_confirm} onChange={(event) => setRuleDraft((prev) => ({ ...prev, auto_confirm: event.target.checked }))} />자동확정</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={ruleDraft.review_required} onChange={(event) => setRuleDraft((prev) => ({ ...prev, review_required: event.target.checked }))} />검토필요</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={ruleDraft.is_active} onChange={(event) => setRuleDraft((prev) => ({ ...prev, is_active: event.target.checked }))} />사용</label>
+              <FormField label="검토 사유">
+                <input className={modalInputClass} value={ruleDraft.review_reason} onChange={(event) => setRuleDraft((prev) => ({ ...prev, review_reason: event.target.value }))} placeholder="KCP확인, 네이버확인 등" />
+              </FormField>
+              <div className="flex justify-end gap-2 pt-2">
+                <ActionButton type="button" variant="secondary" onClick={() => setRuleDraft({ id: "", priority: "100", source_type: "", source_name: "", condition_field: "merchant_name", condition_operator: "contains", keyword: "", amount_condition: "", direction_condition: "", category_id: "", auto_confirm: false, review_required: true, review_reason: "", is_active: true, memo: "" })}>초기화</ActionButton>
+                <ActionButton type="submit">{ruleDraft.id ? "수정" : "추가"}</ActionButton>
+              </div>
+            </form>
           </Card>
         </section>
       )}
 
-      {activeTab === "손익 그래프" && (
+      {activeTab === "대시보드" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Card className="p-5">
             <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
@@ -15314,17 +15521,22 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "미납/결제" && (
+      {activeTab === "카드 정산" && (
         <section className="grid gap-4 xl:grid-cols-2">
-          <AccountingList title="거래처 미납" rows={summary?.payables || []} primaryKey="base_month" amountKey="balance_amount" emptyText="아직 미납 데이터가 없습니다." />
-          <AccountingList title="결제 기록" rows={summary?.payments || []} primaryKey="payment_date" amountKey="amount" emptyText="아직 결제 기록이 없습니다." />
+          <AccountingList title="카드 정산 캘린더" rows={summary?.card_settlements || []} primaryKey="payment_due_date" amountKey="domestic_amount" emptyText="아직 카드 정산 데이터가 없습니다." />
+          <AccountingList title="해외 USD 결제" rows={(summary?.card_settlements || []).filter((row) => asNumber(row.foreign_amount) > 0)} primaryKey="card_name" amountKey="foreign_amount" emptyText="해외 결제 또는 환율 미입력 건이 없습니다." />
         </section>
       )}
 
-      {activeTab === "수입비용" && (
+      {activeTab === "검토필요" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <AccountingList title="수입 발주 연결 후보" rows={summary?.import_orders || []} primaryKey="order_no" amountKey="total_amount" emptyText="수입 발주 데이터가 없습니다." />
-          <ReportList title="수입비용 후보" rows={(summary?.by_category || []).filter((row) => ["수입비용", "관세", "부가세", "통관수수료", "샘플비", "물류비"].includes(String(row.label)))} />
+          <Card className="p-5">
+            <SectionHeader title="검토필요 거래" description="KCP, 네이버, 미분류, 일반명 거래, 자금이동 확인 건을 실제 거래 DB에서 봅니다." />
+            <div className="mt-4">
+              <ExpenseTable rows={expenses.filter((row) => String(row.review_status || "") === "pending")} categoryById={categoryById} compact onOpen={openTransaction} />
+            </div>
+          </Card>
+          <ReportList title="검토 사유 요약" rows={(summary?.review_queue || []).map((row) => ({ label: row.reason || "미분류", amount: 1 }))} />
         </section>
       )}
 
@@ -15338,15 +15550,21 @@ function AccountingWorkspace() {
             <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-                  <tr><th className="px-3 py-2 text-left">카테고리</th><th className="px-3 py-2 text-left">상위</th><th className="px-3 py-2 text-center">상태</th><th className="px-3 py-2 text-right">관리</th></tr>
+                  <tr><th className="px-3 py-2 text-left">대분류</th><th className="px-3 py-2 text-left">중/소분류</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-center">상태</th><th className="px-3 py-2 text-right">관리</th></tr>
                 </thead>
                 <tbody>
                   {categories.map((row) => {
-                    const parent = categories.find((item) => String(item.id || "") === String(row.parent_category_id || ""));
                     return (
                       <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                        <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_name || "-")}</td>
-                        <td className="px-3 py-2 text-gray-500">{String(parent?.category_name || "-")}</td>
+                        <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
+                        <td className="px-3 py-2 text-gray-500">{[row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex justify-center gap-1">
+                            {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
+                            {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
+                            {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : "사용"}</StatusBadge></td>
                         <td className="px-3 py-2">
                           <div className="flex justify-end gap-2">
@@ -15356,9 +15574,15 @@ function AccountingWorkspace() {
                               className="h-8 px-3 text-xs"
                               onClick={() => setCategoryDraft({
                                 id: String(row.id || ""),
-                                category_name: String(row.category_name || ""),
-                                parent_category_id: String(row.parent_category_id || ""),
+                                category_large: String(row.category_large || ""),
+                                category_middle: String(row.category_middle || ""),
+                                category_small: String(row.category_small || ""),
                                 is_active: row.is_active !== false,
+                                affects_profit: row.affects_profit !== false,
+                                affects_cashflow: row.affects_cashflow !== false,
+                                affects_card_settlement: row.affects_card_settlement === true,
+                                sort_order: String(row.sort_order || 0),
+                                memo: String(row.memo || ""),
                               })}
                             >
                               수정
@@ -15369,7 +15593,7 @@ function AccountingWorkspace() {
                       </tr>
                     );
                   })}
-                  {!categories.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
+                  {!categories.length && <tr><td colSpan={5} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
                 </tbody>
               </table>
             </div>
@@ -15378,23 +15602,39 @@ function AccountingWorkspace() {
           <Card className="p-5">
             <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "카테고리 추가"} />
             <form onSubmit={saveExpenseCategory} className="space-y-3">
-              <FormField label="카테고리명" required>
-                <input className={modalInputClass} value={categoryDraft.category_name} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_name: event.target.value }))} />
+              <FormField label="대분류" required>
+                <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
               </FormField>
-              <FormField label="상위 카테고리">
-                <select className={modalSelectClass} value={categoryDraft.parent_category_id} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, parent_category_id: event.target.value }))}>
-                  <option value="">없음</option>
-                  {categories.filter((row) => String(row.id || "") !== categoryDraft.id).map((row) => (
-                    <option key={String(row.id)} value={String(row.id)}>{String(row.category_name)}</option>
-                  ))}
-                </select>
+              <FormField label="중분류">
+                <input className={modalInputClass} value={categoryDraft.category_middle} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
+              </FormField>
+              <FormField label="소분류">
+                <input className={modalInputClass} value={categoryDraft.category_small} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_small: event.target.value }))} />
+              </FormField>
+              <FormField label="정렬 순서">
+                <input className={modalInputClass} type="number" value={categoryDraft.sort_order} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
               </FormField>
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.is_active} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, is_active: event.target.checked }))} />
                 사용
               </label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input type="checkbox" checked={categoryDraft.affects_profit} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />
+                손익 반영
+              </label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input type="checkbox" checked={categoryDraft.affects_cashflow} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />
+                현금흐름 반영
+              </label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input type="checkbox" checked={categoryDraft.affects_card_settlement} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />
+                카드결제예정 반영
+              </label>
+              <FormField label="메모">
+                <textarea className={modalTextareaClass} value={categoryDraft.memo} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+              </FormField>
               <div className="flex justify-end gap-2 pt-2">
-                <ActionButton type="button" variant="secondary" onClick={() => setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true })}>초기화</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={() => setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" })}>초기화</ActionButton>
                 <ActionButton type="submit">{categoryDraft.id ? "수정" : "추가"}</ActionButton>
               </div>
             </form>
@@ -15402,7 +15642,7 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "작업실" && (
+      {activeTab === "대시보드" && (
         <section className="grid gap-4 xl:grid-cols-3">
           <AccountingList title="최근 업로드" rows={recentBatches} primaryKey="source_file_name" amountKey="success_count" emptyText="아직 업로드 기록이 없습니다." />
           <ReportList title="업체별 비용" rows={vendorRows} />
@@ -15454,30 +15694,72 @@ function AccountingWorkspace() {
           <ExpenseTable rows={previewRows} categoryById={categoryById} />
         </SelectionModal>
       )}
+
+      {editingTransaction && (
+        <FormModal
+          title="거래 상세"
+          description={`${String(editingTransaction.transaction_date || "-")} / ${String(editingTransaction.source_name || editingTransaction.source_type || "-")} / ${String(editingTransaction.merchant_name || editingTransaction.description || "-")}`}
+          onClose={() => setEditingTransaction(null)}
+          size="lg"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setEditingTransaction(null)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={saveTransactionDraft}>{transactionDraft.save_rule ? "규칙으로 저장" : "이 거래만 수정"}</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-xl bg-gray-50 p-3 text-xs font-medium text-gray-600 md:grid-cols-2">
+              <p>금액: <b className="text-gray-900">{krw(asNumber(editingTransaction.amount_krw ?? editingTransaction.amount))}</b></p>
+              <p>상태: <b className="text-gray-900">{String(editingTransaction.review_status || editingTransaction.direction || "-")}</b></p>
+              <p className="md:col-span-2">내용: <b className="text-gray-900">{String(editingTransaction.description || "-")}</b></p>
+              <p className="md:col-span-2">원본: <span className="break-all text-gray-500">{JSON.stringify(editingTransaction.raw_json || {}, null, 0).slice(0, 500) || "원본 없음"}</span></p>
+            </div>
+            <FormField label="카테고리">
+              <select className={modalSelectClass} value={transactionDraft.category_id} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, category_id: event.target.value }))}>
+                <option value="">미지정</option>
+                {categories.map((row) => <option key={String(row.id)} value={String(row.id)}>{categoryById.get(String(row.id))}</option>)}
+              </select>
+            </FormField>
+            <FormField label="메모">
+              <textarea className={modalTextareaClass} value={transactionDraft.memo} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+            </FormField>
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <input type="checkbox" checked={transactionDraft.save_rule} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, save_rule: event.target.checked }))} />
+              같은 패턴 자동분류 규칙으로 저장
+            </label>
+          </div>
+        </FormModal>
+      )}
     </div>
   );
 }
 
-function ExpenseTable({ rows, categoryById, compact = false }: { rows: Array<Record<string, unknown>>; categoryById: Map<string, string>; compact?: boolean }) {
+function ExpenseTable({ rows, categoryById, compact = false, onOpen }: { rows: Array<Record<string, unknown>>; categoryById: Map<string, string>; compact?: boolean; onOpen?: (row: Record<string, unknown>) => void }) {
   if (!rows.length) return <EmptyState title="데이터 없음" className="min-h-32" />;
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
       <table className={`w-full text-sm ${compact ? "min-w-[760px]" : "min-w-[980px]"}`}>
         <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-          <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">자료</th><th className="px-3 py-2 text-left">업체</th><th className="px-3 py-2 text-left">내용</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-right">합계</th>{!compact && <th className="px-3 py-2 text-left">메모</th>}</tr>
+          <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">출처</th><th className="px-3 py-2 text-left">거래처</th><th className="px-3 py-2 text-left">내용</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-left">상태</th><th className="px-3 py-2 text-right">금액</th>{!compact && <th className="px-3 py-2 text-left">메모/원본</th>}</tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={String(row.id || index)} className="border-t border-gray-100 hover:bg-orange-50/60">
-              <td className="px-3 py-2 font-semibold text-gray-800">{String(row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
-              <td className="px-3 py-2 text-gray-600"><StatusBadge>{String(row.source_type || "-")}</StatusBadge></td>
-              <td className="px-3 py-2 font-semibold text-gray-900">{String(row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
-              <td className="max-w-[280px] truncate px-3 py-2 text-gray-600">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
-              <td className="px-3 py-2"><StatusBadge tone="orange">{categoryById.get(String(row.category_id || "")) || String(row.category || "기타")}</StatusBadge></td>
-              <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(asNumber(row.total_amount || row["합계"] || row["금액"] || row.amount))}</td>
-              {!compact && <td className="max-w-[220px] truncate px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>}
-            </tr>
-          ))}
+          {rows.map((row, index) => {
+            const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "미분류");
+            const amount = asNumber(row.amount_krw ?? row.total_amount ?? row["합계"] ?? row["금액"] ?? row.amount);
+            return (
+              <tr key={String(row.id || index)} className={`border-t border-gray-100 hover:bg-orange-50/60 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
+                <td className="px-3 py-2 text-gray-600"><StatusBadge>{String(row.source_name || row.source_type || "-")}</StatusBadge></td>
+                <td className="px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
+                <td className="max-w-[280px] truncate px-3 py-2 text-gray-600">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
+                <td className="px-3 py-2"><StatusBadge tone="orange">{category}</StatusBadge></td>
+                <td className="px-3 py-2"><StatusBadge tone={String(row.review_status || "") === "pending" ? "danger" : "success"}>{String(row.review_status || row.direction || "-")}</StatusBadge></td>
+                <td className="px-3 py-2 text-right font-bold text-gray-900">{String(row.currency || "KRW") === "KRW" || row.amount_krw ? krw(amount) : `${asNumber(row.foreign_amount || row.amount).toLocaleString("ko-KR")} ${String(row.currency || "")}`}</td>
+                {!compact && <td className="max-w-[220px] truncate px-3 py-2 text-gray-500">{String(row.memo || row.review_reason || (row.raw_json ? "원본 보존" : "-"))}</td>}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -15523,19 +15805,26 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
 }
 
 function AccountingRightPanel() {
-  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+  const defaultRange = adRangeForPreset("30d");
+  const [dateFrom, setDateFrom] = useState(defaultRange.from);
+  const [dateTo, setDateTo] = useState(defaultRange.to);
+  const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
+  const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
 
   useEffect(() => {
     let alive = true;
     let cachedTimer: number | undefined;
-    const cached = readCachedAccountingSummary();
+    const cached = readCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
     if (cached) {
       cachedTimer = window.setTimeout(() => {
         if (alive) setSummary(cached);
       }, 0);
     }
-    fetchCachedAccountingSummary()
+    cachedClientJson<AccountingSummary>(endpoint, {
+      ttl: ACCOUNTING_CACHE_TTL,
+      storageTtl: ACCOUNTING_STORAGE_TTL,
+    })
       .then((data) => {
         if (alive) setSummary(data);
       })
@@ -15546,39 +15835,41 @@ function AccountingRightPanel() {
       alive = false;
       if (cachedTimer) window.clearTimeout(cachedTimer);
     };
-  }, []);
+  }, [endpoint]);
 
   const totals = summary?.totals || {};
-  const expenses = summary?.expenses || [];
-  const bankCardExpense = expenses.filter((row) => ["국민카드", "국민카드 1", "국민카드 2", "국민은행", "기업은행"].includes(String(row.source_type || "")));
-  const bankCardTotal = bankCardExpense.reduce((total, row) => total + asNumber(row.total_amount || row.amount), 0);
-  const categoryRows = summary?.by_category || [];
   const recentBatches = summary?.batches || [];
+  const settlements = summary?.card_settlements || [];
+  const pendingSettlements = settlements.filter((row) => row.paid !== true);
+  const nextSettlement = pendingSettlements[0];
+  const gaonSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "가온글로벌카드");
+  const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <div className="mb-4">
-        <h2 className="text-[18px] font-semibold text-gray-900">회계 대시보드</h2>
-        <p className="mt-1 text-xs font-medium text-gray-500">비용, 결제, 손익 핵심만 모아봅니다.</p>
+        <h2 className="text-[18px] font-semibold text-gray-900">회계 Ledger</h2>
+        <p className="mt-1 text-xs font-medium text-gray-500">선택 기간 기준 실제 DB 요약입니다.</p>
+      </div>
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        <input className="field-input px-2 py-2 text-xs" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        <input className="field-input px-2 py-2 text-xs" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
       </div>
       <div className="space-y-3">
-        <AccountingMetric label="이번 달 총비용" value={krw(asNumber(totals.expense_amount))} note="업로드/수동 비용" tone="orange" />
-        <AccountingMetric label="카드/은행" value={krw(bankCardTotal)} note="국민카드/국민은행/기업은행" />
-        <AccountingMetric label="광고비" value={krw(asNumber(totals.ad_spend))} note="광고 DB 연결" />
-        <AccountingMetric label="구매/매입" value={krw(asNumber(totals.purchase_amount))} note="매출/재고 연결" />
-        <AccountingMetric label="예상 순이익" value={krw(asNumber(totals.estimated_profit))} note={`마진율 ${asNumber(totals.margin_rate).toFixed(1)}%`} tone="green" />
-        <AccountingMetric label="미납 거래처" value={`${asNumber(totals.unpaid_count).toLocaleString("ko-KR")}곳`} note="결제 확인" tone="rose" />
+        <AccountingMetric label="업로드 상태" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
+        <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
+        <AccountingMetric label="검토필요" value={`${asNumber(totals.review_count).toLocaleString("ko-KR")}건`} note="KCP/네이버/미분류 확인" tone="rose" />
+        <AccountingMetric label="가온글로벌카드" value="20,000,000원" note={`사용률 ${gaonUsage}`} tone="green" />
+        <AccountingMetric label="국민기업카드" value="한도 미입력" note="한도 입력 전 사용률 계산 안 함" tone="orange" />
+        <AccountingMetric label="카드대금 처리" value="현금흐름" note="손익 비용으로 중복 반영하지 않음" />
       </div>
       <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-        <h3 className="text-xs font-semibold text-gray-500">큰 비용 TOP</h3>
+        <h3 className="text-xs font-semibold text-gray-500">기간 KPI</h3>
         <div className="mt-2 space-y-2">
-          {categoryRows.slice(0, 4).map((row, index) => (
-            <div key={`${String(row.label)}-${index}`} className="flex items-center justify-between gap-2 text-xs">
-              <span className="truncate font-semibold text-gray-600">{String(row.label || "-")}</span>
-              <span className="font-bold text-gray-900">{krw(asNumber(row.amount))}</span>
-            </div>
-          ))}
-          {!categoryRows.length && <EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white px-2 py-4" />}
+          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">매출/정산입금</span><span className="font-bold text-gray-900">{krw(asNumber(totals.income_amount))}</span></div>
+          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">비용합계</span><span className="font-bold text-gray-900">{krw(asNumber(totals.expense_amount))}</span></div>
+          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">순손익</span><span className="font-bold text-gray-900">{krw(asNumber(totals.net_profit))}</span></div>
+          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">통장 순현금흐름</span><span className="font-bold text-gray-900">{krw(asNumber(totals.cashflow_amount))}</span></div>
         </div>
       </div>
       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
@@ -15587,7 +15878,7 @@ function AccountingRightPanel() {
           {recentBatches.slice(0, 4).map((row, index) => (
             <div key={`${String(row.id || row.source_file_name)}-${index}`} className="text-xs">
               <p className="truncate font-semibold text-gray-700">{String(row.source_file_name || row.source_type || "-")}</p>
-              <p className="mt-0.5 text-gray-400">{asNumber(row.success_count).toLocaleString("ko-KR")}건 저장</p>
+              <p className="mt-0.5 text-gray-400">{asNumber(row.new_count || row.success_count).toLocaleString("ko-KR")}건 저장 / 중복 {asNumber(row.duplicate_count).toLocaleString("ko-KR")}건</p>
             </div>
           ))}
           {!recentBatches.length && <EmptyState title="업로드 없음" className="min-h-24 border-0 bg-white px-2 py-4" />}

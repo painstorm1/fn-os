@@ -284,6 +284,152 @@ async function rebuildCardSettlements() {
   return rows;
 }
 
+async function categoryFor(row: RawRow) {
+  const id = text(row.category_id || row.categoryId);
+  if (id) {
+    const [category] = await optionalRows("accounting_categories", { id: `eq.${id}`, limit: 1 });
+    if (category) return category;
+  }
+  const category_large = text(row.category_large || row.categoryLarge);
+  const category_middle = text(row.category_middle || row.categoryMiddle);
+  const category_small = text(row.category_small || row.categorySmall);
+  if (!category_large) return null;
+  const [category] = await optionalRows("accounting_categories", {
+    category_large: `eq.${category_large}`,
+    category_middle: `eq.${category_middle}`,
+    category_small: `eq.${category_small}`,
+    limit: 1,
+  });
+  return category || null;
+}
+
+function cleanCategoryPayload(row: RawRow) {
+  return {
+    category_large: text(row.category_large || row.categoryLarge),
+    category_middle: text(row.category_middle || row.categoryMiddle),
+    category_small: text(row.category_small || row.categorySmall),
+    is_active: row.is_active ?? row.isActive ?? true,
+    sort_order: numberValue(row.sort_order ?? row.sortOrder),
+    affects_profit: row.affects_profit ?? row.affectsProfit ?? true,
+    affects_cashflow: row.affects_cashflow ?? row.affectsCashflow ?? true,
+    affects_card_settlement: row.affects_card_settlement ?? row.affectsCardSettlement ?? false,
+    default_review_required: row.default_review_required ?? row.defaultReviewRequired ?? false,
+    memo: text(row.memo) || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertAccountingCategory(row: RawRow) {
+  const id = text(row.id);
+  const payload = cleanCategoryPayload(row);
+  if (!payload.category_large) throw new Error("대분류가 필요합니다.");
+  if (id) return patchRows("accounting_categories", { id: `eq.${id}` }, payload);
+  return upsertRows("accounting_categories", payload, "category_large,category_middle,category_small");
+}
+
+export async function deactivateAccountingCategory(id: string) {
+  if (!id) throw new Error("카테고리 id가 필요합니다.");
+  return patchRows("accounting_categories", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
+export async function upsertAccountingRule(row: RawRow) {
+  const id = text(row.id);
+  const category = await categoryFor(row);
+  const payload = {
+    priority: numberValue(row.priority) || 100,
+    is_active: row.is_active ?? row.isActive ?? true,
+    source_type: text(row.source_type || row.sourceType) || null,
+    source_name: text(row.source_name || row.sourceName) || null,
+    condition_field: text(row.condition_field || row.conditionField) || "merchant_name",
+    condition_operator: text(row.condition_operator || row.conditionOperator) || "contains",
+    keyword: text(row.keyword) || null,
+    amount_condition: text(row.amount_condition || row.amountCondition) || null,
+    direction_condition: text(row.direction_condition || row.directionCondition) || null,
+    currency_condition: text(row.currency_condition || row.currencyCondition) || null,
+    recurring_condition: text(row.recurring_condition || row.recurringCondition) || null,
+    merchant_condition: text(row.merchant_condition || row.merchantCondition) || null,
+    category_id: category?.id || null,
+    category_large: text(category?.category_large || row.category_large || row.categoryLarge),
+    category_middle: text(category?.category_middle || row.category_middle || row.categoryMiddle),
+    category_small: text(category?.category_small || row.category_small || row.categorySmall),
+    auto_confirm: row.auto_confirm ?? row.autoConfirm ?? false,
+    review_required: row.review_required ?? row.reviewRequired ?? true,
+    review_reason: text(row.review_reason || row.reviewReason) || null,
+    memo: text(row.memo) || null,
+    updated_at: new Date().toISOString(),
+  };
+  if (id) return patchRows("accounting_category_rules", { id: `eq.${id}` }, payload);
+  return insertRows("accounting_category_rules", payload);
+}
+
+export async function deactivateAccountingRule(id: string) {
+  if (!id) throw new Error("규칙 id가 필요합니다.");
+  return patchRows("accounting_category_rules", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
+export async function updateAccountingTransaction(id: string, row: RawRow) {
+  if (!id) throw new Error("거래 id가 필요합니다.");
+  const category = await categoryFor(row);
+  const payload: RawRow = {
+    memo: text(row.memo) || null,
+    review_status: text(row.review_status || row.reviewStatus) || "confirmed",
+    updated_at: new Date().toISOString(),
+  };
+  if (category) {
+    payload.category_id = category.id;
+    payload.category_large = category.category_large;
+    payload.category_middle = category.category_middle;
+    payload.category_small = category.category_small;
+  }
+  for (const key of ["category_large", "category_middle", "category_small", "direction", "review_reason"]) {
+    if (row[key] !== undefined && !category) payload[key] = text(row[key]);
+  }
+  for (const key of ["affects_profit", "affects_cashflow", "affects_card_settlement"]) {
+    if (row[key] !== undefined) payload[key] = row[key];
+  }
+  const saved = await patchRows<RawRow>("accounting_transactions", { id: `eq.${id}` }, payload);
+  if (payload.review_status === "confirmed") {
+    await patchRows("accounting_review_queue", { transaction_id: `eq.${id}` }, {
+      status: "resolved",
+      resolved_category_id: category?.id || null,
+      resolved_at: new Date().toISOString(),
+      memo: text(row.review_memo || row.reviewMemo || row.memo) || null,
+      updated_at: new Date().toISOString(),
+    }).catch(() => []);
+  }
+  await rebuildCardSettlements();
+  return saved;
+}
+
+export async function resolveAccountingReview(row: RawRow) {
+  const transactionId = text(row.transaction_id || row.transactionId || row.id);
+  if (!transactionId) throw new Error("검토할 거래 id가 필요합니다.");
+  const [transaction] = await optionalRows("accounting_transactions", { id: `eq.${transactionId}`, limit: 1 });
+  const updated = await updateAccountingTransaction(transactionId, { ...row, review_status: "confirmed" });
+  if (row.create_rule || row.createRule || row.save_rule || row.saveRule) {
+    const category = await categoryFor(row);
+    await upsertAccountingRule({
+      priority: row.priority || 50,
+      source_type: transaction?.source_type,
+      source_name: transaction?.source_name,
+      condition_field: "merchant_name",
+      condition_operator: "contains",
+      keyword: text(row.keyword) || text(transaction?.merchant_name || transaction?.description),
+      amount_condition: row.amount_condition || row.amountCondition || null,
+      direction_condition: transaction?.direction,
+      category_id: category?.id,
+      category_large: category?.category_large || row.category_large,
+      category_middle: category?.category_middle || row.category_middle,
+      category_small: category?.category_small || row.category_small,
+      auto_confirm: row.auto_confirm ?? row.autoConfirm ?? false,
+      review_required: row.review_required ?? row.reviewRequired ?? false,
+      review_reason: row.review_reason || row.reviewReason || null,
+      memo: row.rule_memo || row.ruleMemo || "검토필요 탭에서 저장한 자동분류 규칙",
+    });
+  }
+  return updated;
+}
+
 export async function importAccountingLedgerRows(rows: RawRow[], options: { sourceType?: string; sourceFileName?: string; uploadedBy?: string; memo?: string } = {}) {
   const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }));
   const classified = await classifyAccountingTransactions(normalized);
@@ -340,6 +486,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     if (to && date > to) return false;
     return row.is_active !== false;
   });
+  const categories = await optionalRows("accounting_categories", { order: "sort_order.asc", limit: 500 });
+  const rules = await optionalRows("accounting_category_rules", { order: "priority.asc", limit: 500 });
   const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
   const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
   const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
@@ -359,8 +507,23 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     }
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
   };
+  const byMonth = Array.from(filtered.reduce((map, row) => {
+    const label = isoDate(row.transaction_date).slice(0, 7) || "미지정";
+    const prev = map.get(label) || { label, income: 0, expense: 0, amount: 0, count: 0 };
+    const amount = numberValue(row.amount_krw ?? row.amount);
+    if (row.direction === "income" && row.affects_profit !== false) prev.income += amount;
+    if (row.direction === "expense" && row.affects_profit !== false) prev.expense += amount;
+    prev.amount = prev.income - prev.expense;
+    prev.count += 1;
+    map.set(label, prev);
+    return map;
+  }, new Map<string, { label: string; income: number; expense: number; amount: number; count: number }>()).values()).sort((a, b) => a.label.localeCompare(b.label));
+  const categoryLarge = group((row) => text(row.category_large));
   return {
     transactions: filtered.slice(0, 300),
+    expenses: filtered.slice(0, 300),
+    categories,
+    rules,
     batches,
     review_queue: reviewQueue,
     card_settlements: settlements,
@@ -373,8 +536,10 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       review_count: reviewQueue.length,
       transaction_count: filtered.length,
     },
-    by_category_large: group((row) => text(row.category_large)),
+    by_category_large: categoryLarge,
+    by_category: categoryLarge,
     by_vendor: group((row) => text(row.merchant_name)),
     by_card: group((row) => text(row.card_name || row.source_name)),
+    by_month: byMonth,
   };
 }
