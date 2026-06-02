@@ -14907,6 +14907,8 @@ type AccountingSummary = {
   fixed_costs?: Array<Record<string, unknown>>;
   fixed_cost_occurrences?: Array<Record<string, unknown>>;
   upcoming_fixed_costs?: Array<Record<string, unknown>>;
+  bank_accounts?: Array<Record<string, unknown>>;
+  card_accounts?: Array<Record<string, unknown>>;
   totals?: Record<string, unknown>;
   by_category?: Array<Record<string, unknown>>;
   by_category_large?: Array<Record<string, unknown>>;
@@ -14921,7 +14923,7 @@ type ExpenseUploadItem = {
 };
 
 const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
-const accountingTabs = ["대시보드", "통장", "카드", "고정비", "거래 DB", "업로드", "검토필요", "카테고리 설정", "자동분류 규칙", "카드 정산"];
+const accountingTabs = ["검토필요", "대시보드", "통장", "카드", "고정비", "거래 DB", "업로드", "카테고리 설정", "자동분류 규칙", "카드 정산"];
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
@@ -14958,7 +14960,16 @@ function AccountingWorkspace() {
   const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
-  const [transactionDraft, setTransactionDraft] = useState({ category_id: "", memo: "", save_rule: false });
+  const [transactionDraft, setTransactionDraft] = useState({
+    category_id: "",
+    direction: "",
+    review_reason: "",
+    affects_profit: true,
+    affects_cashflow: true,
+    affects_card_settlement: false,
+    memo: "",
+    save_rule: false,
+  });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
   const [categoryDraft, setCategoryDraft] = useState({
     id: "",
@@ -15268,6 +15279,11 @@ function AccountingWorkspace() {
     setEditingTransaction(row);
     setTransactionDraft({
       category_id: String(row.category_id || ""),
+      direction: String(row.direction || ""),
+      review_reason: String(row.review_reason || ""),
+      affects_profit: row.affects_profit !== false,
+      affects_cashflow: row.affects_cashflow !== false,
+      affects_card_settlement: row.affects_card_settlement === true,
       memo: String(row.memo || ""),
       save_rule: false,
     });
@@ -15284,6 +15300,11 @@ function AccountingWorkspace() {
         id: editingTransaction.id,
         transaction_id: editingTransaction.id,
         category_id: transactionDraft.category_id,
+        direction: transactionDraft.direction,
+        review_reason: transactionDraft.review_reason,
+        affects_profit: transactionDraft.affects_profit,
+        affects_cashflow: transactionDraft.affects_cashflow,
+        affects_card_settlement: transactionDraft.affects_card_settlement,
         memo: transactionDraft.memo,
         review_status: "confirmed",
         create_rule: transactionDraft.save_rule,
@@ -15329,6 +15350,8 @@ function AccountingWorkspace() {
   const fixedCosts = summary?.fixed_costs || [];
   const fixedCostOccurrences = summary?.fixed_cost_occurrences || [];
   const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
+  const bankAccounts = summary?.bank_accounts || [];
+  const cardAccounts = summary?.card_accounts || [];
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
@@ -15488,6 +15511,15 @@ function AccountingWorkspace() {
             description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다."
             actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
+          <div className="mt-4 flex flex-wrap gap-2">
+            {bankAccounts.map((row) => (
+              <span key={String(row.id || row.bank_name)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
+                <StatusBadge>{String(row.bank_name || "-")}</StatusBadge>
+                <span>{String(row.account_holder || "예금주 미입력")}</span>
+                <span className="text-gray-400">{row.list_enabled === false ? "미반영" : "리스트 반영"}</span>
+              </span>
+            ))}
+          </div>
           <div className="mt-4">
             <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} />
           </div>
@@ -15501,6 +15533,15 @@ function AccountingWorkspace() {
             description="카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원."
             actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
+          <div className="mt-4 flex flex-wrap gap-2">
+            {cardAccounts.map((row) => (
+              <span key={String(row.id || row.card_name)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
+                <StatusBadge tone="orange">{String(row.card_name || "-")}</StatusBadge>
+                <span>한도 {asNumber(row.card_limit) ? krw(asNumber(row.card_limit)) : "미입력"}</span>
+                <span className="text-gray-400">출금 {String(row.payment_day || "-")}일</span>
+              </span>
+            ))}
+          </div>
           <div className="mt-4">
             <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} />
           </div>
@@ -16111,6 +16152,26 @@ function AccountingWorkspace() {
                 {categories.map((row) => <option key={String(row.id)} value={String(row.id)}>{categoryById.get(String(row.id))}</option>)}
               </select>
             </FormField>
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField label="거래 방향">
+                <select className={modalSelectClass} value={transactionDraft.direction} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, direction: event.target.value }))}>
+                  <option value="">유지</option>
+                  <option value="income">입금/정산</option>
+                  <option value="expense">비용/출금</option>
+                  <option value="card_payment">카드대금 출금</option>
+                  <option value="transfer">자금이동</option>
+                  <option value="pending_review">검토필요</option>
+                </select>
+              </FormField>
+              <FormField label="검토 사유">
+                <input className={modalInputClass} value={transactionDraft.review_reason} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, review_reason: event.target.value }))} placeholder="KCP확인, 네이버확인 등" />
+              </FormField>
+            </div>
+            <div className="grid gap-2 rounded-xl bg-gray-50 p-3 md:grid-cols-3">
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_profit} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />손익 반영</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_cashflow} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />현금흐름 반영</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_card_settlement} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />카드정산 반영</label>
+            </div>
             <FormField label="메모">
               <textarea className={modalTextareaClass} value={transactionDraft.memo} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, memo: event.target.value }))} />
             </FormField>

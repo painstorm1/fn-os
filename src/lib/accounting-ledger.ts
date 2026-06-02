@@ -77,22 +77,22 @@ function lastDayOfMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-function previousBusinessDay(date: string, holidays = new Set<string>()) {
+function previousBusinessDay(date: string) {
   let current = date;
   for (let guard = 0; guard < 10; guard += 1) {
     const [year, month, day] = current.split("-").map(Number);
     const weekDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-    if (weekDay !== 0 && weekDay !== 6 && !holidays.has(current)) return current;
+    if (weekDay !== 0 && weekDay !== 6) return current;
     current = addDays(current, -1);
   }
   return current;
 }
 
-function monthDueDate(baseDay: unknown, today = kstToday(), holidays = new Set<string>()) {
+function monthDueDate(baseDay: unknown, today = kstToday()) {
   const [year, month] = today.split("-").map(Number);
   const raw = text(baseDay);
   const day = raw === "last" || raw === "말일" ? lastDayOfMonth(year, month) : Math.min(Math.max(numberValue(raw), 1), lastDayOfMonth(year, month));
-  return previousBusinessDay(dateText(year, month, day), holidays);
+  return previousBusinessDay(dateText(year, month, day));
 }
 
 function inferCardPaymentName(row: RawRow) {
@@ -216,8 +216,8 @@ function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], du
   return candidates[0] || null;
 }
 
-function fixedCostOccurrence(row: RawRow, holidays: Set<string>, today = kstToday(), transactions: RawRow[] = []) {
-  const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today, holidays);
+function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = []) {
+  const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
   const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
   const actualAmount = actualRow ? transactionAmount(actualRow) : numberValue(row.last_actual_amount);
@@ -526,8 +526,11 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
     payload.category_middle = category.category_middle;
     payload.category_small = category.category_small;
   }
-  for (const key of ["category_large", "category_middle", "category_small", "direction", "review_reason"]) {
+  for (const key of ["category_large", "category_middle", "category_small"]) {
     if (row[key] !== undefined && !category) payload[key] = text(row[key]);
+  }
+  for (const key of ["direction", "review_reason"]) {
+    if (row[key] !== undefined) payload[key] = text(row[key]);
   }
   for (const key of ["affects_profit", "affects_cashflow", "affects_card_settlement"]) {
     if (row[key] !== undefined) payload[key] = row[key];
@@ -637,10 +640,11 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
   const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
   const fixedCosts = await optionalRows("accounting_fixed_costs", { is_active: "eq.true", order: "sort_order.asc", limit: 300 });
-  const holidays = new Set((await optionalRows("accounting_holidays", { limit: 1000 })).map((row) => isoDate(row.holiday_date)));
+  const bankAccounts = await optionalRows("accounting_bank_accounts", { is_active: "eq.true", order: "sort_order.asc", limit: 100 });
+  const cardAccounts = await optionalRows("accounting_card_accounts", { is_active: "eq.true", order: "sort_order.asc", limit: 100 });
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
-  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, holidays, today, rows));
+  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
   const upcomingFixedCosts = fixedCostOccurrences
     .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
@@ -685,6 +689,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     fixed_costs: fixedCosts,
     fixed_cost_occurrences: fixedCostOccurrences,
     upcoming_fixed_costs: upcomingFixedCosts,
+    bank_accounts: bankAccounts,
+    card_accounts: cardAccounts,
     totals: {
       income_amount: income,
       expense_amount: expense,

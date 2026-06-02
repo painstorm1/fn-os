@@ -862,13 +862,6 @@ create table if not exists accounting_card_settlements (
   unique(card_name, settlement_start, settlement_end)
 );
 
-create table if not exists accounting_holidays (
-  holiday_date date primary key,
-  holiday_name text,
-  memo text,
-  created_at timestamptz not null default now()
-);
-
 create table if not exists accounting_fixed_costs (
   id uuid primary key default gen_random_uuid(),
   fixed_cost_name text not null unique,
@@ -892,6 +885,45 @@ create table if not exists accounting_fixed_costs (
   is_active boolean default true,
   sort_order integer default 0,
   memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_bank_accounts (
+  id uuid primary key default gen_random_uuid(),
+  account_type text default 'business',
+  bank_name text not null,
+  account_holder text,
+  account_number text,
+  password_hint text,
+  list_enabled boolean default true,
+  memo text,
+  is_active boolean default true,
+  sort_order integer default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(bank_name, account_holder, account_number)
+);
+
+create table if not exists accounting_card_accounts (
+  id uuid primary key default gen_random_uuid(),
+  card_type text default 'business',
+  card_name text not null unique,
+  card_number text,
+  expiry_date date,
+  cvc_hint text,
+  secure_message text,
+  payment_password_hint text,
+  cutoff_start_day integer,
+  cutoff_end_day integer,
+  payment_day integer,
+  card_limit numeric,
+  withdrawal_account_name text,
+  list_enabled boolean default true,
+  physical_owner text,
+  memo text,
+  is_active boolean default true,
+  sort_order integer default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -1336,6 +1368,33 @@ on conflict (fixed_cost_name) do update set
   memo = excluded.memo,
   updated_at = now();
 
+insert into accounting_bank_accounts (account_type, bank_name, account_holder, account_number, list_enabled, sort_order, memo)
+values
+  ('business', '국민은행', '김재욱(에프엔)', null, true, 10, '회계/비용 통장 내역 기본 필터용. 계좌번호/비밀번호는 사용자가 수정'),
+  ('business', '기업은행', '에프엔', null, true, 20, '회계/비용 통장 내역 기본 필터용. 계좌번호/비밀번호는 사용자가 수정')
+on conflict (bank_name, account_holder, account_number) do update set
+  account_type = excluded.account_type,
+  list_enabled = excluded.list_enabled,
+  sort_order = excluded.sort_order,
+  memo = excluded.memo,
+  updated_at = now();
+
+insert into accounting_card_accounts (card_type, card_name, cutoff_start_day, cutoff_end_day, payment_day, card_limit, withdrawal_account_name, list_enabled, sort_order, memo)
+values
+  ('business', '가온글로벌카드', 22, 21, 5, 20000000, '국민은행', true, 10, '매월 22일~다음달 21일 사용, 다음달 5일 KB카드출금'),
+  ('business', '국민기업카드', 6, 5, 20, 10000000, '국민은행', true, 20, '매월 6일~다음달 5일 사용, 마감달 20일 KB카드출금')
+on conflict (card_name) do update set
+  card_type = excluded.card_type,
+  cutoff_start_day = excluded.cutoff_start_day,
+  cutoff_end_day = excluded.cutoff_end_day,
+  payment_day = excluded.payment_day,
+  card_limit = excluded.card_limit,
+  withdrawal_account_name = excluded.withdrawal_account_name,
+  list_enabled = excluded.list_enabled,
+  sort_order = excluded.sort_order,
+  memo = excluded.memo,
+  updated_at = now();
+
 create index if not exists idx_shipments_status on shipments(shipment_status);
 create index if not exists idx_ad_daily_date on ad_daily_metrics(metric_date desc);
 create index if not exists idx_ad_upload_batches_channel_file on ad_upload_batches(channel, source_file_name);
@@ -1365,6 +1424,8 @@ create index if not exists idx_accounting_card_settlements_due on accounting_car
 create index if not exists idx_accounting_fixed_costs_active on accounting_fixed_costs(is_active, sort_order);
 create index if not exists idx_accounting_fixed_costs_day on accounting_fixed_costs(base_day);
 create index if not exists idx_accounting_loans_active on accounting_loans(is_active, payment_day);
+create index if not exists idx_accounting_bank_accounts_active on accounting_bank_accounts(is_active, list_enabled, sort_order);
+create index if not exists idx_accounting_card_accounts_active on accounting_card_accounts(is_active, list_enabled, sort_order);
 create index if not exists idx_import_po_status on import_purchase_orders(status, expected_inbound_date);
 create index if not exists idx_import_product_sku_links_import on import_product_sku_links(import_product_id);
 create index if not exists idx_import_product_sku_links_option on import_product_sku_links(import_product_id, import_option_key, sort_order);
