@@ -15511,14 +15511,34 @@ function AccountingWorkspace() {
             description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다."
             actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex flex-wrap gap-2">
-            {bankAccounts.map((row) => (
-              <span key={String(row.id || row.bank_name)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
-                <StatusBadge>{String(row.bank_name || "-")}</StatusBadge>
-                <span>{String(row.account_holder || "예금주 미입력")}</span>
-                <span className="text-gray-400">{row.list_enabled === false ? "미반영" : "리스트 반영"}</span>
-              </span>
-            ))}
+          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead className="bg-gray-50 font-semibold text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">은행명</th>
+                  <th className="px-3 py-2 text-left">속성</th>
+                  <th className="px-3 py-2 text-left">예금주</th>
+                  <th className="px-3 py-2 text-left">계좌번호</th>
+                  <th className="px-3 py-2 text-left">비밀번호</th>
+                  <th className="px-3 py-2 text-center">리스트</th>
+                  <th className="px-3 py-2 text-left">메모</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bankAccounts.map((row) => (
+                  <tr key={String(row.id || row.bank_name)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                    <td className="px-3 py-2"><StatusBadge>{String(row.bank_name || "-")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-700">{String(row.account_type || "business")}</td>
+                    <td className="px-3 py-2 text-gray-700">{String(row.account_holder || "미입력")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.account_number || "미입력")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.password_hint || "미입력")}</td>
+                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
+                    <td className="px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>
+                  </tr>
+                ))}
+                {!bankAccounts.length && <tr><td colSpan={7} className="px-3 py-6"><EmptyState title="통장 설정 없음" className="min-h-20" /></td></tr>}
+              </tbody>
+            </table>
           </div>
           <div className="mt-4">
             <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} />
@@ -15533,14 +15553,42 @@ function AccountingWorkspace() {
             description="카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원."
             actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex flex-wrap gap-2">
-            {cardAccounts.map((row) => (
-              <span key={String(row.id || row.card_name)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
-                <StatusBadge tone="orange">{String(row.card_name || "-")}</StatusBadge>
-                <span>한도 {asNumber(row.card_limit) ? krw(asNumber(row.card_limit)) : "미입력"}</span>
-                <span className="text-gray-400">출금 {String(row.payment_day || "-")}일</span>
-              </span>
-            ))}
+          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[1080px] text-xs">
+              <thead className="bg-gray-50 font-semibold text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">카드명</th>
+                  <th className="px-3 py-2 text-left">속성</th>
+                  <th className="px-3 py-2 text-left">카드번호</th>
+                  <th className="px-3 py-2 text-left">유효기간</th>
+                  <th className="px-3 py-2 text-left">CVC</th>
+                  <th className="px-3 py-2 text-left">해외안심 메시지</th>
+                  <th className="px-3 py-2 text-left">결제 비밀번호</th>
+                  <th className="px-3 py-2 text-right">한도</th>
+                  <th className="px-3 py-2 text-center">결제 기준/출금</th>
+                  <th className="px-3 py-2 text-left">소유자</th>
+                  <th className="px-3 py-2 text-center">리스트</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cardAccounts.map((row) => (
+                  <tr key={String(row.id || row.card_name)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                    <td className="px-3 py-2"><StatusBadge tone="orange">{String(row.card_name || "-")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-700">{String(row.card_type || "business")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.card_number || "미입력")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.expiry_date || "미입력")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.cvc_hint || "미입력")}</td>
+                    <td className="px-3 py-2 text-gray-700">{String(row.secure_message || "미입력")}</td>
+                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.payment_password_hint || "미입력")}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.card_limit) ? krw(asNumber(row.card_limit)) : "미입력"}</td>
+                    <td className="px-3 py-2 text-center text-gray-700">{String(row.cutoff_start_day || "-")}~{String(row.cutoff_end_day || "-")} / {String(row.payment_day || "-")}일</td>
+                    <td className="px-3 py-2 text-gray-700">{String(row.physical_owner || "미입력")}</td>
+                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
+                  </tr>
+                ))}
+                {!cardAccounts.length && <tr><td colSpan={11} className="px-3 py-6"><EmptyState title="카드 설정 없음" className="min-h-20" /></td></tr>}
+              </tbody>
+            </table>
           </div>
           <div className="mt-4">
             <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} />
