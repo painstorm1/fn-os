@@ -1631,10 +1631,6 @@ async function openAttachment(item: OrderAttachment) {
     return;
   }
   if (isExcelAttachment(item)) {
-    const popup = window.open("", "_blank", "noopener,noreferrer");
-    if (popup) {
-      popup.document.write("<title>Google Sheets 열기</title><p style=\"font-family:Arial,sans-serif;padding:24px\">Google Sheets로 여는 중입니다...</p>");
-    }
     try {
       const res = await fetch("/api/google/attachment-sheet", {
         method: "POST",
@@ -1648,10 +1644,9 @@ async function openAttachment(item: OrderAttachment) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false || !data.url) throw new Error(data.error || "Google Sheets로 열 수 없습니다.");
-      if (popup) popup.location.href = data.url;
-      else window.open(data.url, "_blank", "noopener,noreferrer");
+      const opened = window.open(data.url, "_blank", "noopener,noreferrer");
+      if (!opened) window.location.href = data.url;
     } catch (error) {
-      popup?.close();
       alert(error instanceof Error ? error.message : "Google Sheets로 열 수 없습니다.");
     }
     return;
