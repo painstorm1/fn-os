@@ -48,6 +48,13 @@ Use `src/components/fn-ui.tsx` before adding one-off styles.
 - `FilterBar`
 - `EmptyState`
 - `ModalShell`
+- `ModalHeader`
+- `ModalBody`
+- `ModalFooter`
+- `ModalCloseButton`
+- `FormModal`
+- `SelectionModal`
+- `ConfirmModal`
 - `FormField`
 
 ## Layout
@@ -71,6 +78,25 @@ Avoid nested cards, repeated boxes around simple controls, and heavy shadow.
 - Inputs/selects: 38-40px height, 8px radius, gray border
 - Focus: orange border with soft orange ring
 - Placeholder: gray-400
+
+## Modals
+
+Use the shared modal components before adding custom overlays.
+
+- Overlay: `gray-900/55`
+- Shell: white surface, gray border, `rounded-2xl`, restrained shadow
+- Header: title, optional description, icon-style close button
+- Body: content only
+- Footer: right-aligned actions
+- ESC should close the modal through `useEscapeToClose`
+
+Preferred mapping:
+
+- Create/edit/upload flows: `FormModal`
+- Search/picker flows: `SelectionModal`
+- Destructive confirmation: `ConfirmModal`
+
+For UI-only modal cleanup, do not change save, delete, upload, search, API, or DB behavior.
 
 ## Tables
 
