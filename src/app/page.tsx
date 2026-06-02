@@ -14923,7 +14923,7 @@ type ExpenseUploadItem = {
 };
 
 const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
-const accountingTabs = ["검토필요", "대시보드", "통장", "카드", "고정비", "거래 DB", "업로드", "카테고리 설정", "자동분류 규칙", "카드 정산"];
+const accountingTabs = ["검토필요", "통장", "카드", "고정비", "카테고리 설정"];
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
@@ -15571,6 +15571,22 @@ function AccountingWorkspace() {
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <AccountingLineChart rows={monthRows} />
         <AccountingCategoryChart rows={categoryRows} />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card className="p-5">
+          <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
+          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="px-3 py-2 text-left">월</th><th className="px-3 py-2 text-right">매출</th><th className="px-3 py-2 text-right">상품매입</th><th className="px-3 py-2 text-right">광고비</th><th className="px-3 py-2 text-right">비용</th><th className="px-3 py-2 text-right">예상 순이익</th></tr></thead>
+              <tbody><tr className="border-t border-gray-100 hover:bg-orange-50/60"><td className="px-3 py-3 font-semibold">{String(totals.month || "-")}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="px-3 py-3 text-right font-bold text-[#ff6a00]">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
+            </table>
+          </div>
+        </Card>
+        <div className="space-y-4">
+          <FixedCostCalendar rows={fixedCostOccurrences} upcomingRows={upcomingFixedCosts} compact />
+          <ReportList title="업체별 비용" rows={vendorRows} />
+        </div>
       </section>
 
       {activeTab === "통장" && (
@@ -16748,6 +16764,11 @@ function AccountingRightPanel() {
   const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [sourceType, setSourceType] = useState("자동 분류");
+  const [uploading, setUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -16785,20 +16806,94 @@ function AccountingRightPanel() {
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
 
+  function pickFiles(files: FileList | File[] | null) {
+    const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
+    if (!next.length) {
+      setMessage("엑셀 또는 CSV 파일을 선택해 주세요.");
+      return;
+    }
+    setUploadedFiles((prev) => [...prev, ...next]);
+    setMessage(`${next.length.toLocaleString("ko-KR")}개 파일을 대기 목록에 올렸습니다.`);
+  }
+
+  async function uploadAccountingFiles() {
+    if (!uploadedFiles.length) {
+      setMessage("먼저 파일을 선택해 주세요.");
+      return;
+    }
+    setUploading(true);
+    setMessage("회계/비용 데이터를 생성하는 중입니다.");
+    const form = new FormData();
+    form.append("source_type", sourceType);
+    form.append("date_from", dateFrom);
+    form.append("date_to", dateTo);
+    form.append("file_source_types", JSON.stringify(uploadedFiles.map(() => sourceType)));
+    uploadedFiles.forEach((file) => form.append("files", file));
+    const res = await fetch("/api/accounting/ledger/upload", { method: "POST", body: form });
+    const data = await res.json();
+    setUploading(false);
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "업로드 실패");
+      return;
+    }
+    setUploadedFiles([]);
+    setMessage(`저장 완료: ${Number(data.success_count || 0).toLocaleString("ko-KR")}건`);
+    invalidateAccountingCache();
+    cachedClientJson<AccountingSummary>(endpoint, { ttl: ACCOUNTING_CACHE_TTL, storageTtl: ACCOUNTING_STORAGE_TTL, force: true }).then(setSummary).catch(() => undefined);
+  }
+
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
       <div className="mb-4">
         <h2 className="text-[18px] font-semibold text-gray-900">회계 Ledger</h2>
         <p className="mt-1 text-xs font-medium text-gray-500">선택 기간 기준 실제 DB 요약입니다.</p>
       </div>
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <input className="field-input px-2 py-2 text-xs" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-        <input className="field-input px-2 py-2 text-xs" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-      </div>
+      <Card className="mb-3 p-4 shadow-none">
+        <SectionHeader title="회계 업로드" />
+        <div
+          className={`mt-3 rounded-xl border border-dashed px-3 py-4 text-center transition ${isDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
+          onDragOver={(event) => { event.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setIsDragOver(false);
+            pickFiles(event.dataTransfer.files);
+          }}
+        >
+          <p className="text-sm font-bold text-gray-800">파일 업로드</p>
+          <p className="mt-1 text-xs font-semibold text-gray-500">통장/카드 엑셀·CSV를 한번에 드래그</p>
+          <label className="mt-3 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-orange-200 bg-white px-4 text-xs font-bold text-[#ff6a00] hover:bg-orange-50">
+            파일 선택
+            <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={(event) => { pickFiles(event.target.files); event.target.value = ""; }} />
+          </label>
+        </div>
+        <select className="field-input mt-3 w-full px-3 py-2 text-xs font-semibold" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+          <option>자동 분류</option>
+          {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
+        </select>
+        <ActionButton type="button" className="mt-3 w-full" disabled={uploading || !uploadedFiles.length} onClick={uploadAccountingFiles}>
+          {uploading ? "저장 중" : `업로드${uploadedFiles.length ? ` (${uploadedFiles.length})` : ""}`}
+        </ActionButton>
+        {message && <p className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">{message}</p>}
+      </Card>
+      <Card className="mb-3 p-4 shadow-none">
+        <SectionHeader title="저장 기준기간" />
+        <div className="mt-3 grid gap-2">
+          <input className="field-input w-full px-3 py-2 text-sm font-semibold" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          <input className="field-input w-full px-3 py-2 text-sm font-semibold" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
+          <button type="button" className="rounded-lg border border-orange-200 bg-orange-50 px-2 py-2 text-[#ff6a00]" onClick={() => { const range = adRangeForPreset("yesterday"); setDateFrom(range.from); setDateTo(range.to); }}>어제</button>
+          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("7d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 7일</button>
+          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("14d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 2주</button>
+          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("30d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 30일</button>
+        </div>
+      </Card>
       <div className="space-y-3">
         <AccountingMetric label="업로드 상태" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
         <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
         <AccountingMetric label="검토필요" value={`${asNumber(totals.review_count).toLocaleString("ko-KR")}건`} note="KCP/네이버/미분류 확인" tone="rose" />
+        <AccountingMetric label="3일 내 고정비" value={krw(asNumber(totals.fixed_cost_due_amount))} note={`${upcomingFixedCosts.length.toLocaleString("ko-KR")}개 예정`} tone={upcomingFixedCosts.length ? "rose" : "green"} />
         <AccountingMetric label="가온글로벌카드" value="20,000,000원" note={`사용률 ${gaonUsage}`} tone="green" />
         <AccountingMetric label="국민기업카드" value="10,000,000원" note={`사용률 ${kbUsage}`} tone="orange" />
         <AccountingMetric label="카드대금 처리" value="현금흐름" note="손익 비용으로 중복 반영하지 않음" />
@@ -16810,6 +16905,21 @@ function AccountingRightPanel() {
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">비용합계</span><span className="font-bold text-gray-900">{krw(asNumber(totals.expense_amount))}</span></div>
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">순손익</span><span className="font-bold text-gray-900">{krw(asNumber(totals.net_profit))}</span></div>
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">통장 순현금흐름</span><span className="font-bold text-gray-900">{krw(asNumber(totals.cashflow_amount))}</span></div>
+        </div>
+      </div>
+      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <h3 className="text-xs font-semibold text-gray-500">도래 고정비</h3>
+        <div className="mt-2 space-y-2">
+          {upcomingFixedCosts.slice(0, 5).map((row, index) => (
+            <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="text-xs">
+              <div className="flex justify-between gap-2 font-semibold text-gray-700">
+                <span className="truncate">{String(row.title || row.display_title || "-")}</span>
+                <span className="text-[#ff6a00]">{krw(asNumber(row.amount))}</span>
+              </div>
+              <p className="mt-0.5 text-gray-400">{String(row.due_date || "-")} / {String(row.payment_source || row.payment_type || "통장/카드")}</p>
+            </div>
+          ))}
+          {!upcomingFixedCosts.length && <p className="text-xs font-semibold text-gray-400">3일 내 예정된 고정비가 없습니다.</p>}
         </div>
       </div>
       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
