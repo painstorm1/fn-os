@@ -9079,13 +9079,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
       {isInventorySection && (
         <Panel>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <ActionButton type="button" onClick={openInventoryEdit}>수정</ActionButton>
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={inventoryFilters.date} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, date: event.target.value }))} />
             </div>
-            <ActionButton type="button" onClick={openInventoryEdit}>수정</ActionButton>
           </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
             <span>전체 {inventoryListRows.length.toLocaleString("ko-KR")}건 · 선택 {selectedInventoryRows.length.toLocaleString("ko-KR")}건 · {inventoryCurrentPage}/{inventoryTotalPages}페이지</span>
