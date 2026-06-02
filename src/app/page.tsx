@@ -7285,6 +7285,11 @@ type InventorySetting = {
   expiresAt: string;
   memo: string;
 };
+type InventoryPicker = {
+  type: "warehouse" | "product";
+  query: string;
+  index: number;
+};
 type InventoryListRow = {
   key: string;
   product: FnProduct;
@@ -7405,6 +7410,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [inventorySettings, setInventorySettings] = useState<Record<string, InventorySetting>>({});
   const [selectedInventoryKeys, setSelectedInventoryKeys] = useState<string[]>([]);
   const [inventorySort, setInventorySort] = useState<{ key: InventorySortKey; direction: "asc" | "desc" }>({ key: "warehouse", direction: "asc" });
+  const [inventoryPage, setInventoryPage] = useState(1);
+  const [inventoryPicker, setInventoryPicker] = useState<InventoryPicker | null>(null);
   const [inventoryEditKey, setInventoryEditKey] = useState("");
   const [inventoryEditDraft, setInventoryEditDraft] = useState({
     qty: "",
@@ -7441,6 +7448,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
+  useEscapeToClose(Boolean(inventoryPicker), () => setInventoryPicker(null));
+
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [inventoryFilters.warehouse, inventoryFilters.product, inventoryFilters.date, inventorySort.key, inventorySort.direction]);
 
   useEffect(() => {
     function closeOnlineSheetPreviews(event: globalThis.KeyboardEvent) {
@@ -8566,14 +8578,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
   const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters);
   const inventorySalesStats = buildInventorySalesStats(summary?.sales_inventory_basis || summary?.recent_sales || [], inventoryFilters.date);
+  const inventoryWarehouseByCode = new Map(inventoryWarehouses.map((warehouse) => [warehouse.warehouse_code, warehouse]));
   const inventoryListRows = inventoryProducts.flatMap((product) => {
     const productCode = inventoryProductCode(product);
     const productName = inventoryProductName(product);
     const cost = Number(product.cost_price || 0);
     const stockRows = product.inventory?.length ? product.inventory : [{ warehouse_code: "100", warehouse_name: "100", qty: product.current_stock || 0 }];
     return stockRows.map((stock) => {
-      const warehouseCode = inventoryWarehouseCode(stock);
-      const warehouseName = inventoryWarehouseName(stock);
+      const rawWarehouseCode = inventoryWarehouseCode(stock);
+      const warehouse = inventoryWarehouseByCode.get(rawWarehouseCode);
+      const warehouseCode = warehouse?.warehouse_code || rawWarehouseCode;
+      const warehouseName = warehouse?.warehouse_name || inventoryWarehouseName(stock);
       const qty = inventoryQty(stock);
       const stats = inventorySalesStats.get(productCode) || { sales30: 0, sales90: 0, sales365: 0 };
       const avgDaily = stats.sales90 > 0 ? stats.sales90 / 90 : stats.sales365 > 0 ? stats.sales365 / 365 : 0;
@@ -8632,6 +8647,27 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (primary !== 0) return primary;
     return left.productCode.localeCompare(right.productCode, "ko-KR", { numeric: true });
   });
+  const inventoryPageSize = 20;
+  const inventoryTotalPages = Math.max(1, Math.ceil(inventoryListRows.length / inventoryPageSize));
+  const inventoryCurrentPage = Math.min(inventoryPage, inventoryTotalPages);
+  const inventoryPageRows = inventoryListRows.slice((inventoryCurrentPage - 1) * inventoryPageSize, inventoryCurrentPage * inventoryPageSize);
+  const inventoryPageKeys = inventoryPageRows.map((row) => row.key);
+  const inventoryPageAllSelected = Boolean(inventoryPageRows.length) && inventoryPageRows.every((row) => selectedInventoryKeys.includes(row.key));
+  const inventoryPageNumbers = Array.from({ length: Math.min(5, inventoryTotalPages) }, (_, index) => {
+    const start = Math.min(Math.max(1, inventoryCurrentPage - 2), Math.max(1, inventoryTotalPages - 4));
+    return start + index;
+  }).filter((page) => page <= inventoryTotalPages);
+  const inventoryWarehousePickerOptions = inventoryWarehouses.filter((warehouse) => {
+    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.query : inventoryFilters.warehouse).trim().toLowerCase();
+    if (!needle) return true;
+    return `${warehouse.warehouse_code} ${warehouse.warehouse_name}`.toLowerCase().includes(needle);
+  }).slice(0, 50);
+  const inventoryProductPickerOptions = inventoryProducts.filter((product) => {
+    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.query : inventoryFilters.product).trim().toLowerCase();
+    if (!needle) return true;
+    return `${inventoryProductCode(product)} ${inventoryProductName(product)}`.toLowerCase().includes(needle);
+  }).slice(0, 50);
+  const inventoryPickerCount = inventoryPicker?.type === "warehouse" ? inventoryWarehousePickerOptions.length : inventoryProductPickerOptions.length;
   const selectedInventoryRows = inventoryListRows.filter((row) => selectedInventoryKeys.includes(row.key));
   const editingInventoryRow = inventoryListRows.find((row) => row.key === inventoryEditKey);
 
@@ -8641,6 +8677,47 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function setInventorySelected(key: string, selected: boolean) {
     setSelectedInventoryKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function setInventoryPageSelected(selected: boolean) {
+    setSelectedInventoryKeys((prev) => {
+      if (selected) return Array.from(new Set([...prev, ...inventoryPageKeys]));
+      return prev.filter((key) => !inventoryPageKeys.includes(key));
+    });
+  }
+
+  function openInventoryPicker(type: "warehouse" | "product") {
+    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, index: 0 });
+  }
+
+  function selectInventoryPickerOption(index = inventoryPicker?.index || 0) {
+    if (!inventoryPicker) return;
+    if (inventoryPicker.type === "warehouse") {
+      const warehouse = inventoryWarehousePickerOptions[index];
+      if (!warehouse) return;
+      setInventoryFilters((prev) => ({ ...prev, warehouse: warehouse.warehouse_code }));
+    } else {
+      const product = inventoryProductPickerOptions[index];
+      if (!product) return;
+      setInventoryFilters((prev) => ({ ...prev, product: inventoryProductCode(product) }));
+    }
+    setInventoryPicker(null);
+  }
+
+  function handleInventoryPickerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!inventoryPicker) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setInventoryPicker((prev) => prev ? { ...prev, index: Math.min(prev.index + 1, Math.max(0, inventoryPickerCount - 1)) } : prev);
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setInventoryPicker((prev) => prev ? { ...prev, index: Math.max(0, prev.index - 1) } : prev);
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectInventoryPickerOption();
+    }
   }
 
   function openInventoryEdit() {
@@ -9004,52 +9081,52 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <Panel>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} placeholder="전체 창고" />
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} placeholder="전체 품목" />
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={inventoryFilters.date} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, date: event.target.value }))} />
             </div>
             <ActionButton type="button" onClick={openInventoryEdit}>수정</ActionButton>
           </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
-            <span>전체 {inventoryListRows.length.toLocaleString("ko-KR")}건 · 선택 {selectedInventoryRows.length.toLocaleString("ko-KR")}건</span>
-            <span>기본 정렬: 창고코드 순</span>
+            <span>전체 {inventoryListRows.length.toLocaleString("ko-KR")}건 · 선택 {selectedInventoryRows.length.toLocaleString("ko-KR")}건 · {inventoryCurrentPage}/{inventoryTotalPages}페이지</span>
+            <span>기본 정렬: 창고코드 순 · 20개씩 표시</span>
           </div>
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="w-full min-w-[1480px] table-fixed text-sm">
+            <table className="w-full min-w-[1540px] table-fixed text-sm">
               <colgroup>
                 <col className="w-[54px]" />
                 <col className="w-[120px]" />
-                <col className="w-[210px]" />
-                <col className="w-[130px]" />
+                <col className="w-[300px]" />
+                <col className="w-[110px]" />
                 <col className="w-[100px]" />
                 <col className="w-[110px]" />
                 <col className="w-[120px]" />
-                <col className="w-[120px]" />
-                <col className="w-[120px]" />
-                <col className="w-[120px]" />
+                <col className="w-[105px]" />
+                <col className="w-[105px]" />
+                <col className="w-[105px]" />
+                <col className="w-[115px]" />
+                <col className="w-[110px]" />
+                <col className="w-[90px]" />
                 <col className="w-[150px]" />
-                <col className="w-[140px]" />
-                <col className="w-[90px]" />
-                <col className="w-[90px]" />
               </colgroup>
               <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs text-slate-600">
                 <tr>
-                  <th className="px-2 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={Boolean(inventoryListRows.length) && inventoryListRows.every((row) => selectedInventoryKeys.includes(row.key))} onChange={(event) => setSelectedInventoryKeys(event.target.checked ? inventoryListRows.map((row) => row.key) : [])} /></th>
+                  <th className="px-2 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={inventoryPageAllSelected} onChange={(event) => setInventoryPageSelected(event.target.checked)} /></th>
                   {[
                     ["product_code", "품목코드"],
                     ["product_name", "품목명"],
-                    ["warehouse", "창고"],
-                    ["qty", "현재 재고"],
-                    ["cost", "입고 단가"],
-                    ["amount", "재고 금액"],
-                    ["avg", "일평균 판매량"],
-                    ["sales30", "최근 30일 판매량"],
-                    ["sales90", "최근 90일 판매량"],
-                    ["days", "예상 소진일"],
+                    ["warehouse", "창고코드"],
+                    ["qty", "현재\n재고"],
+                    ["cost", "입고\n단가"],
+                    ["amount", "재고\n금액"],
+                    ["avg", "일평균\n판매량"],
+                    ["sales30", "최근 30일\n판매량"],
+                    ["sales90", "최근 90일\n판매량"],
+                    ["days", "예상\n소진일"],
                     ["status", "상태"],
                     ["setting", "설정"],
                   ].map(([key, label]) => (
-                    <th key={key} className="cursor-pointer px-2 py-2 text-left font-black select-none" onDoubleClick={() => toggleInventorySort(key as InventorySortKey)} title="더블클릭하면 오름차순/내림차순으로 정렬됩니다.">
+                    <th key={key} className={`cursor-pointer whitespace-pre-line px-2 py-2 font-black leading-4 select-none ${key === "status" || key === "setting" ? "text-center" : "text-left"}`} onDoubleClick={() => toggleInventorySort(key as InventorySortKey)} title="더블클릭하면 오름차순/내림차순으로 정렬됩니다.">
                       {label}{inventorySort.key === key ? (inventorySort.direction === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   ))}
@@ -9057,14 +9134,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </tr>
               </thead>
               <tbody>
-                {inventoryListRows.map((row) => {
+                {inventoryPageRows.map((row) => {
                   const selected = selectedInventoryKeys.includes(row.key);
                   return (
                     <tr key={row.key} className={`border-b border-slate-100 ${selected ? "bg-orange-50/70" : "hover:bg-orange-50/40"}`} onDoubleClick={() => { setSelectedInventoryKeys([row.key]); setTimeout(openInventoryEdit, 0); }}>
                       <td className="px-2 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selected} onChange={(event) => setInventorySelected(row.key, event.target.checked)} /></td>
                       <td className="truncate px-2 py-2 font-black text-slate-900" title={row.productCode}>{row.productCode || "-"}</td>
                       <td className="truncate px-2 py-2 font-bold" title={row.productName}>{row.productName || "-"}</td>
-                      <td className="truncate px-2 py-2" title={`${row.warehouseCode} ${row.warehouseName}`}>{row.warehouseCode}{row.warehouseName && row.warehouseName !== row.warehouseCode ? ` · ${row.warehouseName}` : ""}</td>
+                      <td className="truncate px-2 py-2" title={row.warehouseName || row.warehouseCode}>{row.warehouseCode || "-"}</td>
                       <td className="px-2 py-2 text-right font-black">{row.qty.toLocaleString("ko-KR")}</td>
                       <td className="px-2 py-2 text-right">{Math.round(row.cost).toLocaleString("ko-KR")}</td>
                       <td className="px-2 py-2 text-right font-bold">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
@@ -9072,8 +9149,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       <td className="px-2 py-2 text-right">{row.sales30.toLocaleString("ko-KR")}</td>
                       <td className="px-2 py-2 text-right">{row.sales90.toLocaleString("ko-KR")}</td>
                       <td className="px-2 py-2 text-right">{row.daysToSoldOut === null ? "DB부족" : `${Math.floor(row.daysToSoldOut).toLocaleString("ko-KR")}일`}</td>
-                      <td className="px-2 py-2"><StatusBadge tone={inventoryStatusTone(row.status)}>{row.status}</StatusBadge></td>
-                      <td className="px-2 py-2"><StatusBadge tone={row.settingMode === "수동" ? "orange" : "muted"}>{row.settingMode}</StatusBadge></td>
+                      <td className="px-2 py-2 text-center"><StatusBadge tone={inventoryStatusTone(row.status)}>{row.status}</StatusBadge></td>
+                      <td className="px-2 py-2 text-center"><StatusBadge tone={row.settingMode === "수동" ? "orange" : "muted"}>{row.settingMode}</StatusBadge></td>
                       <td className="truncate px-2 py-2 text-slate-500" title={row.setting?.memo || ""}>{row.setting?.memo || "-"}</td>
                     </tr>
                   );
@@ -9081,6 +9158,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </tbody>
             </table>
           </div>
+          {inventoryListRows.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="font-bold text-slate-500">
+                {((inventoryCurrentPage - 1) * inventoryPageSize + 1).toLocaleString("ko-KR")}-{Math.min(inventoryCurrentPage * inventoryPageSize, inventoryListRows.length).toLocaleString("ko-KR")} / {inventoryListRows.length.toLocaleString("ko-KR")}
+              </div>
+              <div className="flex items-center gap-1">
+                <button type="button" className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 disabled:opacity-40" disabled={inventoryCurrentPage <= 1} onClick={() => setInventoryPage((prev) => Math.max(1, prev - 1))}>이전</button>
+                {inventoryPageNumbers.map((page) => (
+                  <button key={page} type="button" className={`h-8 min-w-8 rounded-md border px-3 text-xs font-black ${page === inventoryCurrentPage ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50"}`} onClick={() => setInventoryPage(page)}>{page}</button>
+                ))}
+                <button type="button" className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 disabled:opacity-40" disabled={inventoryCurrentPage >= inventoryTotalPages} onClick={() => setInventoryPage((prev) => Math.min(inventoryTotalPages, prev + 1))}>다음</button>
+              </div>
+            </div>
+          )}
           {!inventoryListRows.length && <EmptyState title="표시할 재고가 없습니다." description="창고 또는 품목 검색 조건을 확인해 주세요." />}
           {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
@@ -9172,6 +9263,60 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           sync={sync}
           loadSummary={loadSummary}
         />
+      )}
+
+      {inventoryPicker && (
+        <SelectionModal
+          title={inventoryPicker.type === "warehouse" ? "창고선택" : "품목선택"}
+          description="위/아래 화살표로 이동하고 Enter로 선택합니다."
+          onClose={() => setInventoryPicker(null)}
+          size="lg"
+        >
+          <div className="space-y-3" onKeyDown={handleInventoryPickerKeyDown}>
+            <input
+              className={modalInputClass}
+              autoFocus
+              value={inventoryPicker.query}
+              onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, query: event.target.value, index: 0 } : prev)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  selectInventoryPickerOption();
+                }
+              }}
+              placeholder={inventoryPicker.type === "warehouse" ? "창고코드 / 창고명 검색" : "품목코드 / 품목명 검색"}
+            />
+            <div className="max-h-[420px] overflow-y-auto rounded-lg border border-slate-200 bg-white">
+              {inventoryPicker.type === "warehouse" ? (
+                inventoryWarehousePickerOptions.length ? inventoryWarehousePickerOptions.map((warehouse, index) => (
+                  <button
+                    key={warehouse.id || warehouse.warehouse_code}
+                    type="button"
+                    className={`grid w-full grid-cols-[130px_1fr] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 ${index === inventoryPicker.index ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50"}`}
+                    onMouseEnter={() => setInventoryPicker((prev) => prev ? { ...prev, index } : prev)}
+                    onClick={() => selectInventoryPickerOption(index)}
+                  >
+                    <span className="font-black">{warehouse.warehouse_code || "-"}</span>
+                    <span className="truncate font-bold text-slate-700">{warehouse.warehouse_name || "-"}</span>
+                  </button>
+                )) : <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">선택할 창고가 없습니다.</div>
+              ) : (
+                inventoryProductPickerOptions.length ? inventoryProductPickerOptions.map((product, index) => (
+                  <button
+                    key={product.id || inventoryProductCode(product)}
+                    type="button"
+                    className={`grid w-full grid-cols-[150px_1fr] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 ${index === inventoryPicker.index ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50"}`}
+                    onMouseEnter={() => setInventoryPicker((prev) => prev ? { ...prev, index } : prev)}
+                    onClick={() => selectInventoryPickerOption(index)}
+                  >
+                    <span className="font-black">{inventoryProductCode(product) || "-"}</span>
+                    <span className="truncate font-bold text-slate-700">{inventoryProductName(product) || "-"}</span>
+                  </button>
+                )) : <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">선택할 품목이 없습니다.</div>
+              )}
+            </div>
+          </div>
+        </SelectionModal>
       )}
 
       {editingInventoryRow && (
