@@ -9880,7 +9880,7 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
 
 type MasterTabKey = "customers" | "products" | "warehouses" | "channelMappings" | "channels" | "attendance";
 type PersonnelStatus = "working" | "leave" | "resigned";
-type PersonnelBulkField = "status" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
+type PersonnelBulkField = "status" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "salary" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
 
 type PersonnelEmployee = {
   id: string;
@@ -9894,6 +9894,7 @@ type PersonnelEmployee = {
   department: string;
   rank: string;
   position: string;
+  salary: string;
   bank_name: string;
   bank_account_holder: string;
   bank_account_no: string;
@@ -10183,6 +10184,7 @@ const personnelBulkFields: Array<BulkFieldConfig<PersonnelBulkField>> = [
   { key: "department", label: "부서" },
   { key: "rank", label: "직급" },
   { key: "position", label: "직책" },
+  { key: "salary", label: "급여", inputType: "number" },
   { key: "bank_name", label: "은행" },
   { key: "bank_account_holder", label: "예금주" },
   { key: "bank_account_no", label: "계좌번호" },
@@ -10231,8 +10233,8 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     key: "attendance",
     label: "인사관리",
     title: "인사",
-    templateHeaders: ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모"],
-    sampleRow: ["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "국민은행", "홍길동", "000000-00-000000", ""],
+    templateHeaders: ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모"],
+    sampleRow: ["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", ""],
   },
 ];
 
@@ -10582,6 +10584,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       department: "",
       rank: "",
       position: "",
+      salary: "",
       bank_name: "",
       bank_account_holder: "",
       bank_account_no: "",
@@ -10679,8 +10682,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }
 
   function validateDraft() {
-    if (!draft.status || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim()) {
-      window.alert("속성, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자는 필수입니다.");
+    if (!draft.status || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim() || !draft.salary.trim()) {
+      window.alert("속성, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자, 급여는 필수입니다.");
       return false;
     }
     return true;
@@ -10734,8 +10737,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     void downloadTableXlsx(
       "FN_OS_인사_엑셀폼.xlsx",
       "인사",
-      ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"],
-      [["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "국민은행", "홍길동", "000000-00-000000", "", "", "", "", "", ""]],
+      ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"],
+      [["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", "", "", "", "", "", ""]],
     );
   }
 
@@ -10752,6 +10755,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       department: String(row["부서"] || "").trim(),
       rank: String(row["직급"] || "").trim(),
       position: String(row["직책"] || "").trim(),
+      salary: String(row["급여"] || row["월급"] || "").trim(),
       bank_name: String(row["은행"] || "").trim(),
       bank_account_holder: String(row["예금주"] || "").trim(),
       bank_account_no: String(row["계좌번호"] || "").trim(),
@@ -10795,6 +10799,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       employee.department,
       employee.rank,
       employee.position,
+      employee.salary,
       employee.bank_name,
       employee.bank_account_holder,
       employee.bank_account_no,
@@ -10805,7 +10810,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       employee.resigned_reason || "",
       employee.resigned_at || "",
     ]);
-    void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
+    void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
   }
 
   const addressSuggestions = [
@@ -10969,7 +10974,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                 <FormField label="직급"><input className={modalInputClass} value={draft.rank} onChange={(event) => updateDraft("rank", event.target.value)} /></FormField>
                 <FormField label="직책"><input className={modalInputClass} value={draft.position} onChange={(event) => updateDraft("position", event.target.value)} /></FormField>
               </div>
-              <div className="grid gap-2 md:col-span-2 md:grid-cols-3">
+              <div className="grid gap-2 md:col-span-2 md:grid-cols-4">
+                <FormField label="급여" required><input className={modalInputClass} type="number" value={draft.salary} onChange={(event) => updateDraft("salary", event.target.value)} placeholder="3000000" /></FormField>
                 <FormField label="은행"><input className={modalInputClass} value={draft.bank_name} onChange={(event) => updateDraft("bank_name", event.target.value)} /></FormField>
                 <FormField label="예금주"><input className={modalInputClass} value={draft.bank_account_holder} onChange={(event) => updateDraft("bank_account_holder", event.target.value)} /></FormField>
                 <FormField label="계좌번호"><input className={modalInputClass} value={draft.bank_account_no} onChange={(event) => updateDraft("bank_account_no", event.target.value)} /></FormField>
