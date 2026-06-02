@@ -1,22 +1,45 @@
-import { hasDbConfig, insertRows, patchRows, selectRows } from "./fnos-db";
+import { deleteRows, hasDbConfig, insertRows, patchRows, selectRows } from "./fnos-db";
 
 type RawRow = Record<string, unknown>;
 
 const DEFAULT_CATEGORIES = [
   "광고비",
+  "마케팅-광고",
   "물류비",
   "택배비",
   "수입비용",
+  "수입 결제",
   "관세",
   "부가세",
   "통관수수료",
   "샘플비",
   "포장비",
+  "박스구매",
   "상품매입",
+  "제품구매",
   "외주비",
   "소모품",
   "인건비",
   "사무실비",
+  "업무비용",
+  "식대",
+  "유지비",
+  "통장이동",
+  "거래처 결제",
+  "판매 정산금",
+  "입금",
+  "출금",
+  "국민기업카드",
+  "가온글로벌",
+  "4대보험",
+  "대출이자",
+  "세무사기장료",
+  "종소세신고료",
+  "반품택배",
+  "주유비",
+  "통신인터넷",
+  "타배",
+  "추가비용(세관창고보관료)",
   "기타",
 ];
 
@@ -104,6 +127,35 @@ export async function ensureExpenseCategories() {
   return optionalRows("expense_categories", { order: "category_name.asc", limit: 200 });
 }
 
+export async function upsertExpenseCategory(row: RawRow) {
+  const name = text(row.category_name || row.name);
+  if (!name) throw new Error("카테고리명을 입력해 주세요.");
+  const id = text(row.id);
+  const values = {
+    category_name: name,
+    parent_category_id: text(row.parent_category_id) || null,
+    is_active: row.is_active === undefined ? true : Boolean(row.is_active),
+    updated_at: new Date().toISOString(),
+  };
+  if (id) {
+    const [saved] = await patchRows("expense_categories", { id: `eq.${id}` }, values);
+    return saved;
+  }
+  const [saved] = await insertRows("expense_categories", values);
+  return saved;
+}
+
+export async function removeExpenseCategory(id: string) {
+  if (!id) throw new Error("삭제할 카테고리를 선택해 주세요.");
+  const used = await optionalRows("expenses", { category_id: `eq.${id}`, limit: 1 });
+  if (used.length) {
+    const [saved] = await patchRows("expense_categories", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+    return { mode: "deactivated", category: saved };
+  }
+  const [deleted] = await deleteRows("expense_categories", { id: `eq.${id}` });
+  return { mode: "deleted", category: deleted };
+}
+
 export async function accountingSummary() {
   const [categories, expenses, legacyExpenses, batches, payables, payments, purchases, ads, sales, importOrders] = await Promise.all([
     ensureExpenseCategories(),
@@ -181,6 +233,11 @@ export async function importExpenseRows(rows: RawRow[], sourceType = "기타", s
     const amount = numberValue(first(row, ["amount", "공급가액", "공급가", "승인금액", "배송비", "운임", "비용"])) || Math.max(0, total - vat);
     const rowSourceType = text(row.source_type) || sourceType;
     const categoryName = text(first(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, rowSourceType);
+    const categoryDetail = text(first(row, ["category_detail", "subcategory", "sub_category", "세부분류", "소분류", "상세분류"]));
+    const categoryMemo = text(first(row, ["category_memo", "category_note", "detail_memo", "보조메모", "분류메모"]));
+    const paymentDue = text(first(row, ["payment_due_date", "payment_due", "결제예정일"]));
+    const currencyHint = text(first(row, ["currency_hint", "currency", "통화"]));
+    const memo = [categoryDetail, categoryMemo, paymentDue ? `결제예정일:${paymentDue}` : "", currencyHint && currencyHint !== "KRW" ? `통화:${currencyHint}` : "", text(first(row, ["memo", "비고", "메모"]))].filter(Boolean).join(" / ");
     return {
       expense_date: isoDate(first(row, ["expense_date", "날짜", "일자", "거래일자", "이용일자", "승인일자", "작성일자"])),
       source_type: rowSourceType,
@@ -193,7 +250,7 @@ export async function importExpenseRows(rows: RawRow[], sourceType = "기타", s
       category_id: categoryByName.get(categoryName) || categoryByName.get("기타") || null,
       linked_type: text(first(row, ["linked_type", "연결유형"])),
       linked_id: text(first(row, ["linked_id", "연결ID"])),
-      memo: text(first(row, ["memo", "비고", "메모"])),
+      memo,
       raw_payload: row,
       upload_batch_id: batch.id,
     };

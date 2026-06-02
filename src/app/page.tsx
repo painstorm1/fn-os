@@ -14809,7 +14809,7 @@ type ExpenseUploadItem = {
 };
 
 const expenseSourceTypes = ["국민카드 1", "국민카드 2", "국민은행", "기업은행", "세금계산서", "물류비", "택배비", "광고비", "수입비용", "기타"];
-const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙"];
+const accountingTabs = ["작업실", "비용 내역", "손익 그래프", "미납/결제", "수입비용", "분류 규칙", "카테고리 설정"];
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
@@ -14845,6 +14845,7 @@ function AccountingWorkspace() {
   const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [filters, setFilters] = useState({ q: "", category: "", from: "", to: "" });
+  const [categoryDraft, setCategoryDraft] = useState({ id: "", category_name: "", parent_category_id: "", is_active: true });
   const [manual, setManual] = useState({
     expense_date: new Date().toISOString().slice(0, 10),
     vendor_name: "",
@@ -14995,6 +14996,39 @@ function AccountingWorkspace() {
     }
     setMessage("비용 1건을 저장했습니다.");
     setManual((prev) => ({ ...prev, vendor_name: "", description: "", amount: "", vat_amount: "", total_amount: "", memo: "" }));
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function saveExpenseCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const method = categoryDraft.id ? "PATCH" : "POST";
+    const res = await fetch("/api/accounting/categories", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(categoryDraft),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "카테고리 저장 실패");
+      return;
+    }
+    setMessage(categoryDraft.id ? "카테고리를 수정했습니다." : "카테고리를 추가했습니다.");
+    setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true });
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function deleteExpenseCategory(id: string) {
+    if (!id) return;
+    const res = await fetch(`/api/accounting/categories?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "카테고리 삭제 실패");
+      return;
+    }
+    setMessage(data.mode === "deactivated" ? "사용 중인 카테고리라 비활성화했습니다." : "카테고리를 삭제했습니다.");
+    if (categoryDraft.id === id) setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true });
     invalidateAccountingCache();
     loadSummary(true);
   }
@@ -15210,7 +15244,7 @@ function AccountingWorkspace() {
           <Card className="p-5">
             <SectionHeader title="규칙 기반 분류 결과" description="업체명과 설명 패턴으로 자동 분류한 후보를 확인합니다." />
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {["네이버파이낸셜 -> 광고비 또는 정산", "쿠팡 -> 판매수수료/정산", "CJ대한통운 -> 택배비", "관세사 -> 통관수수료", "카드사 해외결제 -> 샘플비/수입비용 후보", "포장/박스/봉투 -> 포장비"].map((rule) => (
+              {["KCP(결제대행) -> 세부분류 우선: 박스구매/네이버/구독료 확인", "KCP(자동과금) -> 반복금액이면 광고/구독 자동 후보", "네이버파이낸셜(주) -> 카드 결제는 구매/광고 구분 필요, 통장 입금은 판매 정산금", "네이버파이낸셜 + 스마트스토어정 -> 판매 정산금", "쿠팡/쿠팡페이/쿠팡풀필먼트 -> 판매 정산금 또는 수수료 후보", "CJ대한통운 -> 택배비", "관세사/관부과세 -> 통관수수료/관세/부가세", "카드사 해외결제 -> 원화 청구액 연결 필요"].map((rule) => (
                 <div key={rule} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-gray-700">
                   <span>{rule}</span>
                   <StatusBadge tone="orange">규칙</StatusBadge>
@@ -15267,6 +15301,80 @@ function AccountingWorkspace() {
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <AccountingList title="수입 발주 연결 후보" rows={summary?.import_orders || []} primaryKey="order_no" amountKey="total_amount" emptyText="수입 발주 데이터가 없습니다." />
           <ReportList title="수입비용 후보" rows={(summary?.by_category || []).filter((row) => ["수입비용", "관세", "부가세", "통관수수료", "샘플비", "물류비"].includes(String(row.label)))} />
+        </section>
+      )}
+
+      {activeTab === "카테고리 설정" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
+          <Card className="p-5">
+            <SectionHeader
+              title="비용/입출금 카테고리"
+              description="업로드 파일의 정리 열에서 들어온 분류를 DB 카테고리로 관리합니다."
+            />
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                  <tr><th className="px-3 py-2 text-left">카테고리</th><th className="px-3 py-2 text-left">상위</th><th className="px-3 py-2 text-center">상태</th><th className="px-3 py-2 text-right">관리</th></tr>
+                </thead>
+                <tbody>
+                  {categories.map((row) => {
+                    const parent = categories.find((item) => String(item.id || "") === String(row.parent_category_id || ""));
+                    return (
+                      <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                        <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_name || "-")}</td>
+                        <td className="px-3 py-2 text-gray-500">{String(parent?.category_name || "-")}</td>
+                        <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : "사용"}</StatusBadge></td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-2">
+                            <ActionButton
+                              type="button"
+                              variant="secondary"
+                              className="h-8 px-3 text-xs"
+                              onClick={() => setCategoryDraft({
+                                id: String(row.id || ""),
+                                category_name: String(row.category_name || ""),
+                                parent_category_id: String(row.parent_category_id || ""),
+                                is_active: row.is_active !== false,
+                              })}
+                            >
+                              수정
+                            </ActionButton>
+                            <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(String(row.id || ""))}>삭제</ActionButton>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!categories.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "카테고리 추가"} />
+            <form onSubmit={saveExpenseCategory} className="space-y-3">
+              <FormField label="카테고리명" required>
+                <input className={modalInputClass} value={categoryDraft.category_name} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_name: event.target.value }))} />
+              </FormField>
+              <FormField label="상위 카테고리">
+                <select className={modalSelectClass} value={categoryDraft.parent_category_id} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, parent_category_id: event.target.value }))}>
+                  <option value="">없음</option>
+                  {categories.filter((row) => String(row.id || "") !== categoryDraft.id).map((row) => (
+                    <option key={String(row.id)} value={String(row.id)}>{String(row.category_name)}</option>
+                  ))}
+                </select>
+              </FormField>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input type="checkbox" checked={categoryDraft.is_active} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, is_active: event.target.checked }))} />
+                사용
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <ActionButton type="button" variant="secondary" onClick={() => setCategoryDraft({ id: "", category_name: "", parent_category_id: "", is_active: true })}>초기화</ActionButton>
+                <ActionButton type="submit">{categoryDraft.id ? "수정" : "추가"}</ActionButton>
+              </div>
+            </form>
+          </Card>
         </section>
       )}
 

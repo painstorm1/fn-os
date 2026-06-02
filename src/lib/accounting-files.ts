@@ -1,6 +1,54 @@
 import * as XLSX from "xlsx";
 
 type RawRow = Record<string, unknown>;
+type ExpenseSourceProfile = {
+  match: RegExp;
+  sourceType: string;
+  firstDataRow: number;
+  columns: {
+    date: number;
+    vendor: number;
+    amount?: number;
+    foreignAmount?: number;
+    vat?: number;
+    withdraw?: number;
+    deposit?: number;
+    balance?: number;
+    paymentMethod?: number;
+    paymentDue?: number;
+    approvalNo?: number;
+    category: number;
+    detail?: number;
+    memo?: number;
+  };
+};
+
+const SOURCE_PROFILES: ExpenseSourceProfile[] = [
+  {
+    match: /가온글로벌카드|카드이용내역/i,
+    sourceType: "가온글로벌카드",
+    firstDataRow: 7,
+    columns: { date: 0, vendor: 4, amount: 5, foreignAmount: 6, paymentMethod: 7, paymentDue: 12, approvalNo: 13, category: 15, detail: 16, memo: 17 },
+  },
+  {
+    match: /국민기업카드|승인내역조회/i,
+    sourceType: "국민기업카드",
+    firstDataRow: 6,
+    columns: { date: 0, vendor: 6, amount: 10, vat: 11, paymentMethod: 8, approvalNo: 14, category: 24, detail: 25, memo: 26 },
+  },
+  {
+    match: /국민\.xls|국민은행|47870101245017/i,
+    sourceType: "국민은행",
+    firstDataRow: 7,
+    columns: { date: 1, vendor: 2, withdraw: 3, deposit: 4, balance: 5, paymentMethod: 8, category: 12, detail: 13, memo: 14 },
+  },
+  {
+    match: /기업|입출식/i,
+    sourceType: "기업은행",
+    firstDataRow: 3,
+    columns: { date: 1, vendor: 5, withdraw: 2, deposit: 3, balance: 4, paymentMethod: 9, category: 14, detail: 15, memo: 16 },
+  },
+];
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -34,6 +82,8 @@ function classifyExpense(vendor: string, description: string, sourceType: string
 }
 
 function inferSourceType(fileName: string, fallback: string) {
+  const profile = SOURCE_PROFILES.find((item) => item.match.test(fileName));
+  if (profile) return profile.sourceType;
   const name = fileName.toLowerCase();
   if (/국민.*카드|kb.*card|kbcard|국민카드/.test(name)) return "국민카드";
   if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
@@ -44,7 +94,103 @@ function inferSourceType(fileName: string, fallback: string) {
   return fallback;
 }
 
-function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
+function colName(index: number) {
+  return XLSX.utils.encode_col(index);
+}
+
+function isDateLike(value: unknown) {
+  const raw = clean(value);
+  return /^\d{4}[./-]\d{1,2}[./-]\d{1,2}/.test(raw);
+}
+
+function numberValue(value: unknown) {
+  const parsed = Number(clean(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isoDate(value: unknown) {
+  const raw = clean(value);
+  if (/^\d{4}[./-]\d{1,2}[./-]\d{1,2}/.test(raw)) {
+    const [year, month, day] = raw.split(/[./-\s]/);
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  return "";
+}
+
+function addMonths(year: number, month: number, delta: number) {
+  const date = new Date(year, month - 1 + delta, 1);
+  return { year: date.getFullYear(), month: date.getMonth() + 1 };
+}
+
+function formatDate(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function cardPaymentDue(sourceType: string, value: unknown) {
+  const date = isoDate(value);
+  if (!date) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  if (sourceType === "가온글로벌카드") {
+    const dueMonth = day >= 22 ? addMonths(year, month, 2) : addMonths(year, month, 1);
+    return formatDate(dueMonth.year, dueMonth.month, 5);
+  }
+  if (sourceType === "국민기업카드") {
+    const dueMonth = day >= 6 ? addMonths(year, month, 1) : { year, month };
+    return formatDate(dueMonth.year, dueMonth.month, 20);
+  }
+  return "";
+}
+
+function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceProfile) {
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+  const rows: RawRow[] = [];
+  for (let index = profile.firstDataRow; index < matrix.length; index += 1) {
+    const row = matrix[index] || [];
+    if (!isDateLike(row[profile.columns.date])) continue;
+    const withdraw = profile.columns.withdraw !== undefined ? row[profile.columns.withdraw] : "";
+    const deposit = profile.columns.deposit !== undefined ? row[profile.columns.deposit] : "";
+    const hasDeposit = clean(deposit) && clean(deposit) !== "0";
+    const hasWithdraw = clean(withdraw) && clean(withdraw) !== "0";
+    const primaryAmount = profile.columns.amount !== undefined ? row[profile.columns.amount] : hasDeposit ? deposit : withdraw;
+    const foreignAmount = profile.columns.foreignAmount !== undefined ? row[profile.columns.foreignAmount] : "";
+    const amount = primaryAmount;
+    const direction = hasDeposit ? "입금" : hasWithdraw ? "출금" : "";
+    const category = clean(row[profile.columns.category]) || direction;
+    const detail = profile.columns.detail !== undefined ? clean(row[profile.columns.detail]) : "";
+    const memo = profile.columns.memo !== undefined ? clean(row[profile.columns.memo]) : "";
+    const rawByColumn: RawRow = {};
+    row.forEach((value, colIndex) => {
+      if (clean(value)) rawByColumn[colName(colIndex)] = value;
+    });
+    rows.push({
+      ...rawByColumn,
+      expense_date: row[profile.columns.date],
+      vendor_name: row[profile.columns.vendor],
+      description: [row[profile.columns.vendor], detail, memo].map(clean).filter(Boolean).join(" / "),
+      amount,
+      total_amount: amount,
+      vat_amount: profile.columns.vat !== undefined ? row[profile.columns.vat] : "",
+      payment_method: profile.columns.paymentMethod !== undefined ? row[profile.columns.paymentMethod] : "",
+      payment_due_date: profile.columns.paymentDue !== undefined ? row[profile.columns.paymentDue] : cardPaymentDue(profile.sourceType, row[profile.columns.date]),
+      approval_no: profile.columns.approvalNo !== undefined ? row[profile.columns.approvalNo] : "",
+      foreign_amount: foreignAmount,
+      currency_hint: profile.columns.foreignAmount !== undefined && numberValue(primaryAmount) === 0 && numberValue(foreignAmount) > 0 ? "foreign" : "KRW",
+      category,
+      category_detail: detail,
+      category_memo: memo,
+      cash_direction: direction,
+      balance_amount: profile.columns.balance !== undefined ? row[profile.columns.balance] : "",
+      source_row_no: index + 1,
+    });
+  }
+  return rows;
+}
+
+function rowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) {
+  const profile = SOURCE_PROFILES.find((item) => item.match.test(fileName));
+  if (profile) return profileRowsFromWorksheet(sheet, profile);
   return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "", raw: false }).filter((row) =>
     Object.values(row).some((value) => clean(value)),
   );
@@ -61,7 +207,7 @@ export async function parseExpenseFiles(files: File[], sourceType: string, fileS
     let fileRowCount = 0;
 
     for (const sheetName of workbook.SheetNames) {
-      const sheetRows = rowsFromWorksheet(workbook.Sheets[sheetName]);
+      const sheetRows = rowsFromWorksheet(workbook.Sheets[sheetName], file.name);
       fileRowCount += sheetRows.length;
       sheetRows.forEach((row, index) => {
         const vendor = clean(pick(row, ["vendor_name", "거래처", "업체명", "가맹점명", "상호", "적요", "받는분", "사용처"]));
