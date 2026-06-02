@@ -862,6 +862,74 @@ create table if not exists accounting_card_settlements (
   unique(card_name, settlement_start, settlement_end)
 );
 
+create table if not exists accounting_holidays (
+  holiday_date date primary key,
+  holiday_name text,
+  memo text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists accounting_fixed_costs (
+  id uuid primary key default gen_random_uuid(),
+  fixed_cost_name text not null unique,
+  category_large text,
+  category_middle text,
+  category_small text,
+  expected_amount numeric default 0,
+  last_actual_amount numeric,
+  last_actual_date date,
+  base_day text not null,
+  weekend_policy text default 'previous_business_day',
+  holiday_policy text default 'previous_business_day',
+  payment_type text not null default 'bank',
+  payment_source text,
+  source_account_name text,
+  source_card_name text,
+  affects_profit boolean default true,
+  affects_cashflow boolean default true,
+  loan_id uuid,
+  match_keywords text[],
+  is_active boolean default true,
+  sort_order integer default 0,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_loans (
+  id uuid primary key default gen_random_uuid(),
+  loan_name text not null unique,
+  principal_amount numeric,
+  current_balance numeric,
+  bank_name text,
+  account_holder text,
+  account_number text,
+  deposit_account_number text,
+  loan_start_date date,
+  loan_period_months integer,
+  payment_day text,
+  loan_type text,
+  expected_principal_amount numeric default 0,
+  expected_interest_amount numeric default 0,
+  expected_payment_amount numeric default 0,
+  payer_name text,
+  is_active boolean default true,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'accounting_fixed_costs_loan_id_fkey'
+  ) then
+    alter table accounting_fixed_costs
+      add constraint accounting_fixed_costs_loan_id_fkey
+      foreign key (loan_id) references accounting_loans(id) on delete set null;
+  end if;
+end $$;
+
 create or replace view accounting_card_settlement_calendar as
 select
   id,
@@ -1208,6 +1276,66 @@ create index if not exists idx_bom_parent on product_boms(parent_product_id);
 create index if not exists idx_bom_items_bom on product_bom_items(bom_id);
 create index if not exists idx_orders_date on orders(order_date desc);
 create index if not exists idx_order_items_mapping on order_items(mapping_status);
+insert into accounting_loans (loan_name, principal_amount, bank_name, account_holder, account_number, payment_day, loan_type, expected_payment_amount, payer_name, memo)
+values
+  ('재욱 교보 무배당베스트라이프종합보험약관(550만원)', 5500000, '교보', '김재욱', '3333-22-4830411(294502-04-042630)', '말일', '원금상환', 37369, '김재욱', '월말 김재욱 출금액에서 대납되는 대출/보험 항목'),
+  ('재욱 한화 100세 멀티(1410만원)', 14100000, '한화', '김재욱', '3333-22-4830411(294502-04-042630)', '말일', '원금상환', 62869, '김재욱', '월말 김재욱 출금액에서 대납되는 대출/보험 항목'),
+  ('재욱 카카오개인사업자대출상환(5500만원)', 55000000, '카카오뱅크', '김재욱', '3333-22-4830411', '말일', '원금상환', 1339347, '김재욱', '월말 김재욱 출금액에서 대납되는 대출 항목'),
+  ('재욱 KB 소상공인 신용대출(3000만원)', 30000000, 'KB국민은행', '김재욱', '3333-22-4830411(294502-04-042630)', '말일', '원금상환', 913465, '김재욱', '월말 김재욱 출금액에서 대납되는 대출 항목'),
+  ('재욱 KB 소상공인 신용대출(580만원)', 5800000, 'KB국민은행', '김재욱', '3333-22-4830411(294502-04-042630)', '말일', '원금상환', 28394, '김재욱', '월말 김재욱 출금액에서 대납되는 대출 항목'),
+  ('재욱 교보생명 신용대출(2440만원)', 24400000, '교보생명', '김재욱', '3333-22-4830411(294502-04-042630)', '말일', '원금상환', 314460, '김재욱', '월말 김재욱 출금액에서 대납되는 대출 항목'),
+  ('재민 쏠편한 직장인 대출(2100만원)', 21000000, '신한은행', '재민', null, '3', '원금상환', 103981, '재민', '기준일 3일'),
+  ('재민 현대 약관 대출(600만원)', 6000000, '현대', '재민', null, '3', '원금상환', 17835, '재민', '기준일 3일'),
+  ('재민 모친대출(12000만원)', 120000000, null, '재민', '1105-11616-444(신한)', '말일', '원금상환', 458500, '재민', '기준일 말일'),
+  ('재민 경남은행(5000만원)', 50000000, '경남은행', '재민', '카카오 3333-08978-7477', '7', '원금상환', 235000, '재민', '기준일 7일'),
+  ('재민 JB자동차 담보대출 플러스(2800만원)', 28000000, 'JB전북은행', '재민', '전북 1021-02-9728410', '15', '원금상환', 900000, '재민', '기준일 15일')
+on conflict (loan_name) do update set
+  principal_amount = excluded.principal_amount,
+  bank_name = excluded.bank_name,
+  account_holder = excluded.account_holder,
+  account_number = excluded.account_number,
+  payment_day = excluded.payment_day,
+  loan_type = excluded.loan_type,
+  expected_payment_amount = excluded.expected_payment_amount,
+  payer_name = excluded.payer_name,
+  memo = excluded.memo,
+  updated_at = now();
+
+insert into accounting_fixed_costs (fixed_cost_name, category_large, category_middle, category_small, expected_amount, base_day, payment_type, payment_source, source_account_name, source_card_name, affects_profit, affects_cashflow, match_keywords, sort_order, memo)
+values
+  ('[카드 출금] 가온글로벌카드', '카드대금', '가온글로벌카드', '', 0, '5', 'bank', '국민은행', '국민은행', null, false, true, array['KB카드출금'], 10, 'KB카드출금 + 매월 5일 전후 2일. 손익 비용 제외, 현금흐름만 반영'),
+  ('[카드 출금] 국민기업카드', '카드대금', '국민기업카드', '', 0, '20', 'bank', '국민은행', '국민은행', null, false, true, array['KB카드출금'], 20, 'KB카드출금 + 매월 20일 전후 2일. 카드 한도 10,000,000원'),
+  ('[급여] 직원 급여합계', '인건비', '급여', '', 0, '말일', 'bank', '기업은행', '기업은행', null, true, true, array['급여'], 100, '기초관리 인사관리 직원 급여 항목 합산값으로 표시'),
+  ('[임대료] 최석윤(아진가)', '운영비', '임대료', '창고월세', 2205000, '말일', 'bank', '국민은행', '국민은행', null, true, true, array['최석윤','아진가'], 110, '노출 기준은 말일, 실제 비용은 통장 출금 매칭값 사용'),
+  ('[4대보험]', '세금/보험', '4대보험', '', 1372310, '10', 'bank', '국민은행', '국민은행', null, true, true, array['4대보험'], 120, '매월 10일 기준'),
+  ('[관리비] 조은세무법인', '운영비', '세무/전문서비스', '세무법인', 110000, '5', 'bank', null, null, null, true, true, array['조은세무법인'], 200, null),
+  ('[관리비] KT텔레캅', '운영비', '보안/관리비', 'KT텔레캅', 71500, '20', 'bank', null, null, null, true, true, array['KT텔레캅'], 210, null),
+  ('[관리비] 한전', '운영비', '전기/통신', '한전', 250000, '20', 'bank', '국민은행', '국민은행', null, true, true, array['한전'], 220, null),
+  ('[보험] 현대해상 화재보험', '세금/보험', '보험', '현대해상', 79000, '10', 'bank', null, null, null, true, true, array['현대해상'], 230, null),
+  ('[차량/주차] 회사차 주차요금', '차량/교통', '주차비', '회사차 주차요금', 20000, '말일', 'bank', '국민은행', '국민은행', null, true, true, array['회사차 주차요금'], 240, '김재욱 월말 출금액에 함께 포함되는 고정 비용'),
+  ('[대출] 재욱 월말 대납 합계', '금융비용', '대출', '김재욱 대납', 2750491, '말일', 'bank', '국민은행', '국민은행', null, true, true, array['김재욱'], 300, '김재욱 월말 출금액에서 대출/보험 대납 실제값으로 관리'),
+  ('[대출] 재민 쏠편한 직장인 대출', '금융비용', '대출', '재민', 103981, '3', 'bank', null, null, null, true, true, array['쏠편한'], 310, null),
+  ('[대출] 재민 현대 약관 대출', '금융비용', '대출', '재민', 17835, '3', 'bank', null, null, null, true, true, array['현대 약관'], 320, null),
+  ('[대출] 재민 모친대출', '금융비용', '대출', '재민', 458500, '말일', 'bank', null, null, null, true, true, array['재민어머니'], 330, null),
+  ('[대출] 재민 경남은행', '금융비용', '대출', '재민', 235000, '7', 'bank', null, null, null, true, true, array['경남은행'], 340, null),
+  ('[대출] 재민 JB자동차 담보대출 플러스', '금융비용', '대출', '재민', 900000, '15', 'bank', null, null, null, true, true, array['JB자동차','전북'], 350, null)
+on conflict (fixed_cost_name) do update set
+  category_large = excluded.category_large,
+  category_middle = excluded.category_middle,
+  category_small = excluded.category_small,
+  expected_amount = excluded.expected_amount,
+  base_day = excluded.base_day,
+  payment_type = excluded.payment_type,
+  payment_source = excluded.payment_source,
+  source_account_name = excluded.source_account_name,
+  source_card_name = excluded.source_card_name,
+  affects_profit = excluded.affects_profit,
+  affects_cashflow = excluded.affects_cashflow,
+  match_keywords = excluded.match_keywords,
+  sort_order = excluded.sort_order,
+  memo = excluded.memo,
+  updated_at = now();
+
 create index if not exists idx_shipments_status on shipments(shipment_status);
 create index if not exists idx_ad_daily_date on ad_daily_metrics(metric_date desc);
 create index if not exists idx_ad_upload_batches_channel_file on ad_upload_batches(channel, source_file_name);
@@ -1234,6 +1362,9 @@ create index if not exists idx_accounting_transactions_review on accounting_tran
 create index if not exists idx_accounting_transactions_direction on accounting_transactions(direction);
 create index if not exists idx_accounting_review_status on accounting_review_queue(status, reason);
 create index if not exists idx_accounting_card_settlements_due on accounting_card_settlements(payment_due_date desc);
+create index if not exists idx_accounting_fixed_costs_active on accounting_fixed_costs(is_active, sort_order);
+create index if not exists idx_accounting_fixed_costs_day on accounting_fixed_costs(base_day);
+create index if not exists idx_accounting_loans_active on accounting_loans(is_active, payment_day);
 create index if not exists idx_import_po_status on import_purchase_orders(status, expected_inbound_date);
 create index if not exists idx_import_product_sku_links_import on import_product_sku_links(import_product_id);
 create index if not exists idx_import_product_sku_links_option on import_product_sku_links(import_product_id, import_option_key, sort_order);

@@ -14904,6 +14904,9 @@ type AccountingSummary = {
   import_orders?: Array<Record<string, unknown>>;
   review_queue?: Array<Record<string, unknown>>;
   card_settlements?: Array<Record<string, unknown>>;
+  fixed_costs?: Array<Record<string, unknown>>;
+  fixed_cost_occurrences?: Array<Record<string, unknown>>;
+  upcoming_fixed_costs?: Array<Record<string, unknown>>;
   totals?: Record<string, unknown>;
   by_category?: Array<Record<string, unknown>>;
   by_category_large?: Array<Record<string, unknown>>;
@@ -15272,6 +15275,9 @@ function AccountingWorkspace() {
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
   const rules = summary?.rules || [];
+  const fixedCosts = summary?.fixed_costs || [];
+  const fixedCostOccurrences = summary?.fixed_cost_occurrences || [];
+  const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
@@ -15340,6 +15346,89 @@ function AccountingWorkspace() {
         <AccountingLineChart rows={monthRows} />
         <AccountingCategoryChart rows={categoryRows} />
       </section>
+
+      {activeTab === "??" && (
+        <Card className="p-5">
+          <SectionHeader
+            title="?? ??"
+            description="????/???? ??? ?? ?? ???????. ????? ????? ?? ???? ?????."
+            actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}?</StatusBadge>}
+          />
+          <div className="mt-4">
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} />
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "??" && (
+        <Card className="p-5">
+          <SectionHeader
+            title="?? ??"
+            description="?? ??? ?? ?? ??????. ????? ?? 20,000,000? / ???? ?? 10,000,000?."
+            actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}?</StatusBadge>}
+          />
+          <div className="mt-4">
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} />
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "???" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <Card className="p-5">
+            <SectionHeader
+              title="??? ??"
+              description="?? ???? ???? ???, ???? ??/?? ?? ??? ??? ????? ?????."
+              actions={<StatusBadge tone="orange">{fixedCosts.length.toLocaleString("ko-KR")}?</StatusBadge>}
+            />
+            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[920px] text-sm">
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">????</th>
+                    <th className="px-3 py-2 text-left">????</th>
+                    <th className="px-3 py-2 text-center">???</th>
+                    <th className="px-3 py-2 text-center">?? ? ???</th>
+                    <th className="px-3 py-2 text-right">????</th>
+                    <th className="px-3 py-2 text-right">?? ???</th>
+                    <th className="px-3 py-2 text-center">??</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fixedCostOccurrences.map((row) => (
+                    <tr key={String(row.fixed_cost_id || row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2 font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</td>
+                      <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">{String(row.base_day || "-")}</td>
+                      <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
+                      <td className="px-3 py-2 text-right">{krw(asNumber(row.expected_amount))}</td>
+                      <td className="px-3 py-2 text-right">{asNumber(row.last_actual_amount) ? krw(asNumber(row.last_actual_amount)) : "-"}</td>
+                      <td className="px-3 py-2 text-center"><StatusBadge tone={String(row.status) === "upcoming" ? "orange" : "muted"}>{String(row.payment_type || "bank")}</StatusBadge></td>
+                    </tr>
+                  ))}
+                  {!fixedCostOccurrences.length && <tr><td colSpan={7} className="px-3 py-8"><EmptyState title="??? ?? ??" description="Supabase SQL Editor?? ?? schema_sales_inventory.sql? ???? ?? ???? ?????." className="min-h-24" /></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+          <Card className="p-5">
+            <SectionHeader title="??? ??? 5?" />
+            <div className="mt-4 space-y-2">
+              {upcomingFixedCosts.slice(0, 5).map((row) => (
+                <div key={String(row.fixed_cost_id || row.id)} className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</p>
+                    <StatusBadge tone="orange">D-{Math.max(0, asNumber(row.days_until))}</StatusBadge>
+                  </div>
+                  <p className="mt-1 text-xs font-medium text-gray-500">{String(row.due_date || "-")} / {String(row.payment_source || row.payment_type || "??/??")}</p>
+                  <p className="mt-1 text-right text-sm font-bold text-[#ff6a00]">{krw(asNumber(row.amount))}</p>
+                </div>
+              ))}
+              {!upcomingFixedCosts.length && <EmptyState title="3? ? ??? ??" className="min-h-24" />}
+            </div>
+          </Card>
+        </section>
+      )}
 
       {activeTab === "업로드" && (
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -15919,6 +16008,7 @@ function AccountingRightPanel() {
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
   const settlements = summary?.card_settlements || [];
+  const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const pendingSettlements = settlements.filter((row) => row.paid !== true);
   const nextSettlement = pendingSettlements[0];
   const gaonSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "가온글로벌카드");

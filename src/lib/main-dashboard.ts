@@ -137,6 +137,33 @@ function dateOffsetKey(date: string, daysOffset: number) {
   return `${current.getUTCFullYear()}${String(current.getUTCMonth() + 1).padStart(2, "0")}${String(current.getUTCDate()).padStart(2, "0")}`;
 }
 
+function isoDateFromKey(key: string) {
+  return key && key.length === 8 ? `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}` : key;
+}
+
+function lastDayOfMonthKey(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function previousBusinessDateKey(key: string) {
+  let current = key;
+  for (let guard = 0; guard < 10; guard += 1) {
+    const date = new Date(Date.UTC(Number(current.slice(0, 4)), Number(current.slice(4, 6)) - 1, Number(current.slice(6, 8))));
+    const day = date.getUTCDay();
+    if (day !== 0 && day !== 6) return current;
+    current = dateOffsetKey(current, -1);
+  }
+  return current;
+}
+
+function fixedCostDueKey(row: Row, todayKey: string) {
+  const year = Number(todayKey.slice(0, 4));
+  const month = Number(todayKey.slice(4, 6));
+  const raw = text(row.base_day ?? row.payment_day ?? row.due_day);
+  const day = raw === "말일" || raw === "last" ? lastDayOfMonthKey(year, month) : Math.min(Math.max(numberValue(raw), 1), lastDayOfMonthKey(year, month));
+  return previousBusinessDateKey(`${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`);
+}
+
 function monthRange(months: number) {
   const base = new Date(Date.now() + 9 * 60 * 60 * 1000);
   base.setDate(1);
@@ -194,6 +221,7 @@ export async function mainDashboardSummary() {
     expenses,
     legacyExpenses,
     payables,
+    fixedCosts,
     importPurchaseOrders,
     importErpOrdersRaw,
     importErpItems,
@@ -210,6 +238,7 @@ export async function mainDashboardSummary() {
     optionalRows("expenses", { order: "expense_date.desc", limit: 700 }),
     optionalRows("expense_entries", { order: "expense_date.desc", limit: 500 }),
     optionalRows("customer_payables", { order: "due_date.asc", limit: 100 }),
+    optionalRows("accounting_fixed_costs", { is_active: "eq.true", order: "sort_order.asc", limit: 300 }),
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
     optionalRows("import_erp_orders", { order: "order_date.desc", limit: 160 }),
     optionalRows("import_erp_order_items", { order: "sort_order.asc", limit: 1200 }),
@@ -290,11 +319,26 @@ export async function mainDashboardSummary() {
   const monthAdRows = adRows.filter((row) => dateKey(adDate(row)).startsWith(month));
   const monthExpenseRows = expenseRows.filter((row) => dateKey(expenseDate(row)).startsWith(month));
   const cardRows = monthExpenseRows.filter((row) => /card|credit|카드/i.test(`${row.payment_method || ""} ${row.source_type || ""}`));
-  const upcomingFixedCosts = payables.filter((row) => {
-    const due = dateKey(row.due_date ?? row.created_at);
-    const amount = numberValue(row.balance_amount ?? row.amount ?? row.total_amount);
-    return due && due >= today && due <= threeDaysLater && amount > 0;
-  });
+  const upcomingFixedCosts = fixedCosts.length
+    ? fixedCosts
+      .map((row) => {
+        const due = fixedCostDueKey(row, today);
+        return {
+          ...row,
+          due_date: isoDateFromKey(due),
+          amount: numberValue(row.last_actual_amount) || numberValue(row.expected_amount ?? row.amount),
+          display_title: row.fixed_cost_name || row.name,
+        };
+      })
+      .filter((row) => {
+        const due = dateKey(row.due_date);
+        return due && due >= today && due <= threeDaysLater && numberValue(row.amount) > 0;
+      })
+    : payables.filter((row) => {
+      const due = dateKey(row.due_date ?? row.created_at);
+      const amount = numberValue(row.balance_amount ?? row.amount ?? row.total_amount);
+      return due && due >= today && due <= threeDaysLater && amount > 0;
+    });
   const importSixMonthRows = importOrders.filter((row) => dateKey(importDate(row)) >= sixMonthStart);
   const inquiryChannels = channels
     .filter((row) => Boolean(row.api_enabled || row.last_synced_at))

@@ -62,6 +62,48 @@ function dateText(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+function addDays(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  const current = new Date(Date.UTC(year, month - 1, day));
+  current.setUTCDate(current.getUTCDate() + days);
+  return dateText(current.getUTCFullYear(), current.getUTCMonth() + 1, current.getUTCDate());
+}
+
+function kstToday() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function lastDayOfMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function previousBusinessDay(date: string, holidays = new Set<string>()) {
+  let current = date;
+  for (let guard = 0; guard < 10; guard += 1) {
+    const [year, month, day] = current.split("-").map(Number);
+    const weekDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    if (weekDay !== 0 && weekDay !== 6 && !holidays.has(current)) return current;
+    current = addDays(current, -1);
+  }
+  return current;
+}
+
+function monthDueDate(baseDay: unknown, today = kstToday(), holidays = new Set<string>()) {
+  const [year, month] = today.split("-").map(Number);
+  const raw = text(baseDay);
+  const day = raw === "last" || raw === "말일" ? lastDayOfMonth(year, month) : Math.min(Math.max(numberValue(raw), 1), lastDayOfMonth(year, month));
+  return previousBusinessDay(dateText(year, month, day), holidays);
+}
+
+function inferCardPaymentName(row: RawRow) {
+  const haystack = `${text(row.merchant_name)} ${text(row.description)}`;
+  if (!/KB카드출금|카드대금|카드출금/.test(haystack)) return "";
+  const day = Number(isoDate(row.transaction_date).slice(8, 10));
+  if (day >= 3 && day <= 7) return "가온글로벌카드";
+  if (day >= 18 && day <= 22) return "국민기업카드";
+  return "";
+}
+
 function sourceMeta(row: RawRow) {
   const raw = text(row.source_name || row.source_type || row.sourceType);
   const alias = SOURCE_ALIASES[raw];
@@ -103,6 +145,7 @@ function settlementFor(cardName: string, date: string) {
 
 function directionFor(sourceType: string, row: RawRow, merchant: string, debit: number, credit: number) {
   const haystack = `${merchant} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)}`;
+  if (/KB카드출금/.test(haystack)) return "card_payment";
   if (/카드대금|카드결제|결제대금/.test(haystack)) return "card_payment";
   if (/계좌|이체|대표자|자금|대출원금|상환/.test(haystack)) return "transfer";
   if (sourceType === "bank" && credit > 0) return "income";
@@ -144,6 +187,32 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<RawRow>(table, query).catch(() => []);
 }
 
+function fixedCostOccurrence(row: RawRow, holidays: Set<string>, today = kstToday()) {
+  const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today, holidays);
+  const expectedAmount = numberValue(row.expected_amount ?? row.amount);
+  const actualAmount = numberValue(row.last_actual_amount);
+  const displayAmount = actualAmount || expectedAmount;
+  const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
+  return {
+    id: row.id,
+    fixed_cost_id: row.id,
+    title: row.fixed_cost_name || row.name,
+    display_title: row.fixed_cost_name || row.name,
+    category_large: row.category_large,
+    category_middle: row.category_middle,
+    expected_amount: expectedAmount,
+    last_actual_amount: actualAmount || null,
+    amount: displayAmount,
+    due_date: dueDate,
+    base_day: row.base_day ?? row.payment_day ?? row.due_day,
+    days_until: daysUntil,
+    payment_type: row.payment_type,
+    payment_source: row.payment_source,
+    status: daysUntil < 0 ? "overdue_or_paid" : daysUntil <= 3 ? "upcoming" : "scheduled",
+    memo: row.memo,
+  };
+}
+
 function categoryKey(row: RawRow) {
   return `${text(row.category_large)}|${text(row.category_middle)}|${text(row.category_small)}`;
 }
@@ -165,6 +234,7 @@ export function normalizeAccountingTransaction(row: RawRow) {
   const amountKrw = currency === "KRW" ? amount : fxRate ? foreignAmount * fxRate : null;
   const existing = existingCategory(row);
   const direction = directionFor(meta.sourceType, row, merchant, debit, credit);
+  const paymentCardName = direction === "card_payment" ? inferCardPaymentName({ ...row, transaction_date: transactionDate, merchant_name: merchant, description }) : "";
   const approvalNo = text(first(row, ["approval_no", "승인번호", "거래번호"]));
   const key = dedupeKey([
     meta.sourceName,
@@ -193,7 +263,7 @@ export function normalizeAccountingTransaction(row: RawRow) {
     foreign_amount: foreignAmount || null,
     direction,
     payment_method: text(row.payment_method || row["결제수단"]),
-    card_name: meta.cardName || null,
+    card_name: paymentCardName || meta.cardName || null,
     account_name: meta.accountName || null,
     approval_no: approvalNo,
     existing_category_large: existing.large,
@@ -215,13 +285,15 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
 
   return rows.map((row) => {
     const rule = rules.find((item) => ruleMatches(item, row));
+    const isCardPayment = row.direction === "card_payment";
+    const isTransfer = row.direction === "transfer";
     const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
-    const categoryLarge = reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
-    const categoryMiddle = reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
-    const categorySmall = reviewPath?.[2] || text(rule?.category_small) || text(row.existing_category_small) || text(defaultReview?.category_small);
+    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "자금이동" : reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "계좌 간 이체/대표자 입출금" : reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
+    const categorySmall = isCardPayment || isTransfer ? "" : reviewPath?.[2] || text(rule?.category_small) || text(row.existing_category_small) || text(defaultReview?.category_small);
     const category = categoryByPath.get(`${categoryLarge}|${categoryMiddle}|${categorySmall}`) || defaultReview;
-    const needsReview = Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required);
+    const needsReview = !isCardPayment && !isTransfer && (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required));
     return {
       ...row,
       category_large: categoryLarge,
@@ -232,7 +304,7 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
       confidence: rule ? (needsReview ? 0.55 : 0.9) : 0.3,
       review_status: needsReview ? "pending" : "confirmed",
       review_reason: reviewReason || (needsReview ? "미분류" : ""),
-      affects_profit: category?.affects_profit ?? row.direction === "expense",
+      affects_profit: isCardPayment || isTransfer ? false : category?.affects_profit ?? row.direction === "expense",
       affects_cashflow: category?.affects_cashflow ?? row.source_type === "bank",
       affects_card_settlement: category?.affects_card_settlement ?? row.source_type === "card",
     } as RawRow;
@@ -491,6 +563,16 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
   const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
   const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
+  const fixedCosts = await optionalRows("accounting_fixed_costs", { is_active: "eq.true", order: "sort_order.asc", limit: 300 });
+  const holidays = new Set((await optionalRows("accounting_holidays", { limit: 1000 })).map((row) => isoDate(row.holiday_date)));
+  const today = kstToday();
+  const threeDaysLater = addDays(today, 3);
+  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, holidays, today));
+  const upcomingFixedCosts = fixedCostOccurrences
+    .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
+    .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
+    .slice(0, 8);
+  const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);
   const income = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
   const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
   const cashIn = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.credit_amount), 0);
@@ -527,12 +609,16 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     batches,
     review_queue: reviewQueue,
     card_settlements: settlements,
+    fixed_costs: fixedCosts,
+    fixed_cost_occurrences: fixedCostOccurrences,
+    upcoming_fixed_costs: upcomingFixedCosts,
     totals: {
       income_amount: income,
       expense_amount: expense,
       net_profit: income - expense,
       cashflow_amount: cashIn - cashOut,
       card_settlement_due: pendingCard,
+      fixed_cost_due_amount: fixedCostDueAmount,
       review_count: reviewQueue.length,
       transaction_count: filtered.length,
     },
