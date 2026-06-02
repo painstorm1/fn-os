@@ -9163,12 +9163,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <div className="font-bold text-slate-500">
                 {((inventoryCurrentPage - 1) * inventoryPageSize + 1).toLocaleString("ko-KR")}-{Math.min(inventoryCurrentPage * inventoryPageSize, inventoryListRows.length).toLocaleString("ko-KR")} / {inventoryListRows.length.toLocaleString("ko-KR")}
               </div>
-              <div className="flex items-center gap-1">
-                <button type="button" className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 disabled:opacity-40" disabled={inventoryCurrentPage <= 1} onClick={() => setInventoryPage((prev) => Math.max(1, prev - 1))}>이전</button>
+              <div className="flex items-center gap-3 text-sm font-black">
                 {inventoryPageNumbers.map((page) => (
-                  <button key={page} type="button" className={`h-8 min-w-8 rounded-md border px-3 text-xs font-black ${page === inventoryCurrentPage ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50"}`} onClick={() => setInventoryPage(page)}>{page}</button>
+                  <button key={page} type="button" className={page === inventoryCurrentPage ? "text-orange-600" : "text-slate-500 hover:text-orange-600"} onClick={() => setInventoryPage(page)}>{page}</button>
                 ))}
-                <button type="button" className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 disabled:opacity-40" disabled={inventoryCurrentPage >= inventoryTotalPages} onClick={() => setInventoryPage((prev) => Math.min(inventoryTotalPages, prev + 1))}>다음</button>
+                <button type="button" className="text-slate-500 hover:text-orange-600 disabled:text-slate-300" disabled={inventoryCurrentPage >= inventoryTotalPages} onClick={() => setInventoryPage((prev) => Math.min(inventoryTotalPages, prev + 1))}>&gt;</button>
               </div>
             </div>
           )}
