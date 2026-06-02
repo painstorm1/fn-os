@@ -130,6 +130,13 @@ function compactRangeUntil(days: number, endDate: string) {
   });
 }
 
+function dateOffsetKey(date: string, daysOffset: number) {
+  if (!/^\d{8}$/.test(date)) return kstDate(daysOffset);
+  const current = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(4, 6)) - 1, Number(date.slice(6, 8))));
+  current.setUTCDate(current.getUTCDate() + daysOffset);
+  return `${current.getUTCFullYear()}${String(current.getUTCMonth() + 1).padStart(2, "0")}${String(current.getUTCDate()).padStart(2, "0")}`;
+}
+
 function monthRange(months: number) {
   const base = new Date(Date.now() + 9 * 60 * 60 * 1000);
   base.setDate(1);
@@ -268,6 +275,8 @@ export async function mainDashboardSummary() {
   const latestOrderDate = latestDate(orders, orderDate);
   const latestExpenseDate = latestDate(expenseRows, expenseDate);
   const latestImportDate = latestDate(importOrders, importDate);
+  const adSevenDayStart = dateOffsetKey(latestAdDate, -6);
+  const recentImportOrders = [...importOrders].sort((left, right) => dateKey(importDate(right)).localeCompare(dateKey(importDate(left))));
 
   const latestSalesRows = rowsOn(sales, salesDate, latestSalesDate);
   const monthSalesRows = sales.filter((row) => dateKey(salesDate(row)).startsWith(month));
@@ -277,7 +286,7 @@ export async function mainDashboardSummary() {
 
   const latestAdRows = rowsOn(adRows, adDate, latestAdDate);
   const yesterdayAdRows = rowsOn(adRows, adDate, yesterday);
-  const sevenDayAdRows = rowsFrom(adRows, adDate, sevenDaysAgo);
+  const sevenDayAdRows = rowsFrom(adRows, adDate, adSevenDayStart);
   const monthAdRows = adRows.filter((row) => dateKey(adDate(row)).startsWith(month));
   const monthExpenseRows = expenseRows.filter((row) => dateKey(expenseDate(row)).startsWith(month));
   const cardRows = monthExpenseRows.filter((row) => /card|credit|카드/i.test(`${row.payment_method || ""} ${row.source_type || ""}`));
@@ -355,7 +364,7 @@ export async function mainDashboardSummary() {
       : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
     bank_balance: null,
     upcoming_fixed_costs: upcomingFixedCosts.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
-    import_recent_orders: importOrders.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
+    import_recent_orders: recentImportOrders.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
     import_six_month_amount: sum(importSixMonthRows, importAmount),
     import_monthly: importMonthly,
   };
