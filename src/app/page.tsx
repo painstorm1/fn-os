@@ -15441,6 +15441,38 @@ function AccountingWorkspace() {
     loadSummary(true);
   }
 
+  async function saveReviewQuick(row: Record<string, unknown>, patch: Record<string, unknown>, confirm = false) {
+    const id = String(row.id || "");
+    if (!id) return;
+    const category = categories.find((item) => String(item.id || "") === String(patch.category_id || row.category_id || ""));
+    const res = await fetch("/api/accounting/ledger/transactions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        category_id: patch.category_id ?? row.category_id,
+        direction: patch.direction ?? row.direction,
+        review_reason: patch.review_reason ?? row.review_reason,
+        affects_profit: patch.affects_profit ?? row.affects_profit,
+        affects_cashflow: patch.affects_cashflow ?? row.affects_cashflow,
+        affects_card_settlement: patch.affects_card_settlement ?? row.affects_card_settlement,
+        memo: patch.memo ?? row.memo,
+        category_large: category?.category_large,
+        category_middle: category?.category_middle,
+        category_small: category?.category_small,
+        review_status: confirm ? "confirmed" : String(row.review_status || "pending"),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "검토필요 거래 저장 실패");
+      return;
+    }
+    setMessage(confirm ? "검토필요 거래를 확정했습니다." : "검토필요 거래를 수정했습니다.");
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
   async function exportExpenses() {
     const xlsx = await loadXlsxModule();
     const sheet = xlsx.utils.json_to_sheet(filteredExpenses);
@@ -15859,6 +15891,7 @@ function AccountingWorkspace() {
             </div>
           </Card>
           <div className="space-y-4">
+            <FixedCostCalendar rows={fixedCostOccurrences} upcomingRows={upcomingFixedCosts} />
             <Card className="p-5">
               <SectionHeader title="도래할 고정비 5개" />
               <div className="mt-4 space-y-2">
@@ -16187,7 +16220,10 @@ function AccountingWorkspace() {
               </table>
             </div>
           </Card>
-          <ReportList title="비용 카테고리 비중" rows={summary?.by_category || []} />
+          <div className="space-y-4">
+            <ReportList title="비용 카테고리 비중" rows={summary?.by_category || []} />
+            <FixedCostCalendar rows={fixedCostOccurrences} upcomingRows={upcomingFixedCosts} compact />
+          </div>
         </section>
       )}
 
@@ -16201,9 +16237,19 @@ function AccountingWorkspace() {
       {activeTab === "검토필요" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Card className="p-5">
-            <SectionHeader title="검토필요 거래" description="KCP, 네이버, 미분류, 일반명 거래, 자금이동 확인 건을 실제 거래 DB에서 봅니다." />
+            <SectionHeader
+              title="검토필요 거래"
+              description="KCP, 네이버, 미분류, 일반명 거래, 자금이동 확인 건을 바로 분류하고 확정합니다."
+              actions={<StatusBadge tone="danger">{expenses.filter((row) => String(row.review_status || "") === "pending").length.toLocaleString("ko-KR")}건</StatusBadge>}
+            />
             <div className="mt-4">
-              <ExpenseTable rows={expenses.filter((row) => String(row.review_status || "") === "pending")} categoryById={categoryById} compact onOpen={openTransaction} />
+              <ReviewQuickGrid
+                rows={expenses.filter((row) => String(row.review_status || "") === "pending")}
+                categories={categories}
+                categoryById={categoryById}
+                onOpen={openTransaction}
+                onSave={saveReviewQuick}
+              />
             </div>
           </Card>
           <ReportList title="검토 사유 요약" rows={(summary?.review_queue || []).map((row) => ({ label: row.reason || "미분류", amount: 1 }))} />
@@ -16312,21 +16358,6 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "대시보드" && (
-        <section className="grid gap-4 xl:grid-cols-3">
-          <AccountingList title="최근 업로드" rows={recentBatches} primaryKey="source_file_name" amountKey="success_count" emptyText="아직 업로드 기록이 없습니다." />
-          <ReportList title="업체별 비용" rows={vendorRows} />
-          <Card className="p-5">
-            <SectionHeader title="한눈에 보기" />
-            <div className="mt-4 space-y-2 text-sm font-medium text-gray-600">
-              <p className="rounded-md bg-slate-50 px-3 py-2">가장 큰 비용: <b className="text-slate-950">{String(largestCategory?.label || "데이터 없음")}</b></p>
-              <p className="rounded-md bg-slate-50 px-3 py-2">최근 비용 행: <b className="text-slate-950">{expenses.length.toLocaleString("ko-KR")}건</b></p>
-              <p className="rounded-md bg-slate-50 px-3 py-2">파일 대기: <b className="text-orange-600">{pendingUploadCount.toLocaleString("ko-KR")}개</b></p>
-            </div>
-          </Card>
-        </section>
-      )}
-
       {manualExpenseModalOpen && (
         <FormModal
           title="수동 비용 등록"
@@ -16425,6 +16456,175 @@ function AccountingWorkspace() {
   );
 }
 
+function accountingRowTime(row: Record<string, unknown>) {
+  const raw = String(row.transaction_datetime || row.transaction_date || row.expense_date || row["날짜"] || row["일자"] || "");
+  const parsed = new Date(raw.replace(/\./g, "-")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function accountingSourceRowClass(row: Record<string, unknown>) {
+  const source = `${String(row.source_name || "")} ${String(row.source_type || "")} ${String(row.card_name || "")} ${String(row.account_name || "")}`;
+  if (/국민은행/.test(source)) return "bg-yellow-50/45";
+  if (/기업은행|IBK/i.test(source)) return "bg-blue-50/45";
+  if (/가온|글로벌/.test(source)) return "bg-lime-50/45";
+  if (/국민기업|국민.*카드/.test(source)) return "bg-violet-50/45";
+  return "bg-white";
+}
+
+function ReviewQuickGrid({
+  rows,
+  categories,
+  categoryById,
+  onOpen,
+  onSave,
+}: {
+  rows: Array<Record<string, unknown>>;
+  categories: Array<Record<string, unknown>>;
+  categoryById: Map<string, string>;
+  onOpen: (row: Record<string, unknown>) => void;
+  onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void;
+}) {
+  const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
+  if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
+  return (
+    <div className="overflow-x-auto rounded-xl border border-gray-200">
+      <table className="w-full min-w-[1120px] text-xs">
+        <thead className="bg-gray-50 font-semibold text-gray-500">
+          <tr>
+            <th className="px-3 py-2 text-left">일자</th>
+            <th className="px-3 py-2 text-left">출처</th>
+            <th className="px-3 py-2 text-left">거래처/내용</th>
+            <th className="px-3 py-2 text-right">금액</th>
+            <th className="px-3 py-2 text-left">카테고리</th>
+            <th className="px-3 py-2 text-left">입출금</th>
+            <th className="px-3 py-2 text-center">반영</th>
+            <th className="px-3 py-2 text-left">메모</th>
+            <th className="px-3 py-2 text-right">관리</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((row, index) => {
+            const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+            return (
+              <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
+                <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
+                <td className="px-3 py-2"><StatusBadge>{String(row.source_name || row.source_type || "-")}</StatusBadge></td>
+                <td className="max-w-[260px] px-3 py-2">
+                  <p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p>
+                  <p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p>
+                </td>
+                <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+                <td className="px-3 py-2">
+                  <select
+                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400"
+                    defaultValue={String(row.category_id || "")}
+                    onChange={(event) => onSave(row, { category_id: event.target.value })}
+                  >
+                    <option value="">미지정</option>
+                    {categories.map((category) => <option key={String(category.id)} value={String(category.id)}>{categoryById.get(String(category.id))}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2">
+                  <select
+                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400"
+                    defaultValue={String(row.direction || "pending_review")}
+                    onChange={(event) => onSave(row, { direction: event.target.value })}
+                  >
+                    <option value="income">입금/정산</option>
+                    <option value="expense">비용/출금</option>
+                    <option value="card_payment">카드대금</option>
+                    <option value="transfer">자금이동</option>
+                    <option value="pending_review">검토필요</option>
+                  </select>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex justify-center gap-2">
+                    <label className="flex items-center gap-1 font-semibold text-gray-600"><input type="checkbox" defaultChecked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} />손익</label>
+                    <label className="flex items-center gap-1 font-semibold text-gray-600"><input type="checkbox" defaultChecked={row.affects_cashflow !== false} onChange={(event) => onSave(row, { affects_cashflow: event.target.checked })} />현금</label>
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
+                    defaultValue={String(row.memo || "")}
+                    placeholder={String(row.review_reason || "메모")}
+                    onBlur={(event) => onSave(row, { memo: event.target.value })}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex justify-end gap-2">
+                    <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>
+                    <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, {}, true)}>확정</ActionButton>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FixedCostCalendar({ rows, upcomingRows, compact = false }: { rows: Array<Record<string, unknown>>; upcomingRows: Array<Record<string, unknown>>; compact?: boolean }) {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = Array.from({ length: Math.ceil((startOffset + daysInMonth) / 7) * 7 }, (_, index) => {
+    const day = index - startOffset + 1;
+    return day > 0 && day <= daysInMonth ? day : 0;
+  });
+  const byDay = new Map<number, Array<Record<string, unknown>>>();
+  rows.forEach((row) => {
+    const dueDate = String(row.due_date || "");
+    const due = new Date(dueDate);
+    if (due.getFullYear() !== year || due.getMonth() !== month) return;
+    const dayRows = byDay.get(due.getDate()) || [];
+    dayRows.push(row);
+    byDay.set(due.getDate(), dayRows);
+  });
+  const upcomingIds = new Set(upcomingRows.map((row) => String(row.fixed_cost_id || row.id || row.title || row.display_title)));
+  return (
+    <Card className="p-5">
+      <SectionHeader title="고정비 캘린더" actions={<StatusBadge tone="orange">{year}.{String(month + 1).padStart(2, "0")}</StatusBadge>} />
+      <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400">
+        {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span key={day}>{day}</span>)}
+      </div>
+      <div className="mt-2 grid grid-cols-7 gap-1">
+        {cells.map((day, index) => {
+          const dayRows = day ? byDay.get(day) || [] : [];
+          const isToday = day === today.getDate();
+          const hasUpcoming = dayRows.some((row) => upcomingIds.has(String(row.fixed_cost_id || row.id || row.title || row.display_title)));
+          return (
+            <div key={`${day}-${index}`} className={`min-h-[58px] rounded-lg border px-1.5 py-1 text-left ${day ? "border-gray-200 bg-white" : "border-transparent bg-transparent"} ${isToday ? "ring-2 ring-orange-300" : ""} ${hasUpcoming ? "bg-orange-50 border-orange-200" : ""}`}>
+              {day ? <p className="text-[11px] font-bold text-gray-700">{day}</p> : null}
+              <div className="mt-1 space-y-1">
+                {dayRows.slice(0, compact ? 1 : 2).map((row, rowIndex) => (
+                  <p key={`${String(row.fixed_cost_id || row.id)}-${rowIndex}`} className="truncate rounded bg-gray-100 px-1 py-0.5 text-[10px] font-semibold text-gray-600">
+                    {String(row.title || row.display_title || "-")}
+                  </p>
+                ))}
+                {dayRows.length > (compact ? 1 : 2) && <p className="text-[10px] font-bold text-orange-600">+{dayRows.length - (compact ? 1 : 2)}</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 space-y-1">
+        {upcomingRows.slice(0, 3).map((row, index) => (
+          <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="flex justify-between gap-2 rounded-lg bg-orange-50 px-3 py-2 text-xs">
+            <span className="truncate font-semibold text-gray-700">{String(row.title || row.display_title || "-")}</span>
+            <span className="font-bold text-[#ff6a00]">D-{Math.max(0, asNumber(row.days_until))} · {krw(asNumber(row.amount))}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function ExpenseTable({
   rows,
   categoryById,
@@ -16438,46 +16638,67 @@ function ExpenseTable({
   onOpen?: (row: Record<string, unknown>) => void;
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
 }) {
+  const [page, setPage] = useState(1);
+  const pageSize = compact ? rows.length || 1 : 30;
+  const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   if (!rows.length) return <EmptyState title="데이터 없음" className="min-h-32" />;
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className={`w-full text-sm ${compact ? "min-w-[760px]" : "min-w-[980px]"}`}>
-        <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-          <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">출처</th><th className="px-3 py-2 text-left">거래처</th><th className="px-3 py-2 text-left">내용</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-left">상태</th><th className="px-3 py-2 text-right">금액</th>{!compact && <th className="px-3 py-2 text-left">메모/원본</th>}</tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => {
-            const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "미분류");
-            const amount = asNumber(row.amount_krw ?? row.total_amount ?? row["합계"] ?? row["금액"] ?? row.amount);
-            return (
-              <tr key={String(row.id || index)} className={`border-t border-gray-100 hover:bg-orange-50/60 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
-                <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
-                <td className="px-3 py-2 text-gray-600"><StatusBadge>{String(row.source_name || row.source_type || "-")}</StatusBadge></td>
-                <td className="px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
-                <td className="max-w-[280px] truncate px-3 py-2 text-gray-600">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
-                <td className="px-3 py-2"><StatusBadge tone="orange">{category}</StatusBadge></td>
-                <td className="px-3 py-2"><StatusBadge tone={String(row.review_status || "") === "pending" ? "danger" : "success"}>{String(row.review_status || row.direction || "-")}</StatusBadge></td>
-                <td className="px-3 py-2 text-right font-bold text-gray-900">{String(row.currency || "KRW") === "KRW" || row.amount_krw ? krw(amount) : `${asNumber(row.foreign_amount || row.amount).toLocaleString("ko-KR")} ${String(row.currency || "")}`}</td>
-                {!compact && (
-                  <td className="max-w-[240px] px-3 py-2 text-gray-500">
-                    {onMemoSave ? (
-                      <input
-                        className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
-                        defaultValue={String(row.memo || "")}
-                        placeholder={String(row.review_reason || (row.raw_json ? "원본 보존" : "메모"))}
-                        onClick={(event) => event.stopPropagation()}
-                        onBlur={(event) => onMemoSave(row, event.target.value)}
-                      />
-                    ) : (
-                      <span className="block truncate">{String(row.memo || row.review_reason || (row.raw_json ? "원본 보존" : "-"))}</span>
-                    )}
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="space-y-2">
+      {!compact && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500">
+          <span>최신순 고정 · 30줄씩 보기</span>
+          <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className={`w-full text-sm ${compact ? "min-w-[760px]" : "min-w-[980px]"}`}>
+          <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+            <tr><th className="px-3 py-2 text-left">일자</th><th className="px-3 py-2 text-left">출처</th><th className="px-3 py-2 text-left">거래처</th><th className="px-3 py-2 text-left">내용</th><th className="px-3 py-2 text-left">분류</th><th className="px-3 py-2 text-left">상태</th><th className="px-3 py-2 text-right">금액</th>{!compact && <th className="px-3 py-2 text-left">메모/원본</th>}</tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => {
+              const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "미분류");
+              const amount = asNumber(row.amount_krw ?? row.total_amount ?? row["합계"] ?? row["금액"] ?? row.amount);
+              return (
+                <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                  <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || row["날짜"] || row["일자"] || "-")}</td>
+                  <td className="px-3 py-2 text-gray-600"><StatusBadge>{String(row.source_name || row.source_type || "-")}</StatusBadge></td>
+                  <td className="px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row["거래처"] || row["가맹점명"] || row["업체명"] || "-")}</td>
+                  <td className="max-w-[280px] truncate px-3 py-2 text-gray-600">{String(row.description || row["적요"] || row["내용"] || "-")}</td>
+                  <td className="px-3 py-2"><StatusBadge tone="orange">{category}</StatusBadge></td>
+                  <td className="px-3 py-2"><StatusBadge tone={String(row.review_status || "") === "pending" ? "danger" : "success"}>{String(row.review_status || row.direction || "-")}</StatusBadge></td>
+                  <td className="px-3 py-2 text-right font-bold text-gray-900">{String(row.currency || "KRW") === "KRW" || row.amount_krw ? krw(amount) : `${asNumber(row.foreign_amount || row.amount).toLocaleString("ko-KR")} ${String(row.currency || "")}`}</td>
+                  {!compact && (
+                    <td className="max-w-[240px] px-3 py-2 text-gray-500">
+                      {onMemoSave ? (
+                        <input
+                          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
+                          defaultValue={String(row.memo || "")}
+                          placeholder={String(row.review_reason || (row.raw_json ? "원본 보존" : "메모"))}
+                          onClick={(event) => event.stopPropagation()}
+                          onBlur={(event) => onMemoSave(row, event.target.value)}
+                        />
+                      ) : (
+                        <span className="block truncate">{String(row.memo || row.review_reason || (row.raw_json ? "원본 보존" : "-"))}</span>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!compact && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>이전</ActionButton>
+          <span className="min-w-20 text-center text-xs font-bold text-gray-600">{currentPage} / {totalPages}</span>
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>다음</ActionButton>
+        </div>
+      )}
     </div>
   );
 }
