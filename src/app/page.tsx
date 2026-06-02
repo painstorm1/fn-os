@@ -1005,9 +1005,15 @@ type ProductAttribute = "plain" | "set" | "rg";
 type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
 type WarehouseAttribute = "general" | "fulfillment";
-type ProductBulkField = "product_attribute" | "cost_price" | "standard_price";
-type CustomerBulkField = "customer_type" | "business_no" | "contact_name" | "phone" | "memo";
-type WarehouseBulkField = "warehouse_type" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
+type ProductBulkField = "product_attribute" | "product_name" | "cost_price" | "standard_price";
+type CustomerBulkField = "customer_type" | "customer_name" | "business_no" | "contact_name" | "phone" | "memo";
+type WarehouseBulkField = "warehouse_type" | "warehouse_name" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
+type BulkFieldConfig<Field extends string> = {
+  key: Field;
+  label: string;
+  inputType?: "text" | "number" | "date" | "select";
+  options?: Array<{ value: string; label: string }>;
+};
 
 const salesChannelCredentialKeys = [
   "seller_password",
@@ -9877,6 +9883,288 @@ type PersonnelEmployee = {
   resigned_memo?: string;
 };
 
+function fieldLabel<Field extends string>(fields: Array<BulkFieldConfig<Field>>, field: Field) {
+  return fields.find((item) => item.key === field)?.label || field;
+}
+
+function fieldConfig<Field extends string>(fields: Array<BulkFieldConfig<Field>>, field: Field) {
+  return fields.find((item) => item.key === field) || fields[0];
+}
+
+function BulkMultiEditModal<Field extends string, Row>({
+  title,
+  description,
+  fields,
+  selectedFields,
+  setSelectedFields,
+  fieldPickerOpen,
+  setFieldPickerOpen,
+  commonField,
+  setCommonField,
+  commonValue,
+  setCommonValue,
+  rowDrafts,
+  setRowDrafts,
+  rows,
+  rowKeys,
+  selectedRowKeys,
+  setSelectedRowKeys,
+  getRowKey,
+  getRowName,
+  getRowSubLabel,
+  getCurrentValue,
+  onClose,
+  onSave,
+}: {
+  title: string;
+  description: string;
+  fields: Array<BulkFieldConfig<Field>>;
+  selectedFields: Field[];
+  setSelectedFields: (value: Field[] | ((prev: Field[]) => Field[])) => void;
+  fieldPickerOpen: boolean;
+  setFieldPickerOpen: (value: boolean) => void;
+  commonField: Field;
+  setCommonField: (value: Field) => void;
+  commonValue: string;
+  setCommonValue: (value: string) => void;
+  rowDrafts: Record<string, Partial<Record<Field, string>>>;
+  setRowDrafts: (value: Record<string, Partial<Record<Field, string>>> | ((prev: Record<string, Partial<Record<Field, string>>>) => Record<string, Partial<Record<Field, string>>>)) => void;
+  rows: Row[];
+  rowKeys: string[];
+  selectedRowKeys: string[];
+  setSelectedRowKeys: (value: string[] | ((prev: string[]) => string[])) => void;
+  getRowKey: (row: Row) => string;
+  getRowName: (row: Row) => string;
+  getRowSubLabel: (row: Row) => string;
+  getCurrentValue: (row: Row, field: Field) => string;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const [dragMode, setDragMode] = useState<"select" | "deselect" | null>(null);
+  const visibleFields = selectedFields.length ? selectedFields : [fields[0]?.key].filter(Boolean) as Field[];
+  const activeCommonField = visibleFields.includes(commonField) ? commonField : visibleFields[0];
+  const activeCommonConfig = fieldConfig(fields, activeCommonField);
+
+  function setRowSelected(key: string, selected: boolean) {
+    setSelectedRowKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function setDraftValue(key: string, field: Field, value: string) {
+    setRowDrafts((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function draftValue(row: Row, field: Field) {
+    const key = getRowKey(row);
+    return rowDrafts[key]?.[field] ?? getCurrentValue(row, field);
+  }
+
+  function applyCommonValue() {
+    if (!activeCommonField) return;
+    setRowDrafts((prev) => {
+      const next = { ...prev };
+      selectedRowKeys.forEach((key) => {
+        next[key] = {
+          ...(next[key] || {}),
+          [activeCommonField]: commonValue,
+        };
+      });
+      return next;
+    });
+  }
+
+  function toggleField(field: Field, checked: boolean) {
+    setSelectedFields((prev) => {
+      if (checked) return Array.from(new Set([...prev, field]));
+      const next = prev.filter((item) => item !== field);
+      return next.length ? next : [field];
+    });
+  }
+
+  function inputFor(config: BulkFieldConfig<Field>, value: string, onChange: (value: string) => void, disabled = false) {
+    if (config.inputType === "select") {
+      return (
+        <select className={modalSelectClass} value={value || config.options?.[0]?.value || ""} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+          {(config.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      );
+    }
+    return <input className={modalInputClass} type={config.inputType === "number" ? "number" : config.inputType === "date" ? "date" : "text"} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />;
+  }
+
+  return (
+    <>
+      <FormModal
+        title={title}
+        description={description}
+        onClose={onClose}
+        size="xl"
+        footer={
+          <>
+            <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+            <ActionButton type="button" onClick={onSave}>저장</ActionButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="mb-2 text-sm font-black text-slate-900">변경</div>
+            <ActionButton type="button" variant="secondary" onClick={() => setFieldPickerOpen(true)}>변경항목선택</ActionButton>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr_150px]">
+              <select className={modalSelectClass} value={activeCommonField || ""} onChange={(event) => setCommonField(event.target.value as Field)}>
+                {visibleFields.map((field) => <option key={field} value={field}>{fieldLabel(fields, field)}</option>)}
+              </select>
+              {inputFor(activeCommonConfig, commonValue, setCommonValue, selectedRowKeys.length === 0)}
+              <label className="inline-flex items-center justify-center gap-2 text-sm font-black text-slate-600">
+                <input type="checkbox" className="h-4 w-4 rounded border-blue-300" disabled={!selectedRowKeys.length} onChange={(event) => {
+                  if (event.target.checked) {
+                    applyCommonValue();
+                    event.currentTarget.checked = false;
+                  }
+                }} />
+                공통 적용
+              </label>
+            </div>
+          </div>
+          <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
+            <table className="w-full min-w-[760px] table-fixed text-xs">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="w-16 px-2 py-2 text-center">
+                    <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={Boolean(rowKeys.length) && rowKeys.every((key) => selectedRowKeys.includes(key))} onChange={(event) => setSelectedRowKeys(event.target.checked ? rowKeys : [])} />
+                  </th>
+                  <th className="w-56 px-2 py-2 text-left">수정 선택한 항목</th>
+                  {visibleFields.map((field) => <th key={field} className="w-44 px-2 py-2 text-left">{fieldLabel(fields, field)}</th>)}
+                </tr>
+              </thead>
+              <tbody onMouseLeave={() => setDragMode(null)}>
+                {rows.map((row, index) => {
+                  const key = getRowKey(row);
+                  const selected = selectedRowKeys.includes(key);
+                  return (
+                    <tr key={key} className={`border-t border-gray-100 ${selected ? "bg-sky-50/70" : "bg-white"}`}>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          type="button"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            const mode = selected ? "deselect" : "select";
+                            setDragMode(mode);
+                            setRowSelected(key, mode === "select");
+                          }}
+                          onMouseEnter={() => {
+                            if (dragMode) setRowSelected(key, dragMode === "select");
+                          }}
+                          onMouseUp={() => setDragMode(null)}
+                          className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                        >
+                          {index + 1}
+                        </button>
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="truncate font-black text-slate-900" title={getRowName(row)}>{getRowName(row) || "-"}</div>
+                        <div className="truncate text-[11px] font-bold text-slate-400" title={getRowSubLabel(row)}>{getRowSubLabel(row) || "-"}</div>
+                      </td>
+                      {visibleFields.map((field) => (
+                        <td key={field} className="px-2 py-2">
+                          {inputFor(fieldConfig(fields, field), draftValue(row, field), (value) => setDraftValue(key, field, value), !selected)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+                {!rows.length && <tr><td colSpan={2 + visibleFields.length} className="px-3 py-8 text-center font-bold text-slate-400">선택된 항목이 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </FormModal>
+      {fieldPickerOpen && (
+        <FormModal
+          title="항목검색"
+          description="수정할 변경항목을 선택합니다."
+          onClose={() => setFieldPickerOpen(false)}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setFieldPickerOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => setFieldPickerOpen(false)}>적용</ActionButton>
+            </>
+          }
+        >
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="grid grid-cols-[48px_1fr] bg-slate-50 text-xs font-black text-slate-600">
+              <label className="flex items-center justify-center border-r border-slate-200 px-2 py-3">
+                <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={selectedFields.length === fields.length} onChange={(event) => setSelectedFields(event.target.checked ? fields.map((field) => field.key) : [fields[0].key])} />
+              </label>
+              <div className="px-3 py-3 text-center">항목명</div>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              {fields.map((field) => (
+                <label key={field.key} className="grid cursor-pointer grid-cols-[48px_1fr] border-t border-slate-100 text-sm font-bold hover:bg-orange-50">
+                  <span className="flex items-center justify-center border-r border-slate-100 px-2 py-3">
+                    <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={selectedFields.includes(field.key)} onChange={(event) => toggleField(field.key, event.target.checked)} />
+                  </span>
+                  <span className="px-3 py-3">{field.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </FormModal>
+      )}
+    </>
+  );
+}
+
+const productBulkFields: Array<BulkFieldConfig<ProductBulkField>> = [
+  { key: "product_attribute", label: "속성", inputType: "select", options: [{ value: "plain", label: "일반" }, { value: "set", label: "SET" }, { value: "rg", label: "RG" }] },
+  { key: "product_name", label: "품목명" },
+  { key: "cost_price", label: "입고단가", inputType: "number" },
+  { key: "standard_price", label: "출고단가", inputType: "number" },
+];
+
+const customerBulkFields: Array<BulkFieldConfig<CustomerBulkField>> = [
+  { key: "customer_type", label: "속성", inputType: "select", options: [{ value: "general", label: "일반" }, { value: "shopping", label: "쇼핑몰" }] },
+  { key: "customer_name", label: "거래처명" },
+  { key: "business_no", label: "사업자번호" },
+  { key: "contact_name", label: "담당자" },
+  { key: "phone", label: "전화번호" },
+  { key: "memo", label: "메모" },
+];
+
+const warehouseBulkFields: Array<BulkFieldConfig<WarehouseBulkField>> = [
+  { key: "warehouse_type", label: "창고 속성", inputType: "select", options: [{ value: "general", label: "일반" }, { value: "fulfillment", label: "풀필먼트" }] },
+  { key: "warehouse_name", label: "창고명" },
+  { key: "warehouse_address", label: "창고 주소" },
+  { key: "warehouse_phone", label: "창고 연락처" },
+  { key: "manager_name", label: "담당자 이름" },
+  { key: "manager_phone", label: "담당자 연락처" },
+  { key: "manager_memo", label: "담당자 메모" },
+  { key: "memo", label: "메모" },
+];
+
+const personnelBulkFields: Array<BulkFieldConfig<PersonnelBulkField>> = [
+  { key: "status", label: "속성", inputType: "select", options: [{ value: "working", label: "근무" }, { value: "leave", label: "휴직" }, { value: "resigned", label: "퇴사" }] },
+  { key: "phone", label: "전화번호" },
+  { key: "address", label: "주소" },
+  { key: "email", label: "이메일" },
+  { key: "joined_at", label: "입사일자", inputType: "date" },
+  { key: "department", label: "부서" },
+  { key: "rank", label: "직급" },
+  { key: "position", label: "직책" },
+  { key: "bank_name", label: "은행" },
+  { key: "bank_account_holder", label: "예금주" },
+  { key: "bank_account_no", label: "계좌번호" },
+  { key: "memo", label: "메모" },
+];
+
 const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploadEndpoint?: string; templateHeaders: string[]; sampleRow: string[] }> = [
   {
     key: "customers",
@@ -10245,8 +10533,11 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkField, setBulkField] = useState<PersonnelBulkField>("status");
-  const [bulkValue, setBulkValue] = useState("");
+  const [bulkFields, setBulkFields] = useState<PersonnelBulkField[]>(["status"]);
+  const [bulkFieldPickerOpen, setBulkFieldPickerOpen] = useState(false);
+  const [bulkCommonField, setBulkCommonField] = useState<PersonnelBulkField>("status");
+  const [bulkCommonValue, setBulkCommonValue] = useState("");
+  const [bulkDrafts, setBulkDrafts] = useState<Record<string, Partial<Record<PersonnelBulkField, string>>>>({});
   const [addressOpen, setAddressOpen] = useState(false);
   const [addressQuery, setAddressQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -10397,15 +10688,21 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     }
     const nextEmployees = employees.map((employee) => {
       if (!selectedKeys.includes(employee.id)) return employee;
+      const draftValues = bulkDrafts[employee.id] || {};
+      const updates = Object.fromEntries(bulkFields.map((field) => [
+        field,
+        field === "status" ? normalizePersonnelStatus(draftValues[field] ?? employee[field] ?? "working") : draftValues[field] ?? employee[field] ?? "",
+      ]));
       return {
         ...employee,
-        [bulkField]: bulkField === "status" ? normalizePersonnelStatus(bulkValue) : bulkValue,
+        ...updates,
       };
     });
     saveEmployees(nextEmployees);
     setSelectedKeys([]);
     setBulkOpen(false);
-    setBulkValue("");
+    setBulkDrafts({});
+    setBulkCommonValue("");
     setPersonnelMessage(`선택수정 완료: ${selectedEmployees.length.toLocaleString("ko-KR")}건`);
   }
 
@@ -10580,37 +10877,31 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       </Panel>
 
       {bulkOpen && (
-        <FormModal title="직원 선택수정" description={`선택 ${selectedEmployees.length.toLocaleString("ko-KR")}개 직원에 같은 값을 적용합니다.`} onClose={() => setBulkOpen(false)} size="xl" footer={<><ActionButton type="button" variant="secondary" onClick={() => setBulkOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveBulkEdit}>저장</ActionButton></>}>
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-              <select className={modalSelectClass} value={bulkField} onChange={(event) => setBulkField(event.target.value as PersonnelBulkField)}>
-                <option value="status">속성</option>
-                <option value="phone">전화번호</option>
-                <option value="address">주소</option>
-                <option value="email">이메일</option>
-                <option value="joined_at">입사일자</option>
-                <option value="department">부서</option>
-                <option value="rank">직급</option>
-                <option value="position">직책</option>
-                <option value="bank_name">은행</option>
-                <option value="bank_account_holder">예금주</option>
-                <option value="bank_account_no">계좌번호</option>
-                <option value="memo">메모</option>
-              </select>
-              {bulkField === "status" ? (
-                <select className={modalSelectClass} value={bulkValue || "working"} onChange={(event) => setBulkValue(event.target.value)}>
-                  <option value="working">근무</option>
-                  <option value="leave">휴직</option>
-                  <option value="resigned">퇴사</option>
-                </select>
-              ) : bulkField === "joined_at" ? (
-                <input className={modalInputClass} type="date" value={bulkValue} onChange={(event) => setBulkValue(event.target.value)} />
-              ) : (
-                <input className={modalInputClass} value={bulkValue} onChange={(event) => setBulkValue(event.target.value)} placeholder="선택한 직원에 적용할 값" />
-              )}
-            </div>
-          </div>
-        </FormModal>
+        <BulkMultiEditModal<PersonnelBulkField, PersonnelEmployee>
+          title="직원 선택수정"
+          description={`선택 ${selectedEmployees.length.toLocaleString("ko-KR")}개 직원의 값을 수정합니다.`}
+          fields={personnelBulkFields}
+          selectedFields={bulkFields}
+          setSelectedFields={setBulkFields}
+          fieldPickerOpen={bulkFieldPickerOpen}
+          setFieldPickerOpen={setBulkFieldPickerOpen}
+          commonField={bulkCommonField}
+          setCommonField={setBulkCommonField}
+          commonValue={bulkCommonValue}
+          setCommonValue={setBulkCommonValue}
+          rowDrafts={bulkDrafts}
+          setRowDrafts={setBulkDrafts}
+          rows={selectedEmployees}
+          rowKeys={selectedEmployees.map((employee) => employee.id)}
+          selectedRowKeys={selectedKeys}
+          setSelectedRowKeys={setSelectedKeys}
+          getRowKey={(employee) => employee.id}
+          getRowName={(employee) => employee.name || "-"}
+          getRowSubLabel={(employee) => employee.resident_no || employee.phone || "-"}
+          getCurrentValue={(employee, field) => field === "status" ? normalizePersonnelStatus(employee.status) : String(employee[field] || "")}
+          onClose={() => setBulkOpen(false)}
+          onSave={saveBulkEdit}
+        />
       )}
 
       {modalOpen && (
@@ -10725,8 +11016,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [selectedCustomerKeys, setSelectedCustomerKeys] = useState<string[]>([]);
   const [customerSelecting, setCustomerSelecting] = useState(false);
   const [customerBulkOpen, setCustomerBulkOpen] = useState(false);
-  const [customerBulkField, setCustomerBulkField] = useState<CustomerBulkField>("customer_type");
-  const [customerBulkValue, setCustomerBulkValue] = useState("");
+  const [customerBulkSelectedFields, setCustomerBulkSelectedFields] = useState<CustomerBulkField[]>(["customer_type"]);
+  const [customerBulkFieldPickerOpen, setCustomerBulkFieldPickerOpen] = useState(false);
+  const [customerBulkCommonField, setCustomerBulkCommonField] = useState<CustomerBulkField>("customer_type");
+  const [customerBulkCommonValue, setCustomerBulkCommonValue] = useState("");
+  const [customerBulkDrafts, setCustomerBulkDrafts] = useState<Record<string, Partial<Record<CustomerBulkField, string>>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const customerSelectModeRef = useRef<"select" | "deselect">("select");
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -11027,9 +11321,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       setCustomerMessage("수정할 거래처를 먼저 선택해 주세요.");
       return;
     }
-    const value = customerBulkField === "business_no" ? formatBusinessNoInput(customerBulkValue) : customerBulkValue;
     let saved = 0;
     for (const customer of selectedCustomers) {
+      const key = customerRowKey(customer);
+      const draftValues = customerBulkDrafts[key] || {};
+      const updates = Object.fromEntries(customerBulkSelectedFields.map((field) => {
+        const rawValue = draftValues[field] ?? String(customer[field as keyof FnCustomer] || "");
+        const value = field === "customer_type" ? normalizeCustomerAttribute(rawValue) : field === "business_no" ? formatBusinessNoInput(rawValue) : rawValue;
+        return [field, value];
+      }));
       const payload = {
         id: customer.id,
         customer_code: customer.customer_code || customer.cust_code || "",
@@ -11040,7 +11340,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         phone: customer.phone || "",
         payment_terms: customer.payment_terms || "",
         memo: customer.memo || "",
-        [customerBulkField]: customerBulkField === "customer_type" ? normalizeCustomerAttribute(value) : value,
+        ...updates,
       };
       const res = await fetch("/api/fnos/customers", {
         method: "POST",
@@ -11052,7 +11352,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     }
     setCustomerMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
     setCustomerBulkOpen(false);
-    setCustomerBulkValue("");
+    setCustomerBulkDrafts({});
+    setCustomerBulkCommonValue("");
     setSelectedCustomerKeys([]);
     invalidateClientCache("/api/fnos/customers");
     await loadCustomers(page, query, relationFilter);
@@ -11271,56 +11572,34 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         {customerMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{customerMessage}</div>}
       </Panel>
       {customerBulkOpen && (
-        <FormModal
+        <BulkMultiEditModal<CustomerBulkField, FnCustomer>
           title="거래처 선택수정"
-          description={`선택 ${selectedCustomers.length.toLocaleString("ko-KR")}개 거래처에 같은 값을 적용합니다.`}
+          description={`선택 ${selectedCustomers.length.toLocaleString("ko-KR")}개 거래처의 값을 수정합니다.`}
+          fields={customerBulkFields}
+          selectedFields={customerBulkSelectedFields}
+          setSelectedFields={setCustomerBulkSelectedFields}
+          fieldPickerOpen={customerBulkFieldPickerOpen}
+          setFieldPickerOpen={setCustomerBulkFieldPickerOpen}
+          commonField={customerBulkCommonField}
+          setCommonField={setCustomerBulkCommonField}
+          commonValue={customerBulkCommonValue}
+          setCommonValue={setCustomerBulkCommonValue}
+          rowDrafts={customerBulkDrafts}
+          setRowDrafts={setCustomerBulkDrafts}
+          rows={selectedCustomers}
+          rowKeys={selectedCustomers.map(customerRowKey)}
+          selectedRowKeys={selectedCustomerKeys}
+          setSelectedRowKeys={setSelectedCustomerKeys}
+          getRowKey={customerRowKey}
+          getRowName={(customer) => String(customer.customer_name || customer.cust_name || "-")}
+          getRowSubLabel={(customer) => String(customer.customer_code || customer.cust_code || "-")}
+          getCurrentValue={(customer, field) => {
+            if (field === "customer_type") return normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label);
+            return String(customer[field as keyof FnCustomer] || "");
+          }}
           onClose={() => setCustomerBulkOpen(false)}
-          size="xl"
-          footer={
-            <>
-              <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen(false)}>닫기</ActionButton>
-              <ActionButton type="button" onClick={() => void saveCustomerBulkEdit()}>저장</ActionButton>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-              <select className={modalSelectClass} value={customerBulkField} onChange={(event) => setCustomerBulkField(event.target.value as CustomerBulkField)}>
-                <option value="customer_type">속성</option>
-                <option value="business_no">사업자번호</option>
-                <option value="contact_name">담당자</option>
-                <option value="phone">전화번호</option>
-                <option value="memo">메모</option>
-              </select>
-              {customerBulkField === "customer_type" ? (
-                <select className={modalSelectClass} value={customerBulkValue || "general"} onChange={(event) => setCustomerBulkValue(event.target.value)}>
-                  <option value="general">일반</option>
-                  <option value="shopping">쇼핑몰</option>
-                </select>
-              ) : (
-                <input className={modalInputClass} value={customerBulkValue} onChange={(event) => setCustomerBulkValue(event.target.value)} placeholder="선택한 거래처에 적용할 값" />
-              )}
-            </div>
-            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full min-w-[620px] text-xs">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">거래처코드</th><th className="px-2 py-2 text-left">거래처명</th><th className="px-2 py-2 text-left">현재값</th></tr>
-                </thead>
-                <tbody>
-                  {selectedCustomers.map((customer, index) => (
-                    <tr key={customerRowKey(customer)} className="border-t border-gray-100">
-                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
-                      <td className="px-2 py-2 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
-                      <td className="px-2 py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
-                      <td className="px-2 py-2 text-slate-600">{String(customerBulkField === "customer_type" ? customerAttributeLabel(customer.customer_type || customer.customer_type_label) : customer[customerBulkField as keyof FnCustomer] || "-")}</td>
-                    </tr>
-                  ))}
-                  {!selectedCustomers.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 거래처가 없습니다.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </FormModal>
+          onSave={() => void saveCustomerBulkEdit()}
+        />
       )}
       {modalOpen && (
         <CustomerEditModal
@@ -11363,8 +11642,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [selectedProductKeys, setSelectedProductKeys] = useState<string[]>([]);
   const [productSelecting, setProductSelecting] = useState(false);
   const [productBulkOpen, setProductBulkOpen] = useState(false);
-  const [productBulkField, setProductBulkField] = useState<ProductBulkField>("cost_price");
-  const [productBulkValue, setProductBulkValue] = useState("");
+  const [productBulkSelectedFields, setProductBulkSelectedFields] = useState<ProductBulkField[]>(["product_name", "cost_price", "standard_price"]);
+  const [productBulkFieldPickerOpen, setProductBulkFieldPickerOpen] = useState(false);
+  const [productBulkCommonField, setProductBulkCommonField] = useState<ProductBulkField>("product_name");
+  const [productBulkCommonValue, setProductBulkCommonValue] = useState("");
+  const [productBulkDrafts, setProductBulkDrafts] = useState<Record<string, Partial<Record<ProductBulkField, string>>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const productSelectModeRef = useRef<"select" | "deselect">("select");
   const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
@@ -11585,8 +11867,11 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }
     let saved = 0;
     for (const product of selectedProducts) {
-      const productAttribute = productBulkField === "product_attribute" ? normalizeProductAttribute(productBulkValue) : productAttributeOf(product);
-      const productName = productNameWithAttribute(String(product.product_name || ""), productAttribute);
+      const key = productRowKey(product);
+      const draftValues = productBulkDrafts[key] || {};
+      const productAttribute = productBulkSelectedFields.includes("product_attribute") ? normalizeProductAttribute(draftValues.product_attribute ?? productAttributeOf(product)) : productAttributeOf(product);
+      const rawProductName = productBulkSelectedFields.includes("product_name") ? draftValues.product_name ?? String(product.product_name || "") : String(product.product_name || "");
+      const productName = productNameWithAttribute(rawProductName, productAttribute);
       const res = await fetch("/api/fnos/products/master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -11598,8 +11883,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             product_name: productName,
             product_attribute: productAttribute,
             product_kind: productAttribute,
-            cost_price: productBulkField === "cost_price" ? productBulkValue : product.cost_price,
-            standard_price: productBulkField === "standard_price" ? productBulkValue : product.standard_price,
+            cost_price: productBulkSelectedFields.includes("cost_price") ? draftValues.cost_price ?? product.cost_price : product.cost_price,
+            standard_price: productBulkSelectedFields.includes("standard_price") ? draftValues.standard_price ?? product.standard_price : product.standard_price,
           },
         }),
       });
@@ -11607,7 +11892,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }
     setProductMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
     setProductBulkOpen(false);
-    setProductBulkValue("");
+    setProductBulkDrafts({});
+    setProductBulkCommonValue("");
     setSelectedProductKeys([]);
     invalidateClientCache("/api/fnos/products/master");
     invalidateClientCache("/api/fnos/products/search");
@@ -11918,59 +12204,35 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       </Panel>
 
       {productBulkOpen && (
-        <FormModal
+        <BulkMultiEditModal<ProductBulkField, FnProduct>
           title="품목 선택수정"
-          description={`선택 ${selectedProducts.length.toLocaleString("ko-KR")}개 품목에 같은 값을 적용합니다.`}
+          description={`선택 ${selectedProducts.length.toLocaleString("ko-KR")}개 품목의 값을 수정합니다.`}
+          fields={productBulkFields}
+          selectedFields={productBulkSelectedFields}
+          setSelectedFields={setProductBulkSelectedFields}
+          fieldPickerOpen={productBulkFieldPickerOpen}
+          setFieldPickerOpen={setProductBulkFieldPickerOpen}
+          commonField={productBulkCommonField}
+          setCommonField={setProductBulkCommonField}
+          commonValue={productBulkCommonValue}
+          setCommonValue={setProductBulkCommonValue}
+          rowDrafts={productBulkDrafts}
+          setRowDrafts={setProductBulkDrafts}
+          rows={selectedProducts}
+          rowKeys={selectedProducts.map(productRowKey)}
+          selectedRowKeys={selectedProductKeys}
+          setSelectedRowKeys={setSelectedProductKeys}
+          getRowKey={productRowKey}
+          getRowName={(product) => String(product.product_name || "-")}
+          getRowSubLabel={(product) => String(product.product_code || product.sku || "-")}
+          getCurrentValue={(product, field) => {
+            if (field === "product_attribute") return productAttributeOf(product);
+            if (field === "product_name") return String(product.product_name || "");
+            return String(product[field as keyof FnProduct] ?? "");
+          }}
           onClose={() => setProductBulkOpen(false)}
-          size="xl"
-          footer={
-            <>
-              <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen(false)}>닫기</ActionButton>
-              <ActionButton type="button" onClick={() => void saveProductBulkEdit()}>저장</ActionButton>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-              <select className={modalSelectClass} value={productBulkField} onChange={(event) => setProductBulkField(event.target.value as ProductBulkField)}>
-                <option value="product_attribute">속성</option>
-                <option value="cost_price">입고단가</option>
-                <option value="standard_price">출고단가</option>
-              </select>
-              {productBulkField === "product_attribute" ? (
-                <select className={modalSelectClass} value={productBulkValue || "plain"} onChange={(event) => setProductBulkValue(event.target.value)}>
-                  <option value="plain">일반</option>
-                  <option value="set">SET</option>
-                  <option value="rg">RG</option>
-                </select>
-              ) : (
-                <input className={modalInputClass} type="number" value={productBulkValue} onChange={(event) => setProductBulkValue(event.target.value)} placeholder="선택한 품목에 적용할 값" />
-              )}
-            </div>
-            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full min-w-[680px] text-xs">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">품목코드</th><th className="px-2 py-2 text-left">품목명</th><th className="px-2 py-2 text-right">현재값</th></tr>
-                </thead>
-                <tbody>
-                  {selectedProducts.map((product, index) => (
-                    <tr key={productRowKey(product)} className="border-t border-gray-100">
-                      <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
-                      <td className="px-2 py-2 font-black">{product.product_code || product.sku || "-"}</td>
-                      <td className="px-2 py-2 font-bold">{product.product_name || "-"}</td>
-                      <td className="px-2 py-2 text-right text-slate-600">
-                        {productBulkField === "product_attribute"
-                          ? productAttributeLabel(productAttributeOf(product))
-                          : krw(Number(productBulkField === "cost_price" ? product.cost_price || 0 : product.standard_price || 0))}
-                      </td>
-                    </tr>
-                  ))}
-                  {!selectedProducts.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 품목이 없습니다.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </FormModal>
+          onSave={() => void saveProductBulkEdit()}
+        />
       )}
 
       {modalOpen && (
@@ -12000,8 +12262,11 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
   const [selectedWarehouseKeys, setSelectedWarehouseKeys] = useState<string[]>([]);
   const [warehouseSelecting, setWarehouseSelecting] = useState(false);
   const [warehouseBulkOpen, setWarehouseBulkOpen] = useState(false);
-  const [warehouseBulkField, setWarehouseBulkField] = useState<WarehouseBulkField>("warehouse_type");
-  const [warehouseBulkValue, setWarehouseBulkValue] = useState("");
+  const [warehouseBulkSelectedFields, setWarehouseBulkSelectedFields] = useState<WarehouseBulkField[]>(["warehouse_type"]);
+  const [warehouseBulkFieldPickerOpen, setWarehouseBulkFieldPickerOpen] = useState(false);
+  const [warehouseBulkCommonField, setWarehouseBulkCommonField] = useState<WarehouseBulkField>("warehouse_type");
+  const [warehouseBulkCommonValue, setWarehouseBulkCommonValue] = useState("");
+  const [warehouseBulkDrafts, setWarehouseBulkDrafts] = useState<Record<string, Partial<Record<WarehouseBulkField, string>>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const warehouseSelectModeRef = useRef<"select" | "deselect">("select");
   const warehouseKeys = warehouses.map((warehouse) => warehouseRowKey(warehouse)).filter(Boolean);
@@ -12200,13 +12465,19 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     let saved = 0;
     for (const warehouse of selectedWarehouses) {
       const memoDraft = parseWarehouseMemo(warehouse.memo);
+      const key = warehouseRowKey(warehouse);
+      const draftValues = warehouseBulkDrafts[key] || {};
+      const updates = Object.fromEntries(warehouseBulkSelectedFields.map((field) => [
+        field,
+        field === "warehouse_type" ? normalizeWarehouseAttribute(draftValues[field] ?? warehouse.warehouse_type ?? "general") : draftValues[field] ?? (field === "warehouse_name" ? warehouse.warehouse_name || "" : memoDraft[field] || ""),
+      ]));
       const nextDraft = {
         ...memoDraft,
         id: warehouse.id || "",
         warehouse_type: warehouse.warehouse_type || "general",
         warehouse_code: warehouse.warehouse_code || "",
         warehouse_name: warehouse.warehouse_name || "",
-        [warehouseBulkField]: warehouseBulkField === "warehouse_type" ? normalizeWarehouseAttribute(warehouseBulkValue) : warehouseBulkValue,
+        ...updates,
       };
       const res = await fetch("/api/fnos/warehouses", {
         method: "POST",
@@ -12228,7 +12499,8 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     invalidateClientCache("/api/fnos/products/master");
     setMessage(`선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
     setWarehouseBulkOpen(false);
-    setWarehouseBulkValue("");
+    setWarehouseBulkDrafts({});
+    setWarehouseBulkCommonValue("");
     setSelectedWarehouseKeys([]);
     await loadWarehouses(query);
   }
@@ -12410,64 +12682,35 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
       </Panel>
 
       {warehouseBulkOpen && (
-        <FormModal
+        <BulkMultiEditModal<WarehouseBulkField, FnWarehouse>
           title="창고 선택수정"
-          description={`선택 ${selectedWarehouses.length.toLocaleString("ko-KR")}개 창고에 같은 값을 적용합니다.`}
+          description={`선택 ${selectedWarehouses.length.toLocaleString("ko-KR")}개 창고의 값을 수정합니다.`}
+          fields={warehouseBulkFields}
+          selectedFields={warehouseBulkSelectedFields}
+          setSelectedFields={setWarehouseBulkSelectedFields}
+          fieldPickerOpen={warehouseBulkFieldPickerOpen}
+          setFieldPickerOpen={setWarehouseBulkFieldPickerOpen}
+          commonField={warehouseBulkCommonField}
+          setCommonField={setWarehouseBulkCommonField}
+          commonValue={warehouseBulkCommonValue}
+          setCommonValue={setWarehouseBulkCommonValue}
+          rowDrafts={warehouseBulkDrafts}
+          setRowDrafts={setWarehouseBulkDrafts}
+          rows={selectedWarehouses}
+          rowKeys={selectedWarehouses.map(warehouseRowKey)}
+          selectedRowKeys={selectedWarehouseKeys}
+          setSelectedRowKeys={setSelectedWarehouseKeys}
+          getRowKey={warehouseRowKey}
+          getRowName={(warehouse) => String(warehouse.warehouse_name || "-")}
+          getRowSubLabel={(warehouse) => String(warehouse.warehouse_code || "-")}
+          getCurrentValue={(warehouse, field) => {
+            if (field === "warehouse_type") return normalizeWarehouseAttribute(warehouse.warehouse_type);
+            if (field === "warehouse_name") return String(warehouse.warehouse_name || "");
+            return String(parseWarehouseMemo(warehouse.memo)[field] || "");
+          }}
           onClose={() => setWarehouseBulkOpen(false)}
-          size="xl"
-          footer={
-            <>
-              <ActionButton type="button" variant="secondary" onClick={() => setWarehouseBulkOpen(false)}>닫기</ActionButton>
-              <ActionButton type="button" onClick={() => void saveWarehouseBulkEdit()}>저장</ActionButton>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-              <select className={modalSelectClass} value={warehouseBulkField} onChange={(event) => setWarehouseBulkField(event.target.value as WarehouseBulkField)}>
-                <option value="warehouse_type">창고 속성</option>
-                <option value="warehouse_address">창고 주소</option>
-                <option value="warehouse_phone">창고 연락처</option>
-                <option value="manager_name">담당자 이름</option>
-                <option value="manager_phone">담당자 연락처</option>
-                <option value="manager_memo">담당자 메모</option>
-                <option value="memo">메모</option>
-              </select>
-              {warehouseBulkField === "warehouse_type" ? (
-                <select className={modalSelectClass} value={warehouseBulkValue || "general"} onChange={(event) => setWarehouseBulkValue(event.target.value)}>
-                  <option value="general">일반</option>
-                  <option value="fulfillment">풀필먼트</option>
-                </select>
-              ) : (
-                <input className={modalInputClass} value={warehouseBulkValue} onChange={(event) => setWarehouseBulkValue(event.target.value)} placeholder="선택한 창고에 적용할 값" />
-              )}
-            </div>
-            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full min-w-[620px] text-xs">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="w-12 px-2 py-2 text-center">#</th><th className="px-2 py-2 text-left">창고코드</th><th className="px-2 py-2 text-left">창고명</th><th className="px-2 py-2 text-left">현재값</th></tr>
-                </thead>
-                <tbody>
-                  {selectedWarehouses.map((warehouse, index) => {
-                    const memoDraft = parseWarehouseMemo(warehouse.memo);
-                    const currentValue = warehouseBulkField === "warehouse_type"
-                      ? warehouse.warehouse_type_label || warehouseAttributeLabel(warehouse.warehouse_type)
-                      : memoDraft[warehouseBulkField] || "-";
-                    return (
-                      <tr key={warehouseRowKey(warehouse)} className="border-t border-gray-100">
-                        <td className="px-2 py-2 text-center"><span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-blue-600 px-1 font-black text-white">{index + 1}</span></td>
-                        <td className="px-2 py-2 font-black">{warehouse.warehouse_code || "-"}</td>
-                        <td className="px-2 py-2 font-bold">{warehouse.warehouse_name || "-"}</td>
-                        <td className="px-2 py-2 text-slate-600">{currentValue}</td>
-                      </tr>
-                    );
-                  })}
-                  {!selectedWarehouses.length && <tr><td colSpan={4} className="px-3 py-8 text-center font-bold text-slate-400">선택된 창고가 없습니다.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </FormModal>
+          onSave={() => void saveWarehouseBulkEdit()}
+        />
       )}
 
       {modalOpen && (
