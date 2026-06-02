@@ -15419,6 +15419,28 @@ function AccountingWorkspace() {
     loadSummary(true);
   }
 
+  async function saveExpenseMemo(row: Record<string, unknown>, memo: string) {
+    const id = String(row.id || "");
+    if (!id || memo === String(row.memo || "")) return;
+    const res = await fetch("/api/accounting/ledger/transactions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        memo,
+        review_status: String(row.review_status || "pending"),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "메모 저장 실패");
+      return;
+    }
+    setMessage("메모를 저장했습니다.");
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
   async function exportExpenses() {
     const xlsx = await loadXlsxModule();
     const sheet = xlsx.utils.json_to_sheet(filteredExpenses);
@@ -15617,7 +15639,7 @@ function AccountingWorkspace() {
             </div>
           </form>
           <div className="mt-4">
-            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} />
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
           </div>
         </Card>
       )}
@@ -15760,7 +15782,7 @@ function AccountingWorkspace() {
             </div>
           </form>
           <div className="mt-4">
-            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} />
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
           </div>
         </Card>
       )}
@@ -16030,7 +16052,7 @@ function AccountingWorkspace() {
               <input className="field-input px-3 py-2 text-sm" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
             </div>
           </FilterBar>
-          <ExpenseTable rows={filteredExpenses} categoryById={categoryById} onOpen={openTransaction} />
+          <ExpenseTable rows={filteredExpenses} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
         </Card>
       )}
 
@@ -16403,7 +16425,19 @@ function AccountingWorkspace() {
   );
 }
 
-function ExpenseTable({ rows, categoryById, compact = false, onOpen }: { rows: Array<Record<string, unknown>>; categoryById: Map<string, string>; compact?: boolean; onOpen?: (row: Record<string, unknown>) => void }) {
+function ExpenseTable({
+  rows,
+  categoryById,
+  compact = false,
+  onOpen,
+  onMemoSave,
+}: {
+  rows: Array<Record<string, unknown>>;
+  categoryById: Map<string, string>;
+  compact?: boolean;
+  onOpen?: (row: Record<string, unknown>) => void;
+  onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
+}) {
   if (!rows.length) return <EmptyState title="데이터 없음" className="min-h-32" />;
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -16424,7 +16458,21 @@ function ExpenseTable({ rows, categoryById, compact = false, onOpen }: { rows: A
                 <td className="px-3 py-2"><StatusBadge tone="orange">{category}</StatusBadge></td>
                 <td className="px-3 py-2"><StatusBadge tone={String(row.review_status || "") === "pending" ? "danger" : "success"}>{String(row.review_status || row.direction || "-")}</StatusBadge></td>
                 <td className="px-3 py-2 text-right font-bold text-gray-900">{String(row.currency || "KRW") === "KRW" || row.amount_krw ? krw(amount) : `${asNumber(row.foreign_amount || row.amount).toLocaleString("ko-KR")} ${String(row.currency || "")}`}</td>
-                {!compact && <td className="max-w-[220px] truncate px-3 py-2 text-gray-500">{String(row.memo || row.review_reason || (row.raw_json ? "원본 보존" : "-"))}</td>}
+                {!compact && (
+                  <td className="max-w-[240px] px-3 py-2 text-gray-500">
+                    {onMemoSave ? (
+                      <input
+                        className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
+                        defaultValue={String(row.memo || "")}
+                        placeholder={String(row.review_reason || (row.raw_json ? "원본 보존" : "메모"))}
+                        onClick={(event) => event.stopPropagation()}
+                        onBlur={(event) => onMemoSave(row, event.target.value)}
+                      />
+                    ) : (
+                      <span className="block truncate">{String(row.memo || row.review_reason || (row.raw_json ? "원본 보존" : "-"))}</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
