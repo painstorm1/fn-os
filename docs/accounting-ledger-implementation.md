@@ -46,6 +46,8 @@ Added to `schema_sales_inventory.sql`:
 - `accounting_transactions`
 - `accounting_review_queue`
 - `accounting_card_settlements`
+- `accounting_card_settlement_calendar` view
+- `accounting_summary` view
 
 Seeded defaults:
 
@@ -156,4 +158,3 @@ Right panel should use `ledger/summary` and keep width `320px`.
 - Confirm whether old `expenses` uploads should continue in parallel or be migrated into `accounting_transactions`.
 - Confirm whether `이카운트` should remain as a category label under software costs or be renamed after legacy wording cleanup.
 - Confirm production DB migration timing. The new APIs need `schema_sales_inventory.sql` rerun in Supabase before use.
-

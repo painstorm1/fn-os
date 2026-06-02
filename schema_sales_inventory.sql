@@ -760,6 +760,22 @@ create table if not exists accounting_category_rules (
   updated_at timestamptz not null default now()
 );
 
+create unique index if not exists idx_accounting_rules_seed_unique
+on accounting_category_rules (
+  priority,
+  coalesce(source_type, ''),
+  coalesce(source_name, ''),
+  coalesce(condition_field, ''),
+  coalesce(condition_operator, ''),
+  coalesce(keyword, ''),
+  coalesce(amount_condition, ''),
+  coalesce(direction_condition, ''),
+  coalesce(currency_condition, ''),
+  coalesce(category_large, ''),
+  coalesce(category_middle, ''),
+  coalesce(category_small, '')
+);
+
 create table if not exists accounting_transactions (
   id uuid primary key default gen_random_uuid(),
   batch_id uuid references accounting_import_batches(id) on delete set null,
@@ -845,6 +861,39 @@ create table if not exists accounting_card_settlements (
   updated_at timestamptz not null default now(),
   unique(card_name, settlement_start, settlement_end)
 );
+
+create or replace view accounting_card_settlement_calendar as
+select
+  id,
+  card_name,
+  settlement_start as cutoff_start_date,
+  settlement_end as cutoff_end_date,
+  payment_due_date,
+  domestic_amount,
+  foreign_amount,
+  currency,
+  amount_krw,
+  card_limit,
+  usage_rate,
+  paid,
+  memo,
+  created_at,
+  updated_at
+from accounting_card_settlements;
+
+create or replace view accounting_summary as
+select
+  current_date as summary_date,
+  count(*)::integer as transaction_count,
+  coalesce(sum(case when direction = 'income' and affects_profit is true then amount_krw else 0 end), 0) as income_amount,
+  coalesce(sum(case when direction = 'expense' and affects_profit is true then amount_krw else 0 end), 0) as expense_amount,
+  coalesce(sum(case when direction = 'income' and affects_profit is true then amount_krw else 0 end), 0)
+    - coalesce(sum(case when direction = 'expense' and affects_profit is true then amount_krw else 0 end), 0) as net_profit,
+  coalesce(sum(case when source_type = 'bank' then credit_amount else 0 end), 0)
+    - coalesce(sum(case when source_type = 'bank' then debit_amount else 0 end), 0) as cashflow_amount,
+  count(*) filter (where review_status = 'pending')::integer as review_count
+from accounting_transactions
+where is_active is true;
 
 insert into accounting_transaction_sources (source_name, source_type, institution_name, account_name, card_name, source_profile, card_limit, cutoff_start_day, cutoff_end_day, payment_day, payment_month_offset, memo)
 values
