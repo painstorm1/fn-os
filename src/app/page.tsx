@@ -7994,6 +7994,24 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (toggle instanceof HTMLInputElement) toggle.checked = false;
   }
 
+  function exportSalesShipmentList() {
+    const productNameIndex = salesSheetHeaders["FN판매입력"].indexOf("품목명");
+    const qtyIndex = salesSheetHeaders["FN판매입력"].indexOf("수량");
+    const rows = sheets["FN판매입력"]
+      .filter(rowHasValue)
+      .map((row) => [salesCellText(row[productNameIndex]), salesCellText(row[qtyIndex])])
+      .filter(([productName, qty]) => productName || qty)
+      .sort((left, right) => left[0].localeCompare(right[0], "ko-KR", { numeric: true, sensitivity: "base" }));
+    if (!rows.length) {
+      window.alert("출고리스트를 생성할 FN판매입력 행이 없습니다.");
+      return;
+    }
+    const fileBase = `${todayMmdd()}_출고리스트`;
+    if (!window.confirm(`${fileBase} ${rows.length.toLocaleString("ko-KR")}건 생성하시겠습니까?`)) return;
+    void downloadTableXlsx(`${fileBase}.xlsx`, "출고리스트", ["품목명", "수량"], rows);
+    setMessage(`${fileBase} 파일을 생성했습니다.`);
+  }
+
   function selectedShippingRows() {
     if (selectedSalesRange?.sheet === "발주 진행 단계") {
       const indexes = selectedSalesRange.rowIndexes?.length
@@ -8838,7 +8856,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
                 <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원</span>
-                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
+                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" variant="secondary" onClick={exportSalesShipmentList}>출고리스트</ActionButton><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
               </div>
             </div>
           </div>
