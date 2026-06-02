@@ -1599,6 +1599,12 @@ function attachmentFileUrl(item: OrderAttachment) {
   return String(item.file_url || item.file_path || "").trim();
 }
 
+const openingAttachmentSheets = new Set<string>();
+
+function attachmentSheetRequestKey(item: OrderAttachment, fileUrl: string) {
+  return String(item.id || item.file_name || fileUrl);
+}
+
 function FileTypeIcon({ name }: { name?: string }) {
   const type = fileIconType(name);
   const color = type === "pdf" ? "text-rose-600" : type === "image" ? "text-sky-600" : type === "sheet" ? "text-emerald-600" : type === "doc" ? "text-blue-600" : "text-slate-500";
@@ -1631,6 +1637,16 @@ async function openAttachment(item: OrderAttachment) {
     return;
   }
   if (isExcelAttachment(item)) {
+    const requestKey = attachmentSheetRequestKey(item, fileUrl);
+    const cacheKey = `fnos-attachment-sheet:${requestKey}`;
+    const cachedUrl = sessionStorage.getItem(cacheKey);
+    if (cachedUrl) {
+      const cachedOpened = window.open(cachedUrl, "_blank", "noopener,noreferrer");
+      if (!cachedOpened) alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.");
+      return;
+    }
+    if (openingAttachmentSheets.has(requestKey)) return;
+    openingAttachmentSheets.add(requestKey);
     try {
       const res = await fetch("/api/google/attachment-sheet", {
         method: "POST",
@@ -1644,10 +1660,13 @@ async function openAttachment(item: OrderAttachment) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false || !data.url) throw new Error(data.error || "Google Sheets로 열 수 없습니다.");
+      sessionStorage.setItem(cacheKey, data.url);
       const opened = window.open(data.url, "_blank", "noopener,noreferrer");
-      if (!opened) window.location.href = data.url;
+      if (!opened) alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.");
     } catch (error) {
       alert(error instanceof Error ? error.message : "Google Sheets로 열 수 없습니다.");
+    } finally {
+      openingAttachmentSheets.delete(requestKey);
     }
     return;
   }
