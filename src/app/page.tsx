@@ -1098,6 +1098,25 @@ function personnelStatusLabel(value: unknown) {
   return "근무";
 }
 
+function normalizePersonnelRole(value: unknown): PersonnelRole {
+  const textValue = String(value || "").trim().toLowerCase();
+  if (["admin", "manager", "관리자", "관리"].includes(textValue)) return "admin";
+  return "staff";
+}
+
+function personnelRoleLabel(value: unknown) {
+  return normalizePersonnelRole(value) === "admin" ? "관리자" : "일반 직원";
+}
+
+function onlyDigits(value: unknown) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function formatCommaNumber(value: unknown) {
+  const digits = onlyDigits(value);
+  return digits ? Number(digits).toLocaleString("ko-KR") : "";
+}
+
 function formatBusinessNoInput(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
   if (digits.length <= 3) return digits;
@@ -9880,11 +9899,13 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
 
 type MasterTabKey = "customers" | "products" | "warehouses" | "channelMappings" | "channels" | "attendance";
 type PersonnelStatus = "working" | "leave" | "resigned";
-type PersonnelBulkField = "status" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "salary" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
+type PersonnelRole = "staff" | "admin";
+type PersonnelBulkField = "status" | "role" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "salary" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
 
 type PersonnelEmployee = {
   id: string;
   status: PersonnelStatus;
+  role: PersonnelRole;
   name: string;
   resident_no: string;
   phone: string;
@@ -10177,6 +10198,7 @@ const warehouseBulkFields: Array<BulkFieldConfig<WarehouseBulkField>> = [
 
 const personnelBulkFields: Array<BulkFieldConfig<PersonnelBulkField>> = [
   { key: "status", label: "속성", inputType: "select", options: [{ value: "working", label: "근무" }, { value: "leave", label: "휴직" }, { value: "resigned", label: "퇴사" }] },
+  { key: "role", label: "권한", inputType: "select", options: [{ value: "staff", label: "일반 직원" }, { value: "admin", label: "관리자" }] },
   { key: "phone", label: "전화번호" },
   { key: "address", label: "주소" },
   { key: "email", label: "이메일" },
@@ -10233,8 +10255,8 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     key: "attendance",
     label: "인사관리",
     title: "인사",
-    templateHeaders: ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모"],
-    sampleRow: ["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", ""],
+    templateHeaders: ["속성", "권한", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모"],
+    sampleRow: ["근무", "일반 직원", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", ""],
   },
 ];
 
@@ -10575,6 +10597,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     return {
       id: "",
       status: "working",
+      role: "staff",
       name: "",
       resident_no: "",
       phone: "",
@@ -10659,6 +10682,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       ...value,
       id: value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       status: normalizePersonnelStatus(value.status),
+      role: normalizePersonnelRole(value.role),
+      salary: onlyDigits(value.salary),
     };
   }
 
@@ -10673,7 +10698,10 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }
 
   function updateDraft(key: keyof PersonnelEmployee, value: string) {
-    setDraft((prev) => ({ ...prev, [key]: key === "status" ? normalizePersonnelStatus(value) : value }));
+    setDraft((prev) => ({
+      ...prev,
+      [key]: key === "status" ? normalizePersonnelStatus(value) : key === "role" ? normalizePersonnelRole(value) : key === "salary" ? onlyDigits(value) : value,
+    }));
   }
 
   function setSelected(key: string, selected: boolean) {
@@ -10682,8 +10710,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }
 
   function validateDraft() {
-    if (!draft.status || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim() || !draft.salary.trim()) {
-      window.alert("속성, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자, 급여는 필수입니다.");
+    if (!draft.status || !draft.role || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim() || !draft.salary.trim()) {
+      window.alert("속성, 권한, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자, 급여는 필수입니다.");
       return false;
     }
     return true;
@@ -10718,7 +10746,13 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       const draftValues = bulkDrafts[employee.id] || {};
       const updates = Object.fromEntries(bulkFields.map((field) => [
         field,
-        field === "status" ? normalizePersonnelStatus(draftValues[field] ?? employee[field] ?? "working") : draftValues[field] ?? employee[field] ?? "",
+        field === "status"
+          ? normalizePersonnelStatus(draftValues[field] ?? employee[field] ?? "working")
+          : field === "role"
+            ? normalizePersonnelRole(draftValues[field] ?? employee[field] ?? "staff")
+            : field === "salary"
+              ? onlyDigits(draftValues[field] ?? employee[field] ?? "")
+              : draftValues[field] ?? employee[field] ?? "",
       ]));
       return {
         ...employee,
@@ -10737,8 +10771,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     void downloadTableXlsx(
       "FN_OS_인사_엑셀폼.xlsx",
       "인사",
-      ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"],
-      [["근무", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", "", "", "", "", "", ""]],
+      ["속성", "권한", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"],
+      [["근무", "일반 직원", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", "", "", "", "", "", ""]],
     );
   }
 
@@ -10746,6 +10780,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     const rows = await readXlsxObjects(file);
     const normalized = rows.map((row) => normalizePersonnelEmployee({
       status: normalizePersonnelStatus(row["속성"] || row["상태"] || row["구분"]),
+      role: normalizePersonnelRole(row["권한"] || row["권환"] || row["관리권한"]),
       name: String(row["성명"] || row["직원명"] || "").trim(),
       resident_no: String(row["주민등록번호"] || row["주민번호"] || "").trim(),
       phone: String(row["전화번호"] || row["연락처"] || "").trim(),
@@ -10755,7 +10790,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       department: String(row["부서"] || "").trim(),
       rank: String(row["직급"] || "").trim(),
       position: String(row["직책"] || "").trim(),
-      salary: String(row["급여"] || row["월급"] || "").trim(),
+      salary: onlyDigits(row["급여"] || row["월급"]),
       bank_name: String(row["은행"] || "").trim(),
       bank_account_holder: String(row["예금주"] || "").trim(),
       bank_account_no: String(row["계좌번호"] || "").trim(),
@@ -10790,6 +10825,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   function downloadPersonnel() {
     const rows = filteredEmployees().map((employee) => [
       personnelStatusLabel(employee.status),
+      personnelRoleLabel(employee.role),
       employee.name,
       employee.resident_no,
       employee.phone,
@@ -10799,7 +10835,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       employee.department,
       employee.rank,
       employee.position,
-      employee.salary,
+      onlyDigits(employee.salary),
       employee.bank_name,
       employee.bank_account_holder,
       employee.bank_account_no,
@@ -10810,7 +10846,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       employee.resigned_reason || "",
       employee.resigned_at || "",
     ]);
-    void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
+    void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "권한", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
   }
 
   const addressSuggestions = [
@@ -10927,7 +10963,12 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
           getRowKey={(employee) => employee.id}
           getRowName={(employee) => employee.name || "-"}
           getRowSubLabel={(employee) => employee.resident_no || employee.phone || "-"}
-          getCurrentValue={(employee, field) => field === "status" ? normalizePersonnelStatus(employee.status) : String(employee[field] || "")}
+          getCurrentValue={(employee, field) => {
+            if (field === "status") return normalizePersonnelStatus(employee.status);
+            if (field === "role") return normalizePersonnelRole(employee.role);
+            if (field === "salary") return onlyDigits(employee.salary);
+            return String(employee[field] || "");
+          }}
           onClose={() => setBulkOpen(false)}
           onSave={saveBulkEdit}
         />
@@ -10942,16 +10983,29 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
           footer={<><div className="mr-auto">{draft.id && <ActionButton type="button" variant="danger" onClick={deleteDraft}>삭제</ActionButton>}</div><ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveDraft}>저장</ActionButton></>}
         >
           <div className="space-y-5">
-            <div>
-              <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ["working", "근무"],
-                  ["leave", "휴직"],
-                  ["resigned", "퇴사"],
-                ].map(([value, label]) => (
-                  <button key={value} type="button" onClick={() => updateDraft("status", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.status === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>
-                ))}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["working", "근무"],
+                    ["leave", "휴직"],
+                    ["resigned", "퇴사"],
+                  ].map(([value, label]) => (
+                    <button key={value} type="button" onClick={() => updateDraft("status", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.status === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="mb-2 text-[13px] font-semibold text-gray-700">권한 <span className="text-[#ff6a00]">*</span></div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["staff", "일반 직원"],
+                    ["admin", "관리자"],
+                  ].map(([value, label]) => (
+                    <button key={value} type="button" onClick={() => updateDraft("role", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.role === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -10975,7 +11029,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                 <FormField label="직책"><input className={modalInputClass} value={draft.position} onChange={(event) => updateDraft("position", event.target.value)} /></FormField>
               </div>
               <div className="grid gap-2 md:col-span-2 md:grid-cols-4">
-                <FormField label="급여" required><input className={modalInputClass} type="number" value={draft.salary} onChange={(event) => updateDraft("salary", event.target.value)} placeholder="3000000" /></FormField>
+                <FormField label="급여" required><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.salary)} onChange={(event) => updateDraft("salary", event.target.value)} placeholder="3,000,000" /></FormField>
                 <FormField label="은행"><input className={modalInputClass} value={draft.bank_name} onChange={(event) => updateDraft("bank_name", event.target.value)} /></FormField>
                 <FormField label="예금주"><input className={modalInputClass} value={draft.bank_account_holder} onChange={(event) => updateDraft("bank_account_holder", event.target.value)} /></FormField>
                 <FormField label="계좌번호"><input className={modalInputClass} value={draft.bank_account_no} onChange={(event) => updateDraft("bank_account_no", event.target.value)} /></FormField>
