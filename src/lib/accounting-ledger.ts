@@ -187,10 +187,40 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<RawRow>(table, query).catch(() => []);
 }
 
-function fixedCostOccurrence(row: RawRow, holidays: Set<string>, today = kstToday()) {
+function transactionAmount(row: RawRow) {
+  return numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.total_amount);
+}
+
+function fixedCostKeywords(row: RawRow) {
+  const raw = row.match_keywords;
+  if (Array.isArray(raw)) return raw.map(text).filter(Boolean);
+  return text(raw).split(/[,/|]+/).map(text).filter(Boolean);
+}
+
+function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
+  const keywords = fixedCostKeywords(fixedCost);
+  if (!keywords.length) return null;
+  const from = addDays(dueDate, -3);
+  const to = text(fixedCost.base_day) === "말일" || text(fixedCost.base_day) === "last" ? addDays(dueDate, 2) : addDays(dueDate, 2);
+  const sourceHint = text(fixedCost.payment_source || fixedCost.source_account_name || fixedCost.source_card_name);
+  const candidates = transactions
+    .filter((row) => {
+      const txDate = isoDate(row.transaction_date);
+      if (!txDate || txDate < from || txDate > to || txDate > today) return false;
+      if (text(row.source_type) === "bank" && numberValue(row.debit_amount) <= 0) return false;
+      if (sourceHint && !`${text(row.source_name)} ${text(row.account_name)} ${text(row.card_name)}`.includes(sourceHint)) return false;
+      const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`;
+      return keywords.some((keyword) => haystack.includes(keyword));
+    })
+    .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
+  return candidates[0] || null;
+}
+
+function fixedCostOccurrence(row: RawRow, holidays: Set<string>, today = kstToday(), transactions: RawRow[] = []) {
   const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today, holidays);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
-  const actualAmount = numberValue(row.last_actual_amount);
+  const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
+  const actualAmount = actualRow ? transactionAmount(actualRow) : numberValue(row.last_actual_amount);
   const displayAmount = actualAmount || expectedAmount;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
   return {
@@ -202,6 +232,8 @@ function fixedCostOccurrence(row: RawRow, holidays: Set<string>, today = kstToda
     category_middle: row.category_middle,
     expected_amount: expectedAmount,
     last_actual_amount: actualAmount || null,
+    last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : row.last_actual_date || null,
+    matched_transaction_id: actualRow?.id || null,
     amount: displayAmount,
     due_date: dueDate,
     base_day: row.base_day ?? row.payment_day ?? row.due_day,
@@ -439,6 +471,47 @@ export async function deactivateAccountingRule(id: string) {
   return patchRows("accounting_category_rules", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
 }
 
+function cleanFixedCostPayload(row: RawRow) {
+  const keywords = Array.isArray(row.match_keywords)
+    ? row.match_keywords.map(text).filter(Boolean)
+    : text(row.match_keywords || row.matchKeywords).split(/[,/|]+/).map(text).filter(Boolean);
+  return {
+    fixed_cost_name: text(row.fixed_cost_name || row.fixedCostName || row.name),
+    category_large: text(row.category_large || row.categoryLarge),
+    category_middle: text(row.category_middle || row.categoryMiddle),
+    category_small: text(row.category_small || row.categorySmall),
+    expected_amount: numberValue(row.expected_amount ?? row.expectedAmount ?? row.amount),
+    base_day: text(row.base_day || row.baseDay || row.payment_day || row.paymentDay),
+    weekend_policy: text(row.weekend_policy || row.weekendPolicy) || "previous_business_day",
+    holiday_policy: text(row.holiday_policy || row.holidayPolicy) || "previous_business_day",
+    payment_type: text(row.payment_type || row.paymentType) || "bank",
+    payment_source: text(row.payment_source || row.paymentSource) || null,
+    source_account_name: text(row.source_account_name || row.sourceAccountName) || null,
+    source_card_name: text(row.source_card_name || row.sourceCardName) || null,
+    affects_profit: row.affects_profit ?? row.affectsProfit ?? true,
+    affects_cashflow: row.affects_cashflow ?? row.affectsCashflow ?? true,
+    match_keywords: keywords.length ? keywords : null,
+    is_active: row.is_active ?? row.isActive ?? true,
+    sort_order: numberValue(row.sort_order ?? row.sortOrder),
+    memo: text(row.memo) || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertAccountingFixedCost(row: RawRow) {
+  const id = text(row.id);
+  const payload = cleanFixedCostPayload(row);
+  if (!payload.fixed_cost_name) throw new Error("고정비명이 필요합니다.");
+  if (!payload.base_day) throw new Error("기준일이 필요합니다.");
+  if (id) return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, payload);
+  return upsertRows("accounting_fixed_costs", payload, "fixed_cost_name");
+}
+
+export async function deactivateAccountingFixedCost(id: string) {
+  if (!id) throw new Error("고정비 id가 필요합니다.");
+  return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
 export async function updateAccountingTransaction(id: string, row: RawRow) {
   if (!id) throw new Error("거래 id가 필요합니다.");
   const category = await categoryFor(row);
@@ -567,7 +640,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const holidays = new Set((await optionalRows("accounting_holidays", { limit: 1000 })).map((row) => isoDate(row.holiday_date)));
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
-  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, holidays, today));
+  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, holidays, today, rows));
   const upcomingFixedCosts = fixedCostOccurrences
     .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))

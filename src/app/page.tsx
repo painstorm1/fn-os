@@ -14921,7 +14921,7 @@ type ExpenseUploadItem = {
 };
 
 const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
-const accountingTabs = ["대시보드", "거래 DB", "업로드", "검토필요", "카테고리 설정", "자동분류 규칙", "카드 정산"];
+const accountingTabs = ["대시보드", "통장", "카드", "고정비", "거래 DB", "업로드", "검토필요", "카테고리 설정", "자동분류 규칙", "카드 정산"];
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
@@ -14989,6 +14989,24 @@ function AccountingWorkspace() {
     is_active: true,
     memo: "",
   });
+  const emptyFixedCostDraft = {
+    id: "",
+    fixed_cost_name: "",
+    category_large: "운영비",
+    category_middle: "",
+    category_small: "",
+    expected_amount: "",
+    base_day: "",
+    payment_type: "bank",
+    payment_source: "",
+    match_keywords: "",
+    affects_profit: true,
+    affects_cashflow: true,
+    is_active: true,
+    sort_order: "0",
+    memo: "",
+  };
+  const [fixedCostDraft, setFixedCostDraft] = useState(emptyFixedCostDraft);
   const [manual, setManual] = useState({
     expense_date: new Date().toISOString().slice(0, 10),
     vendor_name: "",
@@ -15213,6 +15231,39 @@ function AccountingWorkspace() {
     loadSummary(true);
   }
 
+  async function saveFixedCost(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const method = fixedCostDraft.id ? "PATCH" : "POST";
+    const res = await fetch("/api/accounting/ledger/fixed-costs", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fixedCostDraft),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "고정비 저장 실패");
+      return;
+    }
+    setMessage(fixedCostDraft.id ? "고정비를 수정했습니다." : "고정비를 추가했습니다.");
+    setFixedCostDraft(emptyFixedCostDraft);
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function deactivateFixedCostFromUi(id: string) {
+    if (!id) return;
+    const res = await fetch(`/api/accounting/ledger/fixed-costs?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "고정비 비활성화 실패");
+      return;
+    }
+    setMessage("고정비를 비활성화했습니다.");
+    if (fixedCostDraft.id === id) setFixedCostDraft(emptyFixedCostDraft);
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
   function openTransaction(row: Record<string, unknown>) {
     setEditingTransaction(row);
     setTransactionDraft({
@@ -15427,6 +15478,177 @@ function AccountingWorkspace() {
               {!upcomingFixedCosts.length && <EmptyState title="3? ? ??? ??" className="min-h-24" />}
             </div>
           </Card>
+        </section>
+      )}
+
+      {activeTab === "통장" && (
+        <Card className="p-5">
+          <SectionHeader
+            title="통장 내역"
+            description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다."
+            actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
+          />
+          <div className="mt-4">
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} />
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "카드" && (
+        <Card className="p-5">
+          <SectionHeader
+            title="카드 내역"
+            description="카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원."
+            actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
+          />
+          <div className="mt-4">
+            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} />
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "고정비" && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
+          <Card className="p-5">
+            <SectionHeader
+              title="고정비 현황"
+              description="설정 기준일로 캘린더를 만들고, 업로드된 통장/카드 실제 거래가 있으면 실제값으로 갱신합니다."
+              actions={<StatusBadge tone="orange">{fixedCosts.length.toLocaleString("ko-KR")}개</StatusBadge>}
+            />
+            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[920px] text-sm">
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">고정비명</th>
+                    <th className="px-3 py-2 text-left">카테고리</th>
+                    <th className="px-3 py-2 text-center">기준일</th>
+                    <th className="px-3 py-2 text-center">이번 달 예정일</th>
+                    <th className="px-3 py-2 text-right">예상금액</th>
+                    <th className="px-3 py-2 text-right">최근 실제값</th>
+                    <th className="px-3 py-2 text-center">구분</th>
+                    <th className="px-3 py-2 text-right">관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fixedCostOccurrences.map((row) => (
+                    <tr key={String(row.fixed_cost_id || row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2 font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</td>
+                      <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">{String(row.base_day || "-")}</td>
+                      <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
+                      <td className="px-3 py-2 text-right">{krw(asNumber(row.expected_amount))}</td>
+                      <td className="px-3 py-2 text-right">{asNumber(row.last_actual_amount) ? krw(asNumber(row.last_actual_amount)) : "-"}</td>
+                      <td className="px-3 py-2 text-center"><StatusBadge tone={String(row.status) === "upcoming" ? "orange" : "muted"}>{String(row.payment_type || "bank")}</StatusBadge></td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-2">
+                          <ActionButton
+                            type="button"
+                            variant="secondary"
+                            className="h-8 px-3 text-xs"
+                            onClick={() => {
+                              const source = fixedCosts.find((item) => String(item.id || "") === String(row.fixed_cost_id || row.id)) || row;
+                              setFixedCostDraft({
+                                id: String(source.id || row.fixed_cost_id || ""),
+                                fixed_cost_name: String(source.fixed_cost_name || row.title || ""),
+                                category_large: String(source.category_large || "운영비"),
+                                category_middle: String(source.category_middle || ""),
+                                category_small: String(source.category_small || ""),
+                                expected_amount: String(source.expected_amount || ""),
+                                base_day: String(source.base_day || ""),
+                                payment_type: String(source.payment_type || "bank"),
+                                payment_source: String(source.payment_source || ""),
+                                match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
+                                affects_profit: source.affects_profit !== false,
+                                affects_cashflow: source.affects_cashflow !== false,
+                                is_active: source.is_active !== false,
+                                sort_order: String(source.sort_order || 0),
+                                memo: String(source.memo || ""),
+                              });
+                            }}
+                          >
+                            수정
+                          </ActionButton>
+                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deactivateFixedCostFromUi(String(row.fixed_cost_id || row.id || ""))}>비활성화</ActionButton>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!fixedCostOccurrences.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="Supabase SQL Editor에서 최신 schema_sales_inventory.sql을 실행하면 기본 고정비가 생성됩니다." className="min-h-24" /></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+          <div className="space-y-4">
+            <Card className="p-5">
+              <SectionHeader title="도래할 고정비 5개" />
+              <div className="mt-4 space-y-2">
+                {upcomingFixedCosts.slice(0, 5).map((row) => (
+                  <div key={String(row.fixed_cost_id || row.id)} className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</p>
+                      <StatusBadge tone="orange">D-{Math.max(0, asNumber(row.days_until))}</StatusBadge>
+                    </div>
+                    <p className="mt-1 text-xs font-medium text-gray-500">{String(row.due_date || "-")} / {String(row.payment_source || row.payment_type || "통장/카드")}</p>
+                    <p className="mt-1 text-right text-sm font-bold text-[#ff6a00]">{krw(asNumber(row.amount))}</p>
+                  </div>
+                ))}
+                {!upcomingFixedCosts.length && <EmptyState title="3일 내 고정비 없음" className="min-h-24" />}
+              </div>
+            </Card>
+            <Card className="p-5">
+              <SectionHeader title={fixedCostDraft.id ? "고정비 수정" : "고정비 추가"} />
+              <form onSubmit={saveFixedCost} className="mt-4 space-y-3">
+                <FormField label="고정비명" required>
+                  <input className={modalInputClass} value={fixedCostDraft.fixed_cost_name} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, fixed_cost_name: event.target.value }))} />
+                </FormField>
+                <div className="grid grid-cols-2 gap-2">
+                  <FormField label="예상금액" required>
+                    <input className={`${modalInputClass} text-right`} type="number" value={fixedCostDraft.expected_amount} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, expected_amount: event.target.value }))} />
+                  </FormField>
+                  <FormField label="기준일" required>
+                    <input className={modalInputClass} value={fixedCostDraft.base_day} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, base_day: event.target.value }))} placeholder="5, 20, 말일" />
+                  </FormField>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <FormField label="결제구분">
+                    <select className={modalSelectClass} value={fixedCostDraft.payment_type} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_type: event.target.value }))}>
+                      <option value="bank">통장 출금</option>
+                      <option value="card">카드 사용</option>
+                      <option value="card_payment">카드 출금</option>
+                    </select>
+                  </FormField>
+                  <FormField label="출금수단">
+                    <input className={modalInputClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))} placeholder="국민은행, 기업은행" />
+                  </FormField>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <FormField label="대분류">
+                    <input className={modalInputClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
+                  </FormField>
+                  <FormField label="중분류">
+                    <input className={modalInputClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
+                  </FormField>
+                  <FormField label="소분류">
+                    <input className={modalInputClass} value={fixedCostDraft.category_small} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_small: event.target.value }))} />
+                  </FormField>
+                </div>
+                <FormField label="매칭 키워드">
+                  <input className={modalInputClass} value={fixedCostDraft.match_keywords} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, match_keywords: event.target.value }))} placeholder="쉼표로 구분" />
+                </FormField>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={fixedCostDraft.affects_profit} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />손익 반영</label>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={fixedCostDraft.affects_cashflow} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />현금흐름</label>
+                </div>
+                <FormField label="메모">
+                  <textarea className={modalTextareaClass} value={fixedCostDraft.memo} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+                </FormField>
+                <div className="flex justify-end gap-2 pt-2">
+                  <ActionButton type="button" variant="secondary" onClick={() => setFixedCostDraft(emptyFixedCostDraft)}>초기화</ActionButton>
+                  <ActionButton type="submit">{fixedCostDraft.id ? "수정" : "추가"}</ActionButton>
+                </div>
+              </form>
+            </Card>
+          </div>
         </section>
       )}
 
