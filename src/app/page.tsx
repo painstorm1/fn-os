@@ -1117,6 +1117,16 @@ function formatCommaNumber(value: unknown) {
   return digits ? Number(digits).toLocaleString("ko-KR") : "";
 }
 
+function personnelWorkingMonths(joinedAt: string) {
+  if (!joinedAt) return "";
+  const joined = new Date(`${joinedAt}T00:00:00`);
+  const today = new Date(`${entryDateToday()}T00:00:00`);
+  if (Number.isNaN(joined.getTime()) || Number.isNaN(today.getTime()) || joined > today) return "";
+  let months = (today.getFullYear() - joined.getFullYear()) * 12 + today.getMonth() - joined.getMonth();
+  if (today.getDate() < joined.getDate()) months -= 1;
+  return `${Math.max(0, months).toLocaleString("ko-KR")}개월 근무중`;
+}
+
 function formatBusinessNoInput(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
   if (digits.length <= 3) return digits;
@@ -11022,7 +11032,16 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                   }}>주소검색</ActionButton>
                 </div>
               </FormField>
-              <FormField label="입사일자" required><input className={modalInputClass} type="date" value={draft.joined_at} onChange={(event) => updateDraft("joined_at", event.target.value)} /></FormField>
+              <FormField label="입사일자" required>
+                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                  <input className={modalInputClass} type="date" value={draft.joined_at} onChange={(event) => updateDraft("joined_at", event.target.value)} />
+                  {draft.status === "working" && draft.joined_at && (
+                    <div className="flex h-10 items-center rounded-md border border-orange-100 bg-orange-50 px-3 text-sm font-black text-orange-600">
+                      {personnelWorkingMonths(draft.joined_at)}
+                    </div>
+                  )}
+                </div>
+              </FormField>
               <div className="grid gap-2 md:grid-cols-3">
                 <FormField label="부서"><input className={modalInputClass} value={draft.department} onChange={(event) => updateDraft("department", event.target.value)} /></FormField>
                 <FormField label="직급"><input className={modalInputClass} value={draft.rank} onChange={(event) => updateDraft("rank", event.target.value)} /></FormField>
