@@ -679,6 +679,251 @@ create table if not exists customer_payables (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists accounting_import_batches (
+  id uuid primary key default gen_random_uuid(),
+  source_name text,
+  source_type text,
+  source_file_name text,
+  uploaded_by text,
+  target_period_from date,
+  target_period_to date,
+  total_count integer default 0,
+  new_count integer default 0,
+  duplicate_count integer default 0,
+  error_count integer default 0,
+  review_count integer default 0,
+  status text default 'processing',
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_transaction_sources (
+  id uuid primary key default gen_random_uuid(),
+  source_name text not null unique,
+  source_type text not null,
+  institution_name text,
+  account_name text,
+  card_name text,
+  source_profile text,
+  card_limit numeric,
+  cutoff_start_day integer,
+  cutoff_end_day integer,
+  payment_day integer,
+  payment_month_offset integer default 0,
+  is_active boolean default true,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_categories (
+  id uuid primary key default gen_random_uuid(),
+  category_large text not null,
+  category_middle text not null default '',
+  category_small text not null default '',
+  is_active boolean default true,
+  sort_order integer default 0,
+  affects_profit boolean default true,
+  affects_cashflow boolean default true,
+  affects_card_settlement boolean default false,
+  default_review_required boolean default false,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (category_large, category_middle, category_small)
+);
+
+create table if not exists accounting_category_rules (
+  id uuid primary key default gen_random_uuid(),
+  priority integer default 100,
+  is_active boolean default true,
+  source_type text,
+  source_name text,
+  condition_field text default 'merchant_name',
+  condition_operator text default 'contains',
+  keyword text,
+  amount_condition text,
+  direction_condition text,
+  currency_condition text,
+  recurring_condition text,
+  merchant_condition text,
+  category_id uuid references accounting_categories(id) on delete set null,
+  category_large text,
+  category_middle text,
+  category_small text,
+  auto_confirm boolean default false,
+  review_required boolean default false,
+  review_reason text,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_transactions (
+  id uuid primary key default gen_random_uuid(),
+  batch_id uuid references accounting_import_batches(id) on delete set null,
+  source_id uuid references accounting_transaction_sources(id) on delete set null,
+  source_file_name text,
+  source_sheet_name text,
+  source_row_no integer,
+  source_type text not null,
+  source_name text not null,
+  transaction_date date,
+  posting_date date,
+  transaction_time text,
+  description text,
+  merchant_name text,
+  debit_amount numeric default 0,
+  credit_amount numeric default 0,
+  amount numeric default 0,
+  currency text default 'KRW',
+  fx_rate numeric,
+  amount_krw numeric,
+  foreign_amount numeric,
+  direction text default 'pending_review',
+  payment_method text,
+  card_name text,
+  account_name text,
+  approval_no text,
+  existing_category_large text,
+  existing_category_middle text,
+  existing_category_small text,
+  category_large text,
+  category_middle text,
+  category_small text,
+  category_id uuid references accounting_categories(id) on delete set null,
+  rule_id uuid references accounting_category_rules(id) on delete set null,
+  confidence numeric default 0,
+  review_status text default 'pending',
+  review_reason text,
+  affects_profit boolean default false,
+  affects_cashflow boolean default true,
+  affects_card_settlement boolean default false,
+  is_active boolean default true,
+  memo text,
+  raw_json jsonb,
+  dedupe_key text not null unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_review_queue (
+  id uuid primary key default gen_random_uuid(),
+  transaction_id uuid references accounting_transactions(id) on delete cascade,
+  reason text,
+  status text default 'pending',
+  suggested_category_id uuid references accounting_categories(id) on delete set null,
+  suggested_category_large text,
+  suggested_category_middle text,
+  suggested_category_small text,
+  resolved_category_id uuid references accounting_categories(id) on delete set null,
+  resolved_by text,
+  resolved_at timestamptz,
+  create_rule boolean default false,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(transaction_id)
+);
+
+create table if not exists accounting_card_settlements (
+  id uuid primary key default gen_random_uuid(),
+  card_name text not null,
+  settlement_start date not null,
+  settlement_end date not null,
+  payment_due_date date not null,
+  domestic_amount numeric default 0,
+  foreign_amount numeric default 0,
+  currency text default 'USD',
+  amount_krw numeric,
+  card_limit numeric,
+  usage_rate numeric,
+  paid boolean default false,
+  memo text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(card_name, settlement_start, settlement_end)
+);
+
+insert into accounting_transaction_sources (source_name, source_type, institution_name, account_name, card_name, source_profile, card_limit, cutoff_start_day, cutoff_end_day, payment_day, payment_month_offset, memo)
+values
+  ('가온글로벌카드', 'card', 'KB국민카드', '가온글로벌카드', '가온글로벌카드', 'gaon_global_card', 20000000, 22, 21, 5, 1, '매월 22일~다음달 21일 사용, 다음달 5일 출금'),
+  ('국민기업카드', 'card', 'KB국민카드', '국민기업카드', '국민기업카드', 'kb_business_card', null, 6, 5, 20, 0, '매월 6일~다음달 5일 사용, 마감달 20일 출금'),
+  ('국민은행 통장', 'bank', 'KB국민은행', '국민은행 사업자통장', null, 'kb_bank_account', null, null, null, null, null, '통장 입출금은 실제 현금흐름'),
+  ('기업은행 통장', 'bank', 'IBK기업은행', '기업은행 사업자통장', null, 'ibk_bank_account', null, null, null, null, null, '통장 입출금은 실제 현금흐름')
+on conflict (source_name) do update set
+  source_type = excluded.source_type,
+  institution_name = excluded.institution_name,
+  account_name = excluded.account_name,
+  card_name = excluded.card_name,
+  source_profile = excluded.source_profile,
+  card_limit = excluded.card_limit,
+  cutoff_start_day = excluded.cutoff_start_day,
+  cutoff_end_day = excluded.cutoff_end_day,
+  payment_day = excluded.payment_day,
+  payment_month_offset = excluded.payment_month_offset,
+  memo = excluded.memo,
+  updated_at = now();
+
+insert into accounting_categories (category_large, category_middle, category_small, affects_profit, affects_cashflow, affects_card_settlement, default_review_required, sort_order, memo)
+values
+  ('매출/정산입금', '스마트스토어', '네이버파이낸셜 정산', true, true, false, false, 10, '통장 입금 기준 스마트스토어 정산'),
+  ('매출/정산입금', '쿠팡', '쿠팡 정산', true, true, false, false, 20, '쿠팡 정산 입금'),
+  ('매출/정산입금', '오픈마켓', '11번가/지마켓/옥션', true, true, false, false, 30, '오픈마켓 정산 입금'),
+  ('매입/원가', '제품매입', '국내거래처결제', true, true, false, false, 100, '국내 거래처 제품 매입'),
+  ('매입/원가', '제품매입', '중국/해외매입', true, false, true, false, 110, '카드 해외 결제 제품 매입'),
+  ('매입/원가', '포장재', '박스구매', true, false, true, true, 120, 'KCP 등 포장재 결제 후보'),
+  ('매입/원가', '수입비용', '관부가세/포워딩/해외송금', true, true, false, false, 130, '수입 통관 및 포워딩 비용'),
+  ('물류/배송', '택배비', 'CJ대한통운', true, true, false, false, 200, 'CJ 택배비'),
+  ('물류/배송', '택배비', '타배/반품택배/화물택배', true, true, false, true, 210, '일반명 택배비 후보'),
+  ('마케팅/광고', '네이버광고', '비즈월렛/검색광고', true, false, true, false, 300, '네이버 광고비'),
+  ('마케팅/광고', '메타광고', 'Facebook/Instagram', true, false, true, false, 310, 'FACEBK 계열 광고비'),
+  ('마케팅/광고', '쿠팡광고', '쿠팡 광고비', true, false, true, false, 320, '쿠팡 광고비'),
+  ('운영비', '소프트웨어', '이카운트', true, false, true, false, 400, '반복 KCP 확인 후 자동분류'),
+  ('운영비', '소프트웨어', 'Adobe/호스팅', true, false, true, false, 410, '구독 및 호스팅'),
+  ('운영비', '사무실', '월세/전기세/관리비', true, true, false, false, 420, '사무실 운영비'),
+  ('운영비', '통신', '인터넷/휴대폰', true, true, false, false, 430, '통신비'),
+  ('차량/교통', '주유비', '', true, false, true, false, 500, '주유비'),
+  ('차량/교통', '하이패스', '', true, false, true, false, 510, '하이패스'),
+  ('인건비', '급여', '', true, true, false, false, 600, '급여'),
+  ('식대/복리', '점심/커피/편의점/회식', '', true, false, true, false, 700, '복리후생'),
+  ('세금/보험', '4대보험', '국민연금/건강보험/고용보험/산재보험', true, true, false, false, 800, '세금 보험'),
+  ('금융비용', '대출이자/보증료/노란우산', '', true, true, false, false, 900, '금융비용'),
+  ('카드대금', '가온글로벌카드', '', false, true, false, false, 1000, '카드대금 출금은 손익 제외'),
+  ('카드대금', '국민기업카드', '', false, true, false, false, 1010, '카드대금 출금은 손익 제외'),
+  ('자금이동', '계좌간이체/대표자입출금', '', false, true, false, true, 1100, '자금 이동성 거래'),
+  ('검토필요', 'KCP확인', '', false, false, false, true, 1200, 'KCP 결제대행 확인'),
+  ('검토필요', '네이버확인', '', false, false, false, true, 1210, '네이버파이낸셜/네이버페이 확인'),
+  ('검토필요', '미분류', '', false, false, false, true, 1220, '미분류 거래'),
+  ('검토필요', '일반명거래', '', false, false, false, true, 1230, '인터넷상거래_4/자동결제_1 등')
+on conflict (category_large, category_middle, category_small) do update set
+  affects_profit = excluded.affects_profit,
+  affects_cashflow = excluded.affects_cashflow,
+  affects_card_settlement = excluded.affects_card_settlement,
+  default_review_required = excluded.default_review_required,
+  sort_order = excluded.sort_order,
+  memo = excluded.memo,
+  updated_at = now();
+
+insert into accounting_category_rules (priority, source_type, condition_field, condition_operator, keyword, amount_condition, category_large, category_middle, category_small, auto_confirm, review_required, review_reason, memo)
+values
+  (10, 'card', 'merchant_name', 'starts_with', 'FACEBK', null, '마케팅/광고', '메타광고', 'Facebook/Instagram', true, false, null, 'FACEBK 계열 메타 광고'),
+  (20, 'card', 'merchant_name', 'equals', '네이버페이_비즈월렛', null, '마케팅/광고', '네이버광고', '비즈월렛/검색광고', true, false, null, '네이버 비즈월렛'),
+  (30, 'card', 'merchant_name', 'contains', '네이버파이낸셜', null, '검토필요', '네이버확인', '', false, true, '네이버확인', '카드 네이버파이낸셜은 제품 구매/광고/일반구매 혼재'),
+  (50, 'card', 'merchant_name', 'contains', 'KCP(자동과금)', '300000', '검토필요', 'KCP확인', '', false, true, 'KCP확인', '반복 확인 전 검토'),
+  (60, 'card', 'merchant_name', 'contains', 'KCP(결제대행)', null, '검토필요', 'KCP확인', '', false, true, 'KCP확인', 'KCP 결제대행은 기본 검토'),
+  (61, 'card', 'merchant_amount', 'contains', 'KCP(결제대행)', '44000', '운영비', '소프트웨어', '이카운트', true, false, null, '반복 확인된 이카운트 금액'),
+  (62, 'card', 'merchant_amount', 'contains', 'KCP(결제대행)', '95040', '운영비', '소프트웨어', 'Adobe/호스팅', true, false, null, '반복 확인된 호스팅 금액'),
+  (70, 'card', 'merchant_name', 'contains', '인터넷상거래_4', null, '검토필요', '일반명거래', '', false, true, '일반명거래', '일반명 거래는 검토'),
+  (80, 'card', 'merchant_name', 'contains', '자동결제_1', null, '검토필요', '일반명거래', '', false, true, '일반명거래', '자동결제 일반명 거래'),
+  (90, 'card', 'merchant_name', 'contains', '1688.com', null, '매입/원가', '제품매입', '중국/해외매입', true, false, null, '1688 제품 매입'),
+  (100, 'bank', 'merchant_name', 'contains', '네이버파이낸셜주식회', null, '매출/정산입금', '스마트스토어', '네이버파이낸셜 정산', true, false, null, '통장 입금 네이버 정산'),
+  (110, 'bank', 'merchant_name', 'contains', '쿠팡', null, '매출/정산입금', '쿠팡', '쿠팡 정산', true, false, null, '쿠팡 정산 입금'),
+  (120, 'bank', 'merchant_name', 'contains', '카드대금', null, '카드대금', '가온글로벌카드', '', true, false, null, '카드대금 출금은 손익 제외'),
+  (130, 'bank', 'merchant_name', 'contains', '이체', null, '자금이동', '계좌간이체/대표자입출금', '', false, true, '자금이동 확인', '계좌 이동성 거래')
+on conflict do nothing;
+
 insert into expense_categories (category_name)
 values
   ('광고비'),
@@ -929,6 +1174,17 @@ create index if not exists idx_expenses_category on expenses(category_id);
 create index if not exists idx_expense_batches_uploaded on expense_upload_batches(uploaded_at desc);
 create index if not exists idx_payment_records_date on payment_records(payment_date desc);
 create index if not exists idx_customer_payables_month on customer_payables(base_month, status);
+create index if not exists idx_accounting_batches_source on accounting_import_batches(source_name, created_at desc);
+create index if not exists idx_accounting_sources_type on accounting_transaction_sources(source_type);
+create index if not exists idx_accounting_categories_path on accounting_categories(category_large, category_middle, category_small);
+create index if not exists idx_accounting_rules_priority on accounting_category_rules(is_active, priority);
+create index if not exists idx_accounting_transactions_date on accounting_transactions(transaction_date desc);
+create index if not exists idx_accounting_transactions_source on accounting_transactions(source_type, source_name);
+create index if not exists idx_accounting_transactions_category on accounting_transactions(category_id);
+create index if not exists idx_accounting_transactions_review on accounting_transactions(review_status, review_reason);
+create index if not exists idx_accounting_transactions_direction on accounting_transactions(direction);
+create index if not exists idx_accounting_review_status on accounting_review_queue(status, reason);
+create index if not exists idx_accounting_card_settlements_due on accounting_card_settlements(payment_due_date desc);
 create index if not exists idx_import_po_status on import_purchase_orders(status, expected_inbound_date);
 create index if not exists idx_import_product_sku_links_import on import_product_sku_links(import_product_id);
 create index if not exists idx_import_product_sku_links_option on import_product_sku_links(import_product_id, import_option_key, sort_order);

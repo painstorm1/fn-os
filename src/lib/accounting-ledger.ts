@@ -1,0 +1,380 @@
+import { insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
+
+type RawRow = Record<string, unknown>;
+type QueryValue = string | number | boolean | null | undefined;
+
+const SOURCE_ALIASES: Record<string, { sourceType: "card" | "bank"; sourceName: string; cardName?: string; accountName?: string }> = {
+  "가온글로벌카드": { sourceType: "card", sourceName: "가온글로벌카드", cardName: "가온글로벌카드" },
+  "국민기업카드": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
+  "국민카드": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
+  "국민카드 1": { sourceType: "card", sourceName: "가온글로벌카드", cardName: "가온글로벌카드" },
+  "국민카드 2": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
+  "국민은행": { sourceType: "bank", sourceName: "국민은행 통장", accountName: "국민은행 사업자통장" },
+  "국민은행 통장": { sourceType: "bank", sourceName: "국민은행 통장", accountName: "국민은행 사업자통장" },
+  "기업은행": { sourceType: "bank", sourceName: "기업은행 통장", accountName: "기업은행 사업자통장" },
+  "기업은행 통장": { sourceType: "bank", sourceName: "기업은행 통장", accountName: "기업은행 사업자통장" },
+};
+
+const REVIEW_CATEGORY_BY_REASON: Record<string, [string, string, string]> = {
+  KCP확인: ["검토필요", "KCP확인", ""],
+  네이버확인: ["검토필요", "네이버확인", ""],
+  일반명거래: ["검토필요", "일반명거래", ""],
+  "자금이동 확인": ["자금이동", "계좌간이체/대표자입출금", ""],
+  미분류: ["검토필요", "미분류", ""],
+};
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function first(row: RawRow, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && text(value) !== "") return value;
+  }
+  return "";
+}
+
+function numberValue(value: unknown) {
+  const parsed = Number(text(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isoDate(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "";
+  if (/^\d{8}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  if (/^\d{4}[./-]\d{1,2}[./-]\d{1,2}/.test(raw)) {
+    const [year, month, day] = raw.split(/[./-\s]/);
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  return "";
+}
+
+function addMonths(year: number, month: number, delta: number) {
+  const date = new Date(year, month - 1 + delta, 1);
+  return { year: date.getFullYear(), month: date.getMonth() + 1 };
+}
+
+function dateText(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function sourceMeta(row: RawRow) {
+  const raw = text(row.source_name || row.source_type || row.sourceType);
+  const alias = SOURCE_ALIASES[raw];
+  if (alias) return alias;
+  if (/가온/.test(raw)) return SOURCE_ALIASES["가온글로벌카드"];
+  if (/국민.*카드|기업카드/.test(raw)) return SOURCE_ALIASES["국민기업카드"];
+  if (/국민.*은행/.test(raw)) return SOURCE_ALIASES["국민은행"];
+  if (/기업.*은행|IBK/i.test(raw)) return SOURCE_ALIASES["기업은행"];
+  return { sourceType: /은행|통장/.test(raw) ? "bank" as const : "card" as const, sourceName: raw || "기타" };
+}
+
+function settlementFor(cardName: string, date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  if (cardName === "가온글로벌카드") {
+    const startBase = day >= 22 ? { year, month } : addMonths(year, month, -1);
+    const endBase = day >= 22 ? addMonths(year, month, 1) : { year, month };
+    const dueBase = addMonths(startBase.year, startBase.month, 2);
+    return {
+      settlement_start: dateText(startBase.year, startBase.month, 22),
+      settlement_end: dateText(endBase.year, endBase.month, 21),
+      payment_due_date: dateText(dueBase.year, dueBase.month, 5),
+      card_limit: 20000000,
+    };
+  }
+  if (cardName === "국민기업카드") {
+    const startBase = day >= 6 ? { year, month } : addMonths(year, month, -1);
+    const endBase = day >= 6 ? addMonths(year, month, 1) : { year, month };
+    const dueBase = day >= 6 ? addMonths(year, month, 1) : { year, month };
+    return {
+      settlement_start: dateText(startBase.year, startBase.month, 6),
+      settlement_end: dateText(endBase.year, endBase.month, 5),
+      payment_due_date: dateText(dueBase.year, dueBase.month, 20),
+      card_limit: null,
+    };
+  }
+  return null;
+}
+
+function directionFor(sourceType: string, row: RawRow, merchant: string, debit: number, credit: number) {
+  const haystack = `${merchant} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)}`;
+  if (/카드대금|카드결제|결제대금/.test(haystack)) return "card_payment";
+  if (/계좌|이체|대표자|자금|대출원금|상환/.test(haystack)) return "transfer";
+  if (sourceType === "bank" && credit > 0) return "income";
+  if (sourceType === "bank" && debit > 0) return "expense";
+  if (sourceType === "card") return "expense";
+  return "pending_review";
+}
+
+function existingCategory(row: RawRow) {
+  const large = text(first(row, ["existing_category_large", "기존대분류", "category", "카테고리", "분류"]));
+  const middle = text(first(row, ["existing_category_middle", "기존중분류", "category_detail", "세부분류", "중분류", "상세분류"]));
+  const small = text(first(row, ["existing_category_small", "기존소분류", "category_memo", "소분류", "보조메모", "분류메모"]));
+  return { large, middle, small };
+}
+
+function dedupeKey(parts: Array<unknown>) {
+  return parts.map((part) => text(part).replace(/\s+/g, " ")).join("|").toLowerCase();
+}
+
+function ruleMatches(rule: RawRow, tx: RawRow) {
+  const field = text(rule.condition_field || "merchant_name");
+  const operator = text(rule.condition_operator || "contains");
+  const keyword = text(rule.keyword);
+  const amountCondition = text(rule.amount_condition);
+  const target = field === "merchant_amount"
+    ? `${tx.merchant_name || ""} ${tx.amount || ""}`
+    : text(tx[field] ?? tx.merchant_name ?? tx.description);
+  if (text(rule.source_type) && text(rule.source_type) !== text(tx.source_type)) return false;
+  if (text(rule.source_name) && text(rule.source_name) !== text(tx.source_name)) return false;
+  if (text(rule.direction_condition) && text(rule.direction_condition) !== text(tx.direction)) return false;
+  if (amountCondition && amountCondition !== "무관" && !amountCondition.split(/[,/또는\s]+/).filter(Boolean).some((item) => numberValue(item) === numberValue(tx.amount))) return false;
+  if (!keyword) return true;
+  if (operator === "equals" || operator === "일치") return target === keyword;
+  if (operator === "starts_with" || operator === "시작") return target.startsWith(keyword);
+  return target.includes(keyword);
+}
+
+async function optionalRows(table: string, query?: Record<string, QueryValue>) {
+  return selectRows<RawRow>(table, query).catch(() => []);
+}
+
+function categoryKey(row: RawRow) {
+  return `${text(row.category_large)}|${text(row.category_middle)}|${text(row.category_small)}`;
+}
+
+export function normalizeAccountingTransaction(row: RawRow) {
+  const meta = sourceMeta(row);
+  const transactionDate = isoDate(first(row, ["transaction_date", "expense_date", "거래일", "일자", "날짜", "이용일자", "승인일자"]));
+  const merchant = text(first(row, ["merchant_name", "vendor_name", "거래처", "가맹점명", "적요", "받는분", "사용처"]));
+  const description = text(first(row, ["description", "거래내용", "내용", "이용내역", "메모", "적요"])) || merchant;
+  const withdrawal = numberValue(first(row, ["debit_amount", "출금액", "지급금액", "withdraw", "withdraw_amount"]));
+  const deposit = numberValue(first(row, ["credit_amount", "입금액", "deposit", "deposit_amount"]));
+  const explicitAmount = numberValue(first(row, ["amount", "total_amount", "금액원", "금액", "이용금액", "승인금액", "결제금액", "사용금액"]));
+  const amount = explicitAmount || withdrawal || deposit;
+  const debit = meta.sourceType === "card" ? amount : withdrawal;
+  const credit = meta.sourceType === "bank" ? deposit : 0;
+  const foreignAmount = numberValue(first(row, ["foreign_amount", "해외금액", "USD", "외화금액"]));
+  const currency = text(first(row, ["currency", "통화"])) || (foreignAmount > 0 && amount === 0 ? "USD" : "KRW");
+  const fxRate = numberValue(first(row, ["fx_rate", "환율"]));
+  const amountKrw = currency === "KRW" ? amount : fxRate ? foreignAmount * fxRate : null;
+  const existing = existingCategory(row);
+  const direction = directionFor(meta.sourceType, row, merchant, debit, credit);
+  const approvalNo = text(first(row, ["approval_no", "승인번호", "거래번호"]));
+  const key = dedupeKey([
+    meta.sourceName,
+    transactionDate,
+    approvalNo || text(row.transaction_time || row["거래시각"]),
+    merchant || description,
+    amount || foreignAmount,
+  ]);
+  return {
+    source_file_name: text(row.source_file_name || row["원본파일"]),
+    source_sheet_name: text(row.source_sheet_name),
+    source_row_no: numberValue(row.source_row_no || row["원본행"]) || null,
+    source_type: meta.sourceType,
+    source_name: meta.sourceName,
+    transaction_date: transactionDate || null,
+    posting_date: isoDate(row.posting_date || row["승인일"] || row["이용일"]) || transactionDate || null,
+    transaction_time: text(row.transaction_time || row["거래시각"]),
+    description,
+    merchant_name: merchant || description,
+    debit_amount: debit,
+    credit_amount: credit,
+    amount,
+    currency,
+    fx_rate: fxRate || null,
+    amount_krw: amountKrw,
+    foreign_amount: foreignAmount || null,
+    direction,
+    payment_method: text(row.payment_method || row["결제수단"]),
+    card_name: meta.cardName || null,
+    account_name: meta.accountName || null,
+    approval_no: approvalNo,
+    existing_category_large: existing.large,
+    existing_category_middle: existing.middle,
+    existing_category_small: existing.small,
+    memo: text(row.memo || row["비고"]),
+    raw_json: row,
+    dedupe_key: key,
+  };
+}
+
+export async function classifyAccountingTransactions(rows: RawRow[]): Promise<RawRow[]> {
+  const [categories, rules] = await Promise.all([
+    optionalRows("accounting_categories", { order: "sort_order.asc", limit: 500 }),
+    optionalRows("accounting_category_rules", { is_active: "eq.true", order: "priority.asc", limit: 500 }),
+  ]);
+  const categoryByPath = new Map(categories.map((category) => [categoryKey(category), category]));
+  const defaultReview = categoryByPath.get("검토필요|미분류|");
+
+  return rows.map((row) => {
+    const rule = rules.find((item) => ruleMatches(item, row));
+    const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
+    const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
+    const categoryLarge = reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const categoryMiddle = reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
+    const categorySmall = reviewPath?.[2] || text(rule?.category_small) || text(row.existing_category_small) || text(defaultReview?.category_small);
+    const category = categoryByPath.get(`${categoryLarge}|${categoryMiddle}|${categorySmall}`) || defaultReview;
+    const needsReview = Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required);
+    return {
+      ...row,
+      category_large: categoryLarge,
+      category_middle: categoryMiddle,
+      category_small: categorySmall,
+      category_id: category?.id || null,
+      rule_id: rule?.id || null,
+      confidence: rule ? (needsReview ? 0.55 : 0.9) : 0.3,
+      review_status: needsReview ? "pending" : "confirmed",
+      review_reason: reviewReason || (needsReview ? "미분류" : ""),
+      affects_profit: category?.affects_profit ?? row.direction === "expense",
+      affects_cashflow: category?.affects_cashflow ?? row.source_type === "bank",
+      affects_card_settlement: category?.affects_card_settlement ?? row.source_type === "card",
+    } as RawRow;
+  });
+}
+
+async function upsertReviewRows(transactions: RawRow[]) {
+  const reviewRows = transactions
+    .filter((row) => text(row.review_status) === "pending" && text(row.id))
+    .map((row) => ({
+      transaction_id: row.id,
+      reason: text(row.review_reason) || "미분류",
+      status: "pending",
+      suggested_category_id: row.category_id || null,
+      suggested_category_large: row.category_large || null,
+      suggested_category_middle: row.category_middle || null,
+      suggested_category_small: row.category_small || null,
+      memo: row.memo || null,
+    }));
+  if (reviewRows.length) await upsertRows("accounting_review_queue", reviewRows, "transaction_id");
+}
+
+async function rebuildCardSettlements() {
+  const cardRows = await optionalRows("accounting_transactions", { source_type: "eq.card", is_active: "eq.true", limit: 5000 });
+  const grouped = new Map<string, RawRow>();
+  for (const row of cardRows) {
+    const cardName = text(row.card_name || row.source_name);
+    const txDate = isoDate(row.transaction_date);
+    const settlement = settlementFor(cardName, txDate);
+    if (!settlement) continue;
+    const key = `${cardName}|${settlement.settlement_start}|${settlement.settlement_end}`;
+    const prev = grouped.get(key) || {
+      card_name: cardName,
+      ...settlement,
+      domestic_amount: 0,
+      foreign_amount: 0,
+      amount_krw: 0,
+      currency: "USD",
+      paid: false,
+    };
+    prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? numberValue(row.amount_krw ?? row.amount) : 0);
+    prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : numberValue(row.foreign_amount || row.amount));
+    prev.amount_krw = numberValue(prev.amount_krw) + numberValue(row.amount_krw);
+    prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.domestic_amount) / numberValue(prev.card_limit) : null;
+    grouped.set(key, prev);
+  }
+  const rows = Array.from(grouped.values());
+  if (rows.length) await upsertRows("accounting_card_settlements", rows, "card_name,settlement_start,settlement_end");
+  return rows;
+}
+
+export async function importAccountingLedgerRows(rows: RawRow[], options: { sourceType?: string; sourceFileName?: string; uploadedBy?: string; memo?: string } = {}) {
+  const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }));
+  const classified = await classifyAccountingTransactions(normalized);
+  const [batch] = await insertRows<{ id: string }>("accounting_import_batches", {
+    source_name: options.sourceType || "자동 분류",
+    source_type: options.sourceType || "auto",
+    source_file_name: options.sourceFileName || null,
+    uploaded_by: options.uploadedBy || null,
+    total_count: classified.length,
+    status: "processing",
+    memo: options.memo || null,
+  });
+  const rowsWithBatch: RawRow[] = classified.map((row) => ({ ...row, batch_id: batch.id }));
+  const existing = rowsWithBatch.length
+    ? await optionalRows("accounting_transactions", { dedupe_key: `in.(${rowsWithBatch.map((row) => `"${String(row.dedupe_key).replace(/"/g, '\\"')}"`).join(",")})`, limit: rowsWithBatch.length })
+    : [];
+  const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
+  const fresh = rowsWithBatch.filter((row) => !existingKeys.has(text(row.dedupe_key)));
+  const saved = fresh.length ? await upsertRows<RawRow>("accounting_transactions", fresh, "dedupe_key") : [];
+  await upsertReviewRows(saved);
+  await rebuildCardSettlements();
+  const reviewCount = saved.filter((row) => text(row.review_status) === "pending").length;
+  await patchRows("accounting_import_batches", { id: `eq.${batch.id}` }, {
+    new_count: saved.length,
+    duplicate_count: classified.length - fresh.length,
+    error_count: 0,
+    review_count: reviewCount,
+    status: "uploaded",
+    updated_at: new Date().toISOString(),
+  });
+  return {
+    ok: true,
+    batch_id: batch.id,
+    total_count: classified.length,
+    success_count: saved.length,
+    new_count: saved.length,
+    duplicate_count: classified.length - fresh.length,
+    review_count: reviewCount,
+  };
+}
+
+export async function accountingLedgerSummary(range?: { from?: string; to?: string }) {
+  const from = text(range?.from);
+  const to = text(range?.to);
+  const dateFilter = from && to ? `gte.${from}` : undefined;
+  const rows = await optionalRows("accounting_transactions", {
+    ...(dateFilter ? { transaction_date: dateFilter } : {}),
+    order: "transaction_date.desc",
+    limit: 2000,
+  });
+  const filtered = rows.filter((row) => {
+    const date = isoDate(row.transaction_date);
+    if (from && date < from) return false;
+    if (to && date > to) return false;
+    return row.is_active !== false;
+  });
+  const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
+  const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
+  const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
+  const income = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
+  const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
+  const cashIn = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.credit_amount), 0);
+  const cashOut = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.debit_amount), 0);
+  const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.domestic_amount), 0);
+  const group = (pick: (row: RawRow) => string) => {
+    const map = new Map<string, { label: string; amount: number; count: number }>();
+    for (const row of filtered) {
+      const label = pick(row) || "기타";
+      const prev = map.get(label) || { label, amount: 0, count: 0 };
+      prev.amount += numberValue(row.amount_krw ?? row.amount);
+      prev.count += 1;
+      map.set(label, prev);
+    }
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  };
+  return {
+    transactions: filtered.slice(0, 300),
+    batches,
+    review_queue: reviewQueue,
+    card_settlements: settlements,
+    totals: {
+      income_amount: income,
+      expense_amount: expense,
+      net_profit: income - expense,
+      cashflow_amount: cashIn - cashOut,
+      card_settlement_due: pendingCard,
+      review_count: reviewQueue.length,
+      transaction_count: filtered.length,
+    },
+    by_category_large: group((row) => text(row.category_large)),
+    by_vendor: group((row) => text(row.merchant_name)),
+    by_card: group((row) => text(row.card_name || row.source_name)),
+  };
+}

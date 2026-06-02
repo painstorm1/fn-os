@@ -73,6 +73,29 @@ Last updated: 2026-06-02
   - related `/api/fnos/...` list endpoints
 - Avoid cookie-based data caching.
 
+## P1 - Accounting Ledger V1
+
+- Run the updated `schema_sales_inventory.sql` in Supabase before using the new ledger APIs.
+- Connect the existing accounting upload preview/save buttons to:
+  - `POST /api/accounting/ledger/parse`
+  - `POST /api/accounting/ledger/upload`
+- Connect the right 320px panel to:
+  - `GET /api/accounting/ledger/summary`
+- Rename/re-map accounting tabs to:
+  - `회계/비용 대시보드`
+  - `거래 DB`
+  - `업로드`
+  - `카드 정산`
+  - `카테고리 설정`
+  - `자동분류 규칙`
+  - `검토필요`
+- Add UI for pending `accounting_review_queue` rows:
+  - category override
+  - mark confirmed
+  - save matching rule
+- Add CRUD APIs for `accounting_categories` and `accounting_category_rules`.
+- Confirm `국민기업카드` card limit.
+
 ## P2 - URL State
 
 - Audit remaining internal tabs where F5/Back should preserve state.
@@ -132,4 +155,3 @@ When a task says "UI only":
 ```text
 DB/API/저장/삭제/검색/업로드 로직은 유지하고, JSX 구조와 공통 컴포넌트/스타일만 정리합니다.
 ```
-
