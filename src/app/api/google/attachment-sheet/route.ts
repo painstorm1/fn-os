@@ -24,6 +24,10 @@ function normalizePrivateKey(value: string) {
   return value.replace(/\\n/g, "\n");
 }
 
+function hasOAuthConfig() {
+  return Boolean(env("GOOGLE_CLIENT_ID") && env("GOOGLE_CLIENT_SECRET") && env("GOOGLE_REFRESH_TOKEN"));
+}
+
 function cleanFileName(value: string) {
   return (value || "attachment").replace(/[\\/:*?"<>|]/g, "_").trim() || "attachment";
 }
@@ -51,21 +55,52 @@ function isExcelFile(fileName: string) {
 
 function readableGoogleError(message: string) {
   if (message.includes("Requested entity was not found")) {
-    return "GOOGLE_DRIVE_FOLDER_ID를 찾을 수 없습니다. 폴더 ID와 공유 권한을 확인해주세요.";
+    return "GOOGLE_DRIVE_FOLDER_ID를 찾을 수 없습니다. 폴더 ID와 공유 권한을 확인해 주세요.";
   }
   if (message.includes("The caller does not have permission") || message.includes("PERMISSION_DENIED")) {
-    return "구글 드라이브 접근 권한이 없습니다. GOOGLE_SERVICE_ACCOUNT_EMAIL을 해당 Drive 폴더에 편집자로 공유해주세요.";
+    return "Google Drive 접근 권한이 없습니다. OAuth 계정 또는 서비스 계정에 해당 Drive 폴더 편집 권한을 공유해 주세요.";
   }
   if (message.includes("Google Drive API has not been used") || message.includes("disabled")) {
-    return "Google Drive API가 활성화되어 있지 않습니다. Google Cloud에서 Drive API를 켜주세요.";
+    return "Google Drive API가 활성화되어 있지 않습니다. Google Cloud에서 Drive API를 켜 주세요.";
+  }
+  if (message.includes("storage quota has been exceeded")) {
+    return "Google Drive 저장공간 한도를 초과했습니다. OAuth 개인 계정 환경변수가 설정되어 있는지 확인하거나 Drive 저장공간을 정리해 주세요.";
   }
   return message;
 }
 
-async function getGoogleAccessToken() {
+async function getOAuthAccessToken() {
+  const clientId = env("GOOGLE_CLIENT_ID");
+  const clientSecret = env("GOOGLE_CLIENT_SECRET");
+  const refreshToken = env("GOOGLE_REFRESH_TOKEN");
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN이 모두 필요합니다.");
+  }
+
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+    cache: "no-store",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.access_token) {
+    throw new Error(String(data.error_description || data.error || "Google OAuth access token 발급 실패"));
+  }
+  return String(data.access_token);
+}
+
+async function getServiceAccountAccessToken() {
   const email = env("GOOGLE_SERVICE_ACCOUNT_EMAIL");
   const privateKey = env("GOOGLE_PRIVATE_KEY");
-  if (!email || !privateKey) throw new Error("GOOGLE_SERVICE_ACCOUNT_EMAIL 또는 GOOGLE_PRIVATE_KEY가 설정되지 않았습니다.");
+  if (!email || !privateKey) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_EMAIL 또는 GOOGLE_PRIVATE_KEY가 설정되지 않았습니다.");
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
@@ -94,9 +129,14 @@ async function getGoogleAccessToken() {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.access_token) {
-    throw new Error(String(data.error_description || data.error || "Google access token 발급 실패"));
+    throw new Error(String(data.error_description || data.error || "Google service account access token 발급 실패"));
   }
   return String(data.access_token);
+}
+
+async function getGoogleAccessToken() {
+  if (hasOAuthConfig()) return getOAuthAccessToken();
+  return getServiceAccountAccessToken();
 }
 
 async function googleDriveFetch(path: string, init: RequestInit = {}) {
@@ -177,7 +217,7 @@ export async function POST(request: NextRequest) {
     if (!folderId) {
       return NextResponse.json({
         ok: false,
-        error: "GOOGLE_DRIVE_FOLDER_ID가 설정되지 않았습니다. Google Drive 폴더를 만들고 서비스 계정에 공유한 뒤 Vercel 환경변수에 폴더 ID를 넣어주세요.",
+        error: "GOOGLE_DRIVE_FOLDER_ID가 설정되지 않았습니다. Google Drive 폴더를 만들고 OAuth 계정 또는 서비스 계정에 공유한 뒤 Vercel 환경변수에 폴더 ID를 넣어주세요.",
       }, { status: 400 });
     }
 
@@ -207,6 +247,7 @@ export async function POST(request: NextRequest) {
       title: sheet.name,
       url: sheet.webViewLink,
       reused: Boolean(existing),
+      authMode: hasOAuthConfig() ? "oauth" : "service_account",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google Sheets 열기에 실패했습니다.";
