@@ -7368,7 +7368,10 @@ type InventorySetting = {
 type InventoryPicker = {
   type: "warehouse" | "product";
   query: string;
+  searchedQuery: string;
   index: number;
+  selectedKeys: string[];
+  attribute: ProductSearchAttributeFilter;
 };
 type InventoryListRow = {
   key: string;
@@ -7593,12 +7596,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }, []);
 
   useEffect(() => {
-    const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>("/api/fnos/products/master?page=1&pageSize=5000", { storageTtl: 10 * 60_000 });
+    const inventoryUrl = `/api/fnos/products/master?page=1&pageSize=5000&asOf=${encodeURIComponent(inventoryFilters.date)}`;
+    const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>(inventoryUrl, { storageTtl: 10 * 60_000 });
     if (cached) {
       setInventoryProducts(cached.products || []);
       setInventoryWarehouses(cached.warehouses || []);
     }
-    cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 5 * 60_000, storageTtl: 10 * 60_000 })
+    cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>(inventoryUrl, { ttl: 60_000, storageTtl: 10 * 60_000 })
       .then((data) => {
         setInventoryProducts(data.products || []);
         setInventoryWarehouses(data.warehouses || []);
@@ -7607,7 +7611,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setInventoryProducts([]);
         setInventoryWarehouses([]);
       });
-  }, []);
+  }, [inventoryFilters.date]);
 
   useEffect(() => {
     try {
@@ -8739,15 +8743,37 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const start = Math.min(Math.max(1, inventoryCurrentPage - 2), Math.max(1, inventoryTotalPages - 4));
     return start + index;
   }).filter((page) => page <= inventoryTotalPages);
+  const inventorySearchTerms = (value: string) => value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const inventoryMatchesTerms = (haystack: string, query: string) => {
+    const text = haystack.toLowerCase();
+    return inventorySearchTerms(query).every((term) => text.includes(term));
+  };
+  const inventoryProductMatchesAttribute = (product: FnProduct, attribute: ProductSearchAttributeFilter) => {
+    if (attribute === "all") return true;
+    const productAttribute = String(product.product_attribute || product.product_kind || "").toLowerCase();
+    if (attribute === "set") return productAttribute === "set" || inventoryProductName(product).startsWith("[SET]");
+    if (attribute === "rg") return productAttribute === "rg" || inventoryProductName(product).startsWith("[RG]");
+    if (attribute === "import") return Boolean(product.import_links?.length);
+    return true;
+  };
+  const inventoryPickerKey = (item: FnProduct | WarehouseOption, index: number) => {
+    if (inventoryPicker?.type === "product") {
+      const product = item as FnProduct;
+      return `${inventoryProductCode(product)}-${String(product.id || index)}`;
+    }
+    const warehouse = item as WarehouseOption;
+    return `${warehouse.warehouse_code}-${String(warehouse.id || index)}`;
+  };
   const inventoryWarehousePickerOptions = inventoryWarehouses.filter((warehouse) => {
-    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.query : inventoryFilters.warehouse).trim().toLowerCase();
+    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.query : inventoryFilters.warehouse).trim();
     if (!needle) return true;
-    return `${warehouse.warehouse_code} ${warehouse.warehouse_name}`.toLowerCase().includes(needle);
+    return inventoryMatchesTerms(`${warehouse.warehouse_code} ${warehouse.warehouse_name}`, needle);
   }).slice(0, 50);
   const inventoryProductPickerOptions = inventoryProducts.filter((product) => {
-    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.query : inventoryFilters.product).trim().toLowerCase();
+    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.query : inventoryFilters.product).trim();
+    if (!inventoryProductMatchesAttribute(product, inventoryPicker?.attribute || "all")) return false;
     if (!needle) return true;
-    return `${inventoryProductCode(product)} ${inventoryProductName(product)}`.toLowerCase().includes(needle);
+    return inventoryMatchesTerms(`${inventoryProductCode(product)} ${inventoryProductName(product)}`, needle);
   }).slice(0, 50);
   const inventoryPickerCount = inventoryPicker?.type === "warehouse" ? inventoryWarehousePickerOptions.length : inventoryProductPickerOptions.length;
   const selectedInventoryRows = inventoryListRows.filter((row) => selectedInventoryKeys.includes(row.key));
@@ -8769,17 +8795,41 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function openInventoryPicker(type: "warehouse" | "product") {
-    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, index: 0 });
+    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, searchedQuery: "", index: 0, selectedKeys: [], attribute: "all" });
   }
 
-  function selectInventoryPickerOption(index = inventoryPicker?.index || 0) {
+  function setInventoryPickerSelected(key: string, selected: boolean) {
+    setInventoryPicker((prev) => {
+      if (!prev) return prev;
+      const exists = prev.selectedKeys.includes(key);
+      if (selected && !exists) return { ...prev, selectedKeys: [...prev.selectedKeys, key] };
+      if (!selected && exists) return { ...prev, selectedKeys: prev.selectedKeys.filter((item) => item !== key) };
+      return prev;
+    });
+  }
+
+  function handleInventoryPickerSelection(index: number, event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!inventoryPicker) return;
+    const options = inventoryPicker.type === "warehouse" ? inventoryWarehousePickerOptions : inventoryProductPickerOptions;
+    const item = options[index];
+    if (!item) return;
+    const key = inventoryPickerKey(item, index);
+    setInventoryPicker((prev) => prev ? { ...prev, index } : prev);
+    setInventoryPickerSelected(key, !inventoryPicker.selectedKeys.includes(key));
+  }
+
+  function applyInventoryPickerSelection() {
     if (!inventoryPicker) return;
     if (inventoryPicker.type === "warehouse") {
-      const warehouse = inventoryWarehousePickerOptions[index];
+      const selectedIndex = inventoryWarehousePickerOptions.findIndex((warehouse, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(warehouse, index)));
+      const warehouse = inventoryWarehousePickerOptions[selectedIndex >= 0 ? selectedIndex : inventoryPicker.index];
       if (!warehouse) return;
       setInventoryFilters((prev) => ({ ...prev, warehouse: warehouse.warehouse_code }));
     } else {
-      const product = inventoryProductPickerOptions[index];
+      const selectedIndex = inventoryProductPickerOptions.findIndex((product, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(product, index)));
+      const product = inventoryProductPickerOptions[selectedIndex >= 0 ? selectedIndex : inventoryPicker.index];
       if (!product) return;
       setInventoryFilters((prev) => ({ ...prev, product: inventoryProductCode(product) }));
     }
@@ -8798,7 +8848,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      selectInventoryPickerOption();
+      applyInventoryPickerSelection();
     }
   }
 
@@ -9160,8 +9210,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <ActionButton type="button" onClick={openInventoryEdit}>수정</ActionButton>
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
+              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={inventoryFilters.date} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, date: event.target.value }))} />
             </div>
           </div>
@@ -9345,52 +9395,114 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {inventoryPicker && (
         <SelectionModal
           title={inventoryPicker.type === "warehouse" ? "창고선택" : "품목선택"}
-          description="위/아래 화살표로 이동하고 Enter로 선택합니다."
           onClose={() => setInventoryPicker(null)}
           size="lg"
+          footer={
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <ActionButton type="button" onClick={applyInventoryPickerSelection} disabled={!inventoryPicker.selectedKeys.length}>선택 적용</ActionButton>
+                {inventoryPicker.type === "product" && (
+                  <select
+                    className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 outline-orange-400"
+                    value={inventoryPicker.attribute}
+                    onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, attribute: event.target.value as ProductSearchAttributeFilter, index: 0, selectedKeys: [] } : prev)}
+                    aria-label="품목 속성 검색"
+                  >
+                    <option value="all">전체</option>
+                    <option value="set">SET</option>
+                    <option value="rg">RG</option>
+                    <option value="import">수입연동</option>
+                  </select>
+                )}
+              </div>
+              <ActionButton type="button" variant="secondary" onClick={() => setInventoryPicker(null)}>닫기</ActionButton>
+            </div>
+          }
         >
           <div className="space-y-3" onKeyDown={handleInventoryPickerKeyDown}>
-            <input
-              className={modalInputClass}
-              autoFocus
-              value={inventoryPicker.query}
-              onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, query: event.target.value, index: 0 } : prev)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
+            <div className="mb-3 flex gap-2">
+              <input
+                className={modalInputClass}
+                autoFocus
+                value={inventoryPicker.query}
+                onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, query: event.target.value, index: 0, selectedKeys: [] } : prev)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
                   event.preventDefault();
-                  selectInventoryPickerOption();
-                }
-              }}
-              placeholder={inventoryPicker.type === "warehouse" ? "창고코드 / 창고명 검색" : "품목코드 / 품목명 검색"}
-            />
+                  event.stopPropagation();
+                  setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query } : prev);
+                }}
+                placeholder={inventoryPicker.type === "warehouse" ? "창고코드 / 창고명 검색" : "품목코드 / 품목명 검색"}
+              />
+              <ActionButton type="button" onClick={() => setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query } : prev)}>찾기</ActionButton>
+            </div>
             <div className="max-h-[420px] overflow-y-auto rounded-lg border border-slate-200 bg-white">
-              {inventoryPicker.type === "warehouse" ? (
-                inventoryWarehousePickerOptions.length ? inventoryWarehousePickerOptions.map((warehouse, index) => (
-                  <button
-                    key={warehouse.id || warehouse.warehouse_code}
-                    type="button"
-                    className={`grid w-full grid-cols-[130px_1fr] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 ${index === inventoryPicker.index ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50"}`}
-                    onMouseEnter={() => setInventoryPicker((prev) => prev ? { ...prev, index } : prev)}
-                    onClick={() => selectInventoryPickerOption(index)}
-                  >
-                    <span className="font-black">{warehouse.warehouse_code || "-"}</span>
-                    <span className="truncate font-bold text-slate-700">{warehouse.warehouse_name || "-"}</span>
-                  </button>
-                )) : <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">선택할 창고가 없습니다.</div>
-              ) : (
-                inventoryProductPickerOptions.length ? inventoryProductPickerOptions.map((product, index) => (
-                  <button
-                    key={product.id || inventoryProductCode(product)}
-                    type="button"
-                    className={`grid w-full grid-cols-[150px_1fr] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 ${index === inventoryPicker.index ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50"}`}
-                    onMouseEnter={() => setInventoryPicker((prev) => prev ? { ...prev, index } : prev)}
-                    onClick={() => selectInventoryPickerOption(index)}
-                  >
-                    <span className="font-black">{inventoryProductCode(product) || "-"}</span>
-                    <span className="truncate font-bold text-slate-700">{inventoryProductName(product) || "-"}</span>
-                  </button>
-                )) : <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">선택할 품목이 없습니다.</div>
-              )}
+              <table className="w-full table-fixed text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="w-10 py-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                        checked={inventoryPicker.type === "warehouse"
+                          ? Boolean(inventoryWarehousePickerOptions.length) && inventoryWarehousePickerOptions.every((item, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(item, index)))
+                          : Boolean(inventoryProductPickerOptions.length) && inventoryProductPickerOptions.every((item, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(item, index)))}
+                        onChange={(event) => {
+                          const options = inventoryPicker.type === "warehouse" ? inventoryWarehousePickerOptions : inventoryProductPickerOptions;
+                          setInventoryPicker((prev) => prev ? { ...prev, selectedKeys: event.target.checked ? options.map((item, index) => inventoryPickerKey(item, index)) : [] } : prev);
+                        }}
+                        aria-label={`${inventoryPicker.type === "warehouse" ? "창고" : "품목"} 전체선택`}
+                      />
+                    </th>
+                    {inventoryPicker.type === "warehouse" ? (
+                      <>
+                        <th className="w-32 py-2 text-left">창고코드</th>
+                        <th className="py-2 text-left">창고명</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="w-24 py-2 text-left">품목코드</th>
+                        <th className="py-2 text-left">품목명</th>
+                        <th className="w-20 py-2 text-right">입고단가</th>
+                        <th className="w-20 py-2 text-right">출고단가</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryPicker.type === "warehouse" ? (
+                    inventoryWarehousePickerOptions.length ? inventoryWarehousePickerOptions.map((warehouse, index) => {
+                      const key = inventoryPickerKey(warehouse, index);
+                      const selected = inventoryPicker.selectedKeys.includes(key);
+                      return (
+                        <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
+                          <td className="py-2 text-center">
+                            <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span>
+                          </td>
+                          <td className="truncate py-2 pr-2 font-black text-blue-700">{warehouse.warehouse_code || "-"}</td>
+                          <td className="truncate py-2 pr-2">{warehouse.warehouse_name || "-"}</td>
+                        </tr>
+                      );
+                    }) : <tr><td colSpan={3} className="px-4 py-8 text-center text-sm font-bold text-slate-500">선택할 창고가 없습니다.</td></tr>
+                  ) : (
+                    inventoryProductPickerOptions.length ? inventoryProductPickerOptions.map((product, index) => {
+                      const key = inventoryPickerKey(product, index);
+                      const selected = inventoryPicker.selectedKeys.includes(key);
+                      return (
+                        <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
+                          <td className="py-2 text-center">
+                            <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span>
+                          </td>
+                          <td className="truncate py-2 pr-2 font-black text-blue-700">{inventoryProductCode(product) || "-"}</td>
+                          <td className="truncate py-2 pr-2">{inventoryProductName(product) || "-"}</td>
+                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
+                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
+                        </tr>
+                      );
+                    }) : <tr><td colSpan={5} className="px-4 py-8 text-center text-sm font-bold text-slate-500">{inventoryPicker.query.trim() ? `${inventoryPicker.query.trim()}로 검색되는 품목이 없습니다.` : "선택할 품목이 없습니다."}</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </SelectionModal>

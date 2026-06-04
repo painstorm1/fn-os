@@ -307,6 +307,8 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
           movement_type: item.movementType,
           product_id: text(item.row.product_id) || null,
           sku: text(item.row.sku || item.row.prod_cd),
+          prod_cd: text(item.row.prod_cd || item.row.sku),
+          wh_cd: text(item.row.wh_cd) || "100",
           qty,
           source_type: item.movementType === "purchase_in" ? "purchases" : "sales",
           source_ref_id: text(item.row.id || item.row.source_ref_id),

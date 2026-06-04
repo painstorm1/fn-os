@@ -12,6 +12,21 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function dateText(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{8}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  return raw.slice(0, 10);
+}
+
+function asOfEndIso(value: unknown) {
+  const date = dateText(value);
+  if (!date) return "";
+  const parsed = new Date(`${date}T23:59:59.999+09:00`);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -95,6 +110,10 @@ async function inventoryRows() {
   return selectRows<AnyRecord>("inventory_current", { order: "updated_at.desc", limit: 10000 }).catch(() => []);
 }
 
+async function inventoryMovementRows() {
+  return selectRows<AnyRecord>("inventory_movements", { order: "movement_date.desc", limit: 50000 }).catch(() => []);
+}
+
 async function bomRows() {
   return selectRows<AnyRecord>("product_boms", { order: "created_at.asc", limit: 5000 }).catch(() => []);
 }
@@ -118,18 +137,53 @@ export async function GET(request: NextRequest) {
     const queryTokens = query.split(/\s+/).filter(Boolean);
     const searchField = text(request.nextUrl.searchParams.get("searchField"));
     const relation = text(request.nextUrl.searchParams.get("relation"));
+    const asOfIso = asOfEndIso(request.nextUrl.searchParams.get("asOf"));
     const excludeBom = text(request.nextUrl.searchParams.get("excludeBom")).toLowerCase() === "true";
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
-    const [products, warehouses, inventory, boms, bomItems, importLinks, importProducts] = await Promise.all([
+    const [products, warehouses, currentInventory, movements, boms, bomItems, importLinks, importProducts] = await Promise.all([
       productRows(),
       warehouseRows(),
       inventoryRows(),
+      asOfIso ? inventoryMovementRows() : Promise.resolve([] as AnyRecord[]),
       bomRows(),
       bomItemRows(),
       importLinkRows(),
       importProductRows(),
     ]);
+    const warehouseByIdForInventory = new Map(warehouses.map((row) => [text(row.id), row]));
+    const inventory = currentInventory.map((row) => ({ ...row }));
+    if (asOfIso) {
+      const targetTime = new Date(asOfIso).getTime();
+      const inventoryByKey = new Map<string, AnyRecord>();
+      inventory.forEach((row) => {
+        const code = text(row.prod_cd || row.sku);
+        const wh = text(row.wh_cd || row.warehouse_code) || warehouseCode(warehouseByIdForInventory.get(text(row.warehouse_id)) || {});
+        if (code && wh) inventoryByKey.set(`${code}::${wh}`, row);
+      });
+      movements.forEach((movement) => {
+        const movementTime = new Date(text(movement.movement_date || movement.created_at)).getTime();
+        if (!Number.isFinite(movementTime) || movementTime <= targetTime) return;
+        const code = text(movement.prod_cd || movement.product_code || movement.sku);
+        const wh = text(movement.wh_cd || movement.warehouse_code) || warehouseCode(warehouseByIdForInventory.get(text(movement.warehouse_id)) || {});
+        if (!code || !wh) return;
+        const key = `${code}::${wh}`;
+        const row = inventoryByKey.get(key) || {
+          prod_cd: code,
+          sku: code,
+          wh_cd: wh,
+          wh_name: warehouseName(warehouseByIdForInventory.get(text(movement.warehouse_id)) || { wh_cd: wh }),
+          on_hand_qty: 0,
+          available_qty: 0,
+          bal_qty: 0,
+        };
+        const nextQty = numberValue(row.on_hand_qty ?? row.bal_qty) - numberValue(movement.qty);
+        row.on_hand_qty = nextQty;
+        row.available_qty = nextQty - numberValue(row.reserved_qty);
+        row.bal_qty = nextQty;
+        inventoryByKey.set(key, row);
+      });
+    }
 
     const inventoryByProduct = new Map<string, AnyRecord[]>();
     const inventoryByCode = new Map<string, AnyRecord[]>();
@@ -328,6 +382,8 @@ export async function POST(request: NextRequest) {
           warehouse_id: text(warehouse?.id) || null,
           product_id: productId || null,
           sku: code,
+          prod_cd: code,
+          wh_cd: whCode || warehouseCode(warehouse || {}),
           qty: delta,
           source_type: "product_master",
           source_ref_id: code,
