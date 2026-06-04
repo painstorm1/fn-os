@@ -15586,25 +15586,29 @@ function AccountingWorkspace() {
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{summary.error}</Card>}
       {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-700">{message}</Card>}
 
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <AccountingLineChart rows={monthRows} />
-        <AccountingCategoryChart rows={categoryRows} />
-      </section>
+      {!activeTab && (
+        <>
+          <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <AccountingLineChart rows={monthRows} />
+            <AccountingCategoryChart rows={categoryRows} />
+          </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
-        <Card className="p-5">
-          <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
-          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="px-3 py-2 text-left">월</th><th className="px-3 py-2 text-right">매출</th><th className="px-3 py-2 text-right">상품매입</th><th className="px-3 py-2 text-right">광고비</th><th className="px-3 py-2 text-right">비용</th><th className="px-3 py-2 text-right">예상 순이익</th></tr></thead>
-              <tbody><tr className="border-t border-gray-100 hover:bg-orange-50/60"><td className="px-3 py-3 font-semibold">{String(totals.month || "-")}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="px-3 py-3 text-right font-bold text-[#ff6a00]">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
-            </table>
-          </div>
-        </Card>
-        <div className="space-y-4">
-          <ReportList title="업체별 비용" rows={vendorRows} />
-        </div>
-      </section>
+          <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+            <Card className="p-5">
+              <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
+              <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="px-3 py-2 text-left">월</th><th className="px-3 py-2 text-right">매출</th><th className="px-3 py-2 text-right">상품매입</th><th className="px-3 py-2 text-right">광고비</th><th className="px-3 py-2 text-right">비용</th><th className="px-3 py-2 text-right">예상 순이익</th></tr></thead>
+                  <tbody><tr className="border-t border-gray-100 hover:bg-orange-50/60"><td className="px-3 py-3 font-semibold">{String(totals.month || "-")}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="px-3 py-3 text-right font-bold text-[#ff6a00]">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
+                </table>
+              </div>
+            </Card>
+            <div className="space-y-4">
+              <ReportList title="업체별 비용" rows={vendorRows} />
+            </div>
+          </section>
+        </>
+      )}
 
       {activeTab === "통장" && (
         <Card className="p-5">
