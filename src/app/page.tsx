@@ -10113,7 +10113,7 @@ function SalesPurchaseEntryModal({
               </div>
               {productSearch.error && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{productSearch.error}</div>}
               <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
                       <th className="w-14 py-2">
@@ -10127,6 +10127,8 @@ function SalesPurchaseEntryModal({
                       </th>
                       <th className="py-2 text-left">품목코드</th>
                       <th className="py-2 text-left">품목명</th>
+                      <th className="w-28 py-2 text-right">입고단가</th>
+                      <th className="w-28 py-2 text-right">출고단가</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -10147,6 +10149,8 @@ function SalesPurchaseEntryModal({
                           </td>
                           <td className="py-2 font-black text-blue-700">{fnProductSku(product)}</td>
                           <td className="py-2">{fnProductName(product)}</td>
+                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
+                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
                         </tr>
                       );
                     })}
