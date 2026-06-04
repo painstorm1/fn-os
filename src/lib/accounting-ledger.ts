@@ -703,12 +703,13 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
   const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
   const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
-  const fixedCosts = await optionalRows("accounting_fixed_costs", { is_active: "eq.true", order: "sort_order.asc", limit: 300 });
-  const bankAccounts = await optionalRows("accounting_bank_accounts", { is_active: "eq.true", order: "sort_order.asc", limit: 100 });
-  const cardAccounts = await optionalRows("accounting_card_accounts", { is_active: "eq.true", order: "sort_order.asc", limit: 100 });
+  const fixedCosts = await optionalRows("accounting_fixed_costs", { order: "sort_order.asc", limit: 300 });
+  const activeFixedCosts = fixedCosts.filter((row) => row.is_active !== false);
+  const bankAccounts = await optionalRows("accounting_bank_accounts", { order: "sort_order.asc", limit: 100 });
+  const cardAccounts = await optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 });
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
-  const fixedCostOccurrences = fixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
+  const fixedCostOccurrences = activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
   const upcomingFixedCosts = fixedCostOccurrences
     .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
