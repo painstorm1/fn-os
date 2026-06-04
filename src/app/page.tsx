@@ -3675,7 +3675,6 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">{id ? "제품 수정" : "새 제품 등록"}</h2>
-          <p className="mt-1 text-sm text-gray-500">FN OS 화면에서 입력하고 수입관리 원장에 저장합니다.</p>
         </div>
       </div>
       {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
@@ -4592,7 +4591,6 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">{id ? "발주서 수정" : "새 발주서 작성"}</h2>
-          <p className="mt-1 text-sm text-gray-500">발주 정보와 제품 라인을 입력합니다.</p>
         </div>
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>
       </div>
@@ -13829,7 +13827,6 @@ function Dashboard() {
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-black">수입제품 현황</h2>
-            <p className="mt-1 text-sm text-slate-500">수입관리 데이터를 FN OS 네이티브 화면으로 표시합니다.</p>
           </div>
           <div className="flex gap-2">
             <Link className="inline-flex h-9 items-center rounded-md bg-orange-500 px-3 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>
