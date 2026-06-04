@@ -9526,9 +9526,16 @@ function SalesPurchaseEntryModal({
   const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
   const [warehouseIndex, setWarehouseIndex] = useState(0);
   const [productSearch, setProductSearch] = useState<{ open: boolean; lineIndex: number; query: string; results: FnProduct[]; selectedIndex: number; loading: boolean; error: string }>({ open: false, lineIndex: 0, query: "", results: [], selectedIndex: 0, loading: false, error: "" });
+  const [productSearchSelectedKeys, setProductSearchSelectedKeys] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState("");
   const formRef = useRef<HTMLDivElement | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const customerInputRef = useRef<HTMLInputElement | null>(null);
+  const lineDragModeRef = useRef<"select" | "deselect" | null>(null);
+  const lastLineSelectionIndexRef = useRef<number | null>(null);
+  const productDragModeRef = useRef<"select" | "deselect" | null>(null);
+  const lastProductSelectionIndexRef = useRef<number | null>(null);
   useEscapeToClose(true, onClose);
 
   useEffect(() => {
@@ -9538,6 +9545,19 @@ function SalesPurchaseEntryModal({
     cachedClientJson<{ warehouses?: FnWarehouse[] }>("/api/fnos/warehouses?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 })
       .then((data) => setWarehouses(data.warehouses || []))
       .catch(() => setWarehouses([]));
+  }, []);
+
+  useEffect(() => {
+    window.setTimeout(() => dateInputRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    function stopDragging() {
+      lineDragModeRef.current = null;
+      productDragModeRef.current = null;
+    }
+    window.addEventListener("mouseup", stopDragging);
+    return () => window.removeEventListener("mouseup", stopDragging);
   }, []);
 
   const filteredCustomers = customers.filter((customer) => {
@@ -9587,8 +9607,43 @@ function SalesPurchaseEntryModal({
     return vatMode === "excluded" ? qty * (unit + unit * 0.1) : qty * unit;
   }
 
-  function toggleLine(lineId: string) {
-    setSelectedLineIds((prev) => prev.includes(lineId) ? prev.filter((id) => id !== lineId) : [...prev, lineId]);
+  function setLineSelected(lineId: string, selected: boolean) {
+    setSelectedLineIds((prev) => {
+      const exists = prev.includes(lineId);
+      if (selected && !exists) return [...prev, lineId];
+      if (!selected && exists) return prev.filter((id) => id !== lineId);
+      return prev;
+    });
+  }
+
+  function handleLineSelection(index: number, event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const line = lines[index];
+    if (!line) return;
+    const nextSelected = !selectedLineIds.includes(line.id);
+    if (event.shiftKey && lastLineSelectionIndexRef.current !== null) {
+      const start = Math.min(lastLineSelectionIndexRef.current, index);
+      const end = Math.max(lastLineSelectionIndexRef.current, index);
+      setSelectedLineIds((prev) => {
+        const next = new Set(prev);
+        lines.slice(start, end + 1).forEach((item) => {
+          if (nextSelected) next.add(item.id);
+          else next.delete(item.id);
+        });
+        return Array.from(next);
+      });
+    } else {
+      setLineSelected(line.id, nextSelected);
+    }
+    lineDragModeRef.current = nextSelected ? "select" : "deselect";
+    lastLineSelectionIndexRef.current = index;
+  }
+
+  function handleLineSelectionDrag(index: number) {
+    const mode = lineDragModeRef.current;
+    const line = lines[index];
+    if (!mode || !line) return;
+    setLineSelected(line.id, mode === "select");
   }
 
   function deleteSelectedLines() {
@@ -9629,6 +9684,8 @@ function SalesPurchaseEntryModal({
   async function openProductSearch(lineIndex: number, query: string) {
     const keyword = query.trim();
     setProductSearch({ open: true, lineIndex, query: keyword, results: [], selectedIndex: 0, loading: Boolean(keyword), error: "" });
+    setProductSearchSelectedKeys([]);
+    lastProductSelectionIndexRef.current = null;
     if (!keyword) return;
     try {
       const res = await fetch("/api/fnos/quick-lookup", {
@@ -9654,32 +9711,104 @@ function SalesPurchaseEntryModal({
     }
   }
 
-  function chooseProduct(product: FnProduct) {
+  function productSearchKey(product: FnProduct, index: number) {
+    return `${fnProductSku(product)}-${String(product.id || index)}`;
+  }
+
+  function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine {
     const price = mode === "sales" ? Number(product.standard_price || fnProductPrice(product)) : Number(product.cost_price || fnProductPrice(product));
     const normalizedPrice = vatMode === "excluded" ? Math.round(price / 1.1) : price;
+    return {
+      ...line,
+      prod_cd: fnProductSku(product),
+      prod_name: fnProductName(product),
+      price: normalizedPrice ? String(normalizedPrice) : line.price,
+    };
+  }
+
+  function applyProducts(products: FnProduct[]) {
+    if (!products.length) return;
     setLines((prev) => {
-      const next = prev.map((line, index) => index === productSearch.lineIndex ? {
-        ...line,
-        prod_cd: fnProductSku(product),
-        prod_name: fnProductName(product),
-        price: normalizedPrice ? String(normalizedPrice) : line.price,
-      } : line);
-      const isLast = productSearch.lineIndex === next.length - 1;
-      return isLast ? [...next, defaultLine()] : next;
+      const next = [...prev];
+      products.forEach((product, offset) => {
+        const targetIndex = productSearch.lineIndex + offset;
+        const baseLine = next[targetIndex] || defaultLine();
+        next[targetIndex] = productLinePatch(product, baseLine);
+      });
+      next.push(defaultLine());
+      return next;
     });
-    const nextIndex = productSearch.lineIndex + 1;
+    const nextIndex = productSearch.lineIndex + products.length;
     setProductSearch((prev) => ({ ...prev, open: false }));
+    setProductSearchSelectedKeys([]);
     window.setTimeout(() => {
       const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-code-input='true']");
       inputs?.[nextIndex]?.focus();
     }, 0);
   }
 
+  function chooseProduct(product: FnProduct) {
+    applyProducts([product]);
+  }
+
+  function applySelectedProducts() {
+    const selectedProducts = productSearch.results.filter((product, index) => productSearchSelectedKeys.includes(productSearchKey(product, index)));
+    if (!selectedProducts.length) {
+      window.alert("선택된 품목이 없습니다.");
+      return;
+    }
+    applyProducts(selectedProducts);
+  }
+
+  function setProductSearchSelected(key: string, selected: boolean) {
+    setProductSearchSelectedKeys((prev) => {
+      const exists = prev.includes(key);
+      if (selected && !exists) return [...prev, key];
+      if (!selected && exists) return prev.filter((item) => item !== key);
+      return prev;
+    });
+  }
+
+  function handleProductSearchSelection(index: number, event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const product = productSearch.results[index];
+    if (!product) return;
+    const key = productSearchKey(product, index);
+    const nextSelected = !productSearchSelectedKeys.includes(key);
+    if (event.shiftKey && lastProductSelectionIndexRef.current !== null) {
+      const start = Math.min(lastProductSelectionIndexRef.current, index);
+      const end = Math.max(lastProductSelectionIndexRef.current, index);
+      setProductSearchSelectedKeys((prev) => {
+        const next = new Set(prev);
+        productSearch.results.slice(start, end + 1).forEach((item, offset) => {
+          const itemKey = productSearchKey(item, start + offset);
+          if (nextSelected) next.add(itemKey);
+          else next.delete(itemKey);
+        });
+        return Array.from(next);
+      });
+    } else {
+      setProductSearchSelected(key, nextSelected);
+    }
+    setProductSearch((prev) => ({ ...prev, selectedIndex: index }));
+    productDragModeRef.current = nextSelected ? "select" : "deselect";
+    lastProductSelectionIndexRef.current = index;
+  }
+
+  function handleProductSearchSelectionDrag(index: number) {
+    const mode = productDragModeRef.current;
+    const product = productSearch.results[index];
+    if (!mode || !product) return;
+    setProductSearchSelected(productSearchKey(product, index), mode === "select");
+    setProductSearch((prev) => ({ ...prev, selectedIndex: index }));
+  }
+
   async function saveRows() {
     setLocalError("");
     const validLines = lines.filter((line) => line.prod_cd.trim());
     if (!entryDate || !(customerText.trim() || customerCode.trim()) || !warehouseCode.trim() || !validLines.length) {
-      setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 1개 이상은 필수입니다.");
+      setLocalError("날짜, 거래처명, 창고, 품목코드 1개 이상은 필수입니다.");
       return;
     }
     const rows = validLines.map((line, index) => ({
@@ -9722,6 +9851,10 @@ function SalesPurchaseEntryModal({
     }
   }
 
+  const allLinesSelected = lines.length > 0 && selectedLineIds.length === lines.length;
+  const allProductSearchResultsSelected = productSearch.results.length > 0
+    && productSearch.results.every((product, index) => productSearchSelectedKeys.includes(productSearchKey(product, index)));
+
   return (
     <FormModal
       title={mode === "sales" ? "판매입력" : "구매입력"}
@@ -9739,14 +9872,16 @@ function SalesPurchaseEntryModal({
       }
     >
       <div ref={formRef} className="space-y-4">
-        <div className="grid max-w-[500px] gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
-          <FormField label="날짜" required><input className={modalInputClass} type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} onKeyDown={(event) => handleRequiredEnter(event, Boolean(entryDate))} /></FormField>
-          <FormField label="거래처코드">
-            <input className={modalInputClass} value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} onKeyDown={(event) => handleRequiredEnter(event, Boolean(customerCode.trim() || customerText.trim()))} placeholder="거래처코드" />
-          </FormField>
-          <FormField label={partnerLabel}>
+        <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 md:grid-cols-2">
+          <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            if (typeof event.currentTarget.showPicker === "function") event.currentTarget.showPicker();
+            else moveToNextField(event.currentTarget);
+          }} /></FormField>
+          <FormField label={partnerLabel} required>
             <div className="relative">
-              <input className={modalInputClass} value={customerText} onFocus={() => setCustomerPickerOpen(true)} onChange={(event) => { setCustomerText(event.target.value); setCustomerPickerOpen(true); setCustomerIndex(0); }} onKeyDown={(event) => {
+              <input ref={customerInputRef} className={modalInputClass} value={customerText} onFocus={() => setCustomerPickerOpen(true)} onChange={(event) => { setCustomerText(event.target.value); setCustomerPickerOpen(true); setCustomerIndex(0); }} onKeyDown={(event) => {
                 if (event.key === "ArrowDown") { event.preventDefault(); setCustomerIndex((value) => Math.min(filteredCustomers.length - 1, value + 1)); return; }
                 if (event.key === "ArrowUp") { event.preventDefault(); setCustomerIndex((value) => Math.max(0, value - 1)); return; }
                 if (event.key === "Enter" && customerPickerOpen && filteredCustomers[customerIndex]) { event.preventDefault(); selectCustomer(filteredCustomers[customerIndex]); moveToNextField(event.currentTarget); return; }
@@ -9799,7 +9934,16 @@ function SalesPurchaseEntryModal({
           <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
-                <th className="w-14 px-2 py-2 text-center">선택</th>
+                <th className="w-14 px-2 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    tabIndex={-1}
+                    className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                    checked={allLinesSelected}
+                    onChange={(event) => setSelectedLineIds(event.target.checked ? lines.map((line) => line.id) : [])}
+                    aria-label="물품 전체선택"
+                  />
+                </th>
                 <th className="w-36 px-2 py-2 text-left">품목코드</th>
                 <th className="px-2 py-2 text-left">품목명</th>
                 <th className="w-24 px-2 py-2 text-right">수량</th>
@@ -9815,7 +9959,14 @@ function SalesPurchaseEntryModal({
                 return (
                 <tr key={line.id} className={`border-t border-gray-100 ${selected ? "bg-blue-50" : ""}`}>
                   <td className="px-2 py-2 text-center">
-                    <button type="button" className={`inline-flex h-6 min-w-6 items-center justify-center rounded border px-1 text-xs font-black ${selected ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white text-gray-400"}`} onClick={() => toggleLine(line.id)}>{index + 1}</button>
+                    <button
+                      type="button"
+                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded border px-1 text-xs font-black ${selected ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white text-gray-400"}`}
+                      onMouseDown={(event) => handleLineSelection(index, event)}
+                      onMouseEnter={() => handleLineSelectionDrag(index)}
+                    >
+                      {index + 1}
+                    </button>
                   </td>
                   <td className="px-2 py-2">
                     <input data-product-code-input="true" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_cd} onChange={(event) => updateLine(index, "prod_cd", event.target.value)} onKeyDown={(event) => {
@@ -9839,28 +9990,71 @@ function SalesPurchaseEntryModal({
         <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>
 
         {productSearch.open && (
-          <SelectionModal title="품목검색" onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))} size="lg" footer={<ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>}>
+          <SelectionModal
+            title="품목검색"
+            onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))}
+            size="lg"
+            footer={
+              <div className="flex w-full justify-between gap-2">
+                <ActionButton type="button" onClick={applySelectedProducts} disabled={!productSearchSelectedKeys.length}>선택 적용</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
+              </div>
+            }
+          >
             <div onKeyDown={(event) => {
               if (event.key === "ArrowDown") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(prev.results.length - 1, prev.selectedIndex + 1) })); }
               if (event.key === "ArrowUp") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) })); }
               if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) { event.preventDefault(); chooseProduct(productSearch.results[productSearch.selectedIndex]); }
             }}>
               <div className="mb-3 flex gap-2">
-                <input autoFocus className={modalInputClass} value={productSearch.query} onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void openProductSearch(productSearch.lineIndex, productSearch.query); } }} />
+                <input autoFocus className={modalInputClass} value={productSearch.query} onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (productSearch.results.length && productSearch.results[productSearch.selectedIndex]) chooseProduct(productSearch.results[productSearch.selectedIndex]);
+                  else void openProductSearch(productSearch.lineIndex, productSearch.query);
+                }} />
                 <ActionButton type="button" onClick={() => void openProductSearch(productSearch.lineIndex, productSearch.query)}>Search(F3)</ActionButton>
               </div>
               {productSearch.error && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{productSearch.error}</div>}
               <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="w-14 py-2">선택</th><th className="py-2 text-left">품목코드</th><th className="py-2 text-left">품목명</th></tr></thead>
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="w-14 py-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                          checked={allProductSearchResultsSelected}
+                          onChange={(event) => setProductSearchSelectedKeys(event.target.checked ? productSearch.results.map((product, index) => productSearchKey(product, index)) : [])}
+                          aria-label="품목검색 전체선택"
+                        />
+                      </th>
+                      <th className="py-2 text-left">품목코드</th>
+                      <th className="py-2 text-left">품목명</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {productSearch.results.map((product, index) => (
-                      <tr key={`${fnProductSku(product)}-${index}`} className={`cursor-pointer border-t border-gray-100 ${index === productSearch.selectedIndex ? "bg-blue-50" : "hover:bg-orange-50"}`} onMouseDown={() => chooseProduct(product)}>
-                        <td className="py-2 text-center"><span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${index === productSearch.selectedIndex ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span></td>
-                        <td className="py-2 font-black text-blue-700">{fnProductSku(product)}</td>
-                        <td className="py-2">{fnProductName(product)}</td>
-                      </tr>
-                    ))}
+                    {productSearch.results.map((product, index) => {
+                      const key = productSearchKey(product, index);
+                      const selected = productSearchSelectedKeys.includes(key);
+                      return (
+                        <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === productSearch.selectedIndex ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={() => chooseProduct(product)}>
+                          <td className="py-2 text-center">
+                            <button
+                              type="button"
+                              className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}
+                              onMouseDown={(event) => handleProductSearchSelection(index, event)}
+                              onMouseEnter={() => handleProductSearchSelectionDrag(index)}
+                            >
+                              {index + 1}
+                            </button>
+                          </td>
+                          <td className="py-2 font-black text-blue-700">{fnProductSku(product)}</td>
+                          <td className="py-2">{fnProductName(product)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
