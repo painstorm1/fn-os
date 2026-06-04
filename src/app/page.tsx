@@ -17008,6 +17008,7 @@ function FnSettingsWorkspace() {
   const [adminName, setAdminName] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [error, setError] = useState("");
+  const [fnOsPasswordOpen, setFnOsPasswordOpen] = useState(false);
 
   const tabs = [
     { key: "personnel", label: "인사관리" },
@@ -17118,6 +17119,7 @@ function FnSettingsWorkspace() {
 
   return (
     <div className="space-y-4">
+      {fnOsPasswordOpen && <PasswordSettingsModal open={fnOsPasswordOpen} onClose={() => setFnOsPasswordOpen(false)} />}
       <PageHeader title="FN 설정" actions={!unlocked && <ActionButton type="button" onClick={confirmAdmin}>관리자 확인</ActionButton>} />
 
       {!unlocked ? (
@@ -17172,7 +17174,7 @@ function FnSettingsWorkspace() {
                 <div className="rounded-md border border-slate-200 p-4">
                   <div className="text-sm font-black text-slate-900">FN OS 패스워드</div>
                   <div className="mt-1 text-sm font-semibold text-slate-500">FN OS 로그인 비밀번호</div>
-                  <ActionButton type="button" className="mt-3" onClick={() => window.alert("FN OS 로그인 비밀번호 수정은 기존 로그인 API와 연결 예정입니다.")}>수정</ActionButton>
+                  <ActionButton type="button" className="mt-3" onClick={() => setFnOsPasswordOpen(true)}>수정</ActionButton>
                 </div>
                 <div className="rounded-md border border-slate-200 p-4">
                   <div className="text-sm font-black text-slate-900">관리자 패스워드</div>
