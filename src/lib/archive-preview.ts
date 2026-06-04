@@ -54,6 +54,28 @@ function shouldReplaceTitle(item: AnyRecord) {
   return false;
 }
 
+export function getYoutubeThumbnailUrl(url: string) {
+  const value = text(url);
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    let videoId = "";
+    if (host === "youtu.be") {
+      videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    } else if (host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) {
+      videoId = parsed.searchParams.get("v") || "";
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      if (!videoId && ["shorts", "embed", "live"].includes(parts[0] || "")) videoId = parts[1] || "";
+    }
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return "";
+    return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  } catch {
+    const match = value.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?[^#\s]*v=|shorts\/|embed\/|live\/))([A-Za-z0-9_-]{11})/i);
+    return match?.[1] ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : "";
+  }
+}
+
 export async function fetchOpenGraph(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
@@ -111,8 +133,14 @@ export async function generateArchivePreview(id: string, options: { force?: bool
   });
 
   try {
-    const og = await fetchOpenGraph(url);
-    let previewImageUrl = og.image;
+    let og = { title: "", description: "", image: "" };
+    let metadataError = "";
+    try {
+      og = await fetchOpenGraph(url);
+    } catch (error) {
+      metadataError = error instanceof Error ? error.message : "OG fetch failed";
+    }
+    let previewImageUrl = og.image || getYoutubeThumbnailUrl(url);
     let screenshotError = "";
     if (!previewImageUrl) {
       try {
@@ -122,7 +150,7 @@ export async function generateArchivePreview(id: string, options: { force?: bool
       }
     }
 
-    if (!previewImageUrl) throw new Error(screenshotError || "OG image not found");
+    if (!previewImageUrl) throw new Error(screenshotError || metadataError || "OG image not found");
     const [saved] = await patchRows<AnyRecord>("archive_items", { id: `eq.${id}` }, {
       title: shouldReplaceTitle(item) && og.title ? og.title : text(item.title),
       description: og.description || text(item.description) || null,

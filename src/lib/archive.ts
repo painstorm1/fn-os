@@ -1,4 +1,5 @@
 import { deleteRows, insertRows, patchRows, selectRows, uploadStorageFile } from "./fnos-db";
+import { getYoutubeThumbnailUrl } from "./archive-preview";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -101,6 +102,9 @@ export async function createArchiveItem(input: ArchiveInput) {
   const title = text(input.title) || text(input.url) || "제목 없음";
   const url = text(input.url);
   const contentType = input.content_type || (url ? "link" : "memo");
+  const previewImageUrl = text(input.preview_image_url) || getYoutubeThumbnailUrl(url);
+  const previewStatus = text(input.preview_status) || (previewImageUrl ? "success" : url ? "pending" : "manual");
+  const previewGeneratedAt = text(input.preview_generated_at) || (previewImageUrl ? new Date().toISOString() : null);
   const [saved] = await insertRows<AnyRecord>("archive_items", {
     title,
     url: url || null,
@@ -109,10 +113,10 @@ export async function createArchiveItem(input: ArchiveInput) {
     summary: text(input.summary) || null,
     original_url: text(input.original_url || url) || null,
     description: text(input.description) || null,
-    preview_image_url: text(input.preview_image_url) || null,
-    preview_status: text(input.preview_status) || (url ? "pending" : "manual"),
+    preview_image_url: previewImageUrl || null,
+    preview_status: previewStatus,
     preview_error: text(input.preview_error) || null,
-    preview_generated_at: text(input.preview_generated_at) || null,
+    preview_generated_at: previewGeneratedAt,
     memo: text(input.memo) || null,
     thumbnail_url: text(input.thumbnail_url) || null,
     file_url: text(input.file_url) || null,
@@ -160,18 +164,22 @@ export async function createArchiveFileItem(formData: FormData) {
 }
 
 export async function updateArchiveItem(id: string, input: ArchiveInput) {
+  const url = text(input.url);
+  const previewImageUrl = text(input.preview_image_url) || getYoutubeThumbnailUrl(url);
+  const previewStatus = text(input.preview_status) || (previewImageUrl ? "success" : url ? "pending" : "manual");
+  const previewGeneratedAt = text(input.preview_generated_at) || (previewImageUrl ? new Date().toISOString() : null);
   const [saved] = await patchRows<AnyRecord>("archive_items", { id: `eq.${id}` }, {
     title: text(input.title),
-    url: text(input.url) || null,
-    source_type: inferSourceType(text(input.url), text(input.source_type)),
+    url: url || null,
+    source_type: inferSourceType(url, text(input.source_type)),
     content_type: text(input.content_type) || "link",
     summary: text(input.summary) || null,
     original_url: text(input.original_url || input.url) || null,
     description: text(input.description) || null,
-    preview_image_url: text(input.preview_image_url) || null,
-    preview_status: text(input.preview_status) || (text(input.url) ? "pending" : "manual"),
+    preview_image_url: previewImageUrl || null,
+    preview_status: previewStatus,
     preview_error: text(input.preview_error) || null,
-    preview_generated_at: text(input.preview_generated_at) || null,
+    preview_generated_at: previewGeneratedAt,
     memo: text(input.memo) || null,
     thumbnail_url: text(input.thumbnail_url) || null,
     file_url: text(input.file_url) || null,
