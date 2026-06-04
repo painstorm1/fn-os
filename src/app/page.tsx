@@ -895,6 +895,8 @@ type ImportOrder = {
   attachment_count?: number;
   total_qty?: number;
   total_won?: number;
+  has_product_lines?: boolean;
+  material_only?: boolean;
   status?: string;
   platform?: string;
   currency?: string;
@@ -1942,13 +1944,29 @@ function parseLocalDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function productionDueText(order: ImportOrder) {
-  if (String(order.fn_arrived || "").trim()) return "-";
+function moveWeekendDateToFriday(date: Date) {
+  const next = new Date(date);
+  const weekday = next.getDay();
+  if (weekday === 6) next.setDate(next.getDate() - 1);
+  if (weekday === 0) next.setDate(next.getDate() - 2);
+  return next;
+}
+
+function expectedImportArrivalDate(order: ImportOrder) {
   const days = Number(order.production_days || 0);
   const base = parseLocalDate(order.order_date);
   const due = base ? new Date(base) : parseLocalDate(order.production_due_date);
-  if (!due || (!days && !order.production_due_date)) return "-";
+  if (!due || (!days && !order.production_due_date)) return null;
   if (base && days) due.setDate(base.getDate() + days);
+  if (order.has_product_lines === false) return due;
+  due.setDate(due.getDate() + 15);
+  return moveWeekendDateToFriday(due);
+}
+
+function productionDueText(order: ImportOrder) {
+  if (String(order.fn_arrived || "").trim()) return "-";
+  const due = expectedImportArrivalDate(order);
+  if (!due) return "-";
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
@@ -2073,7 +2091,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
                 <th className="py-2">공장</th>
                 <th className="py-2 text-right">수량</th>
                 <th className="py-2 text-right">금액(원)</th>
-                <th className="py-2 text-right">출고예정</th>
+                <th className="py-2 text-right">입고예정</th>
                 <th className="py-2 text-center">상태</th>
               </tr>
             </thead>
@@ -2455,7 +2473,7 @@ function NativeOrders({
             <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
           </form>
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_44px_76px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
-            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span /><span className="pr-3 text-right">출고예정</span><span className="text-center">상태</span>
+            <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span /><span className="pr-3 text-right">입고예정</span><span className="text-center">상태</span>
           </div>
           {orders.map((order) => (
             <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
@@ -4500,7 +4518,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           product_id: item.product_id ? String(item.product_id) : "",
           product_name: item.product_name || "",
           option_value: item.option_value || "",
-          quantity: item.quantity ? String(item.quantity) : "1",
+          quantity: item.quantity != null ? String(item.quantity) : "1",
           unit_price: item.unit_price ? String(item.unit_price) : "",
           item_currency: item.item_currency || "CNY",
           line_note: item.line_note || "",
@@ -4956,7 +4974,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
           product_id: item.product_id ? String(item.product_id) : "",
           product_name: item.product_name || "",
           option_value: item.option_value || "",
-          quantity: item.quantity ? String(item.quantity) : "",
+          quantity: item.quantity != null ? String(item.quantity) : "",
           unit_price: item.unit_price ? String(item.unit_price) : "",
           item_currency: item.item_currency || "CNY",
           line_note: item.line_note || "",

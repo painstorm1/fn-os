@@ -89,7 +89,17 @@ function inferredOrderStatus(values: AnyRecord) {
 }
 
 function normalizeOrderStatus(value: unknown, values: AnyRecord) {
-  return isBrokenStatus(value) ? inferredOrderStatus(values) : text(value);
+  const inferred = inferredOrderStatus(values);
+  const hasProgressDate = [
+    "fn_arrived",
+    "customs_cleared",
+    "badaeji_arrived",
+    "factory_ship_date",
+    "paid_date",
+    "first_payment_date",
+  ].some((field) => hasMeaningfulDate(values[field]));
+  if (hasProgressDate) return inferred;
+  return isBrokenStatus(value) ? inferred : text(value);
 }
 
 function isTTPaymentText(value: unknown) {
@@ -533,7 +543,14 @@ async function orderRows(filters: { q?: string; dateFrom?: string; dateTo?: stri
   return rows.map((row) => {
     const normalized = { ...row, status: normalizeOrderStatus(row.status, row) };
     const snapshot = lockedCostSnapshot(normalized);
-    return { ...normalized, total_won: numberValue(snapshot?.total_won) || orderTotalWon(normalized, lineMap.get(String(row.id)) || [], rates) };
+    const lines = lineMap.get(String(row.id)) || [];
+    const hasProductLines = lines.some((line) => text(line.item_type).toUpperCase() !== "MATERIAL");
+    return {
+      ...normalized,
+      has_product_lines: hasProductLines,
+      material_only: lines.length > 0 && !hasProductLines,
+      total_won: numberValue(snapshot?.total_won) || orderTotalWon(normalized, lines, rates),
+    };
   });
 }
 
@@ -930,6 +947,13 @@ async function handleGet(path: string, request: NextRequest) {
   if (path === "api/fnos/calendar-production-memos") {
     const orders = await db(
       `select o.id, o.order_code, o.order_date, o.production_days,
+              exists (
+                select 1
+                  from ${q(TABLES.orderItems)} pi
+                  left join ${q(TABLES.products)} pp on pp.id=pi.product_id
+                 where pi.order_id=o.id
+                   and upper(coalesce(pp.item_type, '')) <> 'MATERIAL'
+              ) as has_product_lines,
               (select i.product_name
                  from ${q(TABLES.orderItems)} i
                 where i.order_id=o.id
@@ -942,7 +966,10 @@ async function handleGet(path: string, request: NextRequest) {
     );
     const grouped: Record<string, AnyRecord[]> = {};
     for (const order of orders) {
-      const key = moveWeekendDateKeyToFriday(addDaysDateKey(order.order_date, order.production_days));
+      const productionKey = addDaysDateKey(order.order_date, order.production_days);
+      const key = order.has_product_lines
+        ? moveWeekendDateKeyToFriday(addDaysDateKey(productionKey, 15))
+        : productionKey;
       if (!key) continue;
       const productName = text(order.repr_product) || "대표상품 미지정";
       grouped[key] = [
