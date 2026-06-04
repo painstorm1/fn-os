@@ -15270,7 +15270,6 @@ function AccountingWorkspace() {
     account_number: "",
     password_hint: "",
     list_enabled: true,
-    is_active: true,
     sort_order: "0",
     memo: "",
   };
@@ -15289,7 +15288,6 @@ function AccountingWorkspace() {
     card_limit: "",
     withdrawal_account_name: "",
     list_enabled: true,
-    is_active: true,
     physical_owner: "",
     sort_order: "0",
     memo: "",
@@ -15454,7 +15452,7 @@ function AccountingWorkspace() {
     const res = await fetch("/api/accounting/ledger/categories", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(categoryDraft),
+      body: JSON.stringify({ ...categoryDraft, is_active: true }),
     });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
@@ -15475,7 +15473,7 @@ function AccountingWorkspace() {
       setMessage(data.error || "카테고리 삭제 실패");
       return;
     }
-    setMessage(data.mode === "deactivated" ? "사용 중인 카테고리라 비활성화했습니다." : "카테고리를 삭제했습니다.");
+    setMessage(data.mode === "deactivated" ? "사용 중인 카테고리는 삭제할 수 없습니다." : "카테고리를 삭제했습니다.");
     if (categoryDraft.id === id) setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
     invalidateAccountingCache();
     loadSummary(true);
@@ -15507,19 +15505,6 @@ function AccountingWorkspace() {
     loadSummary(true);
   }
 
-  async function deactivateAccountingRuleFromUi(id: string) {
-    if (!id) return;
-    const res = await fetch(`/api/accounting/ledger/rules?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "자동분류 규칙 비활성화 실패");
-      return;
-    }
-    setMessage("자동분류 규칙을 비활성화했습니다.");
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
   async function saveFixedCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = fixedCostDraft.id ? "PATCH" : "POST";
@@ -15535,20 +15520,6 @@ function AccountingWorkspace() {
     }
     setMessage(fixedCostDraft.id ? "고정비를 수정했습니다." : "고정비를 추가했습니다.");
     setFixedCostDraft(emptyFixedCostDraft);
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
-  async function deactivateFixedCostFromUi(id: string) {
-    if (!id) return;
-    const res = await fetch(`/api/accounting/ledger/fixed-costs?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "고정비 비활성화 실패");
-      return;
-    }
-    setMessage("고정비를 비활성화했습니다.");
-    if (fixedCostDraft.id === id) setFixedCostDraft(emptyFixedCostDraft);
     invalidateAccountingCache();
     loadSummary(true);
   }
@@ -15572,56 +15543,6 @@ function AccountingWorkspace() {
     loadSummary(true);
   }
 
-  async function deactivateBankAccountFromUi(id: string) {
-    if (!id) return;
-    const res = await fetch(`/api/accounting/ledger/bank-accounts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "통장 설정 비활성화 실패");
-      return;
-    }
-    setMessage("통장 설정을 비활성화했습니다.");
-    if (bankAccountDraft.id === id) setBankAccountDraft(emptyBankAccountDraft);
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
-  async function activateFixedCostFromUi(row: Record<string, unknown>) {
-    const id = String(row.id || row.fixed_cost_id || "");
-    if (!id) return;
-    const res = await fetch("/api/accounting/ledger/fixed-costs", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...row, id, is_active: true }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "고정비 설정 활성화 실패");
-      return;
-    }
-    setMessage("고정비 설정을 활성화했습니다.");
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
-  async function activateBankAccountFromUi(row: Record<string, unknown>) {
-    const id = String(row.id || "");
-    if (!id) return;
-    const res = await fetch("/api/accounting/ledger/bank-accounts", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...row, id, is_active: true }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "통장 설정 활성화 실패");
-      return;
-    }
-    setMessage("통장 설정을 활성화했습니다.");
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
   async function saveCardAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = cardAccountDraft.id ? "PATCH" : "POST";
@@ -15637,38 +15558,6 @@ function AccountingWorkspace() {
     }
     setMessage(cardAccountDraft.id ? "카드 설정을 수정했습니다." : "카드 설정을 추가했습니다.");
     setCardAccountDraft(emptyCardAccountDraft);
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
-  async function deactivateCardAccountFromUi(id: string) {
-    if (!id) return;
-    const res = await fetch(`/api/accounting/ledger/card-accounts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "카드 설정 비활성화 실패");
-      return;
-    }
-    setMessage("카드 설정을 비활성화했습니다.");
-    if (cardAccountDraft.id === id) setCardAccountDraft(emptyCardAccountDraft);
-    invalidateAccountingCache();
-    loadSummary(true);
-  }
-
-  async function activateCardAccountFromUi(row: Record<string, unknown>) {
-    const id = String(row.id || "");
-    if (!id) return;
-    const res = await fetch("/api/accounting/ledger/card-accounts", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...row, id, is_active: true }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "카드 설정 활성화 실패");
-      return;
-    }
-    setMessage("카드 설정을 활성화했습니다.");
     invalidateAccountingCache();
     loadSummary(true);
   }
@@ -15923,7 +15812,7 @@ function AccountingWorkspace() {
                     <td className="px-3 py-2 text-gray-700">{String(row.account_holder || "미입력")}</td>
                     <td className="px-3 py-2 font-mono text-gray-900">{String(row.account_number || "미입력")}</td>
                     <td className="px-3 py-2 font-mono text-gray-900">{String(row.password_hint || "미입력")}</td>
-                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "danger" : row.list_enabled === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
+                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
                     <td className="px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>
                     <td className="px-3 py-2">
                       <div className="flex justify-center gap-2">
@@ -15939,18 +15828,12 @@ function AccountingWorkspace() {
                             account_number: String(row.account_number || ""),
                             password_hint: String(row.password_hint || ""),
                             list_enabled: row.list_enabled !== false,
-                            is_active: row.is_active !== false,
                             sort_order: String(row.sort_order || 0),
                             memo: String(row.memo || ""),
                           })}
                         >
                           수정
                         </ActionButton>
-                        {row.is_active === false ? (
-                          <ActionButton type="button" variant="primary" className="h-8 px-3 text-xs" onClick={() => void activateBankAccountFromUi(row)}>활성화</ActionButton>
-                        ) : (
-                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deactivateBankAccountFromUi(String(row.id || ""))}>비활성화</ActionButton>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -16040,7 +15923,7 @@ function AccountingWorkspace() {
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.card_limit) ? krw(asNumber(row.card_limit)) : "미입력"}</td>
                     <td className="px-3 py-2 text-center text-gray-700">{String(row.cutoff_start_day || "-")}~{String(row.cutoff_end_day || "-")} / {String(row.payment_day || "-")}일</td>
                     <td className="px-3 py-2 text-gray-700">{String(row.physical_owner || "미입력")}</td>
-                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "danger" : row.list_enabled === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
+                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-2">
                         <ActionButton
@@ -16062,7 +15945,6 @@ function AccountingWorkspace() {
                             card_limit: String(row.card_limit || ""),
                             withdrawal_account_name: String(row.withdrawal_account_name || ""),
                             list_enabled: row.list_enabled !== false,
-                            is_active: row.is_active !== false,
                             physical_owner: String(row.physical_owner || ""),
                             sort_order: String(row.sort_order || 0),
                             memo: String(row.memo || ""),
@@ -16070,11 +15952,6 @@ function AccountingWorkspace() {
                         >
                           수정
                         </ActionButton>
-                        {row.is_active === false ? (
-                          <ActionButton type="button" variant="primary" className="h-8 px-3 text-xs" onClick={() => void activateCardAccountFromUi(row)}>활성화</ActionButton>
-                        ) : (
-                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deactivateCardAccountFromUi(String(row.id || ""))}>비활성화</ActionButton>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -16181,7 +16058,7 @@ function AccountingWorkspace() {
                       <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
                       <td className="px-3 py-2 text-right">{krw(asNumber(row.expected_amount))}</td>
                       <td className="px-3 py-2 text-right">{asNumber(row.last_actual_amount) ? krw(asNumber(row.last_actual_amount)) : "-"}</td>
-                      <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "danger" : String(row.status) === "upcoming" ? "orange" : "muted"}>{row.is_active === false ? "비활성" : String(row.payment_type || "bank")}</StatusBadge></td>
+                      <td className="px-3 py-2 text-center"><StatusBadge tone={String(row.status) === "upcoming" ? "orange" : "muted"}>{String(row.payment_type || "bank")}</StatusBadge></td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           <ActionButton
@@ -16203,7 +16080,7 @@ function AccountingWorkspace() {
                                 match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
                                 affects_profit: source.affects_profit !== false,
                                 affects_cashflow: source.affects_cashflow !== false,
-                                is_active: source.is_active !== false,
+                                is_active: true,
                                 sort_order: String(source.sort_order || 0),
                                 memo: String(source.memo || ""),
                               });
@@ -16211,11 +16088,6 @@ function AccountingWorkspace() {
                           >
                             수정
                           </ActionButton>
-                          {row.is_active === false ? (
-                            <ActionButton type="button" variant="primary" className="h-8 px-3 text-xs" onClick={() => void activateFixedCostFromUi(row)}>활성화</ActionButton>
-                          ) : (
-                            <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deactivateFixedCostFromUi(String(row.fixed_cost_id || row.id || ""))}>비활성화</ActionButton>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -16331,7 +16203,7 @@ function AccountingWorkspace() {
             <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-                  <tr><th className="px-3 py-2 text-left">대분류</th><th className="px-3 py-2 text-left">중/소분류</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-center">상태</th><th className="px-3 py-2 text-right">관리</th></tr>
+                  <tr><th className="px-3 py-2 text-left">대분류</th><th className="px-3 py-2 text-left">중/소분류</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-right">관리</th></tr>
                 </thead>
                 <tbody>
                   {categories.map((row) => {
@@ -16346,7 +16218,6 @@ function AccountingWorkspace() {
                             {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-center"><StatusBadge tone={row.is_active === false ? "muted" : "success"}>{row.is_active === false ? "비활성" : "사용"}</StatusBadge></td>
                         <td className="px-3 py-2">
                           <div className="flex justify-end gap-2">
                             <ActionButton
@@ -16358,7 +16229,7 @@ function AccountingWorkspace() {
                                 category_large: String(row.category_large || ""),
                                 category_middle: String(row.category_middle || ""),
                                 category_small: String(row.category_small || ""),
-                                is_active: row.is_active !== false,
+                                is_active: true,
                                 affects_profit: row.affects_profit !== false,
                                 affects_cashflow: row.affects_cashflow !== false,
                                 affects_card_settlement: row.affects_card_settlement === true,
@@ -16374,7 +16245,7 @@ function AccountingWorkspace() {
                       </tr>
                     );
                   })}
-                  {!categories.length && <tr><td colSpan={5} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
+                  {!categories.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
                 </tbody>
               </table>
             </div>
@@ -16395,10 +16266,6 @@ function AccountingWorkspace() {
               <FormField label="정렬 순서">
                 <input className={modalInputClass} type="number" value={categoryDraft.sort_order} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
               </FormField>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <input type="checkbox" checked={categoryDraft.is_active} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, is_active: event.target.checked }))} />
-                사용
-              </label>
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_profit} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />
                 손익 반영
