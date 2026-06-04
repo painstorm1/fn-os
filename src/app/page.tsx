@@ -292,7 +292,14 @@ function CalendarMemo() {
           {(serverMemos[selected] || []).map((memo, index) => (
             <div key={`server-${memo.memo}-${index}`} className={`rounded-md px-2 py-1.5 text-xs font-bold ${memo.tone === "fixed" ? "bg-rose-50 text-rose-700" : "bg-orange-50 text-orange-700"}`}>
               {memo.order_id ? (
-                <Link href={importHref(`/orders?open=${memo.order_id}`)} className="block break-keep hover:underline">
+                <Link
+                  href={importHref(`/orders?open=${memo.order_id}`)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    goToInternal(importHref(`/orders?open=${memo.order_id}`));
+                  }}
+                  className="block break-keep hover:underline"
+                >
                   {memo.memo}
                   {memo.order_code ? <span className="ml-1 text-orange-500">({memo.order_code})</span> : null}
                 </Link>

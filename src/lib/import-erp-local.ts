@@ -115,6 +115,20 @@ function addDaysDateKey(value: unknown, days: unknown) {
   ].join("-");
 }
 
+function moveWeekendDateKeyToFriday(key: string) {
+  const [year, month, day] = key.split("-").map(Number);
+  if (!year || !month || !day) return key;
+  const date = new Date(year, month - 1, day);
+  const weekday = date.getDay();
+  if (weekday === 6) date.setDate(date.getDate() - 1);
+  if (weekday === 0) date.setDate(date.getDate() - 2);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -928,7 +942,7 @@ async function handleGet(path: string, request: NextRequest) {
     );
     const grouped: Record<string, AnyRecord[]> = {};
     for (const order of orders) {
-      const key = addDaysDateKey(order.order_date, order.production_days);
+      const key = moveWeekendDateKeyToFriday(addDaysDateKey(order.order_date, order.production_days));
       if (!key) continue;
       const productName = text(order.repr_product) || "대표상품 미지정";
       grouped[key] = [
@@ -937,6 +951,7 @@ async function handleGet(path: string, request: NextRequest) {
           memo: `[제작완료] ${productName}`,
           order_id: Number(order.id),
           order_code: text(order.order_code),
+          tone: "import",
         },
       ];
     }
