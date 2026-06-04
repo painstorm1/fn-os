@@ -71,7 +71,7 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
-    source_ref_id: buildSourceRef(sourceFileName, saleDate, uploadSerNo, productCode, qty),
+    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, saleDate, uploadSerNo, productCode, qty),
     upload_batch_id: batchId,
     io_date: saleDate,
     sale_date: saleDate,
@@ -118,7 +118,7 @@ function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFi
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
-    source_ref_id: buildSourceRef(sourceFileName, purchaseDate, uploadSerNo, productCode, qty),
+    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, purchaseDate, uploadSerNo, productCode, qty),
     upload_batch_id: batchId,
     io_date: purchaseDate,
     purchase_date: purchaseDate,

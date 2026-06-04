@@ -7559,6 +7559,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function invalidateSalesInventoryCaches() {
     invalidateClientCache("/api/dashboard/summary");
+    invalidateClientCache("/api/sales/import");
+    invalidateClientCache("/api/purchases/import");
     invalidateClientCache("/api/fnos/products/master");
     invalidateClientCache("/api/fnos/products/search");
     invalidateClientCache("/api/fnos/products");
@@ -9452,8 +9454,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {entryModalMode && (
         <SalesPurchaseEntryModal
           mode={entryModalMode}
+          recentRows={entryModalMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []}
           onClose={() => setEntryModalMode(null)}
           onSaved={() => {
+            invalidateSalesInventoryCaches();
             setEntryModalMode(null);
             loadSummary(true);
           }}
@@ -9499,10 +9503,12 @@ function OrderCheckTable({ orders, items }: { orders: Array<Record<string, unkno
 
 function SalesPurchaseEntryModal({
   mode,
+  recentRows,
   onClose,
   onSaved,
 }: {
   mode: SalesPurchaseMode;
+  recentRows: Array<Record<string, unknown>>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -9533,6 +9539,9 @@ function SalesPurchaseEntryModal({
   const lastLineSelectionIndexRef = useRef<number | null>(null);
   const productDragModeRef = useRef<"select" | "deselect" | null>(null);
   const lastProductSelectionIndexRef = useRef<number | null>(null);
+  const datePickerOpenRef = useRef(false);
+  const customerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const warehouseOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   useEscapeToClose(true, onClose);
 
   useEffect(() => {
@@ -9556,6 +9565,16 @@ function SalesPurchaseEntryModal({
     window.addEventListener("mouseup", stopDragging);
     return () => window.removeEventListener("mouseup", stopDragging);
   }, []);
+
+  useEffect(() => {
+    if (!customerPickerOpen) return;
+    customerOptionRefs.current[customerIndex]?.scrollIntoView({ block: "nearest" });
+  }, [customerPickerOpen, customerIndex]);
+
+  useEffect(() => {
+    if (!warehousePickerOpen) return;
+    warehouseOptionRefs.current[warehouseIndex]?.scrollIntoView({ block: "nearest" });
+  }, [warehousePickerOpen, warehouseIndex]);
 
   const filteredCustomers = customers.filter((customer) => {
     const needle = (customerText.trim() || customerCode.trim()).toLowerCase();
@@ -9738,13 +9757,30 @@ function SalesPurchaseEntryModal({
 
   function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine {
     const price = mode === "sales" ? Number(product.standard_price || fnProductPrice(product)) : Number(product.cost_price || fnProductPrice(product));
+    const recentPrice = recentUnitPriceForProduct(fnProductSku(product));
     const normalizedPrice = vatMode === "excluded" ? Math.round(price / 1.1) : price;
     return {
       ...line,
       prod_cd: fnProductSku(product),
       prod_name: fnProductName(product),
-      price: normalizedPrice ? String(normalizedPrice) : line.price,
+      price: recentPrice ? String(recentPrice) : normalizedPrice ? String(normalizedPrice) : line.price,
     };
+  }
+
+  function recentUnitPriceForProduct(productCode: string) {
+    const customerNeedles = [customerCode, customerText].map((value) => value.trim().toLowerCase()).filter(Boolean);
+    const productNeedle = productCode.trim().toLowerCase();
+    if (!productNeedle || !customerNeedles.length) return 0;
+    const match = recentRows.find((row) => {
+      const rowCustomers = [row.cust_code, row.customer_code, row.cust_name, row.customer_name, row.supplier_name]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+      const rowProducts = [row.prod_cd, row.product_code, row.sku]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+      return customerNeedles.some((needle) => rowCustomers.includes(needle)) && rowProducts.includes(productNeedle);
+    });
+    return match ? Number(String(match.price ?? match.unit_price ?? "").replace(/[^\d.-]/g, "")) || 0 : 0;
   }
 
   function applyProducts(products: FnProduct[]) {
@@ -9775,6 +9811,23 @@ function SalesPurchaseEntryModal({
       return;
     }
     applyProducts(selectedProducts);
+  }
+
+  function extendProductSearchSelection(nextIndex: number) {
+    const boundedIndex = Math.max(0, Math.min(productSearch.results.length - 1, nextIndex));
+    if (!productSearch.results[boundedIndex]) return;
+    const anchor = lastProductSelectionIndexRef.current ?? productSearch.selectedIndex;
+    const start = Math.min(anchor, boundedIndex);
+    const end = Math.max(anchor, boundedIndex);
+    setProductSearch((prev) => ({ ...prev, selectedIndex: boundedIndex }));
+    setProductSearchSelectedKeys((prev) => {
+      const next = new Set(prev);
+      productSearch.results.slice(start, end + 1).forEach((product, offset) => {
+        next.add(productSearchKey(product, start + offset));
+      });
+      return Array.from(next);
+    });
+    lastProductSelectionIndexRef.current = anchor;
   }
 
   function setProductSearchSelected(key: string, selected: boolean) {
@@ -9828,11 +9881,13 @@ function SalesPurchaseEntryModal({
       setLocalError("날짜, 거래처명, 창고, 품목코드 1개 이상은 필수입니다.");
       return;
     }
+    const sourceRefBase = `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
     const rows = validLines.map((line, index) => ({
       io_date: entryDate,
       sale_date: mode === "sales" ? entryDate : "",
       purchase_date: mode === "purchases" ? entryDate : "",
       upload_ser_no: String(index + 1),
+      source_ref_id: `${sourceRefBase}-${index + 1}-${line.prod_cd}`,
       cust_code: customerCode,
       cust_name: customerText,
       wh_cd: warehouseCode,
@@ -9860,6 +9915,8 @@ function SalesPurchaseEntryModal({
         return;
       }
       invalidateClientCache("/api/dashboard/summary");
+      invalidateClientCache("/api/sales/import");
+      invalidateClientCache("/api/purchases/import");
       onSaved();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "저장 실패");
@@ -9890,11 +9947,17 @@ function SalesPurchaseEntryModal({
     >
       <div ref={formRef} className="space-y-4">
         <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 md:grid-cols-2">
-          <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onKeyDown={(event) => {
+          <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); datePickerOpenRef.current = false; window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onBlur={() => { datePickerOpenRef.current = false; }} onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
+            if (datePickerOpenRef.current) {
+              datePickerOpenRef.current = false;
+              customerInputRef.current?.focus();
+              return;
+            }
+            datePickerOpenRef.current = true;
             if (typeof event.currentTarget.showPicker === "function") event.currentTarget.showPicker();
-            else moveToNextField(event.currentTarget);
+            else customerInputRef.current?.focus();
           }} /></FormField>
           <FormField label={partnerLabel} required>
             <div className="relative">
@@ -9907,7 +9970,7 @@ function SalesPurchaseEntryModal({
               {customerPickerOpen && filteredCustomers.length > 0 && (
                 <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                   {filteredCustomers.map((customer, index) => (
-                    <button key={customer.id || customer.customer_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === customerIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectCustomer(customer); }}>
+                    <button ref={(element) => { customerOptionRefs.current[index] = element; }} key={customer.id || customer.customer_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === customerIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectCustomer(customer); }}>
                       <b>{customer.customer_name || customer.cust_name || "-"}</b>
                       <span className="ml-2 text-xs text-gray-500">{customer.customer_code || customer.cust_code || ""}</span>
                     </button>
@@ -9927,7 +9990,7 @@ function SalesPurchaseEntryModal({
               {warehousePickerOpen && filteredWarehouses.length > 0 && (
                 <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                   {filteredWarehouses.map((warehouse, index) => (
-                    <button key={warehouse.id || warehouse.warehouse_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === warehouseIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectWarehouse(warehouse); }}>
+                    <button ref={(element) => { warehouseOptionRefs.current[index] = element; }} key={warehouse.id || warehouse.warehouse_code || index} type="button" className={`block w-full px-3 py-2 text-left text-sm ${index === warehouseIndex ? "bg-orange-50 text-orange-700" : "hover:bg-gray-50"}`} onMouseDown={(event) => { event.preventDefault(); selectWarehouse(warehouse); }}>
                       <b>{warehouse.warehouse_code}</b>
                       <span className="ml-2 text-xs text-gray-500">{warehouse.warehouse_name}</span>
                     </button>
@@ -9997,7 +10060,7 @@ function SalesPurchaseEntryModal({
                     if (event.key !== "Enter") return;
                     event.preventDefault();
                     if (!event.currentTarget.value.trim()) {
-                      void openProductSearch(index, line.prod_cd || line.prod_name);
+                      void openProductSearch(index, "");
                       return;
                     }
                     moveToNextField(event.currentTarget);
@@ -10027,8 +10090,25 @@ function SalesPurchaseEntryModal({
             }
           >
             <div onKeyDown={(event) => {
-              if (event.key === "ArrowDown") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(prev.results.length - 1, prev.selectedIndex + 1) })); }
-              if (event.key === "ArrowUp") { event.preventDefault(); setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) })); }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                if (event.shiftKey) extendProductSearchSelection(productSearch.selectedIndex + 1);
+                else {
+                  const nextIndex = Math.min(productSearch.results.length - 1, productSearch.selectedIndex + 1);
+                  lastProductSelectionIndexRef.current = nextIndex;
+                  setProductSearch((prev) => ({ ...prev, selectedIndex: nextIndex }));
+                }
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                if (event.shiftKey) extendProductSearchSelection(productSearch.selectedIndex - 1);
+                else {
+                  const nextIndex = Math.max(0, productSearch.selectedIndex - 1);
+                  lastProductSelectionIndexRef.current = nextIndex;
+                  setProductSearch((prev) => ({ ...prev, selectedIndex: nextIndex }));
+                }
+              }
+              if (event.key === "Enter" && productSearchSelectedKeys.length) { event.preventDefault(); applySelectedProducts(); return; }
               if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) { event.preventDefault(); chooseProduct(productSearch.results[productSearch.selectedIndex]); }
             }}>
               <div className="mb-3 flex gap-2">
