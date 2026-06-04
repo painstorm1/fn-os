@@ -15464,7 +15464,7 @@ function AccountingWorkspace() {
   const emptyFixedCostDraft = {
     id: "",
     fixed_cost_name: "",
-    category_large: "운영비",
+    category_large: "업무 비용",
     category_middle: "",
     category_small: "",
     expected_amount: "",
@@ -15708,7 +15708,7 @@ function AccountingWorkspace() {
         priority: Number(ruleDraft.priority || 100),
         category_large: category?.category_large,
         category_middle: category?.category_middle,
-        category_small: category?.category_small,
+        category_small: "",
       }),
     });
     const data = await res.json();
@@ -15865,7 +15865,7 @@ function AccountingWorkspace() {
         memo: patch.memo ?? row.memo,
         category_large: category?.category_large,
         category_middle: category?.category_middle,
-        category_small: category?.category_small,
+        category_small: "",
         review_status: confirm ? "confirmed" : String(row.review_status || "pending"),
       }),
     });
@@ -15889,11 +15889,11 @@ function AccountingWorkspace() {
 
   const categories = summary?.categories || [];
   const expenses = summary?.transactions || summary?.expenses || [];
-  const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
+  const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
   const filteredExpenses = expenses.filter((row) => {
     const q = filters.q.trim().toLowerCase();
     const rowDate = String(row.transaction_date || row.expense_date || "");
-    const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "");
+    const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "");
     if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${row.source_name || ""}`.toLowerCase().includes(q)) return false;
     if (filters.category && category !== filters.category) return false;
     if (filters.source && String(row.source_name || row.source_type || "") !== filters.source) return false;
@@ -16310,7 +16310,7 @@ function AccountingWorkspace() {
                   {fixedCostRows.map((row) => (
                     <tr key={String(row.fixed_cost_id || row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
                       <td className="px-3 py-2 font-semibold text-gray-900">{String(row.title || row.display_title || row.fixed_cost_name || "-")}</td>
-                      <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
+                      <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{String(row.base_day || "-")}</td>
                       <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
                       <td className="px-3 py-2 text-right">{krw(asNumber(row.expected_amount))}</td>
@@ -16327,9 +16327,9 @@ function AccountingWorkspace() {
                               setFixedCostDraft({
                                 id: String(source.id || row.fixed_cost_id || ""),
                                 fixed_cost_name: String(source.fixed_cost_name || row.title || row.display_title || ""),
-                                category_large: String(source.category_large || "운영비"),
+                                category_large: String(source.category_large || "업무 비용"),
                                 category_middle: String(source.category_middle || ""),
-                                category_small: String(source.category_small || ""),
+                                category_small: "",
                                 expected_amount: String(source.expected_amount || ""),
                                 base_day: String(source.base_day || ""),
                                 payment_type: String(source.payment_type || "bank"),
@@ -16397,15 +16397,12 @@ function AccountingWorkspace() {
                     <input className={modalInputClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))} placeholder="국민은행, 기업은행" />
                   </FormField>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <FormField label="대분류">
                     <input className={modalInputClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
                   </FormField>
                   <FormField label="중분류">
                     <input className={modalInputClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
-                  </FormField>
-                  <FormField label="소분류">
-                    <input className={modalInputClass} value={fixedCostDraft.category_small} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_small: event.target.value }))} />
                   </FormField>
                 </div>
                 <FormField label="매칭 키워드">
@@ -16460,14 +16457,14 @@ function AccountingWorkspace() {
             <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-                  <tr><th className="px-3 py-2 text-left">대분류</th><th className="px-3 py-2 text-left">중/소분류</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-right">관리</th></tr>
+                  <tr><th className="px-3 py-2 text-left">1차 카테고리</th><th className="px-3 py-2 text-left">2차 카테고리</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-right">관리</th></tr>
                 </thead>
                 <tbody>
                   {categories.map((row) => {
                     return (
                       <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
                         <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
-                        <td className="px-3 py-2 text-gray-500">{[row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
+                        <td className="px-3 py-2 text-gray-500">{String(row.category_middle || "-")}</td>
                         <td className="px-3 py-2 text-center">
                           <div className="flex justify-center gap-1">
                             {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
@@ -16485,7 +16482,7 @@ function AccountingWorkspace() {
                                 id: String(row.id || ""),
                                 category_large: String(row.category_large || ""),
                                 category_middle: String(row.category_middle || ""),
-                                category_small: String(row.category_small || ""),
+                                category_small: "",
                                 is_active: true,
                                 affects_profit: row.affects_profit !== false,
                                 affects_cashflow: row.affects_cashflow !== false,
@@ -16511,14 +16508,11 @@ function AccountingWorkspace() {
           <Card className="p-5">
             <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "카테고리 추가"} />
             <form onSubmit={saveExpenseCategory} className="space-y-3">
-              <FormField label="대분류" required>
+              <FormField label="1차 카테고리" required>
                 <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
               </FormField>
-              <FormField label="중분류">
+              <FormField label="2차 카테고리">
                 <input className={modalInputClass} value={categoryDraft.category_middle} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
-              </FormField>
-              <FormField label="소분류">
-                <input className={modalInputClass} value={categoryDraft.category_small} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_small: event.target.value }))} />
               </FormField>
               <FormField label="정렬 순서">
                 <input className={modalInputClass} type="number" value={categoryDraft.sort_order} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
@@ -16790,7 +16784,7 @@ function ExpenseTable({
           </thead>
           <tbody>
             {visibleRows.map((row, index) => {
-              const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle, row.category_small].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "미분류");
+              const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || String(row.category || "미분류");
               const amount = asNumber(row.amount_krw ?? row.total_amount ?? row["합계"] ?? row["금액"] ?? row.amount);
               return (
                 <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
@@ -16958,10 +16952,6 @@ function AccountingRightPanel() {
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <div className="mb-4">
-        <h2 className="text-[18px] font-semibold text-gray-900">회계 Ledger</h2>
-        <p className="mt-1 text-xs font-medium text-gray-500">선택 기간 기준 실제 DB 요약입니다.</p>
-      </div>
       <Card className="mb-3 p-4 shadow-none">
         <SectionHeader title="회계 업로드" />
         <div
@@ -17015,7 +17005,7 @@ function AccountingRightPanel() {
       <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
         <h3 className="text-xs font-semibold text-gray-500">기간 KPI</h3>
         <div className="mt-2 space-y-2">
-          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">매출/정산입금</span><span className="font-bold text-gray-900">{krw(asNumber(totals.income_amount))}</span></div>
+          <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">판매 정산금</span><span className="font-bold text-gray-900">{krw(asNumber(totals.income_amount))}</span></div>
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">비용합계</span><span className="font-bold text-gray-900">{krw(asNumber(totals.expense_amount))}</span></div>
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">순손익</span><span className="font-bold text-gray-900">{krw(asNumber(totals.net_profit))}</span></div>
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">통장 순현금흐름</span><span className="font-bold text-gray-900">{krw(asNumber(totals.cashflow_amount))}</span></div>

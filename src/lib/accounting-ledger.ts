@@ -16,11 +16,11 @@ const SOURCE_ALIASES: Record<string, { sourceType: "card" | "bank"; sourceName: 
 };
 
 const REVIEW_CATEGORY_BY_REASON: Record<string, [string, string, string]> = {
-  KCP확인: ["검토필요", "KCP확인", ""],
-  네이버확인: ["검토필요", "네이버확인", ""],
-  일반명거래: ["검토필요", "일반명거래", ""],
-  "자금이동 확인": ["자금이동", "계좌간이체/대표자입출금", ""],
-  미분류: ["검토필요", "미분류", ""],
+  KCP확인: ["기타 출금", "검토필요", ""],
+  네이버확인: ["기타 출금", "검토필요", ""],
+  일반명거래: ["기타 출금", "미확인 출금", ""],
+  "자금이동 확인": ["기타 출금", "내부이체", ""],
+  미분류: ["기타 출금", "검토필요", ""],
 };
 
 function text(value: unknown) {
@@ -246,7 +246,7 @@ function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawR
 }
 
 function categoryKey(row: RawRow) {
-  return `${text(row.category_large)}|${text(row.category_middle)}|${text(row.category_small)}`;
+  return `${text(row.category_large)}|${text(row.category_middle)}|`;
 }
 
 export function normalizeAccountingTransaction(row: RawRow) {
@@ -309,11 +309,11 @@ export function normalizeAccountingTransaction(row: RawRow) {
 
 export async function classifyAccountingTransactions(rows: RawRow[]): Promise<RawRow[]> {
   const [categories, rules] = await Promise.all([
-    optionalRows("accounting_categories", { order: "sort_order.asc", limit: 500 }),
+    optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 }),
     optionalRows("accounting_category_rules", { is_active: "eq.true", order: "priority.asc", limit: 500 }),
   ]);
   const categoryByPath = new Map(categories.map((category) => [categoryKey(category), category]));
-  const defaultReview = categoryByPath.get("검토필요|미분류|");
+  const defaultReview = categoryByPath.get("기타 출금|검토필요|");
 
   return rows.map((row) => {
     const rule = rules.find((item) => ruleMatches(item, row));
@@ -321,10 +321,10 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const isTransfer = row.direction === "transfer";
     const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
-    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "자금이동" : reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
-    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "계좌 간 이체/대표자 입출금" : reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
-    const categorySmall = isCardPayment || isTransfer ? "" : reviewPath?.[2] || text(rule?.category_small) || text(row.existing_category_small) || text(defaultReview?.category_small);
-    const category = categoryByPath.get(`${categoryLarge}|${categoryMiddle}|${categorySmall}`) || defaultReview;
+    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "기타 출금" : reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
+    const categorySmall = "";
+    const category = categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
     const needsReview = !isCardPayment && !isTransfer && (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required));
     return {
       ...row,
@@ -337,8 +337,8 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
       review_status: needsReview ? "pending" : "confirmed",
       review_reason: reviewReason || (needsReview ? "미분류" : ""),
       affects_profit: isCardPayment || isTransfer ? false : category?.affects_profit ?? row.direction === "expense",
-      affects_cashflow: category?.affects_cashflow ?? row.source_type === "bank",
-      affects_card_settlement: category?.affects_card_settlement ?? row.source_type === "card",
+      affects_cashflow: isCardPayment || isTransfer ? true : row.source_type === "bank" && category?.affects_cashflow !== false,
+      affects_card_settlement: !isCardPayment && row.source_type === "card" ? true : category?.affects_card_settlement ?? false,
     } as RawRow;
   });
 }
@@ -396,7 +396,7 @@ async function categoryFor(row: RawRow) {
   }
   const category_large = text(row.category_large || row.categoryLarge);
   const category_middle = text(row.category_middle || row.categoryMiddle);
-  const category_small = text(row.category_small || row.categorySmall);
+  const category_small = "";
   if (!category_large) return null;
   const [category] = await optionalRows("accounting_categories", {
     category_large: `eq.${category_large}`,
@@ -411,7 +411,7 @@ function cleanCategoryPayload(row: RawRow) {
   return {
     category_large: text(row.category_large || row.categoryLarge),
     category_middle: text(row.category_middle || row.categoryMiddle),
-    category_small: text(row.category_small || row.categorySmall),
+    category_small: "",
     is_active: row.is_active ?? row.isActive ?? true,
     sort_order: numberValue(row.sort_order ?? row.sortOrder),
     affects_profit: row.affects_profit ?? row.affectsProfit ?? true,
@@ -455,7 +455,7 @@ export async function upsertAccountingRule(row: RawRow) {
     category_id: category?.id || null,
     category_large: text(category?.category_large || row.category_large || row.categoryLarge),
     category_middle: text(category?.category_middle || row.category_middle || row.categoryMiddle),
-    category_small: text(category?.category_small || row.category_small || row.categorySmall),
+    category_small: "",
     auto_confirm: row.auto_confirm ?? row.autoConfirm ?? false,
     review_required: row.review_required ?? row.reviewRequired ?? true,
     review_reason: text(row.review_reason || row.reviewReason) || null,
@@ -479,7 +479,7 @@ function cleanFixedCostPayload(row: RawRow) {
     fixed_cost_name: text(row.fixed_cost_name || row.fixedCostName || row.name),
     category_large: text(row.category_large || row.categoryLarge),
     category_middle: text(row.category_middle || row.categoryMiddle),
-    category_small: text(row.category_small || row.categorySmall),
+    category_small: "",
     expected_amount: numberValue(row.expected_amount ?? row.expectedAmount ?? row.amount),
     base_day: text(row.base_day || row.baseDay || row.payment_day || row.paymentDay),
     weekend_policy: text(row.weekend_policy || row.weekendPolicy) || "previous_business_day",
@@ -588,10 +588,10 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
     payload.category_id = category.id;
     payload.category_large = category.category_large;
     payload.category_middle = category.category_middle;
-    payload.category_small = category.category_small;
+    payload.category_small = "";
   }
   for (const key of ["category_large", "category_middle", "category_small"]) {
-    if (row[key] !== undefined && !category) payload[key] = text(row[key]);
+    if (row[key] !== undefined && !category) payload[key] = key === "category_small" ? "" : text(row[key]);
   }
   for (const key of ["direction", "review_reason"]) {
     if (row[key] !== undefined) payload[key] = text(row[key]);
@@ -632,7 +632,7 @@ export async function resolveAccountingReview(row: RawRow) {
       category_id: category?.id,
       category_large: category?.category_large || row.category_large,
       category_middle: category?.category_middle || row.category_middle,
-      category_small: category?.category_small || row.category_small,
+      category_small: "",
       auto_confirm: row.auto_confirm ?? row.autoConfirm ?? false,
       review_required: row.review_required ?? row.reviewRequired ?? false,
       review_reason: row.review_reason || row.reviewReason || null,
@@ -698,7 +698,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     if (to && date > to) return false;
     return row.is_active !== false;
   });
-  const categories = await optionalRows("accounting_categories", { order: "sort_order.asc", limit: 500 });
+  const categories = await optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 });
   const rules = await optionalRows("accounting_category_rules", { order: "priority.asc", limit: 500 });
   const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
   const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });

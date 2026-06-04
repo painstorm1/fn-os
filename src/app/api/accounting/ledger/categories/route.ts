@@ -5,7 +5,7 @@ import { deactivateAccountingCategory, upsertAccountingCategory } from "@/lib/ac
 
 export async function GET() {
   try {
-    const categories = await selectRows("accounting_categories", { order: "sort_order.asc", limit: 500 });
+    const categories = await selectRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 });
     return NextResponse.json({ ok: true, categories });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
