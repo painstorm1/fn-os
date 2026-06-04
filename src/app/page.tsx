@@ -10224,7 +10224,7 @@ function ChannelTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   );
 }
 
-type MasterTabKey = "customers" | "products" | "warehouses" | "channelMappings" | "channels" | "attendance";
+type MasterTabKey = "customers" | "products" | "warehouses" | "channelMappings" | "channels";
 type PersonnelStatus = "working" | "leave" | "resigned";
 type PersonnelRole = "staff" | "admin";
 type PersonnelBulkField = "status" | "role" | "phone" | "address" | "email" | "joined_at" | "department" | "rank" | "position" | "salary" | "bank_name" | "bank_account_holder" | "bank_account_no" | "memo";
@@ -10578,13 +10578,6 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     templateHeaders: ["쇼핑몰명", "품목코드", "품목명", "쇼핑몰품목key"],
     sampleRow: ["네이버_에프앤FN", "DNA007_BK", "다이나믹 스포츠 선글라스_블랙", "13155418629제품선택: 다이나믹 스포츠 선글라스 / 선글라스 색상: 블랙"],
   },
-  {
-    key: "attendance",
-    label: "인사관리",
-    title: "인사",
-    templateHeaders: ["속성", "권한", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모"],
-    sampleRow: ["근무", "일반 직원", "홍길동", "900101-1234567", "010-0000-0000", "서울", "sample@fnos.local", "2026-06-01", "운영", "대리", "팀원", "3000000", "국민은행", "홍길동", "000000-00-000000", ""],
-  },
 ];
 
 function masterTemplate(tab: MasterTabKey) {
@@ -10621,8 +10614,6 @@ function MasterManagementPanel({
   const requestedMasterTab = searchParams.get("masterTab");
   const initialMasterTab = isMasterTabKey(requestedMasterTab) ? requestedMasterTab : "customers";
   const [activeMasterTab, setActiveMasterTab] = useState<MasterTabKey>(initialMasterTab);
-  const [personnelUnlocked, setPersonnelUnlocked] = useState(false);
-  const [personnelAuthOpen, setPersonnelAuthOpen] = useState(false);
   const activeConfig = masterTemplate(activeMasterTab);
 
   function rememberMasterTab(tab: MasterTabKey) {
@@ -10638,44 +10629,9 @@ function MasterManagementPanel({
     if (isMasterTabKey(requestedMasterTab) && requestedMasterTab !== activeMasterTab) setActiveMasterTab(requestedMasterTab);
   }, [requestedMasterTab, activeMasterTab]);
 
-  function personnelPassword() {
-    if (typeof window === "undefined") return "0310";
-    return localStorage.getItem("fnos-personnel-password") || "0310";
-  }
-
   function openMasterTab(tab: MasterTabKey) {
-    if (tab === "attendance" && !personnelUnlocked) {
-      setPersonnelAuthOpen(true);
-      return;
-    }
     setActiveMasterTab(tab);
     rememberMasterTab(tab);
-  }
-
-  function unlockPersonnel(password: string) {
-    if (password !== personnelPassword()) {
-      window.alert("비밀번호가 일치하지 않습니다.");
-      return false;
-    }
-    setPersonnelUnlocked(true);
-    setActiveMasterTab("attendance");
-    rememberMasterTab("attendance");
-    setPersonnelAuthOpen(false);
-    return true;
-  }
-
-  function changePersonnelPassword(currentPassword: string, newPassword: string, confirmPassword: string) {
-    if (currentPassword !== personnelPassword()) {
-      window.alert("현재 비밀번호가 일치하지 않습니다.");
-      return false;
-    }
-    if (!newPassword || newPassword !== confirmPassword) {
-      window.alert("새 비밀번호와 확인값을 다시 확인해 주세요.");
-      return false;
-    }
-    localStorage.setItem("fnos-personnel-password", newPassword);
-    window.alert("인사관리 비밀번호를 변경했습니다.");
-    return true;
   }
 
   return (
@@ -10697,15 +10653,7 @@ function MasterManagementPanel({
         </div>
       </div>
 
-      {personnelAuthOpen && (
-        <PersonnelAuthModal
-          onClose={() => setPersonnelAuthOpen(false)}
-          onUnlock={unlockPersonnel}
-          onChangePassword={changePersonnelPassword}
-        />
-      )}
-
-      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && activeMasterTab !== "attendance" && activeMasterTab !== "channelMappings" && (
+      {activeMasterTab !== "products" && activeMasterTab !== "customers" && activeMasterTab !== "warehouses" && activeMasterTab !== "channelMappings" && (
         <MasterEntryPanel
           config={activeConfig}
           setMessage={setMessage}
@@ -10724,14 +10672,6 @@ function MasterManagementPanel({
       {activeMasterTab === "warehouses" && <WarehouseManagementPanel message={message} setMessage={setMessage} />}
 
       {activeMasterTab === "channelMappings" && <ChannelProductMappingPanel />}
-
-      {activeMasterTab === "attendance" && (
-        <PersonnelManagementPanel onLock={() => {
-          setPersonnelUnlocked(false);
-          setActiveMasterTab("customers");
-          rememberMasterTab("customers");
-        }} />
-      )}
 
       {activeMasterTab === "channels" && (
         <Panel
@@ -13645,12 +13585,6 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
       return;
     }
 
-    if (config.key === "attendance") {
-      const saved = JSON.parse(localStorage.getItem("fnos-personnel-draft-rows") || "[]") as Record<string, unknown>[];
-      localStorage.setItem("fnos-personnel-draft-rows", JSON.stringify([...saved, ...rows]));
-      setMessage(`인사 ${rows.length}건을 임시 저장했습니다. DB 저장은 인사 테이블 생성 후 연결합니다.`);
-      return;
-    }
   }
 
   async function uploadExcel(file: File) {
