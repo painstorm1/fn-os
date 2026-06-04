@@ -92,6 +92,14 @@ const salesSubMenus = [
   { label: "기초관리", section: "master" },
 ];
 
+const sidebarSubMenuContainerClass = "ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3";
+
+function sidebarSubMenuLinkClass(active: boolean) {
+  return `block rounded-md px-3 py-2 text-xs font-black transition ${
+    active ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
+  }`;
+}
+
 const menuSlugs: Record<string, string> = {
   대시보드: "dashboard",
   "매출/재고": "sales",
@@ -567,7 +575,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
               </Link>
             )}
             {item === "매출/재고" && activeMenu === "매출/재고" && salesOpen && (
-              <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
+              <div className={sidebarSubMenuContainerClass}>
                 {salesSubMenus.map((sub) => (
                   <Link
                     key={sub.section}
@@ -576,9 +584,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                       event.preventDefault();
                       goToInternal(`/?menu=sales&salesSection=${sub.section}`);
                     }}
-                    className={`block rounded-md px-3 py-2 text-xs font-black ${
-                      salesSection === sub.section ? "bg-orange-50 text-orange-600" : "text-slate-500 hover:bg-slate-50"
-                    }`}
+                    className={sidebarSubMenuLinkClass(salesSection === sub.section)}
                   >
                     {sub.label}
                   </Link>
@@ -586,7 +592,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
               </div>
             )}
             {item === "수입관리" && activeMenu === "수입관리" && importOpen && (
-              <div className="ml-3 mt-2 space-y-2 border-l border-gray-200 pl-4">
+              <div className={sidebarSubMenuContainerClass}>
                 {importSubMenus.map((sub) => (
                   <Link
                     key={sub.path}
