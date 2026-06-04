@@ -380,8 +380,8 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <FormModal
-      title={mode === "view" ? "설정" : "비밀번호 변경"}
-      description={mode === "view" ? "현재 FN OS 로그인 비밀번호를 확인할 수 있습니다." : "새 비밀번호로 변경합니다."}
+      title={mode === "view" ? "FN OS 패스워드" : "FN OS 패스워드 변경"}
+      description={mode === "view" ? "FN OS 로그인에 사용하는 패스워드입니다." : "새 비밀번호로 변경합니다."}
       onClose={onClose}
       size="md"
       footer={
@@ -456,7 +456,6 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
 function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -477,7 +476,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
 
   return (
     <aside className="hidden min-h-screen w-[280px] shrink-0 border-r border-slate-200 bg-white px-6 py-5 lg:block">
-      <PasswordSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <Link
         href="/?menu=dashboard"
         className="mb-4 block"
@@ -498,14 +496,13 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
           로그아웃
         </button>
         <span className="text-gray-300">|</span>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
+        <a
+          href="/?menu=fnSettings&settingsTab=personnel"
           className="hover:text-orange-600"
           title="설정"
         >
           설정
-        </button>
+        </a>
       </div>
 
       <nav className="space-y-1">
@@ -16923,6 +16920,209 @@ function DashboardNew() {
   );
 }
 
+function FnSettingsWorkspace() {
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("settingsTab") || "personnel";
+  const [activeTab, setActiveTab] = useState(requestedTab);
+  const [unlocked, setUnlocked] = useState(false);
+  const [adminName, setAdminName] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const tabs = [
+    { key: "personnel", label: "인사관리" },
+    { key: "bank", label: "통장관리" },
+    { key: "card", label: "카드관리" },
+    { key: "password", label: "비밀번호 관리" },
+    { key: "certification", label: "인증자격관리" },
+    { key: "etc", label: "기타 FN정보" },
+  ];
+
+  useEffect(() => {
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
+
+  function openTab(tab: string) {
+    setActiveTab(tab);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("menu", "fnSettings");
+    params.set("settingsTab", tab);
+    window.history.replaceState(window.history.state, "", `/?${params.toString()}`);
+  }
+
+  function readAdminPassword() {
+    if (typeof window === "undefined") return "0310";
+    return localStorage.getItem("fnos-admin-settings-password") || "0310";
+  }
+
+  function readEmployees(): PersonnelEmployee[] {
+    if (typeof window === "undefined") return [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem("fnos-personnel-employees") || "[]");
+      return Array.isArray(parsed)
+        ? parsed.map((employee) => ({
+            ...employee,
+            role: normalizePersonnelRole(employee.role),
+            status: normalizePersonnelStatus(employee.status),
+          })) as PersonnelEmployee[]
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function confirmAdmin() {
+    const name = adminName.trim();
+    if (!name) {
+      setError("관리자 성명을 입력해 주세요.");
+      return;
+    }
+    if (adminPassword !== readAdminPassword()) {
+      setError("관리자 패스워드가 일치하지 않습니다.");
+      return;
+    }
+    const employees = readEmployees();
+    if (!employees.length) {
+      const initialAdmin: PersonnelEmployee = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        status: "working",
+        role: "admin",
+        name,
+        resident_no: "",
+        phone: "",
+        address: "",
+        email: "",
+        joined_at: new Date().toISOString().slice(0, 10),
+        department: "",
+        rank: "",
+        position: "관리자",
+        salary: "0",
+        bank_name: "",
+        bank_account_holder: "",
+        bank_account_no: "",
+        memo: "FN 설정 최초 관리자",
+        leave_reason: "",
+        leave_from: "",
+        leave_to: "",
+        leave_memo: "",
+        resigned_reason: "",
+        resigned_at: "",
+        resigned_memo: "",
+      };
+      localStorage.setItem("fnos-personnel-employees", JSON.stringify([initialAdmin]));
+      setError("");
+      setUnlocked(true);
+      return;
+    }
+    const admin = employees.find((employee) => employee.name.trim() === name && employee.role === "admin");
+    if (!admin) {
+      setError("인사관리 직원 권한이 관리자인 사용자만 볼 수 있습니다.");
+      return;
+    }
+    setError("");
+    setUnlocked(true);
+  }
+
+  function changeAdminPassword() {
+    const currentPassword = window.prompt("현재 관리자 패스워드");
+    if (currentPassword !== readAdminPassword()) {
+      window.alert("현재 관리자 패스워드가 일치하지 않습니다.");
+      return;
+    }
+    const nextPassword = window.prompt("새 관리자 패스워드");
+    if (!nextPassword) return;
+    localStorage.setItem("fnos-admin-settings-password", nextPassword);
+    window.alert("관리자 패스워드를 수정했습니다.");
+  }
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title="FN 설정" actions={!unlocked && <ActionButton type="button" onClick={confirmAdmin}>관리자 확인</ActionButton>} />
+
+      {!unlocked ? (
+        <Card className="p-5">
+          <SectionHeader
+            title="FN 설정 권한 확인"
+            description={<span>민감한 FN 정보를 보호하기 위해 관리자 권한을 확인합니다.</span>}
+          />
+          <div className="mt-4 grid max-w-3xl gap-3 md:grid-cols-2">
+            <FormField label="관리자 성명" required>
+              <input className={modalInputClass} value={adminName} onChange={(event) => setAdminName(event.target.value)} />
+            </FormField>
+            <FormField label="관리자 패스워드" required>
+              <input
+                className={modalInputClass}
+                type="password"
+                value={adminPassword}
+                onChange={(event) => setAdminPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") confirmAdmin();
+                }}
+              />
+            </FormField>
+          </div>
+          {error && <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm font-black text-red-600">{error}</div>}
+        </Card>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
+            <div className="flex min-w-max gap-1">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => openTab(tab.key)}
+                  className={`h-10 rounded-md px-4 text-sm font-black ${
+                    activeTab === tab.key ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeTab === "personnel" && <PersonnelManagementPanel onLock={() => setUnlocked(false)} />}
+
+          {activeTab === "password" && (
+            <Card className="p-5">
+              <SectionHeader title="비밀번호 관리" />
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-md border border-slate-200 p-4">
+                  <div className="text-sm font-black text-slate-900">FN OS 패스워드</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-500">FN OS 로그인 비밀번호</div>
+                  <ActionButton type="button" className="mt-3" onClick={() => window.alert("FN OS 로그인 비밀번호 수정은 기존 로그인 API와 연결 예정입니다.")}>수정</ActionButton>
+                </div>
+                <div className="rounded-md border border-slate-200 p-4">
+                  <div className="text-sm font-black text-slate-900">관리자 패스워드</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-500">FN 설정 진입 비밀번호</div>
+                  <ActionButton type="button" className="mt-3" onClick={changeAdminPassword}>수정</ActionButton>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {(activeTab === "bank" || activeTab === "card") && (
+            <Card className="p-5">
+              <SectionHeader
+                title={activeTab === "bank" ? "통장관리" : "카드관리"}
+                description={<span>회계/비용 작업 완료 후 해당 메뉴 기능을 FN 설정으로 이동합니다.</span>}
+              />
+            </Card>
+          )}
+
+          {(activeTab === "certification" || activeTab === "etc") && (
+            <Card className="p-5">
+              <SectionHeader title={activeTab === "certification" ? "인증자격관리" : "기타 FN정보"} />
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function HomeContent() {
   const searchParams = useSearchParams();
   const activeSlug = searchParams.get("menu") || "dashboard";
@@ -16966,6 +17166,8 @@ function HomeContent() {
             <AdsAnalysisWorkspace />
           ) : activeSlug === "archive" ? (
             <ArchiveWorkspace />
+          ) : activeSlug === "fnSettings" ? (
+            <FnSettingsWorkspace />
           ) : (
             <section className="rounded-md border border-slate-200 bg-white p-8 shadow-sm">
               <h1 className="text-2xl font-black">{activeMenu}</h1>
