@@ -132,6 +132,7 @@ type CalendarServerMemo = {
   memo: string;
   order_id?: number;
   order_code?: string;
+  tone?: "import" | "fixed";
 };
 
 function CalendarMemo() {
@@ -156,10 +157,15 @@ function CalendarMemo() {
   useEffect(() => {
     let alive = true;
     function loadServerMemos() {
-      cachedJson<Record<string, Array<string | CalendarServerMemo>>>("/api/fnos/calendar-production-memos", 30_000)
-        .then((data) => {
+      const start = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
+      const end = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
+      Promise.all([
+        cachedJson<Record<string, Array<string | CalendarServerMemo>>>("/api/fnos/calendar-production-memos", 30_000),
+        cachedJson<AccountingSummary>(`${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}`, 30_000),
+      ])
+        .then(([data, accounting]) => {
           if (!alive) return;
-          const normalized = Object.fromEntries(
+          const normalized: Record<string, CalendarServerMemo[]> = Object.fromEntries(
             Object.entries(data || {}).map(([date, items]) => [
               date,
               (Array.isArray(items) ? items : []).map((item) => (
@@ -167,6 +173,18 @@ function CalendarMemo() {
               )),
             ]),
           );
+          (accounting?.fixed_cost_occurrences || []).forEach((row) => {
+            const dueDate = String(row.due_date || "");
+            if (!dueDate) return;
+            const title = String(row.title || row.display_title || row.fixed_cost_name || "고정비");
+            const amount = asNumber(row.amount || row.expected_amount);
+            const source = String(row.payment_source || row.payment_type || "통장/카드");
+            const item: CalendarServerMemo = {
+              memo: `[고정비] ${title}${amount ? ` ${krw(amount)}` : ""} / ${source}`,
+              tone: "fixed",
+            };
+            normalized[dueDate] = [...(normalized[dueDate] || []), item];
+          });
           setServerMemos(normalized);
         })
         .catch(() => {
@@ -183,7 +201,7 @@ function CalendarMemo() {
       window.removeEventListener("fnos-calendar-refresh", loadServerMemos);
       window.removeEventListener("focus", loadServerMemos);
     };
-  }, []);
+  }, [viewDate]);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -264,7 +282,7 @@ function CalendarMemo() {
         <strong className="text-xs font-bold text-slate-500">{selected}</strong>
         <div className="mt-2 space-y-2">
           {(serverMemos[selected] || []).map((memo, index) => (
-            <div key={`server-${memo.memo}-${index}`} className="rounded-md bg-orange-50 px-2 py-1.5 text-xs font-bold text-orange-700">
+            <div key={`server-${memo.memo}-${index}`} className={`rounded-md px-2 py-1.5 text-xs font-bold ${memo.tone === "fixed" ? "bg-rose-50 text-rose-700" : "bg-orange-50 text-orange-700"}`}>
               {memo.order_id ? (
                 <Link href={importHref(`/orders?open=${memo.order_id}`)} className="block break-keep hover:underline">
                   {memo.memo}
@@ -15584,7 +15602,6 @@ function AccountingWorkspace() {
           </div>
         </Card>
         <div className="space-y-4">
-          <FixedCostCalendar rows={fixedCostOccurrences} upcomingRows={upcomingFixedCosts} compact />
           <ReportList title="업체별 비용" rows={vendorRows} />
         </div>
       </section>
@@ -15907,7 +15924,6 @@ function AccountingWorkspace() {
             </div>
           </Card>
           <div className="space-y-4">
-            <FixedCostCalendar rows={fixedCostOccurrences} upcomingRows={upcomingFixedCosts} />
             <Card className="p-5">
               <SectionHeader title="도래할 고정비 5개" />
               <div className="mt-4 space-y-2">
@@ -16310,65 +16326,6 @@ function ReviewQuickGrid({
         </tbody>
       </table>
     </div>
-  );
-}
-
-function FixedCostCalendar({ rows, upcomingRows, compact = false }: { rows: Array<Record<string, unknown>>; upcomingRows: Array<Record<string, unknown>>; compact?: boolean }) {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startOffset = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = Array.from({ length: Math.ceil((startOffset + daysInMonth) / 7) * 7 }, (_, index) => {
-    const day = index - startOffset + 1;
-    return day > 0 && day <= daysInMonth ? day : 0;
-  });
-  const byDay = new Map<number, Array<Record<string, unknown>>>();
-  rows.forEach((row) => {
-    const dueDate = String(row.due_date || "");
-    const due = new Date(dueDate);
-    if (due.getFullYear() !== year || due.getMonth() !== month) return;
-    const dayRows = byDay.get(due.getDate()) || [];
-    dayRows.push(row);
-    byDay.set(due.getDate(), dayRows);
-  });
-  const upcomingIds = new Set(upcomingRows.map((row) => String(row.fixed_cost_id || row.id || row.title || row.display_title)));
-  return (
-    <Card className="p-5">
-      <SectionHeader title="고정비 캘린더" actions={<StatusBadge tone="orange">{year}.{String(month + 1).padStart(2, "0")}</StatusBadge>} />
-      <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400">
-        {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span key={day}>{day}</span>)}
-      </div>
-      <div className="mt-2 grid grid-cols-7 gap-1">
-        {cells.map((day, index) => {
-          const dayRows = day ? byDay.get(day) || [] : [];
-          const isToday = day === today.getDate();
-          const hasUpcoming = dayRows.some((row) => upcomingIds.has(String(row.fixed_cost_id || row.id || row.title || row.display_title)));
-          return (
-            <div key={`${day}-${index}`} className={`min-h-[58px] rounded-lg border px-1.5 py-1 text-left ${day ? "border-gray-200 bg-white" : "border-transparent bg-transparent"} ${isToday ? "ring-2 ring-orange-300" : ""} ${hasUpcoming ? "bg-orange-50 border-orange-200" : ""}`}>
-              {day ? <p className="text-[11px] font-bold text-gray-700">{day}</p> : null}
-              <div className="mt-1 space-y-1">
-                {dayRows.slice(0, compact ? 1 : 2).map((row, rowIndex) => (
-                  <p key={`${String(row.fixed_cost_id || row.id)}-${rowIndex}`} className="truncate rounded bg-gray-100 px-1 py-0.5 text-[10px] font-semibold text-gray-600">
-                    {String(row.title || row.display_title || "-")}
-                  </p>
-                ))}
-                {dayRows.length > (compact ? 1 : 2) && <p className="text-[10px] font-bold text-orange-600">+{dayRows.length - (compact ? 1 : 2)}</p>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-3 space-y-1">
-        {upcomingRows.slice(0, 3).map((row, index) => (
-          <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="flex justify-between gap-2 rounded-lg bg-orange-50 px-3 py-2 text-xs">
-            <span className="truncate font-semibold text-gray-700">{String(row.title || row.display_title || "-")}</span>
-            <span className="font-bold text-[#ff6a00]">D-{Math.max(0, asNumber(row.days_until))} · {krw(asNumber(row.amount))}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
   );
 }
 
