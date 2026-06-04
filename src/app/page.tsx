@@ -9098,7 +9098,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </button>
           }
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
               {[
                 ["sales", "판매 관리"],
@@ -9114,7 +9114,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </button>
               ))}
             </div>
-            <div className="text-xs font-black text-slate-500">단축키 F2</div>
           </div>
           <div className="mb-3 grid gap-2 xl:grid-cols-[1fr_1fr_1fr_150px_150px_auto]">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
