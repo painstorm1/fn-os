@@ -15,6 +15,8 @@ function normalizeProduct(row: AnyRecord) {
     unit: text(row.unit || row.UNIT),
     inPrice: text(row.cost_price || row.in_price || row.IN_PRICE),
     outPrice: text(row.standard_price || row.out_price || row.OUT_PRICE),
+    productAttribute: text(row.product_attribute || row.product_kind || row.relation),
+    importLinked: Boolean(row.import_linked || row.import_product_id || row.import_product_code || row.import_product_name),
     raw: row,
   };
 }
@@ -54,19 +56,31 @@ async function inventoryForProduct(code: string) {
 
 function includesQuery(row: ReturnType<typeof normalizeProduct>, query: string) {
   const haystack = `${row.code} ${row.name} ${row.size}`.toLowerCase();
-  return haystack.includes(query.toLowerCase());
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return terms.every((term) => haystack.includes(term));
+}
+
+function matchesAttribute(row: ReturnType<typeof normalizeProduct>, attribute: string) {
+  if (!attribute || attribute === "all") return true;
+  const normalized = row.productAttribute.toLowerCase();
+  if (attribute === "set") return normalized === "set" || row.name.startsWith("[SET]");
+  if (attribute === "rg") return normalized === "rg" || row.name.startsWith("[RG]");
+  if (attribute === "import") return row.importLinked || ["import", "import_linked", "수입연동"].includes(normalized);
+  return true;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { query?: string };
+    const body = (await request.json().catch(() => ({}))) as { query?: string; productAttribute?: string };
     const query = text(body.query);
     if (!query) return NextResponse.json({ ok: false, error: "상품명을 입력해 주세요." }, { status: 400 });
+    const productAttribute = text(body.productAttribute || "all") || "all";
 
     const dbRows = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2000 });
     const products = dbRows
       .map(normalizeProduct)
       .filter((row) => includesQuery(row, query))
+      .filter((row) => matchesAttribute(row, productAttribute))
       .slice(0, 20);
 
     const productsWithInventory = await Promise.all(products.map(async (product) => ({
