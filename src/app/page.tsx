@@ -9093,18 +9093,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
 
       {isHistorySection && (
-        <Panel
-          action={
-            <button
-              type="button"
-              onClick={() => openEntryModal(historyMode)}
-              className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
-            >
-              {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
-            </button>
-          }
-        >
-          <div className="mb-3 flex flex-wrap items-center gap-3">
+        <Panel>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
               {[
                 ["sales", "판매 관리"],
@@ -9120,6 +9110,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => openEntryModal(historyMode)}
+              className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
+            >
+              {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
+            </button>
           </div>
           <div className="mb-3 grid gap-2 xl:grid-cols-[1fr_1fr_1fr_150px_150px_auto]">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
