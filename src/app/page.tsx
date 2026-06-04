@@ -92,6 +92,15 @@ const salesSubMenus = [
   { label: "기초관리", section: "master" },
 ];
 
+const accountingSubMenus = [
+  { label: "대시보드", tab: "dashboard" },
+  { label: "통장 내역", tab: "bank" },
+  { label: "카드 내역", tab: "card" },
+  { label: "고정비", tab: "fixed" },
+  { label: "설정", tab: "settings" },
+  { label: "검토필요", tab: "review" },
+];
+
 const sidebarSubMenuContainerClass = "ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3";
 
 function sidebarSubMenuLinkClass(active: boolean) {
@@ -460,9 +469,10 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: string; importPath: string; salesSection: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { activeMenu: string; importPath: string; salesSection: string; accountingTab: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
+  const [accountingOpen, setAccountingOpen] = useState(activeMenu === "회계/비용");
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -473,6 +483,12 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
   useEffect(() => {
     if (activeMenu !== "매출/재고") return;
     const timer = window.setTimeout(() => setSalesOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== "회계/비용") return;
+    const timer = window.setTimeout(() => setAccountingOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
@@ -567,6 +583,24 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
               >
                 {item}
               </Link>
+            ) : item === "회계/비용" ? (
+              <Link
+                href="/?menu=accounting&accountingTab=dashboard"
+                onClick={(event) => {
+                  if (activeMenu === "회계/비용") {
+                    event.preventDefault();
+                    setAccountingOpen((open) => !open);
+                    return;
+                  }
+                  event.preventDefault();
+                  goToInternal("/?menu=accounting&accountingTab=dashboard");
+                }}
+                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item}
+              </Link>
             ) : (
               <Link
                 href={`/?menu=${menuSlugs[item]}`}
@@ -611,6 +645,23 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                       goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
                     }}
                     className={sidebarSubMenuLinkClass(importPath === sub.path)}
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+            {item === "회계/비용" && activeMenu === "회계/비용" && accountingOpen && (
+              <div className={sidebarSubMenuContainerClass}>
+                {accountingSubMenus.map((sub) => (
+                  <Link
+                    key={sub.tab}
+                    href={`/?menu=accounting&accountingTab=${sub.tab}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToInternal(`/?menu=accounting&accountingTab=${sub.tab}`);
+                    }}
+                    className={sidebarSubMenuLinkClass(accountingTab === sub.tab)}
                   >
                     {sub.label}
                   </Link>
@@ -1414,6 +1465,44 @@ type OrderAttachment = {
   uploaded_at?: string;
 };
 
+type AccountAttachment = Omit<OrderAttachment, "id" | "order_id"> & {
+  id: string;
+  account_type?: "bank" | "card";
+  account_id?: string;
+};
+
+type FnBankAccount = {
+  id?: string;
+  account_type?: string;
+  bank_name?: string;
+  account_holder?: string;
+  account_number?: string;
+  password_hint?: string;
+  list_enabled?: boolean;
+  memo?: string;
+  sort_order?: number | string;
+};
+
+type FnCardAccount = {
+  id?: string;
+  card_type?: string;
+  card_name?: string;
+  card_number?: string;
+  expiry_date?: string;
+  cvc_hint?: string;
+  secure_message?: string;
+  payment_password_hint?: string;
+  cutoff_start_day?: number | string;
+  cutoff_end_day?: number | string;
+  payment_day?: number | string;
+  card_limit?: number | string;
+  withdrawal_account_name?: string;
+  list_enabled?: boolean;
+  physical_owner?: string;
+  memo?: string;
+  sort_order?: number | string;
+};
+
 type SalesInventorySummary = {
   ok?: boolean;
   error?: string;
@@ -1675,6 +1764,36 @@ function attachmentViewerUrl(item: OrderAttachment) {
     name: item.file_name || "첨부파일",
   });
   return `/attachment-viewer?${params.toString()}`;
+}
+
+function maskedSecret(value?: string | number | null) {
+  return String(value || "").trim() ? "****" : "-";
+}
+
+function accountKindLabel(value?: string) {
+  return String(value || "") === "personal" ? "개인" : "기업";
+}
+
+function listEnabledLabel(value?: boolean) {
+  return value === false ? "미반영" : "반영";
+}
+
+function formatCardExpiry(value?: string) {
+  const textValue = String(value || "").trim();
+  const match = textValue.match(/^(\d{4})-(\d{2})/);
+  if (match) return `${match[2]}/${match[1].slice(2)}`;
+  return textValue || "-";
+}
+
+function cardExpiryWarning(card: FnCardAccount) {
+  const expiry = parseLocalDate(card.expiry_date || "");
+  if (!expiry) return false;
+  expiry.setHours(23, 59, 59, 999);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const warnFrom = new Date(expiry);
+  warnFrom.setMonth(warnFrom.getMonth() - 3);
+  return today >= warnFrom;
 }
 
 async function openAttachment(item: OrderAttachment) {
@@ -15411,11 +15530,9 @@ function invalidateAccountingCache() {
   invalidateClientCache("/api/accounting/ledger/summary");
 }
 
-function AccountingWorkspace() {
+function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
-  const [activeTab, setActiveTab] = useState("");
-  const [bankSubTab, setBankSubTab] = useState<"list" | "settings">("list");
-  const [cardSubTab, setCardSubTab] = useState<"list" | "settings">("list");
+  const activeTab = accountingTabLabel[tab] ? tab : "dashboard";
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
@@ -15963,27 +16080,14 @@ function AccountingWorkspace() {
     <div className="space-y-5">
       <PageHeader
         title="회계/비용"
-        description="국민카드, 은행 입출금, 세금계산서, 물류/광고 비용을 파일 기반으로 모아 손익까지 봅니다."
+        description={accountingTabLabel[activeTab]}
       />
-
-      <Card className="flex gap-2 overflow-x-auto p-1 shadow-none">
-        {accountingTabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`h-10 shrink-0 rounded-lg px-4 text-sm font-semibold transition ${activeTab === tab ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
-          >
-            {tab}
-          </button>
-        ))}
-      </Card>
 
       {loading && <Card className="p-4 text-sm font-semibold text-gray-500">회계 데이터를 불러오는 중입니다.</Card>}
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{summary.error}</Card>}
       {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-700">{message}</Card>}
 
-      {!activeTab && (
+      {activeTab === "dashboard" && (
         <>
           <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
             <AccountingLineChart rows={monthRows} />
@@ -16007,291 +16111,33 @@ function AccountingWorkspace() {
         </>
       )}
 
-      {activeTab === "통장" && (
+      {activeTab === "bank" && (
         <Card className="p-5">
           <SectionHeader
-            title={bankSubTab === "list" ? "통장 내역" : "통장 설정"}
-            description={bankSubTab === "list" ? "국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다." : "통장명, 예금주, 계좌번호, 리스트 반영 여부를 관리합니다."}
-            actions={<StatusBadge>{(bankSubTab === "list" ? expenses.filter((row) => String(row.source_type || "") === "bank").length : bankAccounts.length).toLocaleString("ko-KR")}건</StatusBadge>}
+            title="통장 내역"
+            description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다."
+            actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex gap-2 rounded-xl border border-gray-200 bg-white p-1">
-            {[
-              ["list", "통장 내역"],
-              ["settings", "통장 설정"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setBankSubTab(key as "list" | "settings")}
-                className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${bankSubTab === key ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-4">
+            <ExpenseTable mode="bank" rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
           </div>
-
-          {bankSubTab === "list" && (
-            <div className="mt-4">
-              <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
-            </div>
-          )}
-
-          {bankSubTab === "settings" && (
-            <>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full min-w-[760px] text-xs">
-              <thead className="bg-gray-50 font-semibold text-gray-500">
-                <tr>
-                  <th className="px-3 py-2 text-center">은행명</th>
-                  <th className="px-3 py-2 text-left">속성</th>
-                  <th className="px-3 py-2 text-left">예금주</th>
-                  <th className="px-3 py-2 text-left">계좌번호</th>
-                  <th className="px-3 py-2 text-left">비밀번호</th>
-                  <th className="px-3 py-2 text-center">리스트</th>
-                  <th className="px-3 py-2 text-left">메모</th>
-                  <th className="px-3 py-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bankAccounts.map((row) => (
-                  <tr key={String(row.id || row.bank_name)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                    <td className="px-3 py-2 text-center"><StatusBadge>{String(row.bank_name || "-")}</StatusBadge></td>
-                    <td className="px-3 py-2 font-semibold text-gray-700">{String(row.account_type || "business")}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(row.account_holder || "미입력")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.account_number || "미입력")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.password_hint || "미입력")}</td>
-                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
-                    <td className="px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex justify-center gap-2">
-                        <ActionButton
-                          type="button"
-                          variant="secondary"
-                          className="h-8 px-3 text-xs"
-                          onClick={() => setBankAccountDraft({
-                            id: String(row.id || ""),
-                            account_type: String(row.account_type || "business"),
-                            bank_name: String(row.bank_name || ""),
-                            account_holder: String(row.account_holder || ""),
-                            account_number: String(row.account_number || ""),
-                            password_hint: String(row.password_hint || ""),
-                            list_enabled: row.list_enabled !== false,
-                            sort_order: String(row.sort_order || 0),
-                            memo: String(row.memo || ""),
-                          })}
-                        >
-                          수정
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!bankAccounts.length && <tr><td colSpan={8} className="px-3 py-6"><EmptyState title="통장 설정 없음" className="min-h-20" /></td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <form onSubmit={saveBankAccount} className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <SectionHeader title={bankAccountDraft.id ? "통장 설정 수정" : "통장 설정 추가"} />
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <FormField label="속성">
-                <select className={modalSelectClass} value={bankAccountDraft.account_type} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, account_type: event.target.value }))}>
-                  <option value="business">기업</option>
-                  <option value="personal">개인</option>
-                </select>
-              </FormField>
-              <FormField label="은행명">
-                <input className={modalInputClass} value={bankAccountDraft.bank_name} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, bank_name: event.target.value }))} />
-              </FormField>
-              <FormField label="예금주">
-                <input className={modalInputClass} value={bankAccountDraft.account_holder} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, account_holder: event.target.value }))} />
-              </FormField>
-              <FormField label="계좌번호">
-                <input className={modalInputClass} value={bankAccountDraft.account_number} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, account_number: event.target.value }))} />
-              </FormField>
-              <FormField label="비밀번호">
-                <input className={modalInputClass} value={bankAccountDraft.password_hint} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, password_hint: event.target.value }))} />
-              </FormField>
-              <label className="flex items-center gap-2 pt-6 text-sm font-semibold text-gray-700">
-                <input type="checkbox" checked={bankAccountDraft.list_enabled} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, list_enabled: event.target.checked }))} />
-                리스트 반영
-              </label>
-              <FormField label="메모">
-                <input className={modalInputClass} value={bankAccountDraft.memo} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, memo: event.target.value }))} />
-              </FormField>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <ActionButton type="button" variant="secondary" onClick={() => setBankAccountDraft(emptyBankAccountDraft)}>초기화</ActionButton>
-              <ActionButton type="submit">{bankAccountDraft.id ? "수정" : "추가"}</ActionButton>
-            </div>
-          </form>
-            </>
-          )}
         </Card>
       )}
 
-      {activeTab === "카드" && (
+      {activeTab === "card" && (
         <Card className="p-5">
           <SectionHeader
-            title={cardSubTab === "list" ? "카드 내역" : "카드 설정"}
-            description={cardSubTab === "list" ? "카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원." : "카드명, 결제 기준일, 출금일, 한도, 리스트 반영 여부를 관리합니다."}
-            actions={<StatusBadge tone="orange">{(cardSubTab === "list" ? expenses.filter((row) => String(row.source_type || "") === "card").length : cardAccounts.length).toLocaleString("ko-KR")}건</StatusBadge>}
+            title="카드 내역"
+            description="카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."
+            actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex gap-2 rounded-xl border border-gray-200 bg-white p-1">
-            {[
-              ["list", "카드 내역"],
-              ["settings", "카드 설정"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setCardSubTab(key as "list" | "settings")}
-                className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${cardSubTab === key ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-4">
+            <ExpenseTable mode="card" rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
           </div>
-
-          {cardSubTab === "list" && (
-            <div className="mt-4">
-              <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
-            </div>
-          )}
-
-          {cardSubTab === "settings" && (
-            <>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full min-w-[1080px] text-xs">
-              <thead className="bg-gray-50 font-semibold text-gray-500">
-                <tr>
-                  <th className="px-3 py-2 text-left">카드명</th>
-                  <th className="px-3 py-2 text-left">속성</th>
-                  <th className="px-3 py-2 text-left">카드번호</th>
-                  <th className="px-3 py-2 text-left">유효기간</th>
-                  <th className="px-3 py-2 text-left">CVC</th>
-                  <th className="px-3 py-2 text-left">해외안심 메시지</th>
-                  <th className="px-3 py-2 text-left">결제 비밀번호</th>
-                  <th className="px-3 py-2 text-right">한도</th>
-                  <th className="px-3 py-2 text-center">결제 기준/출금</th>
-                  <th className="px-3 py-2 text-left">소유자</th>
-                  <th className="px-3 py-2 text-center">리스트</th>
-                  <th className="px-3 py-2 text-right">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cardAccounts.map((row) => (
-                  <tr key={String(row.id || row.card_name)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                    <td className="px-3 py-2"><StatusBadge tone="orange">{String(row.card_name || "-")}</StatusBadge></td>
-                    <td className="px-3 py-2 font-semibold text-gray-700">{String(row.card_type || "business")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.card_number || "미입력")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.expiry_date || "미입력")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.cvc_hint || "미입력")}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(row.secure_message || "미입력")}</td>
-                    <td className="px-3 py-2 font-mono text-gray-900">{String(row.payment_password_hint || "미입력")}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.card_limit) ? krw(asNumber(row.card_limit)) : "미입력"}</td>
-                    <td className="px-3 py-2 text-center text-gray-700">{String(row.cutoff_start_day || "-")}~{String(row.cutoff_end_day || "-")} / {String(row.payment_day || "-")}일</td>
-                    <td className="px-3 py-2 text-gray-700">{String(row.physical_owner || "미입력")}</td>
-                    <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
-                    <td className="px-3 py-2">
-                      <div className="flex justify-end gap-2">
-                        <ActionButton
-                          type="button"
-                          variant="secondary"
-                          className="h-8 px-3 text-xs"
-                          onClick={() => setCardAccountDraft({
-                            id: String(row.id || ""),
-                            card_type: String(row.card_type || "business"),
-                            card_name: String(row.card_name || ""),
-                            card_number: String(row.card_number || ""),
-                            expiry_date: String(row.expiry_date || ""),
-                            cvc_hint: String(row.cvc_hint || ""),
-                            secure_message: String(row.secure_message || ""),
-                            payment_password_hint: String(row.payment_password_hint || ""),
-                            cutoff_start_day: String(row.cutoff_start_day || ""),
-                            cutoff_end_day: String(row.cutoff_end_day || ""),
-                            payment_day: String(row.payment_day || ""),
-                            card_limit: String(row.card_limit || ""),
-                            withdrawal_account_name: String(row.withdrawal_account_name || ""),
-                            list_enabled: row.list_enabled !== false,
-                            physical_owner: String(row.physical_owner || ""),
-                            sort_order: String(row.sort_order || 0),
-                            memo: String(row.memo || ""),
-                          })}
-                        >
-                          수정
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!cardAccounts.length && <tr><td colSpan={12} className="px-3 py-6"><EmptyState title="카드 설정 없음" className="min-h-20" /></td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <form onSubmit={saveCardAccount} className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <SectionHeader title={cardAccountDraft.id ? "카드 설정 수정" : "카드 설정 추가"} />
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <FormField label="속성">
-                <select className={modalSelectClass} value={cardAccountDraft.card_type} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, card_type: event.target.value }))}>
-                  <option value="business">기업</option>
-                  <option value="personal">개인</option>
-                </select>
-              </FormField>
-              <FormField label="카드명">
-                <input className={modalInputClass} value={cardAccountDraft.card_name} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, card_name: event.target.value }))} />
-              </FormField>
-              <FormField label="카드번호">
-                <input className={modalInputClass} value={cardAccountDraft.card_number} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, card_number: event.target.value }))} />
-              </FormField>
-              <FormField label="유효기간">
-                <input className={modalInputClass} type="date" value={cardAccountDraft.expiry_date} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, expiry_date: event.target.value }))} />
-              </FormField>
-              <FormField label="CVC">
-                <input className={modalInputClass} value={cardAccountDraft.cvc_hint} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, cvc_hint: event.target.value }))} />
-              </FormField>
-              <FormField label="해외안심 메시지">
-                <input className={modalInputClass} value={cardAccountDraft.secure_message} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, secure_message: event.target.value }))} />
-              </FormField>
-              <FormField label="결제 비밀번호">
-                <input className={modalInputClass} value={cardAccountDraft.payment_password_hint} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, payment_password_hint: event.target.value }))} />
-              </FormField>
-              <FormField label="한도">
-                <input className={`${modalInputClass} text-right`} type="number" value={cardAccountDraft.card_limit} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, card_limit: event.target.value }))} />
-              </FormField>
-              <FormField label="기준 시작일">
-                <input className={`${modalInputClass} text-right`} type="number" value={cardAccountDraft.cutoff_start_day} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, cutoff_start_day: event.target.value }))} />
-              </FormField>
-              <FormField label="기준 종료일">
-                <input className={`${modalInputClass} text-right`} type="number" value={cardAccountDraft.cutoff_end_day} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, cutoff_end_day: event.target.value }))} />
-              </FormField>
-              <FormField label="출금일">
-                <input className={`${modalInputClass} text-right`} type="number" value={cardAccountDraft.payment_day} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, payment_day: event.target.value }))} />
-              </FormField>
-              <FormField label="출금 통장">
-                <input className={modalInputClass} value={cardAccountDraft.withdrawal_account_name} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, withdrawal_account_name: event.target.value }))} />
-              </FormField>
-              <FormField label="실물 소유자">
-                <input className={modalInputClass} value={cardAccountDraft.physical_owner} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, physical_owner: event.target.value }))} />
-              </FormField>
-              <label className="flex items-center gap-2 pt-6 text-sm font-semibold text-gray-700">
-                <input type="checkbox" checked={cardAccountDraft.list_enabled} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, list_enabled: event.target.checked }))} />
-                리스트 반영
-              </label>
-              <FormField label="메모">
-                <input className={modalInputClass} value={cardAccountDraft.memo} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, memo: event.target.value }))} />
-              </FormField>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <ActionButton type="button" variant="secondary" onClick={() => setCardAccountDraft(emptyCardAccountDraft)}>초기화</ActionButton>
-              <ActionButton type="submit">{cardAccountDraft.id ? "수정" : "추가"}</ActionButton>
-            </div>
-          </form>
-            </>
-          )}
         </Card>
       )}
 
-      {activeTab === "고정비" && (
+      {activeTab === "fixed" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
           <Card className="p-5">
             <SectionHeader
@@ -16432,7 +16278,7 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "검토필요" && (
+      {activeTab === "review" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Card className="p-5">
             <SectionHeader
@@ -16454,7 +16300,7 @@ function AccountingWorkspace() {
         </section>
       )}
 
-      {activeTab === "카테고리 설정" && (
+      {activeTab === "settings" && (
         <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
           <Card className="p-5">
             <SectionHeader
@@ -16760,27 +16606,149 @@ function ExpenseTable({
   rows,
   categoryById,
   compact = false,
+  mode,
   onOpen,
   onMemoSave,
 }: {
   rows: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
   compact?: boolean;
+  mode?: "bank" | "card";
   onOpen?: (row: Record<string, unknown>) => void;
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
 }) {
   const [page, setPage] = useState(1);
-  const pageSize = compact ? rows.length || 1 : 20;
-  const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
+  const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const pageSize = compact ? rows.length || 1 : 30;
+  const tableMode = mode || (rows.length && rows.every((row) => String(row.source_type || "") === "bank")
+    ? "bank"
+    : rows.length && rows.every((row) => String(row.source_type || "") === "card")
+      ? "card"
+      : "default");
+  const valueForSort = (row: Record<string, unknown>, key: string) => {
+    if (key === "date") return accountingRowTime(row);
+    if (key === "amount") return asNumber(row.amount_krw ?? row.total_amount ?? row.amount ?? row.debit_amount ?? row.credit_amount);
+    if (key === "debit") return asNumber(row.debit_amount);
+    if (key === "credit") return asNumber(row.credit_amount);
+    if (key === "balance") return asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"]);
+    return String(row[key] ?? row.source_name ?? row.merchant_name ?? row.description ?? "").toLowerCase();
+  };
+  const sortedRows = [...rows].sort((a, b) => {
+    if (!sortState) return accountingRowTime(b) - accountingRowTime(a);
+    const left = valueForSort(a, sortState.key);
+    const right = valueForSort(b, sortState.key);
+    const diff = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left || "").localeCompare(String(right || ""), "ko-KR", { numeric: true, sensitivity: "base" });
+    return sortState.dir === "asc" ? diff : -diff;
+  });
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  if (!rows.length) return <EmptyState title="데이터 없음" className="min-h-32" />;
+  const toggleSort = (key: string) => {
+    setPage(1);
+    setSortState((prev) => prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+  const categoryParts = (row: Record<string, unknown>) => {
+    const fallback = categoryById.get(String(row.category_id || ""));
+    if (fallback) {
+      const [large, middle] = fallback.split(" > ");
+      return { large: large || "-", middle: middle || "-" };
+    }
+    return {
+      large: String(row.category_large || row.category || "미분류"),
+      middle: String(row.category_middle || "-"),
+    };
+  };
+  if (!rows.length && tableMode === "default") return <EmptyState title="데이터 없음" className="min-h-32" />;
+
+  if (!compact && (tableMode === "bank" || tableMode === "card")) {
+    const headerClass = "cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:bg-orange-50";
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500">
+          <span>최신순 기본 · 30개씩 보기 · 컬럼 더블클릭 정렬</span>
+          <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className={`w-full text-sm ${tableMode === "bank" ? "min-w-[1040px]" : "min-w-[980px]"}`}>
+            <thead className="bg-gray-50 text-xs">
+              {tableMode === "bank" ? (
+                <tr>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("source_name")}>은행명</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("date")}>날짜</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("description")}>거래내용</th>
+                  <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("debit")}>출금</th>
+                  <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("credit")}>입금</th>
+                  <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("balance")}>거래후 잔액</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
+                  <th className="px-3 py-2 text-left font-semibold text-gray-500">메모</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("source_name")}>카드명</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("date")}>날짜</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("description")}>거래내용</th>
+                  <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("amount")}>사용금액</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("status")}>취소여부</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
+                  <th className={headerClass} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
+                  <th className="px-3 py-2 text-left font-semibold text-gray-500">메모</th>
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {!visibleRows.length && (
+                <tr><td colSpan={tableMode === "bank" ? 9 : 8} className="px-3 py-8"><EmptyState title="데이터 없음" className="min-h-24" /></td></tr>
+              )}
+              {visibleRows.map((row, index) => {
+                const parts = categoryParts(row);
+                const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+                const isCancel = /취소|cancel/i.test(`${String(row.description || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`);
+                return tableMode === "bank" ? (
+                  <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                    <td className="px-3 py-2"><StatusBadge>{String(row.account_name || row.source_name || "-")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
+                    <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.description || row.merchant_name || "-")}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.debit_amount) ? krw(asNumber(row.debit_amount)) : "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.credit_amount) ? krw(asNumber(row.credit_amount)) : "-"}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"]) ? krw(asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"])) : "-"}</td>
+                    <td className="px-3 py-2"><StatusBadge tone="orange">{parts.large}</StatusBadge></td>
+                    <td className="px-3 py-2 text-gray-600">{parts.middle}</td>
+                    <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
+                  </tr>
+                ) : (
+                  <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                    <td className="px-3 py-2"><StatusBadge tone="orange">{String(row.card_name || row.source_name || "-")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
+                    <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+                    <td className="px-3 py-2"><span className={isCancel ? "font-bold text-red-600" : "text-gray-400"}>{isCancel ? "취소" : "-"}</span></td>
+                    <td className="px-3 py-2"><StatusBadge tone="orange">{parts.large}</StatusBadge></td>
+                    <td className="px-3 py-2 text-gray-600">{parts.middle}</td>
+                    <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>이전</ActionButton>
+            <span className="min-w-20 text-center text-xs font-bold text-gray-600">{currentPage} / {totalPages}</span>
+            <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>다음</ActionButton>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500">
-          <span>최신순 고정 · 20개씩 보기</span>
+          <span>최신순 고정 · 30개씩 보기</span>
           <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
         </div>
       )}
@@ -17021,7 +16989,7 @@ function AccountingRightPanel() {
       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
         <h3 className="text-xs font-semibold text-gray-500">도래 고정비</h3>
         <div className="mt-2 space-y-2">
-          {upcomingFixedCosts.slice(0, 5).map((row, index) => (
+          {upcomingFixedCosts.map((row, index) => (
             <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="text-xs">
               <div className="flex justify-between gap-2 font-semibold text-gray-700">
                 <span className="truncate">{String(row.title || row.display_title || "-")}</span>
@@ -17120,6 +17088,554 @@ function DashboardNew() {
   );
 }
 
+function SecretViewModal({ title, label, value, onClose }: { title: string; label: string; value: string; onClose: () => void }) {
+  const [visible, setVisible] = useState(false);
+  useEscapeToClose(true, onClose);
+  return (
+    <FormModal title={title} onClose={onClose} size="sm" footer={<ActionButton type="button" onClick={onClose}>닫기</ActionButton>}>
+      <FormField label={label}>
+        <div className="flex gap-2">
+          <input className={`${modalInputClass} min-w-0 flex-1 font-mono`} readOnly type={visible ? "text" : "password"} value={value || ""} />
+          <ActionButton type="button" variant="secondary" onClick={() => setVisible((next) => !next)}>{visible ? "가리기" : "보기"}</ActionButton>
+        </div>
+      </FormField>
+    </FormModal>
+  );
+}
+
+function AccountFileModal({
+  accountType,
+  accountId,
+  title,
+  onClose,
+  onChanged,
+}: {
+  accountType: "bank" | "card";
+  accountId: string;
+  title: string;
+  onClose: () => void;
+  onChanged?: (count: number) => void;
+}) {
+  const [attachments, setAttachments] = useState<AccountAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const endpoint = `/api/fn-settings/account-files?type=${accountType}&id=${encodeURIComponent(accountId)}`;
+
+  useEscapeToClose(true, onClose);
+
+  async function loadFiles() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; attachments?: AccountAttachment[] }>(endpoint, { ttl: 0, storageTtl: 0, force: true });
+      if (data.ok === false) throw new Error(data.error || "첨부파일을 불러오지 못했습니다.");
+      const next = Array.isArray(data.attachments) ? data.attachments : [];
+      setAttachments(next);
+      onChanged?.(next.length);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "첨부파일을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadFiles();
+  }, [accountType, accountId]);
+
+  function pickFiles(files: FileList | File[] | null) {
+    const next = Array.from(files || []);
+    setSelectedFiles(next);
+    if (next.length) setError("");
+  }
+
+  async function uploadFiles() {
+    if (!selectedFiles.length) {
+      setError("업로드할 파일을 선택해 주세요.");
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      for (const file of selectedFiles) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("note", note);
+        const res = await fetch(endpoint, { method: "POST", body: form, credentials: "include" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(`${file.name}: ${data.error || "업로드에 실패했습니다."}`);
+      }
+      setSelectedFiles([]);
+      setNote("");
+      invalidateClientCache(endpoint);
+      await loadFiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function deleteFile(item: AccountAttachment) {
+    if (!window.confirm("이 첨부파일을 삭제할까요?")) return;
+    setError("");
+    const res = await fetch(`${endpoint}&fileId=${encodeURIComponent(item.id)}`, { method: "DELETE", credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setError(data.error || "삭제에 실패했습니다.");
+      return;
+    }
+    invalidateClientCache(endpoint);
+    await loadFiles();
+  }
+
+  function openFile(item: AccountAttachment) {
+    const fileUrl = attachmentFileUrl(item as unknown as OrderAttachment);
+    if (!fileUrl) {
+      window.alert("첨부파일 URL이 없습니다. 파일을 다시 업로드해 주세요.");
+      return;
+    }
+    const params = new URLSearchParams({ url: fileUrl, name: item.file_name || "첨부파일" });
+    window.open(`/attachment-viewer?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <SelectionModal title={`첨부파일 - ${title}`} description="통장사본, 카드 이미지, 관련 확인 자료를 보관합니다." onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
+      <div className="max-h-[calc(90vh-150px)] overflow-y-auto">
+        <div
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            pickFiles(event.dataTransfer.files);
+          }}
+          className={`rounded-md border p-4 transition ${dragging ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"}`}
+        >
+          <div className="grid gap-3 md:grid-cols-[1.8fr_0.7fr_110px]">
+            <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 shadow-sm hover:bg-orange-50">
+              파일 선택
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx"
+                onChange={(event) => {
+                  pickFiles(event.target.files);
+                  event.target.value = "";
+                }}
+                className="hidden"
+              />
+            </label>
+            <input value={note} onChange={(event) => setNote(event.target.value)} className={modalInputClass} placeholder="메모" />
+            <ActionButton type="button" onClick={uploadFiles} disabled={uploading}>{uploading ? "업로드 중" : "업로드"}</ActionButton>
+          </div>
+          <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm font-bold text-slate-500">
+            파일을 여기로 끌어다 놓거나, 파일 선택 버튼으로 여러 개를 한 번에 선택하세요.
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {selectedFiles.map((item) => (
+                  <span key={`${item.name}-${item.size}-${item.lastModified}`} className="rounded-md bg-orange-50 px-2 py-1 text-xs font-black text-orange-600">
+                    {item.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
+        {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
+        <div className="mt-5 overflow-hidden rounded-md border border-slate-200">
+          <div className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
+            <span>파일명</span>
+            <span>크기</span>
+            <span>업로드일</span>
+            <span>메모</span>
+            <span className="text-center">작업</span>
+          </div>
+          {loading ? (
+            <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
+          ) : attachments.length ? attachments.map((item) => (
+            <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
+              <button type="button" onClick={() => openFile(item)} className="flex min-w-0 cursor-pointer items-center gap-2 text-left font-bold underline-offset-4 hover:text-orange-600 hover:underline">
+                <FileTypeIcon name={item.file_name} />
+                <span className="min-w-0 break-all">{item.file_name || "-"}</span>
+              </button>
+              <span>{fileSize(item.file_size)}</span>
+              <span className="text-xs text-slate-500">{String(item.uploaded_at || "").slice(0, 10) || "-"}</span>
+              <span className="break-all text-slate-600">{item.note || "-"}</span>
+              <span className="flex justify-center gap-2 text-center">
+                <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openFile(item)}>열기</ActionButton>
+                <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50" onClick={() => deleteFile(item)}>삭제</ActionButton>
+              </span>
+            </div>
+          )) : (
+            <div className="px-4 py-8 text-sm font-bold text-slate-500">아직 첨부파일이 없습니다.</div>
+          )}
+        </div>
+      </div>
+    </SelectionModal>
+  );
+}
+
+function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
+  const emptyDraft: FnBankAccount = { id: "", account_type: "business", bank_name: "", account_holder: "", account_number: "", password_hint: "", list_enabled: true, memo: "", sort_order: 0 };
+  const [accounts, setAccounts] = useState<FnBankAccount[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<FnBankAccount>(emptyDraft);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
+  const [fileAccount, setFileAccount] = useState<FnBankAccount | null>(null);
+  const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
+  const rowKeys = accounts.map((account) => account.id || "").filter(Boolean);
+  const selectedAccounts = accounts.filter((account) => account.id && selectedKeys.includes(account.id));
+  const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
+
+  async function loadAccounts() {
+    setLoading(true);
+    try {
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; bank_accounts?: FnBankAccount[] }>("/api/accounting/ledger/bank-accounts", { ttl: 0, storageTtl: 0, force: true });
+      if (data.ok === false) throw new Error(data.error || "통장 설정 조회 실패");
+      setAccounts((data.bank_accounts || []).filter((row) => row && row.id));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "통장 설정 조회 실패");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadAccounts();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2" || modalOpen || fileAccount || secretView) return;
+      event.preventDefault();
+      openNew();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modalOpen, fileAccount, secretView]);
+
+  function updateDraft(key: keyof FnBankAccount, value: string | boolean) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function openNew() {
+    setDraft(emptyDraft);
+    setModalOpen(true);
+  }
+
+  function openEdit(account: FnBankAccount) {
+    setDraft({ ...emptyDraft, ...account, account_type: account.account_type || "business", list_enabled: account.list_enabled !== false });
+    setModalOpen(true);
+  }
+
+  function openSelectedEdit() {
+    if (!selectedAccounts.length) {
+      setMessage("수정할 통장을 먼저 선택해 주세요.");
+      return;
+    }
+    openEdit(selectedAccounts[0]);
+  }
+
+  async function saveDraft() {
+    const payload = {
+      ...draft,
+      bank_name: String(draft.bank_name || "").trim(),
+      account_holder: String(draft.account_holder || "").trim(),
+      account_number: String(draft.account_number || "").trim(),
+      password_hint: String(draft.password_hint || "").trim(),
+    };
+    if (!payload.account_type || !payload.bank_name || !payload.account_holder || !payload.account_number || !payload.password_hint) {
+      window.alert("메모를 제외한 모든 항목은 필수입니다.");
+      return;
+    }
+    const res = await fetch("/api/accounting/ledger/bank-accounts", {
+      method: payload.id ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "통장 저장 실패");
+      return;
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    setMessage(payload.id ? "통장 설정을 수정했습니다." : "통장 설정을 추가했습니다.");
+    setModalOpen(false);
+    setSelectedKeys([]);
+    await loadAccounts();
+  }
+
+  async function deleteDraft() {
+    if (!draft.id || !window.confirm("이 통장 설정을 삭제할까요?")) return;
+    const res = await fetch(`/api/accounting/ledger/bank-accounts?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "통장 삭제 실패");
+      return;
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    setMessage("통장 설정을 삭제했습니다.");
+    setModalOpen(false);
+    setSelectedKeys([]);
+    await loadAccounts();
+  }
+
+  const filteredAccounts = accounts.filter((account) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${account.bank_name || ""} ${account.account_holder || ""} ${account.account_number || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+  });
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="통장관리"
+        subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체통장</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">통장수 {accounts.length.toLocaleString("ko-KR")}개</span></div>}
+        action={<ActionButton type="button" onClick={openNew}>F2 새 통장</ActionButton>}
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={openSelectedEdit}>수정</ActionButton>
+            <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
+          </div>
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 예금주 / 계좌번호 검색" />
+        </div>
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-44 py-2 text-left">예금주</th><th className="w-56 py-2 text-left">계좌번호</th><th className="w-36 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr>
+            </thead>
+            <tbody>
+              {filteredAccounts.map((account, index) => {
+                const key = String(account.id || "");
+                const selected = selectedKeys.includes(key);
+                return (
+                  <tr key={key || `${account.bank_name}-${index}`} onClick={() => openEdit(account)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
+                    <td className="truncate py-2 font-black" title={account.bank_name || ""}>{account.bank_name || "-"}</td>
+                    <td className="truncate py-2 font-bold">{account.account_holder || "-"}</td>
+                    <td className="truncate py-2 font-mono text-slate-700">{account.account_number || "-"}</td>
+                    <td className="py-2" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setFileAccount(account)} className="rounded-md border border-orange-200 bg-white px-3 py-1 text-xs font-black text-orange-600 hover:bg-orange-50">파일 {fileCounts[key] ? fileCounts[key].toLocaleString("ko-KR") : ""}</button></td>
+                    <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!filteredAccounts.length && <EmptyState title={loading ? "불러오는 중..." : "등록된 통장이 없습니다."} />}
+        </div>
+      </Panel>
+
+      {modalOpen && (
+        <FormModal title={draft.id ? "통장 수정" : "새 통장"} description="필수 항목은 빨간 별표로 표시됩니다." onClose={() => setModalOpen(false)} size="xl" footer={<>{draft.id && <ActionButton type="button" variant="secondary" className="mr-auto border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteDraft()}>삭제</ActionButton>}<ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={() => void saveDraft()}>저장</ActionButton></>}>
+          <div className="space-y-5">
+            <div>
+              <div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div>
+              <div className="flex flex-wrap gap-2">{[["business", "기업"], ["personal", "개인"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateDraft("account_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.account_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="은행명" required><input className={modalInputClass} value={draft.bank_name || ""} onChange={(event) => updateDraft("bank_name", event.target.value)} /></FormField>
+              <FormField label="예금주" required><input className={modalInputClass} value={draft.account_holder || ""} onChange={(event) => updateDraft("account_holder", event.target.value)} /></FormField>
+              <FormField label="계좌번호" required><input className={modalInputClass} value={draft.account_number || ""} onChange={(event) => updateDraft("account_number", event.target.value)} /></FormField>
+              <FormField label="비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.password_hint || ""} onChange={(event) => updateDraft("password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "통장 비밀번호", label: "비밀번호", value: String(draft.password_hint || "") })}>보기</ActionButton></div></FormField>
+              <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
+              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
+            </div>
+          </div>
+        </FormModal>
+      )}
+      {secretView && <SecretViewModal title={secretView.title} label={secretView.label} value={secretView.value} onClose={() => setSecretView(null)} />}
+      {fileAccount?.id && <AccountFileModal accountType="bank" accountId={String(fileAccount.id)} title={`${fileAccount.bank_name || "통장"} ${fileAccount.account_holder || ""}`.trim()} onClose={() => setFileAccount(null)} onChanged={(count) => setFileCounts((prev) => ({ ...prev, [String(fileAccount.id)]: count }))} />}
+    </div>
+  );
+}
+
+function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
+  const emptyDraft: FnCardAccount = { id: "", card_type: "business", card_name: "", card_number: "", expiry_date: "", cvc_hint: "", secure_message: "", payment_password_hint: "", cutoff_start_day: "", cutoff_end_day: "", payment_day: "", card_limit: "", list_enabled: true, physical_owner: "", memo: "", sort_order: 0 };
+  const [accounts, setAccounts] = useState<FnCardAccount[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<FnCardAccount>(emptyDraft);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
+  const rowKeys = accounts.map((account) => account.id || "").filter(Boolean);
+  const selectedAccounts = accounts.filter((account) => account.id && selectedKeys.includes(account.id));
+  const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
+
+  async function loadAccounts() {
+    setLoading(true);
+    try {
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; card_accounts?: FnCardAccount[] }>("/api/accounting/ledger/card-accounts", { ttl: 0, storageTtl: 0, force: true });
+      if (data.ok === false) throw new Error(data.error || "카드 설정 조회 실패");
+      setAccounts((data.card_accounts || []).filter((row) => row && row.id));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "카드 설정 조회 실패");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadAccounts();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2" || modalOpen || secretView) return;
+      event.preventDefault();
+      openNew();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modalOpen, secretView]);
+
+  function updateDraft(key: keyof FnCardAccount, value: string | boolean) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function openNew() {
+    setDraft(emptyDraft);
+    setModalOpen(true);
+  }
+
+  function openEdit(account: FnCardAccount) {
+    setDraft({ ...emptyDraft, ...account, card_type: account.card_type || "business", list_enabled: account.list_enabled !== false, card_limit: formatCommaNumber(account.card_limit) });
+    setModalOpen(true);
+  }
+
+  function openSelectedEdit() {
+    if (!selectedAccounts.length) {
+      setMessage("수정할 카드를 먼저 선택해 주세요.");
+      return;
+    }
+    openEdit(selectedAccounts[0]);
+  }
+
+  async function saveDraft() {
+    const payload = {
+      ...draft,
+      card_name: String(draft.card_name || "").trim(),
+      card_number: String(draft.card_number || "").trim(),
+      cvc_hint: String(draft.cvc_hint || "").trim(),
+      secure_message: String(draft.secure_message || "").trim(),
+      payment_password_hint: String(draft.payment_password_hint || "").trim(),
+      card_limit: onlyDigits(draft.card_limit),
+    };
+    if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.secure_message || !payload.payment_password_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
+      window.alert("실물 소유자와 메모를 제외한 모든 항목은 필수입니다.");
+      return;
+    }
+    const res = await fetch("/api/accounting/ledger/card-accounts", { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "카드 저장 실패");
+      return;
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    setMessage(payload.id ? "카드 설정을 수정했습니다." : "카드 설정을 추가했습니다.");
+    setModalOpen(false);
+    setSelectedKeys([]);
+    await loadAccounts();
+  }
+
+  async function deleteDraft() {
+    if (!draft.id || !window.confirm("이 카드 설정을 삭제할까요?")) return;
+    const res = await fetch(`/api/accounting/ledger/card-accounts?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "카드 삭제 실패");
+      return;
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    setMessage("카드 설정을 삭제했습니다.");
+    setModalOpen(false);
+    setSelectedKeys([]);
+    await loadAccounts();
+  }
+
+  const filteredAccounts = accounts.filter((account) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${account.card_name || ""} ${account.card_number || ""} ${account.physical_owner || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+  });
+
+  return (
+    <div className="space-y-4">
+      <Panel title="카드관리" subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체카드</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">카드수 {accounts.length.toLocaleString("ko-KR")}개</span></div>} action={<ActionButton type="button" onClick={openNew}>F2 새 카드</ActionButton>}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2"><ActionButton type="button" variant="secondary" onClick={openSelectedEdit}>수정</ActionButton><span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span></div>
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 카드번호 / 소유자 검색" />
+        </div>
+        <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">소유자</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
+            <tbody>
+              {filteredAccounts.map((account, index) => {
+                const key = String(account.id || "");
+                const selected = selectedKeys.includes(key);
+                return (
+                  <tr key={key || `${account.card_name}-${index}`} onClick={() => openEdit(account)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
+                    <td className="truncate py-2 font-black" title={account.card_name || ""}>{cardExpiryWarning(account) && <span className="mr-2 rounded bg-rose-50 px-2 py-0.5 text-xs font-black text-rose-600">유효기간 만료</span>}{account.card_name || "-"}</td>
+                    <td className="truncate py-2 font-mono text-slate-700">{account.card_number || "-"}</td>
+                    <td className="truncate py-2 font-mono text-slate-700">{formatCardExpiry(account.expiry_date)} / {maskedSecret(account.cvc_hint)}</td>
+                    <td className="truncate py-2 font-bold">{account.physical_owner || "-"}</td>
+                    <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!filteredAccounts.length && <EmptyState title={loading ? "불러오는 중..." : "등록된 카드가 없습니다."} />}
+        </div>
+      </Panel>
+
+      {modalOpen && (
+        <FormModal title={draft.id ? "카드 수정" : "새 카드"} description="필수 항목은 빨간 별표로 표시됩니다." onClose={() => setModalOpen(false)} size="xl" footer={<>{draft.id && <ActionButton type="button" variant="secondary" className="mr-auto border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteDraft()}>삭제</ActionButton>}<ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={() => void saveDraft()}>저장</ActionButton></>}>
+          <div className="space-y-5">
+            <div><div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div><div className="flex flex-wrap gap-2">{[["business", "기업"], ["personal", "개인"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateDraft("card_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.card_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div></div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="카드명" required><input className={modalInputClass} value={draft.card_name || ""} onChange={(event) => updateDraft("card_name", event.target.value)} /></FormField>
+              <FormField label="카드번호" required><input className={modalInputClass} value={draft.card_number || ""} onChange={(event) => updateDraft("card_number", event.target.value)} /></FormField>
+              <FormField label="유효기간" required><input className={modalInputClass} type="date" value={String(draft.expiry_date || "").slice(0, 10)} onChange={(event) => updateDraft("expiry_date", event.target.value)} /></FormField>
+              <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
+              <FormField label="해외안심 결제 개인 확인 메세지" required><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
+              <FormField label="결제 비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
+              <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
+                <FormField label="결제 기준일 시작" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.cutoff_start_day || ""} onChange={(event) => updateDraft("cutoff_start_day", event.target.value)} /></FormField>
+                <FormField label="결제 기준일 종료" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.cutoff_end_day || ""} onChange={(event) => updateDraft("cutoff_end_day", event.target.value)} /></FormField>
+                <FormField label="결제일" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", event.target.value)} /></FormField>
+              </div>
+              <FormField label="한도" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(draft.card_limit)} onChange={(event) => updateDraft("card_limit", formatCommaNumber(event.target.value))} /></FormField>
+              <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
+              <FormField label="실물 소유자"><input className={modalInputClass} value={draft.physical_owner || ""} onChange={(event) => updateDraft("physical_owner", event.target.value)} /></FormField>
+              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
+            </div>
+          </div>
+        </FormModal>
+      )}
+      {secretView && <SecretViewModal title={secretView.title} label={secretView.label} value={secretView.value} onClose={() => setSecretView(null)} />}
+    </div>
+  );
+}
+
 function FnSettingsWorkspace() {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("settingsTab") || "personnel";
@@ -17128,6 +17644,7 @@ function FnSettingsWorkspace() {
   const [adminName, setAdminName] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [fnOsPasswordOpen, setFnOsPasswordOpen] = useState(false);
   const [adminPasswordOpen, setAdminPasswordOpen] = useState(false);
 
@@ -17146,6 +17663,7 @@ function FnSettingsWorkspace() {
 
   function openTab(tab: string) {
     setActiveTab(tab);
+    setMessage("");
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     params.set("menu", "fnSettings");
@@ -17276,6 +17794,7 @@ function FnSettingsWorkspace() {
           </div>
 
           {activeTab === "personnel" && <PersonnelManagementPanel onLock={() => setUnlocked(false)} />}
+          {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</Card>}
 
           {activeTab === "password" && (
             <Card className="p-5">
@@ -17295,14 +17814,8 @@ function FnSettingsWorkspace() {
             </Card>
           )}
 
-          {(activeTab === "bank" || activeTab === "card") && (
-            <Card className="p-5">
-              <SectionHeader
-                title={activeTab === "bank" ? "통장관리" : "카드관리"}
-                description={<span>회계/비용 작업 완료 후 해당 메뉴 기능을 FN 설정으로 이동합니다.</span>}
-              />
-            </Card>
-          )}
+          {activeTab === "bank" && <FnBankSettingsPanel setMessage={setMessage} />}
+          {activeTab === "card" && <FnCardSettingsPanel setMessage={setMessage} />}
 
           {(activeTab === "certification" || activeTab === "etc") && (
             <Card className="p-5">
@@ -17441,6 +17954,8 @@ function HomeContent() {
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
+  const requestedAccountingTab = searchParams.get("accountingTab") || "dashboard";
+  const accountingTab = accountingSubMenus.some((sub) => sub.tab === requestedAccountingTab) ? requestedAccountingTab : "dashboard";
 
   useEffect(() => {
     markClientCacheReady();
@@ -17464,7 +17979,7 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} accountingTab={accountingTab} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
@@ -17473,7 +17988,7 @@ function HomeContent() {
           ) : activeSlug === "sales" ? (
             <SalesInventoryWorkspace section={salesSection} />
           ) : activeSlug === "accounting" ? (
-            <AccountingWorkspace />
+            <AccountingWorkspace tab={accountingTab} />
           ) : activeSlug === "ads" ? (
             <AdsAnalysisWorkspace />
           ) : activeSlug === "archive" ? (
