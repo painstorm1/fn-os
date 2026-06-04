@@ -15863,9 +15863,6 @@ function AccountingWorkspace() {
               <FormField label="비밀번호">
                 <input className={modalInputClass} value={bankAccountDraft.password_hint} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, password_hint: event.target.value }))} />
               </FormField>
-              <FormField label="정렬">
-                <input className={`${modalInputClass} text-right`} type="number" value={bankAccountDraft.sort_order} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
-              </FormField>
               <label className="flex items-center gap-2 pt-6 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={bankAccountDraft.list_enabled} onChange={(event) => setBankAccountDraft((prev) => ({ ...prev, list_enabled: event.target.checked }))} />
                 리스트 반영
@@ -16004,9 +16001,6 @@ function AccountingWorkspace() {
               </FormField>
               <FormField label="실물 소유자">
                 <input className={modalInputClass} value={cardAccountDraft.physical_owner} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, physical_owner: event.target.value }))} />
-              </FormField>
-              <FormField label="정렬">
-                <input className={`${modalInputClass} text-right`} type="number" value={cardAccountDraft.sort_order} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
               </FormField>
               <label className="flex items-center gap-2 pt-6 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={cardAccountDraft.list_enabled} onChange={(event) => setCardAccountDraft((prev) => ({ ...prev, list_enabled: event.target.checked }))} />
@@ -16512,7 +16506,7 @@ function ExpenseTable({
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
 }) {
   const [page, setPage] = useState(1);
-  const pageSize = compact ? rows.length || 1 : 30;
+  const pageSize = compact ? rows.length || 1 : 20;
   const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -16522,7 +16516,7 @@ function ExpenseTable({
     <div className="space-y-2">
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500">
-          <span>최신순 고정 · 30줄씩 보기</span>
+          <span>최신순 고정 · 20개씩 보기</span>
           <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
         </div>
       )}
