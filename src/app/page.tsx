@@ -322,9 +322,9 @@ function CalendarMemo() {
 }
 
 function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [mode, setMode] = useState<"view" | "edit">("view");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -334,27 +334,22 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
 
   useEffect(() => {
     if (!open) return;
-    setMode("view");
     setCurrentPassword("");
     setNewPassword("");
+    setConfirmPassword("");
     setShowPassword(false);
     setMessage("");
     setError("");
-    setLoading(true);
-
-    fetch("/api/login", { method: "GET" })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "비밀번호를 불러오지 못했습니다.");
-        setCurrentPassword(String(data.password || ""));
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+    setLoading(false);
   }, [open]);
 
   if (!open) return null;
 
   async function savePassword() {
+    if (newPassword !== confirmPassword) {
+      setError("새 비밀번호와 확인값이 일치하지 않습니다.");
+      return;
+    }
     setLoading(true);
     setError("");
     setMessage("");
@@ -372,47 +367,33 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
       return;
     }
 
-    setCurrentPassword(newPassword);
+    setCurrentPassword("");
     setNewPassword("");
-    setMode("view");
+    setConfirmPassword("");
     setMessage("비밀번호가 변경되었습니다.");
   }
 
   return (
     <FormModal
-      title={mode === "view" ? "FN OS 패스워드" : "FN OS 패스워드 변경"}
-      description={mode === "view" ? "FN OS 로그인에 사용하는 패스워드입니다." : "새 비밀번호로 변경합니다."}
+      title="FN OS 패스워드 변경"
+      description="현재 비밀번호 확인 후 새 비밀번호로 변경합니다."
       onClose={onClose}
       size="md"
       footer={
         <>
           <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
-          {mode === "view" ? (
-            <ActionButton
-              type="button"
-              onClick={() => {
-                setMode("edit");
-                setMessage("");
-                setError("");
-              }}
-              disabled={loading}
-            >
-              수정
-            </ActionButton>
-          ) : (
-            <ActionButton
-              type="button"
-              onClick={() => void savePassword()}
-              disabled={loading || !newPassword}
-            >
-              {loading ? "저장 중..." : "변경"}
-            </ActionButton>
-          )}
+          <ActionButton
+            type="button"
+            onClick={() => void savePassword()}
+            disabled={loading || !currentPassword || !newPassword || !confirmPassword}
+          >
+            {loading ? "저장 중..." : "변경"}
+          </ActionButton>
         </>
       }
     >
         <div className="space-y-4">
-          <FormField label="현재 비밀번호">
+          <FormField label="현재 비밀번호" required>
           <div className="flex gap-2">
             <input
               id="current-password"
@@ -420,7 +401,7 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
               type={showPassword ? "text" : "password"}
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
-              readOnly={mode === "view"}
+              autoFocus
             />
             <ActionButton
               type="button"
@@ -433,18 +414,29 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
           </div>
           </FormField>
 
-          {mode === "edit" && (
-            <FormField label="새 비밀번호">
+          <div className="grid gap-3 md:grid-cols-2">
+            <FormField label="새 비밀번호" required>
               <input
                 id="new-password"
                 className={modalInputClass}
                 type={showPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
-                autoFocus
               />
             </FormField>
-          )}
+            <FormField label="새 비밀번호 확인" required>
+              <input
+                id="confirm-password"
+                className={modalInputClass}
+                type={showPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void savePassword();
+                }}
+              />
+            </FormField>
+          </div>
         </div>
 
         {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
@@ -16943,6 +16935,7 @@ function FnSettingsWorkspace() {
   const [adminPassword, setAdminPassword] = useState("");
   const [error, setError] = useState("");
   const [fnOsPasswordOpen, setFnOsPasswordOpen] = useState(false);
+  const [adminPasswordOpen, setAdminPasswordOpen] = useState(false);
 
   const tabs = [
     { key: "personnel", label: "인사관리" },
@@ -17039,21 +17032,10 @@ function FnSettingsWorkspace() {
     setUnlocked(true);
   }
 
-  function changeAdminPassword() {
-    const currentPassword = window.prompt("현재 관리자 패스워드");
-    if (currentPassword !== readAdminPassword()) {
-      window.alert("현재 관리자 패스워드가 일치하지 않습니다.");
-      return;
-    }
-    const nextPassword = window.prompt("새 관리자 패스워드");
-    if (!nextPassword) return;
-    localStorage.setItem("fnos-admin-settings-password", nextPassword);
-    window.alert("관리자 패스워드를 수정했습니다.");
-  }
-
   return (
     <div className="space-y-4">
       {fnOsPasswordOpen && <PasswordSettingsModal open={fnOsPasswordOpen} onClose={() => setFnOsPasswordOpen(false)} />}
+      {adminPasswordOpen && <AdminPasswordSettingsModal open={adminPasswordOpen} onClose={() => setAdminPasswordOpen(false)} />}
       <PageHeader title="FN 설정" actions={!unlocked && <ActionButton type="button" onClick={confirmAdmin}>관리자 확인</ActionButton>} />
 
       {!unlocked ? (
@@ -17113,7 +17095,7 @@ function FnSettingsWorkspace() {
                 <div className="rounded-md border border-slate-200 p-4">
                   <div className="text-sm font-black text-slate-900">관리자 패스워드</div>
                   <div className="mt-1 text-sm font-semibold text-slate-500">FN 설정 진입 비밀번호</div>
-                  <ActionButton type="button" className="mt-3" onClick={changeAdminPassword}>수정</ActionButton>
+                  <ActionButton type="button" className="mt-3" onClick={() => setAdminPasswordOpen(true)}>수정</ActionButton>
                 </div>
               </div>
             </Card>
@@ -17136,6 +17118,126 @@ function FnSettingsWorkspace() {
         </>
       )}
     </div>
+  );
+}
+
+function AdminPasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEscapeToClose(open, onClose);
+
+  useEffect(() => {
+    if (!open) return;
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+    setMessage("");
+    setError("");
+  }, [open]);
+
+  if (!open) return null;
+
+  function readAdminPassword() {
+    if (typeof window === "undefined") return "0310";
+    return localStorage.getItem("fnos-admin-settings-password") || "0310";
+  }
+
+  function savePassword() {
+    if (currentPassword !== readAdminPassword()) {
+      setError("현재 관리자 패스워드가 일치하지 않습니다.");
+      setMessage("");
+      return;
+    }
+    if (newPassword.length < 4) {
+      setError("새 관리자 패스워드는 4자 이상으로 입력해 주세요.");
+      setMessage("");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("새 비밀번호와 확인값이 일치하지 않습니다.");
+      setMessage("");
+      return;
+    }
+    localStorage.setItem("fnos-admin-settings-password", newPassword);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setError("");
+    setMessage("관리자 패스워드가 변경되었습니다.");
+  }
+
+  return (
+    <FormModal
+      title="관리자 패스워드 변경"
+      description="현재 관리자 패스워드 확인 후 새 패스워드로 변경합니다."
+      onClose={onClose}
+      size="md"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+          <ActionButton
+            type="button"
+            onClick={savePassword}
+            disabled={!currentPassword || !newPassword || !confirmPassword}
+          >
+            변경
+          </ActionButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <FormField label="현재 비밀번호" required>
+          <div className="flex gap-2">
+            <input
+              className={`${modalInputClass} min-w-0 flex-1`}
+              type={showPassword ? "text" : "password"}
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              autoFocus
+            />
+            <ActionButton
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              onClick={() => setShowPassword((value) => !value)}
+            >
+              {showPassword ? "가리기" : "보기"}
+            </ActionButton>
+          </div>
+        </FormField>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="새 비밀번호" required>
+            <input
+              className={modalInputClass}
+              type={showPassword ? "text" : "password"}
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+          </FormField>
+          <FormField label="새 비밀번호 확인" required>
+            <input
+              className={modalInputClass}
+              type={showPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") savePassword();
+              }}
+            />
+          </FormField>
+        </div>
+      </div>
+
+      {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
+      {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
+    </FormModal>
   );
 }
 
