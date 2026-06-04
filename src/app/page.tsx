@@ -9427,9 +9427,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }
         >
           <div className="space-y-3" onKeyDown={handleInventoryPickerKeyDown}>
-            <div className="mb-3 flex gap-2">
+            <div className="mb-3 flex gap-2 [&_button]:w-20 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:px-0">
               <input
-                className={modalInputClass}
+                className={`${modalInputClass} min-w-0 flex-[0_1_78%]`}
                 autoFocus
                 value={inventoryPicker.query}
                 onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, query: event.target.value, index: 0, selectedKeys: [] } : prev)}
@@ -9469,9 +9469,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     ) : (
                       <>
                         <th className="w-24 py-2 text-left">품목코드</th>
-                        <th className="py-2 text-left">품목명</th>
-                        <th className="w-20 py-2 text-right">입고단가</th>
-                        <th className="w-20 py-2 text-right">출고단가</th>
+                        <th className="w-[300px] py-2 text-left">품목명</th>
+                        <th className="w-24 py-2 pr-3 text-right">입고단가</th>
+                        <th className="w-24 py-2 pr-4 text-right">출고단가</th>
                       </>
                     )}
                   </tr>
@@ -9502,8 +9502,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                           </td>
                           <td className="truncate py-2 pr-2 font-black text-blue-700">{inventoryProductCode(product) || "-"}</td>
                           <td className="truncate py-2 pr-2">{inventoryProductName(product) || "-"}</td>
-                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
-                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
+                          <td className="py-2 pr-3 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
+                          <td className="py-2 pr-4 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
                         </tr>
                       );
                     }) : <tr><td colSpan={5} className="px-4 py-8 text-center text-sm font-bold text-slate-500">{inventoryPicker.query.trim() ? `${inventoryPicker.query.trim()}로 검색되는 품목이 없습니다.` : "선택할 품목이 없습니다."}</td></tr>
@@ -10247,8 +10247,8 @@ function SalesPurchaseEntryModal({
               if (event.key === "Enter" && productSearchSelectedKeys.length) { event.preventDefault(); applySelectedProducts(); return; }
               if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) { event.preventDefault(); chooseProduct(productSearch.results[productSearch.selectedIndex]); }
             }}>
-              <div className="mb-3 flex gap-2">
-                <input autoFocus className={modalInputClass} value={productSearch.query} onChange={(event) => {
+              <div className="mb-3 flex gap-2 [&_button]:w-20 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:px-0">
+                <input autoFocus className={`${modalInputClass} min-w-0 flex-[0_1_78%]`} value={productSearch.query} onChange={(event) => {
                   setProductSearch((prev) => ({ ...prev, query: event.target.value }));
                   setProductSearchSelectedKeys([]);
                 }} onKeyDown={(event) => {
@@ -10285,9 +10285,9 @@ function SalesPurchaseEntryModal({
                         />
                       </th>
                       <th className="w-24 py-2 text-left">품목코드</th>
-                      <th className="py-2 text-left">품목명</th>
-                      <th className="w-20 py-2 text-right">입고단가</th>
-                      <th className="w-20 py-2 text-right">출고단가</th>
+                      <th className="w-[300px] py-2 text-left">품목명</th>
+                      <th className="w-24 py-2 pr-3 text-right">입고단가</th>
+                      <th className="w-24 py-2 pr-4 text-right">출고단가</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -10308,8 +10308,8 @@ function SalesPurchaseEntryModal({
                           </td>
                           <td className="truncate py-2 pr-2 font-black text-blue-700">{fnProductSku(product)}</td>
                           <td className="truncate py-2 pr-2">{fnProductName(product)}</td>
-                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
-                          <td className="py-2 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
+                          <td className="py-2 pr-3 text-right font-semibold text-slate-700">{Number(product.cost_price || 0) ? krw(Number(product.cost_price || 0)) : "-"}</td>
+                          <td className="py-2 pr-4 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
                         </tr>
                       );
                     })}
