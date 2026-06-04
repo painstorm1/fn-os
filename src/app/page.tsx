@@ -9666,6 +9666,30 @@ function SalesPurchaseEntryModal({
     }, 0);
   }
 
+  function focusProductCode(index: number) {
+    window.setTimeout(() => {
+      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-code-input='true']");
+      inputs?.[index]?.focus();
+    }, 0);
+  }
+
+  function focusProductName(index: number) {
+    window.setTimeout(() => {
+      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-name-input='true']");
+      const input = inputs?.[index];
+      input?.focus();
+      input?.select();
+    }, 0);
+  }
+
+  function moveFromMemo(index: number) {
+    if (index < lines.length - 1) {
+      focusProductCode(index + 1);
+      return;
+    }
+    appendLine();
+  }
+
   function selectCustomer(customer: FnCustomer) {
     const code = String(customer.customer_code || customer.cust_code || "");
     const name = String(customer.customer_name || customer.cust_name || code);
@@ -9738,13 +9762,9 @@ function SalesPurchaseEntryModal({
       next.push(defaultLine());
       return next;
     });
-    const nextIndex = productSearch.lineIndex + products.length;
     setProductSearch((prev) => ({ ...prev, open: false }));
     setProductSearchSelectedKeys([]);
-    window.setTimeout(() => {
-      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-code-input='true']");
-      inputs?.[nextIndex]?.focus();
-    }, 0);
+    focusProductName(productSearch.lineIndex);
   }
 
   function chooseProduct(product: FnProduct) {
@@ -9976,12 +9996,20 @@ function SalesPurchaseEntryModal({
                       }
                     }} />
                   </td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_name} onChange={(event) => updateLine(index, "prod_name", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  <td className="px-2 py-2"><input data-product-name-input="true" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_name} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "prod_name", event.target.value)} onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    if (!event.currentTarget.value.trim()) {
+                      void openProductSearch(index, line.prod_cd || line.prod_name);
+                      return;
+                    }
+                    moveToNextField(event.currentTarget);
+                  }} /></td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
                   {vatMode === "excluded" && <td className="px-2 py-2 text-right font-bold text-gray-600">{Math.round(lineTax(line) * lineQty(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); appendLine(); } }} /></td>
+                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
                 </tr>
               );})}
             </tbody>
