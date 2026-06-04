@@ -15232,6 +15232,8 @@ function invalidateAccountingCache() {
 function AccountingWorkspace() {
   const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const [activeTab, setActiveTab] = useState("");
+  const [bankSubTab, setBankSubTab] = useState<"list" | "settings">("list");
+  const [cardSubTab, setCardSubTab] = useState<"list" | "settings">("list");
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
@@ -15826,10 +15828,34 @@ function AccountingWorkspace() {
       {activeTab === "통장" && (
         <Card className="p-5">
           <SectionHeader
-            title="통장 내역"
-            description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다."
-            actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
+            title={bankSubTab === "list" ? "통장 내역" : "통장 설정"}
+            description={bankSubTab === "list" ? "국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 자금이동은 손익 비용에서 제외됩니다." : "통장명, 예금주, 계좌번호, 리스트 반영 여부를 관리합니다."}
+            actions={<StatusBadge>{(bankSubTab === "list" ? expenses.filter((row) => String(row.source_type || "") === "bank").length : bankAccounts.length).toLocaleString("ko-KR")}건</StatusBadge>}
           />
+          <div className="mt-4 flex gap-2 rounded-xl border border-gray-200 bg-white p-1">
+            {[
+              ["list", "통장 내역"],
+              ["settings", "통장 설정"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setBankSubTab(key as "list" | "settings")}
+                className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${bankSubTab === key ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {bankSubTab === "list" && (
+            <div className="mt-4">
+              <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
+            </div>
+          )}
+
+          {bankSubTab === "settings" && (
+            <>
           <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
             <table className="w-full min-w-[760px] text-xs">
               <thead className="bg-gray-50 font-semibold text-gray-500">
@@ -15916,19 +15942,42 @@ function AccountingWorkspace() {
               <ActionButton type="submit">{bankAccountDraft.id ? "수정" : "추가"}</ActionButton>
             </div>
           </form>
-          <div className="mt-4">
-            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
-          </div>
+            </>
+          )}
         </Card>
       )}
 
       {activeTab === "카드" && (
         <Card className="p-5">
           <SectionHeader
-            title="카드 내역"
-            description="카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원."
-            actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
+            title={cardSubTab === "list" ? "카드 내역" : "카드 설정"}
+            description={cardSubTab === "list" ? "카드 사용일 기준 비용 발생분입니다. 가온글로벌 한도 20,000,000원 / 국민기업 한도 10,000,000원." : "카드명, 결제 기준일, 출금일, 한도, 리스트 반영 여부를 관리합니다."}
+            actions={<StatusBadge tone="orange">{(cardSubTab === "list" ? expenses.filter((row) => String(row.source_type || "") === "card").length : cardAccounts.length).toLocaleString("ko-KR")}건</StatusBadge>}
           />
+          <div className="mt-4 flex gap-2 rounded-xl border border-gray-200 bg-white p-1">
+            {[
+              ["list", "카드 내역"],
+              ["settings", "카드 설정"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setCardSubTab(key as "list" | "settings")}
+                className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${cardSubTab === key ? "bg-[#ff6a00] text-white" : "text-gray-600 hover:bg-orange-50 hover:text-[#c2410c]"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {cardSubTab === "list" && (
+            <div className="mt-4">
+              <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
+            </div>
+          )}
+
+          {cardSubTab === "settings" && (
+            <>
           <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
             <table className="w-full min-w-[1080px] text-xs">
               <thead className="bg-gray-50 font-semibold text-gray-500">
@@ -16055,9 +16104,8 @@ function AccountingWorkspace() {
               <ActionButton type="submit">{cardAccountDraft.id ? "수정" : "추가"}</ActionButton>
             </div>
           </form>
-          <div className="mt-4">
-            <ExpenseTable rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
-          </div>
+            </>
+          )}
         </Card>
       )}
 
