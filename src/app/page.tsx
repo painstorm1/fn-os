@@ -14326,6 +14326,14 @@ function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string;
   return <KpiCard label={label} value={value} note={note} tone={nextTone} className="h-full min-h-[88px]" />;
 }
 
+const adChannelExternalUrls: Record<string, string> = {
+  메타GFA: "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=1604145144225053&business_id=1310111940216086&global_scope_id=1310111940216086&filter_set=campaign.impressions-NUMBER%1EGREATER_THAN%1E0%1DCAMPAIGN_GROUP_DELIVERY_STATUS-STRING_SET%1EIN%1E[%22active%22]&quick_view_id=26159869786986474",
+  네이버GFA: "https://ads.naver.com/manage/ad-accounts/1724792/da/dashboard/campaign/1301355?dateRange=2026-06-03%2C2026-06-03&period=yesterday",
+  네이버쇼핑검색: "https://ads.naver.com/manage/ad-accounts/1724792/sa/campaigns-by/SHOPPING",
+  네이버Advoost: "https://ads.naver.com/manage/ad-accounts/1724792/da/campaigns-by/PMAX?dateRange=2026-06-03%2C2026-06-03&period=yesterday",
+  "쿠팡": "https://advertising.coupang.com/marketing-reporting/billboard/reports/pa",
+};
+
 function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; selectedChannels: string[] }) {
   const selected = new Set(selectedChannels);
   const orderedRows = adReportChannelOrder
@@ -14353,10 +14361,16 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
         {orderedRows.map((row, index) => (
           <div key={`ad-channel-status-${row.channel}`} className="space-y-1.5">
             <div className="grid grid-cols-[minmax(82px,1fr)_auto_auto] items-center gap-2 text-sm">
-              <span className="flex min-w-0 items-center gap-1.5 font-black text-slate-700">
+              <a
+                className="flex min-w-0 items-center gap-1.5 font-black text-slate-700 transition hover:text-[#ff6a00]"
+                href={adChannelExternalUrls[row.channel]}
+                target="_blank"
+                rel="noreferrer"
+                title={`${row.label} 광고관리 열기`}
+              >
                 <AdChannelLogo channel={row.channel} />
                 <span className="truncate">{row.label}</span>
-              </span>
+              </a>
               <span className="shrink-0 font-black text-[#ff6a00]">{adPercent(row.roas)}</span>
               <span className="shrink-0 font-black text-gray-950">{krw(row.cost)}</span>
             </div>
@@ -14441,14 +14455,13 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const costAxisMax = rawMaxCost > 0 ? maxCost : 0;
   const roasAxisMax = rawMaxRoas > 0 ? maxRoas : 0;
   const chartPoints = points.map((row, index) => {
-    const x = points.length <= 1 ? 50 : 10 + (index / (points.length - 1)) * 80;
+    const x = points.length <= 1 ? 50 : 12 + (index / (points.length - 1)) * 76;
     const costY = 92 - (adNumber(row.cost) / maxCost) * 70;
     const roasY = 92 - (adNumber(row.roas) / maxRoas) * 70;
     return { row, x, costY, roasY };
   });
   const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
   const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
-  const labelColumns = Math.min(points.length || 1, range.mode === "month" ? 6 : 10);
   const showPointDateLabels = range.mode === "month" || points.length <= 7;
   const axisTicks = [
     { y: 20, cost: costAxisMax, roas: roasAxisMax },
@@ -14482,9 +14495,9 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 ))}
               </div>
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="광고비와 ROAS 그래프">
-                <path d="M 6 92 L 94 92" stroke="#e2e8f0" strokeWidth="0.8" />
-                <path d="M 6 56 L 94 56" stroke="#e2e8f0" strokeWidth="0.5" />
-                <path d="M 6 20 L 94 20" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 8 92 L 92 92" stroke="#e2e8f0" strokeWidth="0.8" />
+                <path d="M 8 56 L 92 56" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 8 20 L 92 20" stroke="#e2e8f0" strokeWidth="0.5" />
                 {points.length > 1 && <path d={costPath} fill="none" stroke="#ff6a00" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
                 {points.length > 1 && <path d={roasPath} fill="none" stroke="#16a34a" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
@@ -14496,8 +14509,8 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                 return (
                 <div key={`ad-hover-point-${String(row.date)}-${index}`} className="group">
                   {[
-                    { y: costY, xOffset: -0.55, color: "bg-[#ff6a00]" },
-                    { y: roasY, xOffset: 0.55, color: "bg-emerald-600" },
+                    { y: costY, color: "bg-[#ff6a00]" },
+                    { y: roasY, color: "bg-emerald-600" },
                   ].map((point) => (
                     <button
                       key={`${String(row.date)}-${point.color}`}
@@ -14505,7 +14518,7 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                       aria-label={`${String(row.date)} 광고 지표`}
                       onClick={() => setActivePointKey((current) => current === pointKey ? null : pointKey)}
                       className="absolute z-20 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                      style={{ left: `${x + point.xOffset}%`, top: `${point.y}%` }}
+                      style={{ left: `${x}%`, top: `${point.y}%` }}
                     >
                       <span className={`absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-2 ring-white`} />
                     </button>
@@ -14523,9 +14536,13 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
               })}
             </div>
             {showPointDateLabels && (
-              <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${labelColumns}, minmax(0, 1fr))` }}>
+              <div className="relative mt-2 h-6">
                 {points.map((row, index) => (
-                  <div key={`ad-chart-label-${String(row.date)}-${index}`} className="min-w-0 px-1 py-0.5 text-center text-xs">
+                  <div
+                    key={`ad-chart-label-${String(row.date)}-${index}`}
+                    className="absolute top-0 min-w-12 -translate-x-1/2 text-center text-xs"
+                    style={{ left: `${chartPoints[index]?.x ?? 50}%` }}
+                  >
                     <p className="truncate font-black text-slate-600">{range.mode === "month" ? String(row.date || "-") : String(row.date || "-").slice(5)}</p>
                   </div>
                 ))}
