@@ -15526,6 +15526,8 @@ type AccountingSummary = {
   card_settlements?: Array<Record<string, unknown>>;
   fixed_costs?: Array<Record<string, unknown>>;
   fixed_cost_occurrences?: Array<Record<string, unknown>>;
+  loans?: Array<Record<string, unknown>>;
+  loan_occurrences?: Array<Record<string, unknown>>;
   upcoming_fixed_costs?: Array<Record<string, unknown>>;
   bank_accounts?: Array<Record<string, unknown>>;
   card_accounts?: Array<Record<string, unknown>>;
@@ -15543,7 +15545,23 @@ type ExpenseUploadItem = {
 };
 
 const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
-const accountingTabs = ["검토필요", "통장", "카드", "고정비", "카테고리 설정"];
+const jaewookPersonalPaymentItems = [
+  ["재욱 교보 무배당베스트라이프종합보험약관", 37369],
+  ["재욱 한화 100세 멀티", 62869],
+  ["재욱 카카오개인사업자대출상환", 1339347],
+  ["재욱 KB 소상공인 신용대출 3000만원", 913465],
+  ["재욱 KB 소상공인 신용대출 580만원", 28394],
+  ["재욱 교보생명 신용대출", 314460],
+  ["재욱 회사차 주차요금", 20000],
+] as const;
+const accountingTabLabel: Record<string, string> = {
+  dashboard: "대시보드",
+  bank: "통장 내역",
+  card: "카드 내역",
+  fixed: "고정비",
+  settings: "설정",
+  review: "검토필요",
+};
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
@@ -15638,6 +15656,30 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     memo: "",
   };
   const [fixedCostDraft, setFixedCostDraft] = useState(emptyFixedCostDraft);
+  const emptyLoanDraft = {
+    id: "",
+    loan_name: "",
+    loan_type: "principal_interest",
+    principal_amount: "",
+    current_balance: "",
+    bank_name: "",
+    account_holder: "",
+    account_number: "",
+    deposit_account_number: "",
+    loan_start_date: "",
+    loan_period_months: "",
+    payment_day: "",
+    expected_principal_amount: "",
+    expected_interest_amount: "",
+    expected_payment_amount: "",
+    payer_name: "",
+    memo: "",
+  };
+  const [fixedCostMode, setFixedCostMode] = useState<"fixed" | "loan">("fixed");
+  const [fixedCostQuery, setFixedCostQuery] = useState("");
+  const [fixedCostSort, setFixedCostSort] = useState<"due" | "category" | "amount">("due");
+  const [loanDraft, setLoanDraft] = useState(emptyLoanDraft);
+  const [jaewookModalRow, setJaewookModalRow] = useState<Record<string, unknown> | null>(null);
   const emptyBankAccountDraft = {
     id: "",
     account_type: "business",
@@ -15897,6 +15939,28 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setMessage(fixedCostDraft.id ? "고정비를 수정했습니다." : "고정비를 추가했습니다.");
     setFixedCostDraft(emptyFixedCostDraft);
     invalidateAccountingCache();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
+    loadSummary(true);
+  }
+
+  async function saveLoan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const method = loanDraft.id ? "PATCH" : "POST";
+    const res = await fetch("/api/accounting/ledger/loans", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(loanDraft),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "대출 저장 실패");
+      return;
+    }
+    setMessage(loanDraft.id ? "대출 항목을 수정했습니다." : "대출 항목을 추가했습니다.");
+    setLoanDraft(emptyLoanDraft);
+    setFixedCostMode("fixed");
+    invalidateAccountingCache();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
     loadSummary(true);
   }
 
@@ -16038,6 +16102,21 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     loadSummary(true);
   }
 
+  async function saveJaewookPersonalPayment(row: Record<string, unknown>, allocations: Array<{ label: string; amount: number }>) {
+    const memo = [
+      "김재욱 개인대납",
+      ...allocations.filter((item) => item.amount > 0).map((item) => `${item.label}: ${krw(item.amount)}`),
+    ].join("\n");
+    await saveReviewQuick(row, {
+      direction: "transfer",
+      affects_profit: false,
+      affects_cashflow: true,
+      review_reason: "김재욱 개인대납",
+      memo,
+    }, true);
+    setJaewookModalRow(null);
+  }
+
   async function exportExpenses() {
     const xlsx = await loadXlsxModule();
     const sheet = xlsx.utils.json_to_sheet(filteredExpenses);
@@ -16066,8 +16145,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const rules = summary?.rules || [];
   const fixedCosts = summary?.fixed_costs || [];
   const fixedCostOccurrences = summary?.fixed_cost_occurrences || [];
+  const loans = summary?.loans || [];
+  const loanOccurrences = summary?.loan_occurrences || [];
   const fixedCostOccurrenceById = new Map(fixedCostOccurrences.map((row) => [String(row.fixed_cost_id || row.id || ""), row]));
   const fixedCostRows = fixedCosts.map((row) => ({ ...row, ...(fixedCostOccurrenceById.get(String(row.id || "")) || {}) }));
+  const loanRows: Array<Record<string, unknown>> = loans.map((row: Record<string, unknown>) => ({ ...row, ...((loanOccurrences || []).find((occurrence: Record<string, unknown>) => String(occurrence.loan_id || "") === String(row.id || "")) || {}), row_type: "loan" }));
+  const combinedFixedSourceRows: Array<Record<string, unknown>> = [...fixedCostRows.map((row: Record<string, unknown>) => ({ ...row, row_type: "fixed" })), ...loanRows];
+  const combinedFixedRows = combinedFixedSourceRows
+    .filter((row: Record<string, unknown>) => {
+      const q = fixedCostQuery.trim().toLowerCase();
+      if (!q) return true;
+      return `${row["fixed_cost_name"] || ""} ${row["loan_name"] || ""} ${row["title"] || ""} ${row["category_large"] || ""} ${row["category_middle"] || ""} ${row["payment_source"] || ""} ${row["bank_name"] || ""} ${row["memo"] || ""}`.toLowerCase().includes(q);
+    })
+    .sort((left: Record<string, unknown>, right: Record<string, unknown>) => {
+      if (fixedCostSort === "amount") return asNumber(right["amount"] || right["expected_amount"] || right["expected_payment_amount"]) - asNumber(left["amount"] || left["expected_amount"] || left["expected_payment_amount"]);
+      if (fixedCostSort === "category") return `${left["category_large"] || ""}${left["category_middle"] || ""}${left["title"] || left["loan_name"] || ""}`.localeCompare(`${right["category_large"] || ""}${right["category_middle"] || ""}${right["title"] || right["loan_name"] || ""}`);
+      return String(left["due_date"] || "").localeCompare(String(right["due_date"] || ""));
+    });
   const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const bankAccounts = summary?.bank_accounts || [];
   const cardAccounts = summary?.card_accounts || [];
@@ -16173,81 +16267,130 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       )}
 
       {activeTab === "fixed" && (
-        <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-4 xl:grid-cols-[1fr_400px]">
           <Card className="p-5">
             <SectionHeader
               title="고정비 현황"
-              description="설정 기준일로 캘린더를 만들고, 업로드된 통장/카드 실제 거래가 있으면 실제값으로 갱신합니다."
-              actions={<StatusBadge tone="orange">{fixedCosts.length.toLocaleString("ko-KR")}개</StatusBadge>}
+              description="고정비와 대출 납입 항목을 같은 기준일로 관리합니다. 납부 상태는 업로드된 통장/카드 실제 거래와 매칭된 값이 우선입니다."
+              actions={<StatusBadge tone="orange">{combinedFixedRows.length.toLocaleString("ko-KR")}개</StatusBadge>}
             />
+            <FilterBar className="mt-4">
+              <input
+                className="field-input h-10 min-w-[220px] flex-1 rounded-md border border-gray-200 px-3 text-sm font-semibold"
+                value={fixedCostQuery}
+                onChange={(event) => setFixedCostQuery(event.target.value)}
+                placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
+              />
+              <div className="flex rounded-md border border-gray-200 bg-white p-1">
+                {[
+                  ["due", "도래일 순"],
+                  ["category", "카테고리 순"],
+                  ["amount", "금액 순"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setFixedCostSort(value as "due" | "category" | "amount")}
+                    className={`h-8 rounded px-3 text-xs font-black ${fixedCostSort === value ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <ActionButton type="button" onClick={() => { setFixedCostMode("fixed"); setFixedCostDraft(emptyFixedCostDraft); }}>F2 새 비용</ActionButton>
+              <ActionButton type="button" variant="secondary" onClick={() => { setFixedCostMode("loan"); setLoanDraft(emptyLoanDraft); }}>대출 추가</ActionButton>
+            </FilterBar>
             <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-              <table className="w-full min-w-[920px] text-sm">
+              <table className="w-full min-w-[1040px] text-sm">
                 <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
                   <tr>
+                    <th className="px-3 py-2 text-left">속성</th>
                     <th className="px-3 py-2 text-left">고정비명</th>
                     <th className="px-3 py-2 text-left">카테고리</th>
-                    <th className="px-3 py-2 text-center">기준일</th>
-                    <th className="px-3 py-2 text-center">이번 달 예정일</th>
-                    <th className="px-3 py-2 text-right">예상금액</th>
-                    <th className="px-3 py-2 text-right">최근 실제값</th>
-                    <th className="px-3 py-2 text-center">구분</th>
-                    <th className="px-3 py-2 text-right">관리</th>
+                    <th className="px-3 py-2 text-center">결제일</th>
+                    <th className="px-3 py-2 text-right">비용 금액</th>
+                    <th className="px-3 py-2 text-center">결제 구분</th>
+                    <th className="px-3 py-2 text-center">납입현황</th>
+                    <th className="px-3 py-2 text-left">메모</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {fixedCostRows.map((row) => (
-                    <tr key={String(row.fixed_cost_id || row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                      <td className="px-3 py-2 font-semibold text-gray-900">{String(row.title || row.display_title || row.fixed_cost_name || "-")}</td>
-                      <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "-"}</td>
-                      <td className="px-3 py-2 text-center text-gray-600">{String(row.base_day || "-")}</td>
-                      <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
-                      <td className="px-3 py-2 text-right">{krw(asNumber(row.expected_amount))}</td>
-                      <td className="px-3 py-2 text-right">{asNumber(row.last_actual_amount) ? krw(asNumber(row.last_actual_amount)) : "-"}</td>
-                      <td className="px-3 py-2 text-center"><StatusBadge tone={String(row.status) === "upcoming" ? "orange" : "muted"}>{String(row.payment_type || "bank")}</StatusBadge></td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-end gap-2">
-                          <ActionButton
-                            type="button"
-                            variant="secondary"
-                            className="h-8 px-3 text-xs"
-                            onClick={() => {
-                              const source = fixedCosts.find((item) => String(item.id || "") === String(row.fixed_cost_id || row.id)) || row;
-                              setFixedCostDraft({
-                                id: String(source.id || row.fixed_cost_id || ""),
-                                fixed_cost_name: String(source.fixed_cost_name || row.title || row.display_title || ""),
-                                category_large: String(source.category_large || "업무 비용"),
-                                category_middle: String(source.category_middle || ""),
-                                category_small: "",
-                                expected_amount: String(source.expected_amount || ""),
-                                base_day: String(source.base_day || ""),
-                                payment_type: String(source.payment_type || "bank"),
-                                payment_source: String(source.payment_source || ""),
-                                match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
-                                affects_profit: source.affects_profit !== false,
-                                affects_cashflow: source.affects_cashflow !== false,
-                                is_active: true,
-                                sort_order: String(source.sort_order || 0),
-                                memo: String(source.memo || ""),
-                              });
-                            }}
-                          >
-                            수정
-                          </ActionButton>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!fixedCostRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="Supabase SQL Editor에서 최신 schema_sales_inventory.sql을 실행하면 기본 고정비가 생성됩니다." className="min-h-24" /></td></tr>}
+                  {combinedFixedRows.map((row, index) => {
+                    const isLoan = String(row.row_type || "") === "loan";
+                    const title = String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-");
+                    const amount = asNumber(row.amount || row.last_actual_amount || row.expected_amount || row.expected_payment_amount);
+                    const paid = Boolean(row.matched_transaction_id || row.last_actual_date) || String(row.status || "") === "overdue_or_paid" && String(row.due_date || "") < new Date().toISOString().slice(0, 10);
+                    return (
+                      <tr
+                        key={`${String(row.id || row.fixed_cost_id || row.loan_id)}-${index}`}
+                        className="cursor-pointer border-t border-gray-100 hover:bg-orange-50/60"
+                        onClick={() => {
+                          if (isLoan) {
+                            setFixedCostMode("loan");
+                            setLoanDraft({
+                              id: String(row.loan_id || row.id || ""),
+                              loan_name: String(row.loan_name || row.title || ""),
+                              loan_type: String(row.loan_type || "principal_interest"),
+                              principal_amount: String(row.principal_amount || ""),
+                              current_balance: String(row.current_balance || ""),
+                              bank_name: String(row.bank_name || row.payment_source || ""),
+                              account_holder: String(row.account_holder || ""),
+                              account_number: String(row.account_number || ""),
+                              deposit_account_number: String(row.deposit_account_number || ""),
+                              loan_start_date: String(row.loan_start_date || "").slice(0, 10),
+                              loan_period_months: String(row.loan_period_months || ""),
+                              payment_day: String(row.payment_day || row.base_day || ""),
+                              expected_principal_amount: String(row.expected_principal_amount || ""),
+                              expected_interest_amount: String(row.expected_interest_amount || ""),
+                              expected_payment_amount: String(row.expected_payment_amount || row.amount || ""),
+                              payer_name: String(row.payer_name || ""),
+                              memo: String(row.memo || ""),
+                            });
+                            return;
+                          }
+                          setFixedCostMode("fixed");
+                          const source = fixedCosts.find((item) => String(item.id || "") === String(row.fixed_cost_id || row.id)) || row;
+                          setFixedCostDraft({
+                            id: String(source.id || row.fixed_cost_id || ""),
+                            fixed_cost_name: String(source.fixed_cost_name || row.title || row.display_title || ""),
+                            category_large: String(source.category_large || "업무 비용"),
+                            category_middle: String(source.category_middle || ""),
+                            category_small: "",
+                            expected_amount: String(source.expected_amount || ""),
+                            base_day: String(source.base_day || ""),
+                            payment_type: String(source.payment_type || "bank"),
+                            payment_source: String(source.payment_source || ""),
+                            match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
+                            affects_profit: source.affects_profit !== false,
+                            affects_cashflow: source.affects_cashflow !== false,
+                            is_active: true,
+                            sort_order: String(source.sort_order || 0),
+                            memo: String(source.memo || ""),
+                          });
+                        }}
+                      >
+                        <td className="px-3 py-2"><StatusBadge tone={isLoan ? "orange" : "muted"}>{isLoan ? "대출" : String(row.category_large || "고정비")}</StatusBadge></td>
+                        <td className="px-3 py-2 font-semibold text-gray-900">{title}</td>
+                        <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || (isLoan ? "금융비용 > 대출 원리금" : "-")}</td>
+                        <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
+                        <td className="px-3 py-2 text-right font-bold">{krw(amount)}</td>
+                        <td className="px-3 py-2 text-center">{String(row.payment_source || row.bank_name || row.payment_type || "통장")}</td>
+                        <td className="px-3 py-2 text-center"><StatusBadge tone={paid ? "success" : "danger"}>{paid ? "완납" : "미납"}</StatusBadge></td>
+                        <td className="max-w-[220px] truncate px-3 py-2 text-gray-500" title={String(row.memo || "")}>{String(row.memo || "-")}</td>
+                      </tr>
+                    );
+                  })}
+                  {!combinedFixedRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="오른쪽에서 새 비용 또는 대출 항목을 추가할 수 있습니다." className="min-h-24" /></td></tr>}
                 </tbody>
               </table>
             </div>
           </Card>
           <div className="space-y-4">
             <Card className="p-5">
-              <SectionHeader title="도래할 고정비 5개" />
+              <SectionHeader title="D-3 도래 고정비" />
               <div className="mt-4 space-y-2">
-                {upcomingFixedCosts.slice(0, 5).map((row) => (
-                  <div key={String(row.fixed_cost_id || row.id)} className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2">
+                {upcomingFixedCosts.map((row, index) => (
+                  <div key={`${String(row.fixed_cost_id || row.loan_id || row.id)}-${index}`} className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</p>
                       <StatusBadge tone="orange">D-{Math.max(0, asNumber(row.days_until))}</StatusBadge>
@@ -16260,54 +16403,45 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </div>
             </Card>
             <Card className="p-5">
-              <SectionHeader title={fixedCostDraft.id ? "고정비 수정" : "고정비 추가"} />
-              <form onSubmit={saveFixedCost} className="mt-4 space-y-3">
-                <FormField label="고정비명" required>
-                  <input className={modalInputClass} value={fixedCostDraft.fixed_cost_name} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, fixed_cost_name: event.target.value }))} />
-                </FormField>
-                <div className="grid grid-cols-2 gap-2">
-                  <FormField label="예상금액" required>
-                    <input className={`${modalInputClass} text-right`} type="number" value={fixedCostDraft.expected_amount} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, expected_amount: event.target.value }))} />
-                  </FormField>
-                  <FormField label="기준일" required>
-                    <input className={modalInputClass} value={fixedCostDraft.base_day} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, base_day: event.target.value }))} placeholder="5, 20, 말일" />
-                  </FormField>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <FormField label="결제구분">
-                    <select className={modalSelectClass} value={fixedCostDraft.payment_type} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_type: event.target.value }))}>
-                      <option value="bank">통장 출금</option>
-                      <option value="card">카드 사용</option>
-                      <option value="card_payment">카드 출금</option>
-                    </select>
-                  </FormField>
-                  <FormField label="출금수단">
-                    <input className={modalInputClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))} placeholder="국민은행, 기업은행" />
-                  </FormField>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <FormField label="대분류">
-                    <input className={modalInputClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
-                  </FormField>
-                  <FormField label="중분류">
-                    <input className={modalInputClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
-                  </FormField>
-                </div>
-                <FormField label="매칭 키워드">
-                  <input className={modalInputClass} value={fixedCostDraft.match_keywords} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, match_keywords: event.target.value }))} placeholder="쉼표로 구분" />
-                </FormField>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={fixedCostDraft.affects_profit} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />손익 반영</label>
-                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={fixedCostDraft.affects_cashflow} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />현금흐름</label>
-                </div>
-                <FormField label="메모">
-                  <textarea className={modalTextareaClass} value={fixedCostDraft.memo} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, memo: event.target.value }))} />
-                </FormField>
-                <div className="flex justify-end gap-2 pt-2">
-                  <ActionButton type="button" variant="secondary" onClick={() => setFixedCostDraft(emptyFixedCostDraft)}>초기화</ActionButton>
-                  <ActionButton type="submit">{fixedCostDraft.id ? "수정" : "추가"}</ActionButton>
-                </div>
-              </form>
+              <div className="mb-4 flex rounded-md border border-gray-200 bg-white p-1">
+                <button type="button" onClick={() => setFixedCostMode("fixed")} className={`h-9 flex-1 rounded text-sm font-black ${fixedCostMode === "fixed" ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}>고정비</button>
+                <button type="button" onClick={() => setFixedCostMode("loan")} className={`h-9 flex-1 rounded text-sm font-black ${fixedCostMode === "loan" ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}>대출</button>
+              </div>
+              {fixedCostMode === "fixed" ? (
+                <form onSubmit={saveFixedCost} className="space-y-3">
+                  <SectionHeader title={fixedCostDraft.id ? "고정비 수정" : "고정비 추가"} />
+                  <FormField label="고정비명" required><input className={modalInputClass} value={fixedCostDraft.fixed_cost_name} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, fixed_cost_name: event.target.value }))} /></FormField>
+                  <div className="grid grid-cols-2 gap-2">
+                    <FormField label="비용 금액" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(fixedCostDraft.expected_amount)} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, expected_amount: formatCommaNumber(event.target.value) }))} /></FormField>
+                    <FormField label="결제일" required><input className={modalInputClass} value={fixedCostDraft.base_day} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, base_day: event.target.value }))} placeholder="5, 20, 말일" /></FormField>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <FormField label="결제 구분" required><select className={modalSelectClass} value={fixedCostDraft.payment_type} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_type: event.target.value }))}><option value="bank">통장 출금</option><option value="card">카드 사용</option><option value="card_payment">카드 출금</option></select></FormField>
+                    <FormField label={fixedCostDraft.payment_type === "card" ? "연동 카드" : "연동 계좌"} required><select className={modalSelectClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))}><option value="">선택</option>{(fixedCostDraft.payment_type === "card" ? cardAccounts : bankAccounts).map((account) => <option key={String(account.id || account.card_name || account.bank_name)} value={String(account.card_name || account.bank_name)}>{String(account.card_name || account.bank_name)}</option>)}</select></FormField>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <FormField label="1차 카테고리"><input className={modalInputClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value, fixed_cost_name: prev.fixed_cost_name || `[${event.target.value}] ` }))} /></FormField>
+                    <FormField label="2차 카테고리"><input className={modalInputClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))} /></FormField>
+                  </div>
+                  <FormField label="매칭 키워드"><input className={modalInputClass} value={fixedCostDraft.match_keywords} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, match_keywords: event.target.value }))} placeholder="쉼표로 구분" /></FormField>
+                  <FormField label="메모"><textarea className={modalTextareaClass} value={fixedCostDraft.memo} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, memo: event.target.value }))} /></FormField>
+                  <div className="flex justify-end gap-2 pt-2"><ActionButton type="button" variant="secondary" onClick={() => setFixedCostDraft(emptyFixedCostDraft)}>초기화</ActionButton><ActionButton type="submit">{fixedCostDraft.id ? "수정" : "추가"}</ActionButton></div>
+                </form>
+              ) : (
+                <form onSubmit={saveLoan} className="space-y-3">
+                  <SectionHeader title={loanDraft.id ? "대출 수정" : "대출 추가"} />
+                  <FormField label="납입 방식" required><select className={modalSelectClass} value={loanDraft.loan_type} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_type: event.target.value }))}><option value="principal_interest">원리금상환</option><option value="interest_only">이자납입</option></select></FormField>
+                  <FormField label="대출명" required><input className={modalInputClass} value={loanDraft.loan_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_name: event.target.value }))} /></FormField>
+                  <div className="grid grid-cols-2 gap-2"><FormField label="대출금액"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, principal_amount: formatCommaNumber(event.target.value) }))} /></FormField><FormField label="예상 납입액" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_payment_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_payment_amount: formatCommaNumber(event.target.value) }))} /></FormField></div>
+                  <div className="grid grid-cols-2 gap-2"><FormField label="원금"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_principal_amount: formatCommaNumber(event.target.value) }))} /></FormField><FormField label="이자"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_interest_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_interest_amount: formatCommaNumber(event.target.value) }))} /></FormField></div>
+                  <div className="grid grid-cols-2 gap-2"><FormField label="은행"><input className={modalInputClass} value={loanDraft.bank_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, bank_name: event.target.value }))} /></FormField><FormField label="예금주"><input className={modalInputClass} value={loanDraft.account_holder} onChange={(event) => setLoanDraft((prev) => ({ ...prev, account_holder: event.target.value }))} /></FormField></div>
+                  <FormField label="입금계좌"><input className={modalInputClass} value={loanDraft.deposit_account_number || loanDraft.account_number} onChange={(event) => setLoanDraft((prev) => ({ ...prev, deposit_account_number: event.target.value }))} /></FormField>
+                  <div className="grid grid-cols-2 gap-2"><FormField label="대출 시작일"><input className={modalInputClass} type="date" value={loanDraft.loan_start_date} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_start_date: event.target.value }))} /></FormField><FormField label="대출 기간(개월)"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={loanDraft.loan_period_months} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_period_months: event.target.value }))} /></FormField></div>
+                  <FormField label="납입 기준일" required><input className={modalInputClass} value={loanDraft.payment_day} onChange={(event) => setLoanDraft((prev) => ({ ...prev, payment_day: event.target.value }))} placeholder="3, 7, 15, 말일" /></FormField>
+                  <FormField label="메모"><textarea className={modalTextareaClass} value={loanDraft.memo} onChange={(event) => setLoanDraft((prev) => ({ ...prev, memo: event.target.value }))} /></FormField>
+                  <div className="flex justify-end gap-2 pt-2"><ActionButton type="button" variant="secondary" onClick={() => setLoanDraft(emptyLoanDraft)}>초기화</ActionButton><ActionButton type="submit">{loanDraft.id ? "수정" : "추가"}</ActionButton></div>
+                </form>
+              )}
             </Card>
           </div>
         </section>
@@ -16328,6 +16462,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 categoryById={categoryById}
                 onOpen={openTransaction}
                 onSave={saveReviewQuick}
+                onJaewook={(row) => setJaewookModalRow(row)}
               />
             </div>
           </Card>
@@ -16523,6 +16658,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           </div>
         </FormModal>
       )}
+      {jaewookModalRow && (
+        <JaewookPersonalPaymentModal
+          row={jaewookModalRow}
+          onClose={() => setJaewookModalRow(null)}
+          onSave={(allocations) => void saveJaewookPersonalPayment(jaewookModalRow, allocations)}
+        />
+      )}
     </div>
   );
 }
@@ -16542,18 +16684,71 @@ function accountingSourceRowClass(row: Record<string, unknown>) {
   return "bg-white";
 }
 
+function JaewookPersonalPaymentModal({
+  row,
+  onClose,
+  onSave,
+}: {
+  row: Record<string, unknown>;
+  onClose: () => void;
+  onSave: (allocations: Array<{ label: string; amount: number }>) => void;
+}) {
+  const totalAmount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount ?? row.debit_amount);
+  const [allocations, setAllocations] = useState<Array<{ label: string; amount: number }>>(() => jaewookPersonalPaymentItems.map(([label, amount]) => ({ label, amount })));
+  useEscapeToClose(true, onClose);
+  const allocationTotal = allocations.reduce((sum, item) => sum + asNumber(item.amount), 0);
+  return (
+    <FormModal
+      title="김재욱 개인대납 정리"
+      description="이 거래 금액을 대출/보험/주차요금 대납 항목으로 나눠 기록합니다."
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+          <ActionButton type="button" onClick={() => onSave(allocations)}>저장</ActionButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-md border border-orange-100 bg-orange-50 px-3 py-2 text-sm font-bold text-orange-700">
+          거래금액 {krw(totalAmount)} / 입력합계 {krw(allocationTotal)}
+        </div>
+        <div className="space-y-2">
+          {allocations.map((item, index) => (
+            <div key={item.label} className="grid grid-cols-[1fr_150px] items-center gap-3">
+              <div className="text-sm font-semibold text-gray-700">{item.label}</div>
+              <input
+                className={`${modalInputClass} text-right`}
+                inputMode="numeric"
+                value={formatCommaNumber(item.amount)}
+                onChange={(event) => setAllocations((prev) => prev.map((prevItem, prevIndex) => (
+                  prevIndex === index ? { ...prevItem, amount: asNumber(event.target.value) } : prevItem
+                )))}
+                placeholder={formatCommaNumber(item.amount)}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </FormModal>
+  );
+}
+
 function ReviewQuickGrid({
   rows,
   categories,
   categoryById,
   onOpen,
   onSave,
+  onJaewook,
 }: {
   rows: Array<Record<string, unknown>>;
   categories: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
   onOpen: (row: Record<string, unknown>) => void;
   onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void;
+  onJaewook?: (row: Record<string, unknown>) => void;
 }) {
   const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
   if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
@@ -16576,6 +16771,7 @@ function ReviewQuickGrid({
         <tbody>
           {sortedRows.map((row, index) => {
             const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+            const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
             return (
               <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
                 <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
@@ -16625,6 +16821,7 @@ function ReviewQuickGrid({
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-2">
                     <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>
+                    {jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}
                     <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, {}, true)}>확정</ActionButton>
                   </div>
                 </td>

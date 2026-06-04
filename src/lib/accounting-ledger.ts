@@ -512,6 +512,74 @@ export async function deactivateAccountingFixedCost(id: string) {
   return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
 }
 
+
+function cleanLoanPayload(row: RawRow) {
+  return {
+    loan_name: text(row.loan_name || row.loanName || row.name),
+    principal_amount: numberValue(row.principal_amount ?? row.principalAmount),
+    current_balance: numberValue(row.current_balance ?? row.currentBalance),
+    bank_name: text(row.bank_name || row.bankName) || null,
+    account_holder: text(row.account_holder || row.accountHolder) || null,
+    account_number: text(row.account_number || row.accountNumber) || null,
+    deposit_account_number: text(row.deposit_account_number || row.depositAccountNumber || row.deposit_account || row.depositAccount) || null,
+    loan_start_date: isoDate(row.loan_start_date || row.loanStartDate) || null,
+    loan_period_months: numberValue(row.loan_period_months ?? row.loanPeriodMonths) || null,
+    payment_day: text(row.payment_day || row.paymentDay || row.base_day || row.baseDay),
+    loan_type: text(row.loan_type || row.loanType) || "principal_interest",
+    expected_principal_amount: numberValue(row.expected_principal_amount ?? row.expectedPrincipalAmount),
+    expected_interest_amount: numberValue(row.expected_interest_amount ?? row.expectedInterestAmount),
+    expected_payment_amount: numberValue(row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount),
+    payer_name: text(row.payer_name || row.payerName) || null,
+    is_active: row.is_active ?? row.isActive ?? true,
+    memo: text(row.memo) || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertAccountingLoan(row: RawRow) {
+  const id = text(row.id);
+  const payload = cleanLoanPayload(row);
+  if (!payload.loan_name) throw new Error("대출명이 필요합니다.");
+  if (!payload.payment_day) throw new Error("납입 기준일이 필요합니다.");
+  if (id) return patchRows("accounting_loans", { id: `eq.${id}` }, payload);
+  return upsertRows("accounting_loans", { ...payload, created_at: new Date().toISOString() }, "loan_name");
+}
+
+export async function deactivateAccountingLoan(id: string) {
+  if (!id) throw new Error("대출 id가 필요합니다.");
+  return patchRows("accounting_loans", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+}
+
+function loanOccurrence(row: RawRow, today = kstToday()) {
+  const dueDate = monthDueDate(row.payment_day ?? row.base_day, today);
+  const amount = numberValue(row.expected_payment_amount)
+    || numberValue(row.expected_principal_amount) + numberValue(row.expected_interest_amount);
+  const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
+  return {
+    id: `loan-${text(row.id)}`,
+    loan_id: row.id,
+    fixed_cost_id: row.id,
+    title: row.loan_name,
+    display_title: row.loan_name,
+    category_large: "금융비용",
+    category_middle: "대출 원리금",
+    expected_amount: amount,
+    amount,
+    due_date: dueDate,
+    base_day: row.payment_day,
+    days_until: daysUntil,
+    payment_type: "bank",
+    payment_source: row.bank_name,
+    status: daysUntil < 0 ? "overdue_or_paid" : daysUntil <= 3 ? "upcoming" : "scheduled",
+    memo: row.memo,
+    row_type: "loan",
+    loan_type: row.loan_type,
+    principal_amount: row.principal_amount,
+    expected_principal_amount: row.expected_principal_amount,
+    expected_interest_amount: row.expected_interest_amount,
+  };
+}
+
 function cleanBankAccountPayload(row: RawRow) {
   return {
     account_type: text(row.account_type || row.accountType) || "business",
@@ -705,15 +773,19 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
   const fixedCosts = await optionalRows("accounting_fixed_costs", { order: "sort_order.asc", limit: 300 });
   const activeFixedCosts = fixedCosts.filter((row) => row.is_active !== false);
+  const loans = await optionalRows("accounting_loans", { order: "payment_day.asc", limit: 300 });
+  const activeLoans = loans.filter((row) => row.is_active !== false);
   const bankAccounts = await optionalRows("accounting_bank_accounts", { order: "sort_order.asc", limit: 100 });
   const cardAccounts = await optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 });
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
   const fixedCostOccurrences = activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
-  const upcomingFixedCosts = fixedCostOccurrences
+  const loanOccurrences = activeLoans.map((row) => loanOccurrence(row, today));
+  const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences];
+  const upcomingFixedCosts = [...fixedCostOccurrences, ...loanOccurrences]
     .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
-    .slice(0, 8);
+    .slice(0, 30);
   const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);
   const income = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
   const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
@@ -752,7 +824,9 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     review_queue: reviewQueue,
     card_settlements: settlements,
     fixed_costs: fixedCosts,
-    fixed_cost_occurrences: fixedCostOccurrences,
+    fixed_cost_occurrences: calendarFixedCostOccurrences,
+    loan_occurrences: loanOccurrences,
+    loans,
     upcoming_fixed_costs: upcomingFixedCosts,
     bank_accounts: bankAccounts,
     card_accounts: cardAccounts,
