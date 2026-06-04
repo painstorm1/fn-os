@@ -603,9 +603,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection }: { activeMenu: str
                       event.preventDefault();
                       goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
                     }}
-                    className={`block py-1.5 text-sm font-semibold transition ${
-                      importPath === sub.path ? "text-[#ff6a00]" : "text-gray-500 hover:text-[#c2410c]"
-                    }`}
+                    className={sidebarSubMenuLinkClass(importPath === sub.path)}
                   >
                     {sub.label}
                   </Link>
@@ -15848,20 +15846,20 @@ function AccountingWorkspace() {
             <table className="w-full min-w-[760px] text-xs">
               <thead className="bg-gray-50 font-semibold text-gray-500">
                 <tr>
-                  <th className="px-3 py-2 text-left">은행명</th>
+                  <th className="px-3 py-2 text-center">은행명</th>
                   <th className="px-3 py-2 text-left">속성</th>
                   <th className="px-3 py-2 text-left">예금주</th>
                   <th className="px-3 py-2 text-left">계좌번호</th>
                   <th className="px-3 py-2 text-left">비밀번호</th>
                   <th className="px-3 py-2 text-center">리스트</th>
                   <th className="px-3 py-2 text-left">메모</th>
-                  <th className="px-3 py-2 text-right">관리</th>
+                  <th className="px-3 py-2 text-center">관리</th>
                 </tr>
               </thead>
               <tbody>
                 {bankAccounts.map((row) => (
                   <tr key={String(row.id || row.bank_name)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                    <td className="px-3 py-2"><StatusBadge>{String(row.bank_name || "-")}</StatusBadge></td>
+                    <td className="px-3 py-2 text-center"><StatusBadge>{String(row.bank_name || "-")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-700">{String(row.account_type || "business")}</td>
                     <td className="px-3 py-2 text-gray-700">{String(row.account_holder || "미입력")}</td>
                     <td className="px-3 py-2 font-mono text-gray-900">{String(row.account_number || "미입력")}</td>
@@ -15869,7 +15867,7 @@ function AccountingWorkspace() {
                     <td className="px-3 py-2 text-center"><StatusBadge tone={row.list_enabled === false ? "muted" : "success"}>{row.list_enabled === false ? "미반영" : "반영"}</StatusBadge></td>
                     <td className="px-3 py-2 text-gray-500">{String(row.memo || "-")}</td>
                     <td className="px-3 py-2">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-center gap-2">
                         <ActionButton
                           type="button"
                           variant="secondary"
