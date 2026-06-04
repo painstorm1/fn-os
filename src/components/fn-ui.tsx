@@ -11,6 +11,78 @@ function visualDescription(value?: ReactNode) {
   return typeof value === "string" ? null : value;
 }
 
+let f4SaveShortcutReady = false;
+let f4SaveObserver: MutationObserver | null = null;
+
+function isF4SaveLabel(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || text === "F4 저장" || /저장\s*중/.test(text)) return false;
+  return text === "저장" || text.endsWith(" 저장");
+}
+
+function isVisibleElement(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getClientRects().length > 0;
+}
+
+function isSaveButton(element: Element): element is HTMLButtonElement | HTMLInputElement {
+  if (!(element instanceof HTMLButtonElement || element instanceof HTMLInputElement)) return false;
+  if (element.disabled) return false;
+  if (element instanceof HTMLInputElement && !["button", "submit"].includes(element.type)) return false;
+  const label = element instanceof HTMLInputElement ? element.value : element.textContent || "";
+  return element.dataset.f4Save === "true" || isF4SaveLabel(label) || label.trim() === "F4 저장";
+}
+
+function decorateF4SaveButtons(root: ParentNode = document) {
+  root.querySelectorAll("button, input[type='button'], input[type='submit']").forEach((element) => {
+    if (!isSaveButton(element)) return;
+    const label = element instanceof HTMLInputElement ? element.value : element.textContent || "";
+    if (!isF4SaveLabel(label)) return;
+    element.dataset.f4Save = "true";
+    element.title ||= "F4 저장";
+    if (element instanceof HTMLInputElement) element.value = "F4 저장";
+    else element.textContent = "F4 저장";
+  });
+}
+
+function visibleSaveButtons(root: ParentNode = document) {
+  return Array.from(root.querySelectorAll("button, input[type='button'], input[type='submit']"))
+    .filter(isSaveButton)
+    .filter((element) => isVisibleElement(element));
+}
+
+function findF4SaveButton() {
+  decorateF4SaveButtons();
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    const activeForm = active.closest("form");
+    const formButton = activeForm ? visibleSaveButtons(activeForm)[0] : null;
+    if (formButton) return formButton;
+  }
+  const modal = Array.from(document.querySelectorAll("[role='dialog'], .fixed, .modal"))
+    .filter((element): element is HTMLElement => element instanceof HTMLElement && isVisibleElement(element))
+    .pop();
+  const modalButton = modal ? visibleSaveButtons(modal).pop() : null;
+  if (modalButton) return modalButton;
+  return visibleSaveButtons().pop() || null;
+}
+
+function ensureF4SaveShortcut() {
+  if (typeof window === "undefined" || f4SaveShortcutReady) return;
+  f4SaveShortcutReady = true;
+  window.setTimeout(() => decorateF4SaveButtons(), 0);
+  f4SaveObserver = new MutationObserver(() => decorateF4SaveButtons());
+  f4SaveObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "F4" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const button = findF4SaveButton();
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    button.click();
+  }, true);
+}
+
 export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <section className={cn("rounded-[14px] border border-gray-200 bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)]", className)} {...props} />;
 }
@@ -89,22 +161,30 @@ export function KpiCard({
 export function ActionButton({
   variant = "primary",
   className,
+  children,
+  title,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost" | "danger";
 }) {
+  useEffect(() => ensureF4SaveShortcut(), []);
   const variants = {
     primary: "bg-[#ff6a00] text-white hover:bg-[#ea580c]",
     secondary: "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
     ghost: "bg-transparent text-gray-600 hover:bg-gray-100",
     danger: "bg-red-600 text-white hover:bg-red-700",
   };
+  const saveLabel = typeof children === "string" && isF4SaveLabel(children);
 
   return (
     <button
-      className={cn("inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", variants[variant], className)}
       {...props}
-    />
+      data-f4-save={saveLabel ? "true" : undefined}
+      title={saveLabel ? title || "F4 저장" : title}
+      className={cn("inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", variants[variant], className)}
+    >
+      {saveLabel ? "F4 저장" : children}
+    </button>
   );
 }
 
