@@ -59,6 +59,29 @@ type CategoryGroup = "교육" | "업무" | "개인";
 type ActiveMenu = "save" | "all" | "project" | CategoryGroup;
 type ArchiveViewMode = "preview" | "list";
 const PROJECT_LINK_TYPE = "archive_project";
+const ARCHIVE_CACHE_URL = "/api/fnos/archive";
+const ARCHIVE_MEMORY_TTL = 10 * 60_000;
+const ARCHIVE_STORAGE_TTL = 30 * 60_000;
+const EMPTY_ARCHIVE_DATA: ArchiveData = { items: [], categories: [], tags: [], itemTags: [], links: [] };
+let lastArchiveData: ArchiveData | null = null;
+
+function normalizeArchiveData(value: Partial<ArchiveData> | null | undefined): ArchiveData {
+  return {
+    items: value?.items || [],
+    categories: value?.categories || [],
+    tags: value?.tags || [],
+    itemTags: value?.itemTags || [],
+    links: value?.links || [],
+  };
+}
+
+function readArchiveCache() {
+  if (lastArchiveData) return lastArchiveData;
+  const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { storageTtl: ARCHIVE_STORAGE_TTL });
+  if (!cached) return null;
+  lastArchiveData = normalizeArchiveData(cached);
+  return lastArchiveData;
+}
 
 const categoryTree: Record<CategoryGroup, string[]> = {
   교육: ["영어", "포토샵", "일러스트", "AI"],
@@ -274,8 +297,8 @@ export default function ArchiveWorkspace() {
   const [projectCreateName, setProjectCreateName] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
-  const [data, setData] = useState<ArchiveData>({ items: [], categories: [], tags: [], itemTags: [], links: [] });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<ArchiveData>(() => readArchiveCache() || EMPTY_ARCHIVE_DATA);
+  const [loading, setLoading] = useState(() => !readArchiveCache());
   const [message, setMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
@@ -323,17 +346,29 @@ export default function ArchiveWorkspace() {
     return true;
   }), [categoryById, categoryFilteredItems, filters, projectLinks]);
 
+  function applyArchiveData(value: Partial<ArchiveData> | null | undefined) {
+    const normalized = normalizeArchiveData(value);
+    lastArchiveData = normalized;
+    setData(normalized);
+  }
+
   async function refresh() {
-    setLoading(true);
+    const cached = readArchiveCache();
+    if (cached) {
+      applyArchiveData(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const cached = readCachedJson<ArchiveData>("/api/fnos/archive", { storageTtl: 5 * 60_000 });
+      const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { storageTtl: ARCHIVE_STORAGE_TTL });
       if (cached) {
-        setData(cached);
+        applyArchiveData(cached);
         setLoading(false);
       }
-      const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>("/api/fnos/archive", { ttl: 3 * 60_000, storageTtl: 5 * 60_000 });
+      const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>(ARCHIVE_CACHE_URL, { ttl: ARCHIVE_MEMORY_TTL, storageTtl: ARCHIVE_STORAGE_TTL });
       if (next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
-      setData({ items: next.items || [], categories: next.categories || [], tags: next.tags || [], itemTags: next.itemTags || [], links: next.links || [] });
+      applyArchiveData(next);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 조회 실패");
     } finally {
