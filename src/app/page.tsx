@@ -9102,7 +9102,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   key={mode}
                   type="button"
                   onClick={() => setHistoryMode(mode as "sales" | "purchases")}
-                  className={`rounded px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}
+                  className={`rounded px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "text-slate-600 hover:bg-white hover:text-orange-600"}`}
                 >
                   {label}
                 </button>
@@ -10636,7 +10636,7 @@ function MasterManagementPanel({
               type="button"
               onClick={() => openMasterTab(tab.key)}
               className={`h-10 rounded-md px-4 text-sm font-black ${
-                activeMasterTab === tab.key ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"
+                activeMasterTab === tab.key ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "text-slate-500 hover:bg-orange-50 hover:text-orange-600"
               }`}
             >
               {tab.label}
