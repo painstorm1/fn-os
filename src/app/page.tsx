@@ -14009,6 +14009,26 @@ function adPercent2(value: unknown) {
   return `${adNumber(value).toFixed(2)}%`;
 }
 
+function adRoundUp(value: number, step: number) {
+  if (!Number.isFinite(value) || value <= 0) return step;
+  return Math.ceil(value / step) * step;
+}
+
+function adCostAxisMax(value: number) {
+  if (value <= 0) return 1;
+  if (value >= 100_000) return adRoundUp(value, 100_000);
+  if (value >= 10_000) return adRoundUp(value, 10_000);
+  if (value >= 1_000) return adRoundUp(value, 1_000);
+  return adRoundUp(value, 100);
+}
+
+function adRoasAxisMax(value: number) {
+  if (value <= 0) return 1;
+  if (value >= 100) return adRoundUp(value, 10);
+  if (value >= 10) return adRoundUp(value, 5);
+  return adRoundUp(value, 1);
+}
+
 function adDateInput(date: Date) {
   return [
     date.getFullYear(),
@@ -14176,12 +14196,16 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const [activePointKey, setActivePointKey] = useState<string | null>(null);
   const range = adChartRange(from, to);
   const points = range.mode === "month" ? adMonthlyRowsForRange(rows, range.from, range.to) : adDailyRowsForRange(rows, range.from, range.to);
-  const maxCost = Math.max(...points.map((row) => adNumber(row.cost)), 1);
-  const maxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 1);
+  const rawMaxCost = Math.max(...points.map((row) => adNumber(row.cost)), 0);
+  const rawMaxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 0);
+  const maxCost = rawMaxCost > 0 ? adCostAxisMax(rawMaxCost) : 1;
+  const maxRoas = rawMaxRoas > 0 ? adRoasAxisMax(rawMaxRoas) : 1;
+  const costAxisMax = rawMaxCost > 0 ? maxCost : 0;
+  const roasAxisMax = rawMaxRoas > 0 ? maxRoas : 0;
   const chartPoints = points.map((row, index) => {
-    const x = points.length <= 1 ? 50 : 8 + (index / (points.length - 1)) * 84;
-    const costY = 92 - (adNumber(row.cost) / maxCost) * 72;
-    const roasY = 92 - (adNumber(row.roas) / maxRoas) * 72;
+    const x = points.length <= 1 ? 50 : 10 + (index / (points.length - 1)) * 80;
+    const costY = 92 - (adNumber(row.cost) / maxCost) * 70;
+    const roasY = 92 - (adNumber(row.roas) / maxRoas) * 70;
     return { row, x, costY, roasY };
   });
   const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
@@ -14189,8 +14213,8 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   const labelColumns = Math.min(points.length || 1, range.mode === "month" ? 6 : 10);
   const showPointDateLabels = range.mode === "month" || points.length <= 7;
   const axisTicks = [
-    { y: 20, cost: maxCost, roas: maxRoas },
-    { y: 56, cost: maxCost / 2, roas: maxRoas / 2 },
+    { y: 20, cost: costAxisMax, roas: roasAxisMax },
+    { y: 56, cost: costAxisMax / 2, roas: roasAxisMax / 2 },
     { y: 92, cost: 0, roas: 0 },
   ];
 
@@ -14213,16 +14237,16 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
             <div className="relative h-44">
               <div className="pointer-events-none absolute inset-0 z-10">
                 {axisTicks.map((tick) => (
-                  <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex -translate-y-1/2 items-center justify-between text-[10px] font-black text-slate-400/70" style={{ top: `${tick.y}%` }}>
-                    <span className="rounded bg-slate-50/80 px-1 text-[#ff6a00]/70">{krw(tick.cost)}</span>
-                    <span className="rounded bg-slate-50/80 px-1 text-emerald-600/70">{adPercent(tick.roas)}</span>
+                  <div key={`ad-axis-${tick.y}`} className="absolute left-0 right-0 flex items-start justify-between text-[11px] font-black leading-none text-slate-400/70" style={{ top: `calc(${tick.y}% - 16px)` }}>
+                    <span className="rounded bg-slate-50/90 px-1.5 py-0.5 text-[#ff6a00]/70">{krw(tick.cost)}</span>
+                    <span className="rounded bg-slate-50/90 px-1.5 py-0.5 text-emerald-600/70">{adPercent(tick.roas)}</span>
                   </div>
                 ))}
               </div>
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="광고비와 ROAS 그래프">
-                <path d="M 0 92 L 100 92" stroke="#e2e8f0" strokeWidth="0.8" />
-                <path d="M 0 56 L 100 56" stroke="#e2e8f0" strokeWidth="0.5" />
-                <path d="M 0 20 L 100 20" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 6 92 L 94 92" stroke="#e2e8f0" strokeWidth="0.8" />
+                <path d="M 6 56 L 94 56" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 6 20 L 94 20" stroke="#e2e8f0" strokeWidth="0.5" />
                 {points.length > 1 && <path d={costPath} fill="none" stroke="#ff6a00" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
                 {points.length > 1 && <path d={roasPath} fill="none" stroke="#16a34a" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
@@ -14374,20 +14398,46 @@ function adMetricReportRows(channels: AdsMetricRow[], selectedChannels: string[]
   return [total, ...channelRows];
 }
 
+type AdReportSortKey = "label" | "cost" | "purchaseValue" | "roas" | "purchases" | "purchaseCvr" | "costPerPurchase" | "ctr" | "impressions" | "clicks" | "cpc" | "cpm";
+
 function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> }) {
+  const [sortState, setSortState] = useState<{ key: AdReportSortKey; dir: "asc" | "desc" } | null>(null);
   const header = [
-    ["총비용", true],
-    ["전환매출", true],
-    ["ROAS", true],
-    ["전환\n건수", true],
-    ["CVR", true],
-    ["CPA", true],
-    ["CTR", true],
-    ["노출", false],
-    ["클릭", false],
-    ["CPC", false],
-    ["CPM", false],
+    { key: "cost", label: "총비용", main: true },
+    { key: "purchaseValue", label: "전환매출", main: true },
+    { key: "roas", label: "ROAS", main: true },
+    { key: "purchases", label: "전환\n건수", main: true },
+    { key: "purchaseCvr", label: "CVR", main: true },
+    { key: "costPerPurchase", label: "CPA", main: true },
+    { key: "ctr", label: "CTR", main: true },
+    { key: "impressions", label: "노출", main: false },
+    { key: "clicks", label: "클릭", main: false },
+    { key: "cpc", label: "CPC", main: false },
+    { key: "cpm", label: "CPM", main: false },
   ] as const;
+  const sortBy = (key: AdReportSortKey) => {
+    setSortState((current) => ({ key, dir: current?.key === key && current.dir === "asc" ? "desc" : "asc" }));
+  };
+  const sortOnDoubleClick = (event: MouseEvent, key: AdReportSortKey) => {
+    if (event.detail !== 2) return;
+    sortBy(key);
+  };
+  const sortValue = (row: (typeof rows)[number], key: AdReportSortKey) => key === "label" ? row.label : row[key];
+  const displayRows = (() => {
+    if (!sortState) return rows;
+    const totalRows = rows.filter((row) => row.channel === "total");
+    const sortableRows = rows.filter((row) => row.channel !== "total");
+    const sorted = [...sortableRows].sort((left, right) => {
+      const leftValue = sortValue(left, sortState.key);
+      const rightValue = sortValue(right, sortState.key);
+      const result = sortState.key === "label"
+        ? String(leftValue || "").localeCompare(String(rightValue || ""), "ko-KR", { numeric: true, sensitivity: "base" })
+        : adNumber(leftValue) - adNumber(rightValue);
+      return sortState.dir === "asc" ? result : -result;
+    });
+    return [...totalRows, ...sorted];
+  })();
+  const sortMark = (key: AdReportSortKey) => sortState?.key === key ? (sortState.dir === "asc" ? " ▲" : " ▼") : "";
   const channelRows = rows.filter((row) => row.channel !== "total");
   const cpaValues = channelRows.filter((row) => row.purchases > 0 && row.costPerPurchase > 0).map((row) => row.costPerPurchase);
   const ctrValues = channelRows.map((row) => row.ctr);
@@ -14435,14 +14485,27 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
         </colgroup>
         <thead>
           <tr>
-            <th className="border-b border-r border-gray-200 bg-gray-50 px-2.5 py-2 text-left font-semibold text-gray-700">광고</th>
-            {header.map(([label, main]) => (
-              <th key={label} className={`whitespace-pre-line break-keep border-b border-r border-gray-200 px-2 py-2 font-semibold leading-tight text-gray-800 ${main ? "bg-[#fff7ed] text-orange-800" : "bg-gray-50"}`}>{label}</th>
+            <th
+              className="cursor-pointer select-none border-b border-r border-gray-200 bg-gray-50 px-2.5 py-2 text-left font-semibold text-gray-700"
+              title="더블클릭하면 정렬됩니다"
+              onClick={(event) => sortOnDoubleClick(event, "label")}
+            >
+              광고{sortMark("label")}
+            </th>
+            {header.map(({ key, label, main }) => (
+              <th
+                key={key}
+                className={`cursor-pointer select-none whitespace-pre-line break-keep border-b border-r border-gray-200 px-2 py-2 font-semibold leading-tight text-gray-800 ${main ? "bg-[#fff7ed] text-orange-800" : "bg-gray-50"}`}
+                title="더블클릭하면 정렬됩니다"
+                onClick={(event) => sortOnDoubleClick(event, key)}
+              >
+                {label}{sortMark(key)}
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {displayRows.map((row) => (
             <tr key={row.channel} className={row.channel === "total" ? "bg-orange-50 text-[12px] font-bold" : "bg-white hover:bg-[#fff7ed]"}>
               <td className="border-b border-r border-gray-100 bg-inherit px-2 py-2 text-left font-black">
                 <span className="flex min-w-0 items-center gap-1.5">
@@ -14643,7 +14706,7 @@ function AdsAnalysisWorkspace() {
         </div>
       </Card>
 
-      <section className="grid gap-4 xl:grid-cols-[1.15fr_1.05fr]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
         <AdsChannelStatus rows={channels} selectedChannels={selectedAdChannels} />
       </section>
