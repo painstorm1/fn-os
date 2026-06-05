@@ -1181,6 +1181,7 @@ type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
 type WarehouseAttribute = "general" | "fulfillment";
 type ProductBulkField = "product_attribute" | "product_name" | "cost_price" | "standard_price";
+type FixedCostBulkField = "category_large" | "category_middle" | "fixed_cost_name" | "expected_amount" | "base_day" | "payment_type" | "payment_source" | "loan_name" | "principal_amount" | "expected_payment_amount" | "payment_day" | "bank_name" | "account_holder" | "account_number" | "loan_start_date" | "loan_end_date" | "memo";
 type CustomerBulkField = "customer_type" | "customer_name" | "business_no" | "contact_name" | "phone" | "memo";
 type WarehouseBulkField = "warehouse_type" | "warehouse_name" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
 type BulkFieldConfig<Field extends string> = {
@@ -16663,6 +16664,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [fixedCostSort, setFixedCostSort] = useState<"due" | "category" | "amount">("due");
   const [fixedCostTypeFilter, setFixedCostTypeFilter] = useState<"all" | "fixed" | "loan">("all");
   const [fixedCostEditorOpen, setFixedCostEditorOpen] = useState(false);
+  const [fixedCostBulkOpen, setFixedCostBulkOpen] = useState(false);
+  const [fixedCostBulkSelectedFields, setFixedCostBulkSelectedFields] = useState<FixedCostBulkField[]>(["fixed_cost_name", "expected_amount", "base_day"]);
+  const [fixedCostBulkFieldPickerOpen, setFixedCostBulkFieldPickerOpen] = useState(false);
+  const [fixedCostBulkCommonField, setFixedCostBulkCommonField] = useState<FixedCostBulkField>("fixed_cost_name");
+  const [fixedCostBulkCommonValue, setFixedCostBulkCommonValue] = useState("");
+  const [fixedCostBulkDrafts, setFixedCostBulkDrafts] = useState<Record<string, Partial<Record<FixedCostBulkField, string>>>>({});
+  const [fixedCostBulkMode, setFixedCostBulkMode] = useState<"fixed" | "loan">("fixed");
   const [fixedCostSelectedKeys, setFixedCostSelectedKeys] = useState<string[]>([]);
   const [fixedCostSelecting, setFixedCostSelecting] = useState(false);
   const fixedCostSelectModeRef = useRef<"select" | "deselect">("select");
@@ -17309,6 +17317,37 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const pendingUploadCount = uploadedExpenseFiles.length;
   const activeBankAccounts = bankAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
   const activeCardAccounts = cardAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
+  const selectedFixedCostRows = combinedFixedRows.filter((row) => fixedCostSelectedKeys.includes(fixedCostRowKey(row)));
+  const fixedCostBulkFields: Array<BulkFieldConfig<FixedCostBulkField>> = fixedCostBulkMode === "loan"
+    ? [
+      { key: "category_large", label: "카테고리1", inputType: "select", options: fixedCostCategoryLargeOptions.map((name) => ({ value: name, label: name })) },
+      { key: "category_middle", label: "카테고리2", inputType: "select", options: fixedCostCategoryMiddleOptions("").map((name) => ({ value: name, label: name })) },
+      { key: "loan_name", label: "대출명" },
+      { key: "principal_amount", label: "대출금액", inputType: "number" },
+      { key: "expected_payment_amount", label: "예상 납입액", inputType: "number" },
+      { key: "payment_day", label: "납입일" },
+      { key: "bank_name", label: "은행" },
+      { key: "account_holder", label: "예금주" },
+      { key: "account_number", label: "계좌번호" },
+      { key: "loan_start_date", label: "대출 시작일", inputType: "date" },
+      { key: "loan_end_date", label: "대출 만료일", inputType: "date" },
+      { key: "memo", label: "메모" },
+    ]
+    : [
+      { key: "category_large", label: "카테고리1", inputType: "select", options: fixedCostCategoryLargeOptions.map((name) => ({ value: name, label: name })) },
+      { key: "category_middle", label: "카테고리2", inputType: "select", options: fixedCostCategoryMiddleOptions("").map((name) => ({ value: name, label: name })) },
+      { key: "fixed_cost_name", label: "고정비명" },
+      { key: "expected_amount", label: "비용 금액", inputType: "number" },
+      { key: "base_day", label: "결제일" },
+      { key: "payment_type", label: "결제 구분", inputType: "select", options: [{ value: "bank", label: "통장 출금" }, { value: "card", label: "카드 사용" }] },
+      { key: "payment_source", label: "연동 계좌/카드", inputType: "select", options: [...activeBankAccounts, ...activeCardAccounts].map((row) => {
+        const raw = String(row.account_name || row.bank_name || row.card_name || row.source_name || "");
+        const mode = row.card_name ? "card" : "bank";
+        const label = accountingSourceFilterLabel(raw, mode);
+        return { value: label, label };
+      }).filter((option) => option.value) },
+      { key: "memo", label: "메모" },
+    ];
   const ledgerMonthRange = accountingMonthRange(ledgerFilters.month);
   const currentLedgerRows = ledgerSourceRows
     .filter((row) => String(row.source_type || "") === ledgerMode)
@@ -17477,7 +17516,80 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       window.alert("속성값이 다른 고정비는 함께 수정이 불가합니다.");
       return;
     }
-    if (selectedRows.length) openFixedCostRow(selectedRows[0]);
+    const mode = (selectedRows[0]?.row_type || "fixed") === "loan" ? "loan" : "fixed";
+    setFixedCostBulkMode(mode);
+    setFixedCostBulkSelectedFields(mode === "loan" ? ["loan_name", "expected_payment_amount", "payment_day"] : ["fixed_cost_name", "expected_amount", "base_day"]);
+    setFixedCostBulkCommonField(mode === "loan" ? "loan_name" : "fixed_cost_name");
+    setFixedCostBulkCommonValue("");
+    setFixedCostBulkDrafts({});
+    setFixedCostBulkOpen(true);
+  }
+
+  function fixedCostBulkValue(row: Record<string, unknown>, field: FixedCostBulkField) {
+    if (field === "fixed_cost_name") return fixedCostRowTitle(row);
+    if (field === "expected_amount") return String(row.expected_amount || row.amount || "");
+    if (field === "base_day") return String(row.base_day || "");
+    if (field === "payment_type") return String(row.payment_type || "bank");
+    if (field === "payment_source") return String(row.payment_source || "");
+    if (field === "loan_name") return fixedCostRowTitle(row);
+    if (field === "principal_amount") return String(row.principal_amount || "");
+    if (field === "expected_payment_amount") return String(row.expected_payment_amount || row.amount || "");
+    if (field === "payment_day") return String(row.payment_day || row.base_day || "");
+    if (field === "loan_start_date" || field === "loan_end_date") return String(row[field] || "").slice(0, 10);
+    return String(row[field] || "");
+  }
+
+  async function saveFixedCostBulkEdit() {
+    if (!selectedFixedCostRows.length) {
+      setMessage("수정할 고정비를 먼저 선택해 주세요.");
+      return;
+    }
+    const types = new Set(selectedFixedCostRows.map((row) => String(row.row_type || "fixed")));
+    if (types.size > 1) {
+      window.alert("속성값이 다른 고정비는 함께 수정이 불가합니다.");
+      return;
+    }
+    let saved = 0;
+    for (const row of selectedFixedCostRows) {
+      const key = fixedCostRowKey(row);
+      const draftValues = fixedCostBulkDrafts[key] || {};
+      const isLoan = String(row.row_type || "") === "loan";
+      const payload: Record<string, unknown> = { id: String(row.loan_id || row.fixed_cost_id || row.id || "") };
+      fixedCostBulkSelectedFields.forEach((field) => {
+        if (field === "fixed_cost_name" && !isLoan) payload.fixed_cost_name = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "expected_amount" && !isLoan) payload.expected_amount = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "base_day" && !isLoan) payload.base_day = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "payment_type" && !isLoan) payload.payment_type = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "payment_source" && !isLoan) payload.payment_source = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "loan_name" && isLoan) payload.loan_name = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "principal_amount" && isLoan) payload.principal_amount = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "expected_payment_amount" && isLoan) payload.expected_payment_amount = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "payment_day" && isLoan) payload.payment_day = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "bank_name" && isLoan) payload.bank_name = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "account_holder" && isLoan) payload.account_holder = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "account_number" && isLoan) payload.account_number = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "loan_start_date" && isLoan) payload.loan_start_date = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "loan_end_date" && isLoan) payload.loan_end_date = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "category_large") payload.category_large = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "category_middle") payload.category_middle = draftValues[field] ?? fixedCostBulkValue(row, field);
+        else if (field === "memo") payload.memo = draftValues[field] ?? fixedCostBulkValue(row, field);
+      });
+      const endpoint = isLoan ? "/api/accounting/ledger/loans" : "/api/accounting/ledger/fixed-costs";
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) saved += 1;
+    }
+    setMessage(`고정비 선택수정 완료: ${saved.toLocaleString("ko-KR")}건`);
+    setFixedCostBulkOpen(false);
+    setFixedCostBulkDrafts({});
+    setFixedCostBulkCommonValue("");
+    setFixedCostSelectedKeys([]);
+    invalidateAccountingCache();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
+    loadSummary(true);
   }
 
   function downloadFixedCostTemplate() {
@@ -18008,6 +18120,37 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             </form>
           </div>
         </FormModal>
+      )}
+
+      {fixedCostBulkOpen && (
+        <BulkMultiEditModal<FixedCostBulkField, Record<string, unknown>>
+          title="고정비 선택수정"
+          description={`선택 ${selectedFixedCostRows.length.toLocaleString("ko-KR")}개 ${fixedCostBulkMode === "loan" ? "대출" : "고정비"}의 값을 수정합니다.`}
+          fields={fixedCostBulkFields}
+          selectedFields={fixedCostBulkSelectedFields}
+          setSelectedFields={setFixedCostBulkSelectedFields}
+          fieldPickerOpen={fixedCostBulkFieldPickerOpen}
+          setFieldPickerOpen={setFixedCostBulkFieldPickerOpen}
+          commonField={fixedCostBulkCommonField}
+          setCommonField={setFixedCostBulkCommonField}
+          commonValue={fixedCostBulkCommonValue}
+          setCommonValue={setFixedCostBulkCommonValue}
+          rowDrafts={fixedCostBulkDrafts}
+          setRowDrafts={setFixedCostBulkDrafts}
+          rows={selectedFixedCostRows}
+          rowKeys={selectedFixedCostRows.map(fixedCostRowKey)}
+          selectedRowKeys={fixedCostSelectedKeys}
+          setSelectedRowKeys={setFixedCostSelectedKeys}
+          getRowKey={fixedCostRowKey}
+          getRowName={fixedCostRowTitle}
+          getRowSubLabel={(row) => fixedCostBulkMode === "loan" ? String(row.bank_name || row.payment_source || "대출") : `${String(row.category_large || "-")} / ${String(row.category_middle || "-")}`}
+          getCurrentValue={fixedCostBulkValue}
+          onClose={() => {
+            setFixedCostBulkFieldPickerOpen(false);
+            setFixedCostBulkOpen(false);
+          }}
+          onSave={() => void saveFixedCostBulkEdit()}
+        />
       )}
 
       {fixedCostEditorOpen && (
