@@ -2844,8 +2844,58 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
     }));
   }
 
-  const headers = ["옵션명", "수량", "상품단가", "원가배분%", "부대비용/개", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"];
-  const widths = ["9%", "5%", "8%", "6%", "8%", "7%", "8%", "8%", "8%", "8%", "8%", "8%", "9%"];
+  const headers = ["옵션명", "수량", "단가", "배분%", "비용", "부자재", "예상원가", "쿠팡(무료)", "쿠팡MG", "네이버(무료)", "네이버MG", "네이버(착불)", "네이버MG"];
+  const minimumColumnWidths = [72, 48, 56, 56, 56, 56, 62, 72, 92, 72, 92, 72, 92];
+  const baseColumnWidths = useMemo(() => {
+    const next = [94, 52, 62, 62, 62, 62, 62, 83, 108, 83, 108, 83, 119];
+    rows.forEach((row) => {
+      if (row.material_only || String(row.item_type || "").toUpperCase() === "MATERIAL") return;
+      const rowId = Number(row.order_item_id || 0);
+      const price = prices[rowId] || { coupang: "", naverFree: "", naverCod: "" };
+      const unitCost = Number(row.estimated_unit_cost || 0);
+      const marginTexts = [
+        formatMargin(calc(price.coupang, unitCost, 0.12, 3000)),
+        formatMargin(calc(price.naverFree, unitCost, 0.06, 3000)),
+        formatMargin(calc(price.naverCod, unitCost, 0.06, 0)),
+      ];
+      [8, 10, 12].forEach((columnIndex, marginIndex) => {
+        next[columnIndex] = Math.max(next[columnIndex], Math.min(240, marginTexts[marginIndex].length * 8 + 26));
+      });
+    });
+    return next;
+  }, [prices, rows]);
+  const [customColumnWidths, setCustomColumnWidths] = useState<Record<number, number>>({});
+  const resizeState = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
+  const [resizingColumn, setResizingColumn] = useState<number | null>(null);
+  const columnWidths = baseColumnWidths.map((width, index) => customColumnWidths[index] ?? width);
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+
+  function startColumnResize(index: number, event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeState.current = { index, startX: event.clientX, startWidth: columnWidths[index] };
+    setResizingColumn(index);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const current = resizeState.current;
+      if (!current) return;
+      const nextWidth = Math.max(minimumColumnWidths[current.index], Math.round(current.startWidth + moveEvent.clientX - current.startX));
+      setCustomColumnWidths((prev) => ({ ...prev, [current.index]: nextWidth }));
+    };
+    const stopResize = () => {
+      resizeState.current = null;
+      setResizingColumn(null);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", stopResize);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", stopResize);
+  }
 
   return (
     <section className="rounded-md border border-slate-200 bg-white">
@@ -2854,14 +2904,23 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
         {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] table-fixed text-xs">
+        <table className="table-fixed text-xs" style={{ minWidth: tableWidth, width: `max(100%, ${tableWidth}px)` }}>
           <colgroup>
-            {widths.map((width, index) => <col key={`${width}-${index}`} style={{ width }} />)}
+            {columnWidths.map((width, index) => <col key={`${index}-${width}`} style={{ width }} />)}
           </colgroup>
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              {headers.map((head) => (
-                <th key={head} className="truncate border-b border-r border-slate-200 px-1.5 py-2 text-center font-black last:border-r-0" title={head}>{head}</th>
+              {headers.map((head, index) => (
+                <th key={`${head}-${index}`} className="relative border-b border-r border-slate-200 px-1.5 py-2 text-center font-black last:border-r-0" title={head}>
+                  <span className="block truncate">{head}</span>
+                  <button
+                    type="button"
+                    aria-label={`${head} 열 너비 조정`}
+                    onMouseDown={(event) => startColumnResize(index, event)}
+                    className={`absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r-2 ${resizingColumn === index ? "border-orange-400 bg-orange-50" : "border-transparent hover:border-orange-300"}`}
+                    style={{ cursor: "col-resize" }}
+                  />
+                </th>
               ))}
             </tr>
           </thead>
@@ -2898,11 +2957,11 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
                   <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
-                  <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(cp)}>{formatMargin(cp)}</td>
+                  <td className="whitespace-nowrap border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(cp)}>{formatMargin(cp)}</td>
                   <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
-                  <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(nf)}>{formatMargin(nf)}</td>
+                  <td className="whitespace-nowrap border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(nf)}>{formatMargin(nf)}</td>
                   <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
-                  <td className="truncate px-1.5 py-2 text-right" title={formatMargin(nc)}>{formatMargin(nc)}</td>
+                  <td className="whitespace-nowrap px-1.5 py-2 text-right" title={formatMargin(nc)}>{formatMargin(nc)}</td>
                 </tr>
               );
             })}
