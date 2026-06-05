@@ -102,6 +102,81 @@ function sum(rows: Row[], pick: (row: Row) => unknown) {
   return rows.reduce((total, row) => total + numberValue(pick(row)), 0);
 }
 
+function entryAmount(row: Row) {
+  return row.total_amount ?? row.supply_amount ?? row.supply_amt;
+}
+
+function entryQty(row: Row) {
+  return row.qty ?? row.quantity ?? row.order_qty;
+}
+
+function entryDate(row: Row, mode: "sales" | "purchases") {
+  return row.io_date ?? (mode === "sales" ? row.sale_date : row.purchase_date) ?? row.created_at;
+}
+
+function entryProductCode(row: Row) {
+  return text(row.prod_cd || row.product_code || row.sku);
+}
+
+function entryProductName(row: Row) {
+  return text(row.prod_name || row.product_name || row.prod_cd || row.sku);
+}
+
+function entryGroupKey(row: Row, mode: "sales" | "purchases") {
+  const batchId = text(row.upload_batch_id);
+  if (batchId) return `batch:${batchId}`;
+  const ref = text(row.source_ref_id);
+  const manualMatch = ref.match(/^(manual-(?:sale|purchase)-\d+)/);
+  if (manualMatch?.[1]) return `manual:${manualMatch[1]}`;
+  return `row:${text(row.id || ref || `${mode}-${entryDate(row, mode)}-${entryProductCode(row)}-${entryQty(row)}`)}`;
+}
+
+function entryLineNo(row: Row) {
+  const parsed = numberValue(row.upload_ser_no);
+  return parsed > 0 ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function summarizeEntryRows(rows: Row[], mode: "sales" | "purchases", limit: number) {
+  const groups = new Map<string, { rows: Row[]; firstSeen: number }>();
+  rows.forEach((row, index) => {
+    const key = entryGroupKey(row, mode);
+    const group = groups.get(key) || { rows: [], firstSeen: index };
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+
+  return Array.from(groups.entries())
+    .map(([key, group]) => {
+      const sortedRows = [...group.rows].sort((left, right) => {
+        const noDiff = entryLineNo(left) - entryLineNo(right);
+        if (Number.isFinite(noDiff) && noDiff !== 0) return noDiff;
+        return text(left.created_at).localeCompare(text(right.created_at));
+      });
+      const first = sortedRows[0] || {};
+      return {
+        ...first,
+        id: key,
+        entry_group_key: key,
+        line_count: sortedRows.length,
+        qty: sum(sortedRows, entryQty),
+        supply_amt: sum(sortedRows, entryAmount),
+        supply_amount: sum(sortedRows, entryAmount),
+        total_amount: sum(sortedRows, entryAmount),
+        prod_cd: entryProductCode(first),
+        prod_name: entryProductName(first),
+        representative_product_code: entryProductCode(first),
+        representative_product_name: entryProductName(first),
+        upload_ser_no: text(first.upload_ser_no) || "1",
+        created_at: text(sortedRows.map((row) => row.created_at).filter(Boolean).sort().at(-1)) || text(first.created_at),
+        sync_status: text(first.sync_status || "SAVED"),
+        _recent_order: group.firstSeen,
+      };
+    })
+    .sort((left, right) => numberValue(left._recent_order) - numberValue(right._recent_order))
+    .slice(0, limit)
+    .map(({ _recent_order: _removed, ...row }) => row);
+}
+
 function metricTitle(base: string, date: string, today: string, yesterday: string) {
   if (date === today) return `오늘${base}`;
   if (date === yesterday) return `어제 ${base}`;
@@ -213,6 +288,7 @@ function monthlySeries(rows: Row[], months: number, pickDate: (row: Row) => unkn
 export async function mainDashboardSummary() {
   const [
     sales,
+    purchases,
     orders,
     inventory,
     channels,
@@ -230,6 +306,7 @@ export async function mainDashboardSummary() {
     importErpFactories,
   ] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
+    optionalRows("purchases", { order: "created_at.desc", limit: 1500 }),
     optionalRows("orders", { order: "created_at.desc", limit: 700 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 500 }),
     optionalRows("sales_channels", { order: "channel_code.asc", limit: 100 }),
@@ -309,6 +386,7 @@ export async function mainDashboardSummary() {
 
   const latestSalesRows = rowsOn(sales, salesDate, latestSalesDate);
   const monthSalesRows = sales.filter((row) => dateKey(salesDate(row)).startsWith(month));
+  const monthPurchaseRows = purchases.filter((row) => dateKey(entryDate(row, "purchases")).startsWith(month));
   const sevenDaySalesRows = rowsFrom(sales, salesDate, sevenDaysAgo);
   const latestOrderRows = rowsOn(orders, orderDate, latestOrderDate);
   const riskItems = inventory.filter((row) => numberValue(row.available_qty ?? row.on_hand_qty ?? row.bal_qty) <= 5);
@@ -384,6 +462,7 @@ export async function mainDashboardSummary() {
     sales_latest_amount: sum(latestSalesRows, salesAmount),
     seven_day_sales: sum(sevenDaySalesRows, salesAmount),
     month_sales: sum(monthSalesRows, salesAmount),
+    month_purchases: sum(monthPurchaseRows, entryAmount),
     sales_daily: dailySeries(sales, 14, salesDate, salesAmount),
     order_count: latestOrderRows.length,
     order_latest_date: iso(latestOrderDate),
@@ -391,6 +470,8 @@ export async function mainDashboardSummary() {
     inventory_risk_items: riskItems.slice(0, 10),
     inventory: inventory.slice(0, 500),
     sales_inventory_basis: sales.slice(0, 1500),
+    recent_sales: summarizeEntryRows(sales, "sales", 80),
+    recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
     inquiry_channels: inquiryChannels,
     ad_label: metricTitle("광고비", latestAdDate, today, yesterday),
     ad_latest_date: iso(latestAdDate),

@@ -7969,7 +7969,11 @@ function entryRowCustomer(row: Record<string, unknown>, mode: SalesPurchaseMode)
 }
 
 function entryRowProduct(row: Record<string, unknown>) {
-  return String(row.prod_name || row.product_name || row.prod_cd || row.sku || "-");
+  return String(row.representative_product_name || row.prod_name || row.product_name || row.representative_product_code || row.prod_cd || row.sku || "-");
+}
+
+function entryRowProductCode(row: Record<string, unknown>) {
+  return String(row.representative_product_code || row.prod_cd || row.product_code || row.sku || "");
 }
 
 function entryRowWarehouse(row: Record<string, unknown>) {
@@ -7980,13 +7984,47 @@ function entryRowAmount(row: Record<string, unknown>) {
   return Number(row.total_amount || row.supply_amount || row.supply_amt || 0);
 }
 
+function entryRowQty(row: Record<string, unknown>) {
+  return Number(row.qty || row.quantity || row.order_qty || 0);
+}
+
+function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode) {
+  const groups = new Map<string, { rows: Array<Record<string, unknown>>; firstSeen: number }>();
+  rows.forEach((row, index) => {
+    const sourceRef = String(row.source_ref_id || "");
+    const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+    const key = String(row.entry_group_key || row.upload_batch_id || manualMatch?.[1] || row.id || `${mode}-${index}`);
+    const group = groups.get(key) || { rows: [], firstSeen: index };
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+  return Array.from(groups.entries()).map(([key, group]) => {
+    const sorted = [...group.rows].sort((left, right) => Number(left.upload_ser_no || 999999) - Number(right.upload_ser_no || 999999));
+    const first = sorted[0] || {};
+    return {
+      ...first,
+      id: key,
+      entry_group_key: key,
+      line_count: sorted.length,
+      qty: sorted.reduce((total, row) => total + entryRowQty(row), 0),
+      supply_amt: sorted.reduce((total, row) => total + entryRowAmount(row), 0),
+      supply_amount: sorted.reduce((total, row) => total + entryRowAmount(row), 0),
+      total_amount: sorted.reduce((total, row) => total + entryRowAmount(row), 0),
+      representative_product_code: entryRowProductCode(first),
+      representative_product_name: entryRowProduct(first),
+      _recent_order: group.firstSeen,
+    };
+  }).sort((left, right) => Number(left._recent_order) - Number(right._recent_order))
+    .map(({ _recent_order: _removed, ...row }) => row);
+}
+
 function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode, filters: Record<string, string>) {
   const from = entryDateFilterKey(filters.from);
   const to = entryDateFilterKey(filters.to);
   const customerNeedle = filters.customer.trim().toLowerCase();
   const warehouseNeedle = filters.warehouse.trim().toLowerCase();
   const productNeedle = filters.product.trim().toLowerCase();
-  return rows.filter((row) => {
+  return summarizeEntryDisplayRows(rows, mode).filter((row) => {
     const date = entryDateFilterKey(entryRowDate(row));
     if (from && date && date < from) return false;
     if (to && date && date > to) return false;
@@ -14830,16 +14868,22 @@ function SalesInventoryTable({ rows, mode }: { rows: Array<Record<string, unknow
   if (!rows.length) {
     return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
   }
+  const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   return (
     <div className="fn-table-shell overflow-x-auto">
-      <table className="w-full min-w-[860px] table-fixed text-sm">
+      <table className="w-full min-w-[1240px] table-fixed text-sm">
         <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
           <tr>
             <th className="w-32 py-2 pl-4 text-left">일자-NO.</th>
-            <th className="w-44 py-2 text-left">{mode === "sales" ? "거래처명" : "구매처명"}</th>
-            <th className="py-2 text-left">품목명</th>
+            <th className="w-28 py-2 text-left">{partnerLabel}코드</th>
+            <th className="w-44 py-2 text-left">{partnerLabel}명</th>
+            <th className="w-24 py-2 text-left">창고</th>
+            <th className="w-32 py-2 text-left">대표품목코드</th>
+            <th className="py-2 text-left">대표품목명</th>
+            <th className="w-24 py-2 text-right">품목수</th>
+            <th className="w-24 py-2 text-right">수량합계</th>
             <th className="w-36 py-2 text-right">금액합계</th>
-            <th className="w-28 py-2 text-left">창고</th>
+            <th className="w-40 py-2 text-left">적요</th>
             <th className="w-24 py-2 text-center">상태</th>
           </tr>
         </thead>
@@ -14847,10 +14891,15 @@ function SalesInventoryTable({ rows, mode }: { rows: Array<Record<string, unknow
           {rows.map((row, index) => (
             <tr key={String(row.id || index)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/50">
               <td className="truncate py-2 pl-4 font-bold text-blue-700">{entryRowDate(row) || "-"} - {String(row.upload_ser_no || row.no || index + 1)}</td>
+              <td className="truncate py-2">{String(row.cust_code || row.customer_code || row.supplier_code || "-")}</td>
               <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
-              <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
-              <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
               <td className="truncate py-2">{entryRowWarehouse(row)}</td>
+              <td className="truncate py-2">{entryRowProductCode(row) || "-"}</td>
+              <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
+              <td className="py-2 text-right">{Number(row.line_count || 1).toLocaleString("ko-KR")}</td>
+              <td className="py-2 text-right">{entryRowQty(row).toLocaleString("ko-KR")}</td>
+              <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
+              <td className="truncate py-2">{String(row.remarks || row.memo || "-")}</td>
               <td className="py-2 text-center"><StatusPill status={String(row.sync_status || "SAVED")} /></td>
             </tr>
           ))}
@@ -17796,7 +17845,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           <Card className="p-5">
             <SectionHeader
               title="고정비 현황"
-              actions={<div className="text-sm font-black text-slate-700">총 고정비: <span className="text-[#ff6a00]">{krw(fixedCostAllAmount)}</span></div>}
             />
             <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
               {[
@@ -17833,13 +17881,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 </button>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2 lg:flex-nowrap">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <ActionButton type="button" variant="secondary" onClick={openFixedCostBulkEdit}>수정</ActionButton>
                 <span className="text-xs font-bold text-slate-500">선택 {fixedCostSelectedKeys.length.toLocaleString("ko-KR")}개</span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex rounded-md border border-gray-200 bg-white p-1">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 lg:flex-nowrap">
+                <div className="flex shrink-0 rounded-md border border-gray-200 bg-white p-1">
                   {[
                     ["due", "도래일 순"],
                     ["category", "카테고리 별"],
@@ -17852,14 +17900,14 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                       setFixedCostSort(value as "due" | "category" | "amount");
                       setFixedCostSortState(null);
                     }}
-                    className={`h-8 rounded px-3 text-xs font-black ${fixedCostSort === value ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}
+                    className={`h-8 rounded px-2.5 text-xs font-black ${fixedCostSort === value ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}
                   >
                     {label}
                   </button>
                   ))}
                 </div>
                 <input
-                  className="field-input w-72 rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  className="field-input min-w-[220px] flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm"
                   value={fixedCostQuery}
                   onChange={(event) => setFixedCostQuery(event.target.value)}
                   placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
