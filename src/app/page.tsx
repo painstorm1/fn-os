@@ -10905,6 +10905,10 @@ type PersonnelEmployee = {
   resident_no: string;
   phone: string;
   address: string;
+  postal_code?: string;
+  road_address?: string;
+  jibun_address?: string;
+  detail_address?: string;
   email: string;
   joined_at: string;
   department: string;
@@ -10923,6 +10927,36 @@ type PersonnelEmployee = {
   resigned_at?: string;
   resigned_memo?: string;
 };
+
+type DaumPostcodeData = {
+  zonecode?: string;
+  roadAddress?: string;
+  jibunAddress?: string;
+  autoRoadAddress?: string;
+  autoJibunAddress?: string;
+  userSelectedType?: string;
+};
+
+type DaumPostcodeConstructor = new (options: {
+  oncomplete: (data: DaumPostcodeData) => void;
+  onclose?: () => void;
+  width?: string | number;
+  height?: string | number;
+}) => {
+  embed: (element: HTMLElement) => void;
+  open: () => void;
+};
+
+declare global {
+  interface Window {
+    daum?: {
+      Postcode?: DaumPostcodeConstructor;
+      postcode?: {
+        load?: (callback: () => void) => void;
+      };
+    };
+  }
+}
 
 function fieldLabel<Field extends string>(fields: Array<BulkFieldConfig<Field>>, field: Field) {
   return fields.find((item) => item.key === field)?.label || field;
@@ -11207,6 +11241,82 @@ const personnelBulkFields: Array<BulkFieldConfig<PersonnelBulkField>> = [
   { key: "bank_account_no", label: "계좌번호" },
   { key: "memo", label: "메모" },
 ];
+
+function composePersonnelAddress(employee: Partial<PersonnelEmployee>) {
+  const road = String(employee.road_address || "").trim();
+  const jibun = String(employee.jibun_address || "").trim();
+  const detail = String(employee.detail_address || "").trim();
+  const base = road || jibun || String(employee.address || "").trim();
+  return [base, detail].filter(Boolean).join(" ");
+}
+
+let daumPostcodeScriptPromise: Promise<void> | null = null;
+
+function loadDaumPostcodeScript() {
+  if (typeof window === "undefined") return Promise.reject(new Error("브라우저에서만 주소검색을 사용할 수 있습니다."));
+  if (window.daum?.Postcode) return Promise.resolve();
+  if (!daumPostcodeScriptPromise) {
+    daumPostcodeScriptPromise = new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>('script[data-fnos-daum-postcode="true"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error("Daum 우편번호 서비스를 불러오지 못했습니다.")), { once: true });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+      script.async = true;
+      script.dataset.fnosDaumPostcode = "true";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Daum 우편번호 서비스를 불러오지 못했습니다."));
+      document.head.appendChild(script);
+    });
+  }
+  return daumPostcodeScriptPromise.then(() => new Promise<void>((resolve) => {
+    if (window.daum?.postcode?.load) window.daum.postcode.load(resolve);
+    else resolve();
+  }));
+}
+
+function DaumPostcodeModal({ onClose, onSelect }: { onClose: () => void; onSelect: (data: DaumPostcodeData) => void }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState("");
+
+  useEscapeToClose(true, onClose);
+
+  useEffect(() => {
+    let alive = true;
+    loadDaumPostcodeScript()
+      .then(() => {
+        if (!alive || !containerRef.current || !window.daum?.Postcode) return;
+        containerRef.current.innerHTML = "";
+        new window.daum.Postcode({
+          width: "100%",
+          height: "100%",
+          oncomplete: (data) => {
+            onSelect(data);
+            onClose();
+          },
+        }).embed(containerRef.current);
+      })
+      .catch((err) => {
+        if (alive) setError(err instanceof Error ? err.message : "주소검색을 불러오지 못했습니다.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [onClose, onSelect]);
+
+  return (
+    <SelectionModal title="주소검색" description="Daum/Kakao 우편번호 서비스에서 주소를 검색하고 선택해 주세요." onClose={onClose} size="xl" className="overflow-hidden">
+      {error ? (
+        <div className="rounded-md bg-rose-50 px-4 py-6 text-sm font-bold text-rose-600">{error}</div>
+      ) : (
+        <div ref={containerRef} className="h-[560px] min-h-[420px] w-full overflow-hidden rounded-md border border-slate-200 bg-white" />
+      )}
+    </SelectionModal>
+  );
+}
 
 const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploadEndpoint?: string; templateHeaders: string[]; sampleRow: string[] }> = [
   {
@@ -11523,8 +11633,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   const [bulkCommonField, setBulkCommonField] = useState<PersonnelBulkField>("status");
   const [bulkCommonValue, setBulkCommonValue] = useState("");
   const [bulkDrafts, setBulkDrafts] = useState<Record<string, Partial<Record<PersonnelBulkField, string>>>>({});
-  const [addressOpen, setAddressOpen] = useState(false);
-  const [addressQuery, setAddressQuery] = useState("");
+  const [addressSearchOpen, setAddressSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectModeRef = useRef<"select" | "deselect">("select");
   const storageKey = "fnos-personnel-employees";
@@ -11539,6 +11648,10 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       resident_no: "",
       phone: "",
       address: "",
+      postal_code: "",
+      road_address: "",
+      jibun_address: "",
+      detail_address: "",
       email: "",
       joined_at: "",
       department: "",
@@ -11609,13 +11722,13 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "F2" || modalOpen || bulkOpen || addressOpen) return;
+      if (event.key !== "F2" || modalOpen || bulkOpen || addressSearchOpen) return;
       event.preventDefault();
       openNewEmployee();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, bulkOpen, addressOpen]);
+  }, [modalOpen, bulkOpen, addressSearchOpen]);
 
   function normalizePersonnelEmployee(value: Partial<PersonnelEmployee>): PersonnelEmployee {
     return {
@@ -11625,6 +11738,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       status: normalizePersonnelStatus(value.status),
       role: normalizePersonnelRole(value.role),
       salary: onlyDigits(value.salary),
+      address: composePersonnelAddress(value) || String(value.address || ""),
     };
   }
 
@@ -11642,7 +11756,20 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     setDraft((prev) => ({
       ...prev,
       [key]: key === "status" ? normalizePersonnelStatus(value) : key === "role" ? normalizePersonnelRole(value) : key === "salary" ? onlyDigits(value) : value,
+      ...(key === "detail_address" ? { address: composePersonnelAddress({ ...prev, detail_address: value }) } : {}),
     }));
+  }
+
+  function applyPostcode(data: DaumPostcodeData) {
+    setDraft((prev) => {
+      const next = {
+        ...prev,
+        postal_code: String(data.zonecode || "").trim(),
+        road_address: String(data.roadAddress || data.autoRoadAddress || "").trim(),
+        jibun_address: String(data.jibunAddress || data.autoJibunAddress || "").trim(),
+      };
+      return { ...next, address: composePersonnelAddress(next) };
+    });
   }
 
   function setSelected(key: string, selected: boolean) {
@@ -11651,7 +11778,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }
 
   function validateDraft() {
-    if (!draft.status || !draft.role || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !draft.address.trim() || !draft.email.trim() || !draft.joined_at.trim() || !draft.salary.trim()) {
+    if (!draft.status || !draft.role || !draft.name.trim() || !draft.resident_no.trim() || !draft.phone.trim() || !composePersonnelAddress(draft).trim() || !draft.email.trim() || !draft.joined_at.trim() || !draft.salary.trim()) {
       window.alert("속성, 권한, 성명, 주민등록번호, 전화번호, 주소, 이메일, 입사일자, 급여는 필수입니다.");
       return false;
     }
@@ -11660,7 +11787,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
 
   function saveDraft() {
     if (!validateDraft()) return;
-    const nextDraft = normalizePersonnelEmployee(draft);
+    const nextDraft = normalizePersonnelEmployee({ ...draft, address: composePersonnelAddress(draft) });
     const nextEmployees = draft.id
       ? employees.map((employee) => employee.id === draft.id ? nextDraft : employee)
       : [nextDraft, ...employees];
@@ -11789,16 +11916,6 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     ]);
     void downloadTableXlsx(`FN_OS_인사_${rows.length}건_${todayMmdd()}.xlsx`, "인사", ["속성", "권한", "성명", "주민등록번호", "전화번호", "주소", "이메일", "입사일자", "부서", "직급", "직책", "급여", "은행", "예금주", "계좌번호", "메모", "휴직사유", "휴직시작", "휴직종료", "퇴사사유", "퇴사일자"], rows);
   }
-
-  const addressSuggestions = [
-    "서울특별시",
-    "경기도",
-    "인천광역시",
-    "부산광역시",
-    "대구광역시",
-    "대전광역시",
-    "광주광역시",
-  ].filter((item) => !addressQuery.trim() || item.includes(addressQuery.trim()));
 
   return (
     <div className="space-y-4">
@@ -11969,12 +12086,17 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
               <FormField label="전화번호" required><input className={modalInputClass} value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
               <FormField label="이메일" required><input className={modalInputClass} value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} placeholder="name@example.com" /></FormField>
               <FormField label="주소" required className="md:col-span-2">
-                <div className="grid gap-2 md:grid-cols-[1fr_120px]">
-                  <input className={modalInputClass} value={draft.address} onChange={(event) => updateDraft("address", event.target.value)} placeholder="주소" />
-                  <ActionButton type="button" variant="secondary" onClick={() => {
-                    setAddressQuery(draft.address);
-                    setAddressOpen(true);
-                  }}>주소검색</ActionButton>
+                <div className="grid gap-2">
+                  <div className="grid gap-2 md:grid-cols-[160px_120px_1fr]">
+                    <input className={modalInputClass} value={draft.postal_code || ""} readOnly placeholder="우편번호" />
+                    <ActionButton type="button" variant="secondary" onClick={() => setAddressSearchOpen(true)}>주소검색</ActionButton>
+                    <input className={modalInputClass} value={composePersonnelAddress(draft)} readOnly placeholder="선택한 주소" />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <input className={modalInputClass} value={draft.road_address || ""} readOnly placeholder="도로명주소" />
+                    <input className={modalInputClass} value={draft.jibun_address || ""} readOnly placeholder="지번주소" />
+                  </div>
+                  <input className={modalInputClass} value={draft.detail_address || ""} onChange={(event) => updateDraft("detail_address", event.target.value)} placeholder="상세주소" />
                 </div>
               </FormField>
               <FormField label="입사일자" required>
@@ -12023,22 +12145,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
         </FormModal>
       )}
 
-      {addressOpen && (
-        <FormModal title="주소검색" description="외부 주소 API 연결 전까지 직접 검색어를 입력해 주소로 적용합니다." onClose={() => setAddressOpen(false)} size="sm" footer={<><ActionButton type="button" variant="secondary" onClick={() => setAddressOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={() => {
-          updateDraft("address", addressQuery);
-          setAddressOpen(false);
-        }}>적용</ActionButton></>}>
-          <div className="space-y-3">
-            <input className={modalInputClass} value={addressQuery} onChange={(event) => setAddressQuery(event.target.value)} placeholder="주소 검색 또는 직접 입력" autoFocus />
-            <div className="max-h-52 overflow-auto rounded-lg border border-gray-200">
-              {addressSuggestions.map((address) => (
-                <button key={address} type="button" onClick={() => setAddressQuery(address)} className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm font-bold hover:bg-orange-50">{address}</button>
-              ))}
-              {!addressSuggestions.length && <div className="px-3 py-6 text-center text-sm font-bold text-slate-400">입력한 주소를 그대로 적용할 수 있습니다.</div>}
-            </div>
-          </div>
-        </FormModal>
-      )}
+      {addressSearchOpen && <DaumPostcodeModal onClose={() => setAddressSearchOpen(false)} onSelect={applyPostcode} />}
     </div>
   );
 }
@@ -16775,6 +16882,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     if (activeTab !== "ledger") return;
     writeAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
   }, [activeTab, ledgerMode, ledgerFilters]);
+  useEffect(() => {
+    if (activeTab !== "ledger") return;
+    const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
+    if (restored.mode === "bank" || restored.mode === "card") setLedgerMode(restored.mode);
+    if (restored.filters) setLedgerFilters((prev) => ({ ...prev, ...restored.filters }));
+  }, [activeTab]);
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
@@ -16853,7 +16966,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <FilterBar className="mt-4 overflow-x-auto" style={{ flexWrap: "nowrap" }}>
+          <div className="mt-4 flex items-center gap-2">
             <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
               {[
                 ["bank", "통장 내역"],
@@ -16866,24 +16979,24 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                     setLedgerMode(value as "bank" | "card");
                     setLedgerFilters((prev) => ({ ...prev, source: "", categoryLarge: "", categoryMiddle: "" }));
                   }}
-                  className={`h-8 rounded-md px-3 text-xs font-black transition ${ledgerMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
+                  className={`h-8 rounded-md px-2.5 text-xs font-black transition ${ledgerMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
                 >
                   {label}
                 </button>
               ))}
             </div>
             <select
-              className="h-9 w-24 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              className="h-9 w-20 shrink-0 truncate rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
               value={ledgerFilters.source}
               onChange={(event) => {
                 setLedgerFilters((prev) => ({ ...prev, source: event.target.value }));
               }}
             >
-              <option value="">{ledgerMode === "bank" ? "전체 통장" : "전체 카드"}</option>
+              <option value="">전체</option>
               {effectiveLedgerSourceOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <select
-              className="h-9 w-36 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              className="h-9 w-[126px] shrink-0 truncate rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
               value={ledgerFilters.categoryLarge}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryLarge: event.target.value, categoryMiddle: "" }))}
             >
@@ -16891,7 +17004,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {ledgerCategoryLargeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <select
-              className="h-9 w-36 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400 disabled:bg-gray-50 disabled:text-gray-400"
+              className="h-9 w-[126px] shrink-0 truncate rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400 disabled:bg-gray-50 disabled:text-gray-400"
               value={ledgerFilters.categoryMiddle}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryMiddle: event.target.value }))}
               disabled={!ledgerFilters.categoryLarge}
@@ -16900,23 +17013,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {ledgerFilters.categoryLarge && ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <input
-              className="h-9 w-56 shrink-0 rounded-md border border-gray-200 bg-white px-3 text-sm outline-orange-400"
+              className="h-9 min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm outline-orange-400"
               value={ledgerFilters.q}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
             />
             <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 shrink-0 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
-            <div className="flex h-9 shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
-              <button type="button" className="h-full px-3 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, -1) }))}>◀</button>
+            <div className="flex h-9 w-[172px] shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+              <button type="button" className="h-full px-2.5 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, -1) }))}>◀</button>
               <input
-                className="h-full w-[118px] border-x border-gray-200 bg-white px-2 text-center text-sm font-bold outline-orange-400"
+                className="h-full min-w-0 flex-1 border-x border-gray-200 bg-white px-1 text-center text-sm font-bold outline-orange-400"
                 type="month"
                 value={ledgerFilters.month}
                 onChange={(event) => {
                   setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
                 }}
               />
-              <button type="button" className="h-full px-3 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, 1) }))}>▶</button>
+              <button type="button" className="h-full px-2.5 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, 1) }))}>▶</button>
             </div>
             <button
               type="button"
@@ -16927,7 +17040,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             >
               <ExcelFormIcon />
             </button>
-          </FilterBar>
+          </div>
           <div className="mt-4">
             <ExpenseTable
               key={ledgerMode}
