@@ -57,6 +57,14 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function nullableNumber(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const parsed = numberValue(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function parseJsonRecord(value: unknown): AnyRecord | null {
   const raw = text(value);
   if (!raw) return null;
@@ -733,6 +741,17 @@ async function orderDetail(id: number) {
     order.cost_snapshot_at = backfilledSnapshot.frozen_at;
   }
   const cost = frozenCost || backfilledSnapshot || liveCost;
+  const margins = await marginRowsByOrder(id);
+  const marginMap = new Map(margins.map((margin) => [String(margin.order_item_id), margin]));
+  const costGrid = cost.cost_grid
+    ? {
+        ...cost.cost_grid,
+        rows: (Array.isArray(cost.cost_grid.rows) ? cost.cost_grid.rows : []).map((row: AnyRecord) => {
+          const margin = marginMap.get(String(row.order_item_id));
+          return margin ? { ...row, ...margin } : row;
+        }),
+      }
+    : cost.cost_grid;
   const totalQty = lines.reduce((sum, line) => sum + numberValue(line.quantity), 0);
   const itemTotal = lines.reduce((sum, line) => sum + numberValue(line.quantity) * numberValue(line.unit_price), 0);
   return {
@@ -744,7 +763,7 @@ async function orderDetail(id: number) {
     total_qty: totalQty,
     item_total: itemTotal,
     total_won: numberValue(cost.total_won),
-    cost_grid: cost.cost_grid,
+    cost_grid: costGrid,
     self_total_won: numberValue(cost.self_total_won),
     native_totals: cost.native_totals || {},
     product_won: numberValue(cost.product_won),
@@ -752,6 +771,43 @@ async function orderDetail(id: number) {
     cost_snapshot_locked: Boolean(frozenCost || backfilledSnapshot),
     cost_snapshot_at: frozenCost?.frozen_at || backfilledSnapshot?.frozen_at || order.cost_snapshot_at || null,
   };
+}
+
+async function marginRowsByOrder(orderId: number) {
+  return db(
+    `select order_item_id, coupang_free_price, naver_free_price, naver_cod_price
+       from ${q(TABLES.margins)}
+      where order_id=$1`,
+    [orderId],
+  );
+}
+
+async function saveOrderItemMargins(request: NextRequest, orderId: number) {
+  const body = await request.json().catch(() => ({}));
+  const items = Array.isArray(body.items) ? body.items as AnyRecord[] : [];
+  const lines = (await linesByOrder([orderId])).get(String(orderId)) || [];
+  const allowedItemIds = new Set(lines.map((line) => Number(line.id)).filter((id) => Number.isFinite(id) && id > 0));
+  const rows = items
+    .map((item) => ({
+      order_item_id: Number(item.order_item_id),
+      coupang_free_price: nullableNumber(item.coupang_free_price),
+      naver_free_price: nullableNumber(item.naver_free_price),
+      naver_cod_price: nullableNumber(item.naver_cod_price),
+    }))
+    .filter((item) => allowedItemIds.has(item.order_item_id));
+
+  await db(`delete from ${q(TABLES.margins)} where order_id=$1`, [orderId]);
+  const ids = await nextIds(TABLES.margins, rows.length);
+  const now = nowIso();
+  await insertRows(TABLES.margins, rows.map((row, index) => ({
+    id: ids[index],
+    order_id: orderId,
+    ...row,
+    created_at: now,
+    updated_at: now,
+  })));
+  const detail = await orderDetail(orderId);
+  return json(detail || { ok: true });
 }
 
 async function saveOrderCostSnapshotPayload(orderId: number, snapshot: AnyRecord) {
@@ -1004,6 +1060,8 @@ async function handleMutation(path: string, request: NextRequest) {
     return json({ ok: true });
   }
   if (path === "api/fnos/orders" && request.method === "POST") return saveOrder(request);
+  const marginMatch = path.match(/^api\/fnos\/orders\/(\d+)\/margin$/);
+  if (marginMatch && request.method === "POST") return saveOrderItemMargins(request, Number(marginMatch[1]));
   const orderMatch = path.match(/^api\/fnos\/orders\/(\d+)$/);
   if (orderMatch && request.method === "PUT") return saveOrder(request, Number(orderMatch[1]));
   if (orderMatch && request.method === "DELETE") {
