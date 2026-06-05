@@ -16195,6 +16195,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [ledgerRows, setLedgerRows] = useState<Array<Record<string, unknown>>>([]);
   const ledgerMonthInitializedRef = useRef(false);
+  const ledgerSessionRestoredRef = useRef(false);
   const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
@@ -16880,13 +16881,16 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }, [activeTab, ledgerSourceRows, ledgerFilters.month]);
   useEffect(() => {
     if (activeTab !== "ledger") return;
+    if (!ledgerSessionRestoredRef.current) return;
     writeAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
   }, [activeTab, ledgerMode, ledgerFilters]);
   useEffect(() => {
     if (activeTab !== "ledger") return;
+    if (ledgerSessionRestoredRef.current) return;
     const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
     if (restored.mode === "bank" || restored.mode === "card") setLedgerMode(restored.mode);
     if (restored.filters) setLedgerFilters((prev) => ({ ...prev, ...restored.filters }));
+    ledgerSessionRestoredRef.current = true;
   }, [activeTab]);
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
@@ -16966,7 +16970,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
               {[
                 ["bank", "통장 내역"],
@@ -17013,7 +17017,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {ledgerFilters.categoryLarge && ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <input
-              className="h-9 min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm outline-orange-400"
+              className="h-9 w-44 shrink-0 rounded-md border border-gray-200 bg-white px-3 text-sm outline-orange-400"
               value={ledgerFilters.q}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
@@ -17704,14 +17708,14 @@ function ExpenseTable({
           >
             {[30, 100, 300, 500, 1000].map((size) => <option key={size} value={size}>{size}</option>)}
           </select>
-          <div className="flex flex-wrap items-center gap-3 text-xs font-black text-slate-700">
+          <div className="flex flex-wrap items-center gap-4 text-[15px] font-black text-slate-800">
             {tableMode === "bank" ? (
               <>
-                <span>입금: <strong className="text-emerald-600">{krw(filteredCreditTotal)}</strong></span>
-                <span>출금: <strong className="text-rose-600">{krw(filteredDebitTotal)}</strong></span>
+                <span>입금: <strong className="text-base text-emerald-600">{krw(filteredCreditTotal)}</strong></span>
+                <span>출금: <strong className="text-base text-rose-600">{krw(filteredDebitTotal)}</strong></span>
               </>
             ) : (
-              <span>결제금액: <strong className="text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
+              <span>결제금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
             )}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -17740,8 +17744,8 @@ function ExpenseTable({
                   <th className={headerClass} onDoubleClick={() => toggleSort("description")}>거래내용</th>
                   <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("debit")}>출금</th>
                   <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("credit")}>입금</th>
-                  <th className={headerClass} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
-                  <th className={headerClass} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
+                  <th className={`${headerClass} text-center`} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
+                  <th className={`${headerClass} text-center`} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-500">메모</th>
                 </tr>
               ) : (
@@ -17751,8 +17755,8 @@ function ExpenseTable({
                   <th className={headerClass} onDoubleClick={() => toggleSort("description")}>거래내용</th>
                   <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("amount")}>사용금액</th>
                   <th className={headerClass} onDoubleClick={() => toggleSort("status")}>취소여부</th>
-                  <th className={headerClass} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
-                  <th className={headerClass} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
+                  <th className={`${headerClass} text-center`} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
+                  <th className={`${headerClass} text-center`} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-500">메모</th>
                 </tr>
               )}
@@ -17774,8 +17778,8 @@ function ExpenseTable({
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.debit_amount) ? krw(asNumber(row.debit_amount)) : "-"}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.credit_amount) ? krw(asNumber(row.credit_amount)) : "-"}</td>
-                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
-                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
                   </tr>
                 ) : (
@@ -17785,8 +17789,8 @@ function ExpenseTable({
                     <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
                     <td className="px-3 py-2"><span className={isCancel ? "font-bold text-red-600" : "text-gray-400"}>{isCancel ? "취소" : "-"}</span></td>
-                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
-                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
                   </tr>
                 );
