@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
 import {
@@ -15946,6 +15946,31 @@ function accountingSourceFilterLabel(value: string, mode: "bank" | "card") {
   return value.replace(/글로벌|기업|카드/g, "").trim() || value;
 }
 
+function accountingSourceDisplayName(row: Record<string, unknown>, mode: "bank" | "card") {
+  const value = String(mode === "bank" ? row.account_name || row.source_name || row.bank_name || "" : row.card_name || row.source_name || "");
+  return accountingSourceFilterLabel(value || String(row.source_name || "-"), mode);
+}
+
+function accountingSourceMatches(row: Record<string, unknown>, filter: string, mode: "bank" | "card") {
+  if (!filter) return true;
+  const values = [
+    row.account_name,
+    row.card_name,
+    row.source_name,
+    row.bank_name,
+  ].map((value) => String(value || "")).filter(Boolean);
+  return values.some((value) => value === filter || accountingSourceFilterLabel(value, mode) === filter);
+}
+
+function accountingShiftMonth(month: string, offset: number) {
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!year || monthIndex < 0) return accountingMonthValue(0);
+  const date = new Date(year, monthIndex + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function readCachedAccountingSummary() {
   return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
 }
@@ -16594,7 +16619,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       const categoryMiddle = String(row.category_middle || "-");
       if (ledgerMonthRange.from && rowDate < ledgerMonthRange.from) return false;
       if (ledgerMonthRange.to && rowDate > ledgerMonthRange.to) return false;
-      if (ledgerFilters.source && sourceName !== ledgerFilters.source) return false;
+      if (!accountingSourceMatches(row, ledgerFilters.source, ledgerMode)) return false;
       if (ledgerFilters.categoryLarge && categoryLarge !== ledgerFilters.categoryLarge) return false;
       if (ledgerFilters.categoryMiddle && categoryMiddle !== ledgerFilters.categoryMiddle) return false;
       if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${sourceName} ${row.amount_krw || ""} ${row.amount || ""} ${row.debit_amount || ""} ${row.credit_amount || ""}`.toLowerCase().includes(q)) return false;
@@ -16604,7 +16629,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     .map((row) => {
       const value = String(ledgerMode === "bank" ? row.account_name || row.bank_name || row.source_name : row.card_name || row.source_name);
       const fallback = value || String(ledgerMode === "bank" ? row.bank_name || row.source_name : row.card_name || row.source_name);
-      return { value: value || fallback, label: accountingSourceFilterLabel(fallback || value, ledgerMode) };
+      const label = accountingSourceFilterLabel(fallback || value, ledgerMode);
+      return { value: label, label };
     })
     .filter((row) => row.value);
   const fallbackLedgerSourceOptions = Array.from(new Set(
@@ -16612,7 +16638,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       .filter((row) => String(row.source_type || "") === ledgerMode)
       .map((row) => String(row.account_name || row.card_name || row.source_name || ""))
       .filter(Boolean),
-  )).map((value) => ({ value, label: accountingSourceFilterLabel(value, ledgerMode) }));
+  )).map((value) => {
+    const label = accountingSourceFilterLabel(value, ledgerMode);
+    return { value: label, label };
+  });
   const effectiveLedgerSourceOptions = ledgerSourceOptions.length ? ledgerSourceOptions : fallbackLedgerSourceOptions;
   const ledgerCategoryLargeOptions = Array.from(new Set(
     ledgerSourceRows
@@ -16748,15 +16777,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <option value="">{ledgerMode === "bank" ? "전체 통장" : "전체 카드"}</option>
               {effectiveLedgerSourceOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
-            <input
-              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
-              type="month"
-              value={ledgerFilters.month}
-              onChange={(event) => {
-                setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
-              }}
-            />
-            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
             <select
               className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
               value={ledgerFilters.categoryLarge}
@@ -16769,9 +16789,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
               value={ledgerFilters.categoryMiddle}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryMiddle: event.target.value }))}
+              disabled={!ledgerFilters.categoryLarge}
             >
-              <option value="">카테고리2 전체</option>
-              {ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="">{ledgerFilters.categoryLarge ? "카테고리2 전체" : "카테고리2"}</option>
+              {ledgerFilters.categoryLarge && ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <input
               className="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm outline-orange-400"
@@ -16779,14 +16800,28 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
             />
-            <ActionButton
+            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
+            <div className="flex h-9 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+              <button type="button" className="h-full px-3 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, -1) }))}>◀</button>
+              <input
+                className="h-full w-[118px] border-x border-gray-200 bg-white px-2 text-center text-sm font-bold outline-orange-400"
+                type="month"
+                value={ledgerFilters.month}
+                onChange={(event) => {
+                  setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
+                }}
+              />
+              <button type="button" className="h-full px-3 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, 1) }))}>▶</button>
+            </div>
+            <button
               type="button"
-              variant="secondary"
-              className="h-9 px-4 text-xs"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
+              aria-label="엑셀다운"
+              title="엑셀다운"
               onClick={() => exportExpenses(currentLedgerRows, ledgerMode === "bank" ? "bank" : "card")}
             >
-              엑셀다운
-            </ActionButton>
+              <ExcelFormIcon />
+            </button>
           </FilterBar>
           <div className="mt-4">
             <ExpenseTable
@@ -17151,11 +17186,37 @@ function accountingRowTime(row: Record<string, unknown>) {
 
 function accountingSourceRowClass(row: Record<string, unknown>) {
   const source = `${String(row.source_name || "")} ${String(row.source_type || "")} ${String(row.card_name || "")} ${String(row.account_name || "")}`;
-  if (/국민은행/.test(source)) return "bg-yellow-50/45";
-  if (/기업은행|IBK/i.test(source)) return "bg-blue-50/45";
   if (/가온|글로벌/.test(source)) return "bg-lime-50/45";
   if (/국민기업|국민.*카드/.test(source)) return "bg-violet-50/45";
+  if (/국민은행/.test(source)) return "bg-yellow-50/45";
+  if (/기업은행|IBK/i.test(source)) return "bg-blue-50/45";
   return "bg-white";
+}
+
+function accountingShortDate(value?: unknown) {
+  const raw = String(value || "");
+  const match = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (!match) return raw || "-";
+  return `${match[2].padStart(2, "0")}/${match[3].padStart(2, "0")}`;
+}
+
+function accountingCategoryBadgeClass(category: string) {
+  const palette = [
+    "bg-orange-50 text-orange-700 ring-orange-100",
+    "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    "bg-sky-50 text-sky-700 ring-sky-100",
+    "bg-violet-50 text-violet-700 ring-violet-100",
+    "bg-rose-50 text-rose-700 ring-rose-100",
+    "bg-amber-50 text-amber-700 ring-amber-100",
+    "bg-cyan-50 text-cyan-700 ring-cyan-100",
+    "bg-slate-100 text-slate-700 ring-slate-200",
+  ];
+  const index = Array.from(category || "-").reduce((sum, char) => sum + char.charCodeAt(0), 0) % palette.length;
+  return palette[index];
+}
+
+function AccountingCategoryBadge({ large, children }: { large: string; children: ReactNode }) {
+  return <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[12px] font-semibold leading-tight ring-1 ${accountingCategoryBadgeClass(large)}`}>{children}</span>;
 }
 
 function JaewookPersonalPaymentModal({
@@ -17352,9 +17413,10 @@ function ExpenseTable({
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
 }) {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(30);
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  useEffect(() => setPage(1), [rows.length, mode]);
-  const pageSize = compact ? rows.length || 1 : 30;
+  useEffect(() => setPage(1), [rows.length, mode, pageSize]);
+  const effectivePageSize = compact ? rows.length || 1 : pageSize;
   const tableMode = mode || (rows.length && rows.every((row) => String(row.source_type || "") === "bank")
     ? "bank"
     : rows.length && rows.every((row) => String(row.source_type || "") === "card")
@@ -17376,9 +17438,11 @@ function ExpenseTable({
       : String(left || "").localeCompare(String(right || ""), "ko-KR", { numeric: true, sensitivity: "base" });
     return sortState.dir === "asc" ? diff : -diff;
   });
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / effectivePageSize));
   const currentPage = Math.min(page, totalPages);
-  const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * effectivePageSize, currentPage * effectivePageSize);
+  const pageGroupStart = Math.floor((currentPage - 1) / 5) * 5 + 1;
+  const visiblePageNumbers = Array.from({ length: Math.min(5, totalPages - pageGroupStart + 1) }, (_, index) => pageGroupStart + index);
   const toggleSort = (key: string) => {
     setPage(1);
     setSortState((prev) => prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -17400,9 +17464,29 @@ function ExpenseTable({
     const headerClass = "cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:bg-orange-50";
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500">
-          <span>최신순 기본 · 30개씩 보기 · 컬럼 더블클릭 정렬</span>
-          <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-gray-500">
+          <select
+            className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-bold outline-orange-400"
+            value={pageSize}
+            onChange={(event) => setPageSize(Number(event.target.value) || 30)}
+          >
+            {[30, 100, 300, 500, 1000].map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {pageGroupStart > 1 && <button type="button" className="text-xs font-black text-slate-600 hover:text-[#ff6a00]" onClick={() => setPage(pageGroupStart - 1)}>◀</button>}
+            {visiblePageNumbers.map((pageNumber) => (
+              <button
+                key={pageNumber}
+                type="button"
+                className={`text-xs font-black ${currentPage === pageNumber ? "text-[#ff6a00]" : "text-slate-600 hover:text-[#ff6a00]"}`}
+                onClick={() => setPage(pageNumber)}
+              >
+                {pageNumber}
+              </button>
+            ))}
+            {pageGroupStart + 5 <= totalPages && <button type="button" className="text-xs font-black text-slate-600 hover:text-[#ff6a00]" onClick={() => setPage(pageGroupStart + 5)}>▶</button>}
+            <span className="pl-2 text-gray-500">{sortedRows.length.toLocaleString("ko-KR")}건 중 {sortedRows.length ? ((currentPage - 1) * effectivePageSize + 1).toLocaleString("ko-KR") : 0}~{Math.min(currentPage * effectivePageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
+          </div>
         </div>
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className={`w-full text-sm ${tableMode === "bank" ? "min-w-[920px]" : "min-w-[980px]"}`}>
@@ -17443,24 +17527,24 @@ function ExpenseTable({
                 const rowClass = `border-t border-gray-100 ${selected ? "bg-orange-100/80" : accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onSelect || onOpen ? "cursor-pointer" : ""}`;
                 return tableMode === "bank" ? (
                   <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
-                    <td className="px-3 py-2"><StatusBadge>{String(row.account_name || row.source_name || "-")}</StatusBadge></td>
-                    <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
+                    <td className="px-3 py-2"><StatusBadge>{accountingSourceDisplayName(row, "bank")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.debit_amount) ? krw(asNumber(row.debit_amount)) : "-"}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.credit_amount) ? krw(asNumber(row.credit_amount)) : "-"}</td>
-                    <td className="px-3 py-2"><StatusBadge tone="orange">{parts.large}</StatusBadge></td>
-                    <td className="px-3 py-2 text-gray-600">{parts.middle}</td>
+                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
                   </tr>
                 ) : (
                   <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
-                    <td className="px-3 py-2"><StatusBadge tone="orange">{String(row.card_name || row.source_name || "-")}</StatusBadge></td>
-                    <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
+                    <td className="px-3 py-2"><StatusBadge tone="orange">{accountingSourceDisplayName(row, "card")}</StatusBadge></td>
+                    <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
                     <td className="px-3 py-2"><span className={isCancel ? "font-bold text-red-600" : "text-gray-400"}>{isCancel ? "취소" : "-"}</span></td>
-                    <td className="px-3 py-2"><StatusBadge tone="orange">{parts.large}</StatusBadge></td>
-                    <td className="px-3 py-2 text-gray-600">{parts.middle}</td>
+                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
+                    <td className="px-3 py-2"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
                   </tr>
                 );
@@ -17468,13 +17552,6 @@ function ExpenseTable({
             </tbody>
           </table>
         </div>
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 pt-1">
-            <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>이전</ActionButton>
-            <span className="min-w-20 text-center text-xs font-bold text-gray-600">{currentPage} / {totalPages}</span>
-            <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>다음</ActionButton>
-          </div>
-        )}
       </div>
     );
   }
