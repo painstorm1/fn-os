@@ -7493,7 +7493,14 @@ type SalesPurchaseEntryLine = {
   price: string;
   memo: string;
 };
-type ProductSearchAttributeFilter = "all" | "set" | "rg" | "import";
+type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
+const productSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter; label: string }> = [
+  { value: "plain", label: "일반" },
+  { value: "set", label: "SET" },
+  { value: "rg", label: "RG" },
+  { value: "import", label: "수입연동" },
+  { value: "all", label: "전체" },
+];
 
 function entryDateFromDate(date: Date) {
   const year = date.getFullYear();
@@ -7698,6 +7705,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [inventorySort, setInventorySort] = useState<{ key: InventorySortKey; direction: "asc" | "desc" }>({ key: "warehouse", direction: "asc" });
   const [inventoryPage, setInventoryPage] = useState(1);
   const [inventoryPicker, setInventoryPicker] = useState<InventoryPicker | null>(null);
+  const inventoryPickerDragModeRef = useRef<"select" | "deselect" | null>(null);
+  const lastInventoryPickerSelectionIndexRef = useRef<number | null>(null);
+  const inventoryPickerRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [inventoryEditKey, setInventoryEditKey] = useState("");
   const [inventoryEditDraft, setInventoryEditDraft] = useState({
     qty: "",
@@ -7735,6 +7745,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
   useEscapeToClose(Boolean(inventoryPicker), () => setInventoryPicker(null));
+
+  useEffect(() => {
+    if (!inventoryPicker) return;
+    inventoryPickerRowRefs.current[inventoryPicker.index]?.scrollIntoView({ block: "nearest" });
+  }, [inventoryPicker?.index, inventoryPicker?.type]);
 
   useEffect(() => {
     setInventoryPage(1);
@@ -8954,8 +8969,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const inventoryProductMatchesAttribute = (product: FnProduct, attribute: ProductSearchAttributeFilter) => {
     if (attribute === "all") return true;
     const productAttribute = String(product.product_attribute || product.product_kind || "").toLowerCase();
-    if (attribute === "set") return productAttribute === "set" || inventoryProductName(product).startsWith("[SET]");
-    if (attribute === "rg") return productAttribute === "rg" || inventoryProductName(product).startsWith("[RG]");
+    const productName = inventoryProductName(product);
+    if (attribute === "plain") return (!productAttribute || productAttribute === "plain" || productAttribute === "general") && !productName.startsWith("[SET]") && !productName.startsWith("[RG]");
+    if (attribute === "set") return productAttribute === "set" || productName.startsWith("[SET]");
+    if (attribute === "rg") return productAttribute === "rg" || productName.startsWith("[RG]");
     if (attribute === "import") return Boolean(product.import_links?.length);
     return true;
   };
@@ -8998,7 +9015,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function openInventoryPicker(type: "warehouse" | "product") {
-    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, searchedQuery: "", index: 0, selectedKeys: [], attribute: "all" });
+    inventoryPickerDragModeRef.current = null;
+    lastInventoryPickerSelectionIndexRef.current = null;
+    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, searchedQuery: "", index: 0, selectedKeys: [], attribute: "plain" });
   }
 
   function setInventoryPickerSelected(key: string, selected: boolean) {
@@ -9019,8 +9038,36 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const item = options[index];
     if (!item) return;
     const key = inventoryPickerKey(item, index);
+    const nextSelected = !inventoryPicker.selectedKeys.includes(key);
+    if (event.shiftKey && lastInventoryPickerSelectionIndexRef.current !== null) {
+      const start = Math.min(lastInventoryPickerSelectionIndexRef.current, index);
+      const end = Math.max(lastInventoryPickerSelectionIndexRef.current, index);
+      setInventoryPicker((prev) => {
+        if (!prev) return prev;
+        const next = new Set(prev.selectedKeys);
+        options.slice(start, end + 1).forEach((option, offset) => {
+          const itemKey = inventoryPickerKey(option, start + offset);
+          if (nextSelected) next.add(itemKey);
+          else next.delete(itemKey);
+        });
+        return { ...prev, index, selectedKeys: Array.from(next) };
+      });
+    } else {
+      setInventoryPickerSelected(key, nextSelected);
+      setInventoryPicker((prev) => prev ? { ...prev, index } : prev);
+    }
+    inventoryPickerDragModeRef.current = nextSelected ? "select" : "deselect";
+    lastInventoryPickerSelectionIndexRef.current = index;
+  }
+
+  function handleInventoryPickerSelectionDrag(index: number) {
+    const mode = inventoryPickerDragModeRef.current;
+    if (!inventoryPicker || !mode) return;
+    const options = inventoryPicker.type === "warehouse" ? inventoryWarehousePickerOptions : inventoryProductPickerOptions;
+    const item = options[index];
+    if (!item) return;
+    setInventoryPickerSelected(inventoryPickerKey(item, index), mode === "select");
     setInventoryPicker((prev) => prev ? { ...prev, index } : prev);
-    setInventoryPickerSelected(key, !inventoryPicker.selectedKeys.includes(key));
   }
 
   function applyInventoryPickerSelection() {
@@ -9043,15 +9090,40 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!inventoryPicker) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setInventoryPicker((prev) => prev ? { ...prev, index: Math.min(prev.index + 1, Math.max(0, inventoryPickerCount - 1)) } : prev);
+      moveInventoryPickerSelection(1, event.shiftKey);
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setInventoryPicker((prev) => prev ? { ...prev, index: Math.max(0, prev.index - 1) } : prev);
+      moveInventoryPickerSelection(-1, event.shiftKey);
     }
     if (event.key === "Enter") {
       event.preventDefault();
       applyInventoryPickerSelection();
+    }
+  }
+
+  function moveInventoryPickerSelection(direction: 1 | -1, extend: boolean) {
+    if (!inventoryPicker) return;
+    const options = inventoryPicker.type === "warehouse" ? inventoryWarehousePickerOptions : inventoryProductPickerOptions;
+    const nextIndex = Math.max(0, Math.min(options.length - 1, inventoryPicker.index + direction));
+    if (!options[nextIndex]) return;
+    if (extend) {
+      setInventoryPicker((prev) => {
+        if (!prev) return prev;
+        const next = new Set(prev.selectedKeys);
+        const currentItem = options[inventoryPicker.index];
+        const nextItem = options[nextIndex];
+        if (direction > 0) {
+          if (currentItem) next.add(inventoryPickerKey(currentItem, inventoryPicker.index));
+          if (nextItem) next.add(inventoryPickerKey(nextItem, nextIndex));
+        } else if (currentItem) {
+          next.delete(inventoryPickerKey(currentItem, inventoryPicker.index));
+        }
+        return { ...prev, index: nextIndex, selectedKeys: Array.from(next) };
+      });
+    } else {
+      lastInventoryPickerSelectionIndexRef.current = nextIndex;
+      setInventoryPicker((prev) => prev ? { ...prev, index: nextIndex } : prev);
     }
   }
 
@@ -9605,17 +9677,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <div className="flex flex-wrap items-center gap-2">
                 <ActionButton type="button" onClick={applyInventoryPickerSelection} disabled={!inventoryPicker.selectedKeys.length}>선택 적용</ActionButton>
                 {inventoryPicker.type === "product" && (
-                  <select
-                    className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 outline-orange-400"
-                    value={inventoryPicker.attribute}
-                    onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, attribute: event.target.value as ProductSearchAttributeFilter, index: 0, selectedKeys: [] } : prev)}
-                    aria-label="품목 속성 검색"
-                  >
-                    <option value="all">전체</option>
-                    <option value="set">SET</option>
-                    <option value="rg">RG</option>
-                    <option value="import">수입연동</option>
-                  </select>
+                  <div className="flex flex-wrap items-center gap-1 text-sm font-black" aria-label="품목 속성 검색">
+                    {productSearchAttributeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setInventoryPicker((prev) => prev ? { ...prev, attribute: option.value, index: 0, selectedKeys: [] } : prev)}
+                        className={`rounded-md px-2.5 py-1.5 ${inventoryPicker.attribute === option.value ? "bg-orange-500 text-white" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
               <ActionButton type="button" variant="secondary" onClick={() => setInventoryPicker(null)}>닫기</ActionButton>
@@ -9678,9 +9751,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       const key = inventoryPickerKey(warehouse, index);
                       const selected = inventoryPicker.selectedKeys.includes(key);
                       return (
-                        <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
+                        <tr ref={(element) => { inventoryPickerRowRefs.current[index] = element; }} key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
                           <td className="py-2 text-center">
-                            <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span>
+                                                        <button
+                              type="button"
+                              className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}
+                              onMouseDown={(event) => handleInventoryPickerSelection(index, event)}
+                              onMouseEnter={() => handleInventoryPickerSelectionDrag(index)}
+                            >
+                              {index + 1}
+                            </button>
                           </td>
                           <td className="truncate py-2 pr-2 font-black text-blue-700">{warehouse.warehouse_code || "-"}</td>
                           <td className="truncate py-2 pr-2">{warehouse.warehouse_name || "-"}</td>
@@ -9692,9 +9772,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       const key = inventoryPickerKey(product, index);
                       const selected = inventoryPicker.selectedKeys.includes(key);
                       return (
-                        <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
+                        <tr ref={(element) => { inventoryPickerRowRefs.current[index] = element; }} key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
                           <td className="py-2 text-center">
-                            <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}>{index + 1}</span>
+                                                        <button
+                              type="button"
+                              className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}
+                              onMouseDown={(event) => handleInventoryPickerSelection(index, event)}
+                              onMouseEnter={() => handleInventoryPickerSelectionDrag(index)}
+                            >
+                              {index + 1}
+                            </button>
                           </td>
                           <td className="truncate py-2 pr-2 font-black text-blue-700">{inventoryProductCode(product) || "-"}</td>
                           <td className="truncate py-2 pr-2">{inventoryProductName(product) || "-"}</td>
@@ -9846,7 +9933,7 @@ function SalesPurchaseEntryModal({
   const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
   const [warehouseIndex, setWarehouseIndex] = useState(0);
   const [productSearch, setProductSearch] = useState<{ open: boolean; lineIndex: number; query: string; searchedQuery: string; results: FnProduct[]; selectedIndex: number; loading: boolean; error: string }>({ open: false, lineIndex: 0, query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" });
-  const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("all");
+  const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
   const [productSearchSelectedKeys, setProductSearchSelectedKeys] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState("");
@@ -10411,21 +10498,23 @@ function SalesPurchaseEntryModal({
               <div className="flex w-full flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionButton type="button" onClick={applySelectedProducts} disabled={!productSearchSelectedKeys.length}>선택 적용</ActionButton>
-                  <select
-                    className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 outline-orange-400"
-                    value={productSearchAttribute}
-                    onChange={(event) => {
-                      const next = event.target.value as ProductSearchAttributeFilter;
-                      setProductSearchAttribute(next);
-                      if (productSearch.query.trim()) void openProductSearch(productSearch.lineIndex, productSearch.query, next);
-                    }}
-                    aria-label="품목 속성 검색"
-                  >
-                    <option value="all">전체</option>
-                    <option value="set">SET</option>
-                    <option value="rg">RG</option>
-                    <option value="import">수입연동</option>
-                  </select>
+                  <div className="flex flex-wrap items-center gap-1 text-sm font-black" aria-label="품목 속성 검색">
+                    {productSearchAttributeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          const next = option.value;
+                          if (productSearchAttribute === next) return;
+                          setProductSearchAttribute(next);
+                          if (productSearch.query.trim()) void openProductSearch(productSearch.lineIndex, productSearch.query, next);
+                        }}
+                        className={`rounded-md px-2.5 py-1.5 ${productSearchAttribute === option.value ? "bg-orange-500 text-white" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
               </div>
