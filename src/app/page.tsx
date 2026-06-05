@@ -71,6 +71,113 @@ function useF2Navigate(enabled: boolean, href: string) {
   }, [enabled, href]);
 }
 
+type CheckboxSelectionMode = "select" | "deselect";
+
+function setKeysSelected(prev: string[], keys: string[], selected: boolean) {
+  const cleanKeys = keys.filter(Boolean);
+  if (!cleanKeys.length) return prev;
+  if (selected) return Array.from(new Set([...prev, ...cleanKeys]));
+  const removeSet = new Set(cleanKeys);
+  return prev.filter((key) => !removeSet.has(key));
+}
+
+function useCheckboxColumnSelection({
+  keys,
+  selectedKeys,
+  setSelectedKeys,
+  enabled = true,
+  columns = 1,
+}: {
+  keys: string[];
+  selectedKeys: string[];
+  setSelectedKeys: (value: string[] | ((prev: string[]) => string[])) => void;
+  enabled?: boolean;
+  columns?: number;
+}) {
+  const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
+  const dragModeRef = useRef<CheckboxSelectionMode | null>(null);
+  const dragLastKeyRef = useRef("");
+  const keyboardIndexRef = useRef<number | null>(null);
+  const allSelected = Boolean(keys.length) && keys.every((key) => selectedKeySet.has(key));
+
+  function setOneSelected(key: string, selected: boolean, index?: number) {
+    if (!key) return;
+    if (index != null) keyboardIndexRef.current = index;
+    setSelectedKeys((prev) => setKeysSelected(prev, [key], selected));
+  }
+
+  function beginSelection(key: string, index: number, event?: MouseEvent<HTMLElement>) {
+    if (!enabled || !key) return;
+    event?.preventDefault();
+    event?.stopPropagation();
+    const nextSelected = !selectedKeySet.has(key);
+    if (event?.shiftKey && keyboardIndexRef.current !== null) {
+      const start = Math.min(keyboardIndexRef.current, index);
+      const end = Math.max(keyboardIndexRef.current, index);
+      setSelectedKeys((prev) => setKeysSelected(prev, keys.slice(start, end + 1), nextSelected));
+    } else {
+      setOneSelected(key, nextSelected, index);
+    }
+    keyboardIndexRef.current = index;
+    dragModeRef.current = nextSelected ? "select" : "deselect";
+    dragLastKeyRef.current = key;
+  }
+
+  function continueSelection(key: string, index: number) {
+    if (!enabled || !key || dragModeRef.current === null || dragLastKeyRef.current === key) return;
+    dragLastKeyRef.current = key;
+    setOneSelected(key, dragModeRef.current === "select", index);
+  }
+
+  function toggleAll(selected: boolean) {
+    setSelectedKeys(selected ? keys : []);
+    keyboardIndexRef.current = selected && keys.length ? 0 : null;
+  }
+
+  useEffect(() => {
+    function stopSelection() {
+      dragModeRef.current = null;
+      dragLastKeyRef.current = "";
+    }
+    window.addEventListener("mouseup", stopSelection);
+    window.addEventListener("blur", stopSelection);
+    return () => {
+      window.removeEventListener("mouseup", stopSelection);
+      window.removeEventListener("blur", stopSelection);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (!event.shiftKey || !["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) return;
+      if (!keys.length || !selectedKeys.length) return;
+      event.preventDefault();
+      const columnStep = Math.max(1, columns);
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowDown" ? columnStep : event.key === "ArrowLeft" ? -1 : -columnStep;
+      const fallbackIndex = keys.findIndex((key) => key === selectedKeys[selectedKeys.length - 1]);
+      const currentIndex = keyboardIndexRef.current !== null ? keyboardIndexRef.current : fallbackIndex;
+      if (currentIndex < 0) return;
+      const targetIndex = Math.max(0, Math.min(keys.length - 1, currentIndex + step));
+      if (targetIndex === currentIndex) return;
+      if (step > 0) setOneSelected(keys[targetIndex], true, targetIndex);
+      else setOneSelected(keys[currentIndex], false, targetIndex);
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [columns, enabled, keys, selectedKeys]);
+
+  return { allSelected, beginSelection, continueSelection, toggleAll };
+}
+
+function SelectionNumberButton({ index, selected, onMouseDown, onMouseEnter }: { index: number; selected: boolean; onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void; onMouseEnter: () => void }) {
+  return (
+    <button type="button" onMouseDown={onMouseDown} onMouseEnter={onMouseEnter} onClick={(event) => event.stopPropagation()} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>
+      {index + 1}
+    </button>
+  );
+}
+
 const mainMenus = [
   "매출/재고",
   "수입관리",
@@ -192,6 +299,7 @@ function CalendarMemo() {
           (accounting?.fixed_cost_occurrences || []).forEach((row) => {
             const dueDate = String(row.due_date || "");
             if (!dueDate) return;
+            if (dueDate < formatDateKey(new Date())) return;
             const title = String(row.title || row.display_title || row.fixed_cost_name || "고정비");
             const amount = asNumber(row.amount || row.expected_amount);
             const source = String(row.payment_source || row.payment_type || "통장/카드");
@@ -1042,6 +1150,7 @@ type FnCustomer = {
   ceo_name?: string;
   contact_name?: string;
   phone?: string;
+  address?: string;
   payment_terms?: string;
   memo?: string;
   is_active?: boolean;
@@ -10090,7 +10199,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           mode={entryModalMode}
           recentRows={entryModalMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []}
           onClose={() => setEntryModalMode(null)}
-          onSaved={() => {
+          onSaved={(savedRows) => {
+            if (savedRows.length) {
+              const key = entryModalMode === "sales" ? "recent_sales" : "recent_purchases";
+              setSummary((prev) => prev ? { ...prev, [key]: [...savedRows, ...((prev[key] as Array<Record<string, unknown>> | undefined) || [])].slice(0, 30) } : prev);
+            }
             invalidateSalesInventoryCaches();
             setEntryModalMode(null);
             loadSummary(true);
@@ -10144,7 +10257,7 @@ function SalesPurchaseEntryModal({
   mode: SalesPurchaseMode;
   recentRows: Array<Record<string, unknown>>;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedRows: Array<Record<string, unknown>>) => void;
 }) {
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   const defaultLine = (): SalesPurchaseEntryLine => ({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, prod_cd: "", prod_name: "", qty: "1", price: "", memo: "" });
@@ -10556,10 +10669,22 @@ function SalesPurchaseEntryModal({
         setLocalError(data.error || "저장 실패");
         return;
       }
+      const savedCount = Number(data.db_saved_count ?? data.success_count ?? 0);
+      if (savedCount <= 0) {
+        setLocalError(data.duplicate_count ? "이미 저장된 입력으로 처리되어 새로 추가된 행이 없습니다." : "저장된 행이 없습니다. 입력값을 확인해 주세요.");
+        return;
+      }
       invalidateClientCache("/api/dashboard/summary");
       invalidateClientCache("/api/sales/import");
       invalidateClientCache("/api/purchases/import");
-      onSaved();
+      onSaved(rows.map((row, index) => ({
+        ...row,
+        id: row.source_ref_id || `${mode}-${Date.now()}-${index}`,
+        created_at: new Date().toISOString(),
+        sync_status: "SAVED",
+        source_type: "fn_os",
+        source_file_name: mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY",
+      })));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "저장 실패");
     } finally {
@@ -10717,7 +10842,10 @@ function SalesPurchaseEntryModal({
             </tbody>
           </table>
         </div>
-        <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={deleteSelectedLines}>행 삭제</ActionButton>
+        </div>
 
         {productSearch.open && (
           <SelectionModal
@@ -11018,14 +11146,10 @@ function BulkMultiEditModal<Field extends string, Row>({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const [dragMode, setDragMode] = useState<"select" | "deselect" | null>(null);
   const visibleFields = selectedFields.length ? selectedFields : [fields[0]?.key].filter(Boolean) as Field[];
   const activeCommonField = visibleFields.includes(commonField) ? commonField : visibleFields[0];
   const activeCommonConfig = fieldConfig(fields, activeCommonField);
-
-  function setRowSelected(key: string, selected: boolean) {
-    setSelectedRowKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
-  }
+  const rowSelection = useCheckboxColumnSelection({ keys: rowKeys, selectedKeys: selectedRowKeys, setSelectedKeys: setSelectedRowKeys });
 
   function setDraftValue(key: string, field: Field, value: string) {
     setRowDrafts((prev) => ({
@@ -11116,35 +11240,20 @@ function BulkMultiEditModal<Field extends string, Row>({
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="w-16 px-2 py-2 text-center">
-                    <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={Boolean(rowKeys.length) && rowKeys.every((key) => selectedRowKeys.includes(key))} onChange={(event) => setSelectedRowKeys(event.target.checked ? rowKeys : [])} />
+                    <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={rowSelection.allSelected} onChange={(event) => rowSelection.toggleAll(event.target.checked)} />
                   </th>
                   <th className="w-56 px-2 py-2 text-left">수정 선택한 항목</th>
                   {visibleFields.map((field) => <th key={field} className="w-44 px-2 py-2 text-left">{fieldLabel(fields, field)}</th>)}
                 </tr>
               </thead>
-              <tbody onMouseLeave={() => setDragMode(null)}>
+              <tbody>
                 {rows.map((row, index) => {
                   const key = getRowKey(row);
                   const selected = selectedRowKeys.includes(key);
                   return (
                     <tr key={key} className={`border-t border-gray-100 ${selected ? "bg-sky-50/70" : "bg-white"}`}>
                       <td className="px-2 py-2 text-center">
-                        <button
-                          type="button"
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            const mode = selected ? "deselect" : "select";
-                            setDragMode(mode);
-                            setRowSelected(key, mode === "select");
-                          }}
-                          onMouseEnter={() => {
-                            if (dragMode) setRowSelected(key, dragMode === "select");
-                          }}
-                          onMouseUp={() => setDragMode(null)}
-                          className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
-                        >
-                          {index + 1}
-                        </button>
+                        <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => rowSelection.beginSelection(key, index, event)} onMouseEnter={() => rowSelection.continueSelection(key, index)} />
                       </td>
                       <td className="px-2 py-2">
                         <div className="truncate font-black text-slate-900" title={getRowName(row)}>{getRowName(row) || "-"}</div>
@@ -11250,6 +11359,14 @@ function composePersonnelAddress(employee: Partial<PersonnelEmployee>) {
   const jibun = String(employee.jibun_address || "").trim();
   const detail = String(employee.detail_address || "").trim();
   const base = road || jibun || String(employee.address || "").trim();
+  return [base, detail].filter(Boolean).join(" ");
+}
+
+function composeCustomerAddress(customer: Record<string, string>) {
+  const road = String(customer.road_address || "").trim();
+  const jibun = String(customer.jibun_address || "").trim();
+  const detail = String(customer.detail_address || "").trim();
+  const base = road || jibun || String(customer.address || "").trim();
   return [base, detail].filter(Boolean).join(" ");
 }
 
@@ -11712,7 +11829,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   const visibleEmployees = filteredEmployees().slice(0, pageSize);
   const visibleKeys = visibleEmployees.map(employeeKey).filter(Boolean);
   const selectedEmployees = employees.filter((employee) => selectedKeys.includes(employeeKey(employee)));
-  const allSelected = Boolean(visibleKeys.length) && visibleKeys.every((key) => selectedKeys.includes(key));
+  const rowSelection = useCheckboxColumnSelection({ keys: visibleKeys, selectedKeys, setSelectedKeys, enabled: !modalOpen && !bulkOpen && !addressSearchOpen });
 
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "[]") as PersonnelEmployee[];
@@ -11976,7 +12093,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
           <table className="w-full min-w-[1100px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
-                <th className="w-16 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? visibleKeys : [])} aria-label="직원 전체선택" /></th>
+                <th className="w-16 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={rowSelection.allSelected} onChange={(event) => rowSelection.toggleAll(event.target.checked)} aria-label="직원 전체선택" /></th>
                 <th className="w-24 py-2 text-left">속성</th>
                 <th className="w-28 py-2 text-left">성명</th>
                 <th className="w-40 py-2 text-left">주민등록번호</th>
@@ -12110,8 +12227,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="성명" required><input className={modalInputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} /></FormField>
-              <FormField label="주민등록번호" required><input className={modalInputClass} value={draft.resident_no} onChange={(event) => updateDraft("resident_no", event.target.value)} placeholder="900101-1234567" /></FormField>
-              <FormField label="전화번호" required><input className={modalInputClass} value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+              <FormField label="주민등록번호" required><input className={modalInputClass} inputMode="numeric" value={draft.resident_no} onChange={(event) => updateDraft("resident_no", event.target.value)} placeholder="900101-1234567" maxLength={14} /></FormField>
+              <FormField label="전화번호" required><input className={modalInputClass} inputMode="numeric" value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} placeholder="010-0000-0000" maxLength={13} /></FormField>
               <FormField label="이메일" required><input className={modalInputClass} value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} placeholder="name@example.com" /></FormField>
               <FormField label="주소" required className="md:col-span-2">
                 <div className="grid gap-2">
@@ -12225,10 +12342,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const customerKeys = customers.map((customer) => customer.id || customer.customer_code || customer.cust_code || "").filter(Boolean);
   const selectedCustomers = customers.filter((customer) => selectedCustomerKeys.includes(customer.id || customer.customer_code || customer.cust_code || ""));
-  const allCustomersSelected = Boolean(customerKeys.length) && customerKeys.every((key) => selectedCustomerKeys.includes(key));
+  const customerSelection = useCheckboxColumnSelection({ keys: customerKeys, selectedKeys: selectedCustomerKeys, setSelectedKeys: setSelectedCustomerKeys, enabled: !modalOpen && !customerBulkOpen });
 
   function blankCustomerDraft() {
-    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", contact_name: "", phone: "", payment_terms: "", memo: "" };
+    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", contact_name: "", phone: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", memo: "" };
   }
 
   async function loadCustomers(nextPage = page, nextQuery = query, nextRelation = relationFilter) {
@@ -12302,6 +12419,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       business_no: formatBusinessNoInput(customer.business_no || ""),
       contact_name: customer.contact_name || "",
       phone: customer.phone || "",
+      postal_code: "",
+      road_address: customer.address || "",
+      jibun_address: "",
+      detail_address: "",
+      address: customer.address || "",
       payment_terms: customer.payment_terms || "",
       memo: customer.memo || "",
     };
@@ -12336,6 +12458,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           ...channel,
           channel_name: channel.id ? channel.channel_name : value,
         }));
+      }
+      if (key === "road_address" || key === "jibun_address" || key === "detail_address" || key === "address") {
+        const next = { ...prev, [key]: value };
+        return { ...next, address: composeCustomerAddress(next) };
       }
       return { ...prev, [key]: value };
     });
@@ -12537,6 +12663,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         business_no: customer.business_no || "",
         contact_name: customer.contact_name || "",
         phone: customer.phone || "",
+        address: customer.address || "",
         payment_terms: customer.payment_terms || "",
         memo: customer.memo || "",
         ...updates,
@@ -12579,6 +12706,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         business_no: formatBusinessNoInput(String(row["사업자번호"] || row["사업자등록번호"] || "").trim()),
         contact_name: String(row["담당자"] || row["연락담당자"] || "").trim(),
         phone: String(row["전화번호"] || row["전화"] || row["연락처"] || row["휴대폰"] || "").trim(),
+        address: String(row["주소"] || row["거래처주소"] || "").trim(),
         memo: String(row["주소/Email/기타메모"] || row["거래처정보"] || row["기타메모"] || row["메모"] || row["비고"] || "").trim(),
       }))
       .filter((row) => row.customer_code && row.customer_name);
@@ -12631,9 +12759,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       customer.business_no || "",
       customer.contact_name || "",
       customer.phone || "",
+      customer.address || "",
       customer.memo || "",
     ]);
-    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "속성", "사업자번호", "담당자", "전화번호", "주소/Email/기타메모"], rows);
+    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "속성", "사업자번호", "담당자", "전화번호", "주소", "주소/Email/기타메모"], rows);
   }
 
   const pageNumbers = Array.from({ length: Math.min(6, pageCount) }, (_, index) => {
@@ -12712,8 +12841,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                   <input
                     type="checkbox"
                     className="h-5 w-5"
-                    checked={allCustomersSelected}
-                    onChange={(event) => setSelectedCustomerKeys(event.target.checked ? customerKeys : [])}
+                    checked={customerSelection.allSelected}
+                    onChange={(event) => customerSelection.toggleAll(event.target.checked)}
                     aria-label="거래처 전체선택"
                   />
                 </th>
@@ -12733,22 +12862,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                 return (
                 <tr key={customer.id || customer.customer_code} onClick={() => openCustomer(customer)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
                   <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        const mode = selected ? "deselect" : "select";
-                        customerSelectModeRef.current = mode;
-                        setCustomerSelecting(true);
-                        setCustomerSelected(key, mode === "select");
-                      }}
-                      onMouseEnter={() => {
-                        if (customerSelecting) setCustomerSelected(key, customerSelectModeRef.current === "select");
-                      }}
-                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
-                    >
-                      {index + 1}
-                    </button>
+                    <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => customerSelection.beginSelection(key, index, event)} onMouseEnter={() => customerSelection.continueSelection(key, index)} />
                   </td>
                   <td className="truncate py-2 pl-3 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
                   <td className="truncate py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
@@ -12852,7 +12966,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const productKeys = products.map((product) => product.id || product.product_code || product.sku || "").filter(Boolean);
   const selectedProducts = products.filter((product) => selectedProductKeys.includes(product.id || product.product_code || product.sku || ""));
-  const allProductsSelected = Boolean(productKeys.length) && productKeys.every((key) => selectedProductKeys.includes(key));
+  const productSelection = useCheckboxColumnSelection({ keys: productKeys, selectedKeys: selectedProductKeys, setSelectedKeys: setSelectedProductKeys, enabled: !modalOpen && !productBulkOpen });
 
   function blankDraft() {
     return {
@@ -13335,8 +13449,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                   <input
                     type="checkbox"
                     className="h-5 w-5"
-                    checked={allProductsSelected}
-                    onChange={(event) => setSelectedProductKeys(event.target.checked ? productKeys : [])}
+                    checked={productSelection.allSelected}
+                    onChange={(event) => productSelection.toggleAll(event.target.checked)}
                     aria-label="품목 전체선택"
                   />
                 </th>
@@ -13355,22 +13469,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 return (
                 <tr key={product.id || product.product_code} onClick={() => openProduct(product)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
                   <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        const mode = selected ? "deselect" : "select";
-                        productSelectModeRef.current = mode;
-                        setProductSelecting(true);
-                        setProductSelected(key, mode === "select");
-                      }}
-                      onMouseEnter={() => {
-                        if (productSelecting) setProductSelected(key, productSelectModeRef.current === "select");
-                      }}
-                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
-                    >
-                      {index + 1}
-                    </button>
+                    <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => productSelection.beginSelection(key, index, event)} onMouseEnter={() => productSelection.continueSelection(key, index)} />
                   </td>
                   <td className="truncate py-2 pl-3 font-black">{product.product_code || product.sku || "-"}</td>
                   <td className="truncate py-2 font-bold" title={product.product_name || ""}>{product.product_name || "-"}</td>
@@ -13470,7 +13569,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
   const warehouseSelectModeRef = useRef<"select" | "deselect">("select");
   const warehouseKeys = warehouses.map((warehouse) => warehouseRowKey(warehouse)).filter(Boolean);
   const selectedWarehouses = warehouses.filter((warehouse) => selectedWarehouseKeys.includes(warehouseRowKey(warehouse)));
-  const allWarehousesSelected = Boolean(warehouseKeys.length) && warehouseKeys.every((key) => selectedWarehouseKeys.includes(key));
+  const warehouseSelection = useCheckboxColumnSelection({ keys: warehouseKeys, selectedKeys: selectedWarehouseKeys, setSelectedKeys: setSelectedWarehouseKeys, enabled: !modalOpen && !warehouseBulkOpen });
 
   function blankWarehouseDraft() {
     return {
@@ -13829,8 +13928,8 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
                   <input
                     type="checkbox"
                     className="h-5 w-5"
-                    checked={allWarehousesSelected}
-                    onChange={(event) => setSelectedWarehouseKeys(event.target.checked ? warehouseKeys : [])}
+                    checked={warehouseSelection.allSelected}
+                    onChange={(event) => warehouseSelection.toggleAll(event.target.checked)}
                     aria-label="창고 전체선택"
                   />
                 </th>
@@ -13848,22 +13947,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
                 return (
                   <tr key={warehouse.id || warehouse.warehouse_code} onClick={() => openWarehouse(warehouse)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
                     <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
-                      <button
-                        type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          const mode = selected ? "deselect" : "select";
-                          warehouseSelectModeRef.current = mode;
-                          setWarehouseSelecting(true);
-                          setWarehouseSelected(key, mode === "select");
-                        }}
-                        onMouseEnter={() => {
-                          if (warehouseSelecting) setWarehouseSelected(key, warehouseSelectModeRef.current === "select");
-                        }}
-                        className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
-                      >
-                        {index + 1}
-                      </button>
+                      <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => warehouseSelection.beginSelection(key, index, event)} onMouseEnter={() => warehouseSelection.continueSelection(key, index)} />
                     </td>
                     <td className="truncate py-2 pl-4 font-black">{warehouse.warehouse_code || "-"}</td>
                     <td className="truncate py-2 font-bold" title={warehouse.warehouse_name || ""}>{warehouse.warehouse_name || "-"}</td>
@@ -13999,9 +14083,19 @@ function CustomerEditModal({
   useEscapeToClose(true, onClose);
   const customerType = normalizeCustomerAttribute(draft.customer_type);
   const businessSameAsCode = Boolean(draft.customer_code && draft.business_no && draft.business_no === formatBusinessNoInput(draft.customer_code));
+  const [addressSearchOpen, setAddressSearchOpen] = useState(false);
+  const detailAddressInputRef = useRef<HTMLInputElement | null>(null);
 
   function changeBusinessSameAsCode(checked: boolean) {
     onChange("business_no", checked ? draft.customer_code || "" : "");
+  }
+
+  function applyPostcode(data: DaumPostcodeData) {
+    onChange("postal_code", String(data.zonecode || "").trim());
+    onChange("road_address", daumRoadAddressWithExtra(data));
+    onChange("jibun_address", String(data.jibunAddress || data.autoJibunAddress || "").trim());
+    setAddressSearchOpen(false);
+    window.setTimeout(() => detailAddressInputRef.current?.focus(), 0);
   }
 
   return (
@@ -14050,6 +14144,16 @@ function CustomerEditModal({
             </FormField>
             <FormField label="담당자"><input className={modalInputClass} value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></FormField>
             <FormField label="전화번호"><input className={modalInputClass} value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+            <FormField label="주소" className="md:col-span-2">
+              <div className="grid gap-2">
+                <div className="grid gap-2 md:grid-cols-[120px_180px_1fr]">
+                  <ActionButton type="button" variant="secondary" onClick={() => setAddressSearchOpen(true)}>주소검색</ActionButton>
+                  <input className={modalInputClass} value={draft.postal_code || ""} readOnly placeholder="우편번호" />
+                  <input ref={detailAddressInputRef} className={modalInputClass} value={draft.detail_address || ""} onChange={(event) => onChange("detail_address", event.target.value)} placeholder="상세주소" />
+                </div>
+                <input className={modalInputClass} value={composeCustomerAddress(draft)} readOnly placeholder="주소" />
+              </div>
+            </FormField>
             <FormField label="거래처정보 · 기타 메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></FormField>
           </div>
           {customerType === "shopping" && (
@@ -14105,6 +14209,7 @@ function CustomerEditModal({
             </div>
           )}
         </div>
+        {addressSearchOpen && <DaumPostcodeModal onClose={() => setAddressSearchOpen(false)} onSelect={applyPostcode} />}
     </FormModal>
   );
 }
@@ -16323,6 +16428,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     id: "",
     loan_name: "",
     loan_type: "principal_interest",
+    category_large: "금융비용",
+    category_middle: "대출 원리금",
     principal_amount: "",
     current_balance: "",
     bank_name: "",
@@ -16330,6 +16437,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     account_number: "",
     deposit_account_number: "",
     loan_start_date: "",
+    loan_end_date: "",
     loan_period_months: "",
     payment_day: "",
     expected_principal_amount: "",
@@ -16341,6 +16449,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [fixedCostMode, setFixedCostMode] = useState<"fixed" | "loan">("fixed");
   const [fixedCostQuery, setFixedCostQuery] = useState("");
   const [fixedCostSort, setFixedCostSort] = useState<"due" | "category" | "amount">("due");
+  const [fixedCostTypeFilter, setFixedCostTypeFilter] = useState<"all" | "fixed" | "loan">("all");
+  const [fixedCostEditorOpen, setFixedCostEditorOpen] = useState(false);
+  const [fixedCostSelectedKeys, setFixedCostSelectedKeys] = useState<string[]>([]);
+  const [fixedCostSelecting, setFixedCostSelecting] = useState(false);
+  const fixedCostSelectModeRef = useRef<"select" | "deselect">("select");
+  const [fixedCostSortState, setFixedCostSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [loanDraft, setLoanDraft] = useState(emptyLoanDraft);
   const [jaewookModalRow, setJaewookModalRow] = useState<Record<string, unknown> | null>(null);
   const emptyBankAccountDraft = {
@@ -16422,6 +16536,25 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     const timer = window.setTimeout(() => loadLedgerRows(false), 0);
     return () => window.clearTimeout(timer);
   }, [activeTab]);
+
+  useEffect(() => {
+    function stopFixedCostSelecting() {
+      setFixedCostSelecting(false);
+    }
+    window.addEventListener("mouseup", stopFixedCostSelecting);
+    return () => window.removeEventListener("mouseup", stopFixedCostSelecting);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "fixed") return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "F2" || fixedCostEditorOpen) return;
+      event.preventDefault();
+      openNewFixedCost();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTab, fixedCostEditorOpen]);
 
   function expenseFileKey(item: ExpenseUploadItem) {
     return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
@@ -16619,6 +16752,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(fixedCostDraft.id ? "고정비를 수정했습니다." : "고정비를 추가했습니다.");
     setFixedCostDraft(emptyFixedCostDraft);
+    setFixedCostEditorOpen(false);
+    setFixedCostSelectedKeys([]);
     invalidateAccountingCache();
     if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
     loadSummary(true);
@@ -16640,6 +16775,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setMessage(loanDraft.id ? "대출 항목을 수정했습니다." : "대출 항목을 추가했습니다.");
     setLoanDraft(emptyLoanDraft);
     setFixedCostMode("fixed");
+    setFixedCostEditorOpen(false);
+    setFixedCostSelectedKeys([]);
     invalidateAccountingCache();
     if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
     loadSummary(true);
@@ -16835,17 +16972,89 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const fixedCostRows = fixedCosts.map((row) => ({ ...row, ...(fixedCostOccurrenceById.get(String(row.id || "")) || {}) }));
   const loanRows: Array<Record<string, unknown>> = loans.map((row: Record<string, unknown>) => ({ ...row, ...((loanOccurrences || []).find((occurrence: Record<string, unknown>) => String(occurrence.loan_id || "") === String(row.id || "")) || {}), row_type: "loan" }));
   const combinedFixedSourceRows: Array<Record<string, unknown>> = [...fixedCostRows.map((row: Record<string, unknown>) => ({ ...row, row_type: "fixed" })), ...loanRows];
+  const fixedCostRowKey = (row: Record<string, unknown>) => `${String(row.row_type || "fixed")}:${String(row.id || row.fixed_cost_id || row.loan_id || row.title || row.loan_name || "")}`;
+  const fixedCostRowTitle = (row: Record<string, unknown>) => String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-");
+  const fixedCostRowAmount = (row: Record<string, unknown>) => asNumber(row.amount || row.last_actual_amount || row.expected_amount || row.expected_payment_amount);
+  const fixedCostCategoryLargeOptions = Array.from(new Set(categories.map((row) => String(row.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
+  const fixedCostCategoryMiddleOptions = (large: string) => Array.from(new Set(categories
+    .filter((row) => !large || String(row.category_large || "").trim() === large)
+    .map((row) => String(row.category_middle || "").trim())
+    .filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
+  const fixedCostToday = new Date();
+  fixedCostToday.setHours(0, 0, 0, 0);
+  function fixedCostBaseDay(row: Record<string, unknown>) {
+    const raw = String(row.base_day || row.payment_day || "");
+    if (/말일|last/i.test(raw)) return "last";
+    const parsed = Number(raw.replace(/[^0-9]/g, ""));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  function fixedCostDateForMonth(year: number, month: number, baseDay: number | "last" | null) {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const day = baseDay === "last" ? lastDay : Math.min(Math.max(1, Number(baseDay || 1)), lastDay);
+    return new Date(year, month, day);
+  }
+  function fixedCostNextDueDate(row: Record<string, unknown>) {
+    const due = String(row.due_date || "");
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(due);
+    if (match) {
+      const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      if (parsed >= fixedCostToday) return parsed;
+    }
+    const baseDay = fixedCostBaseDay(row);
+    const thisMonth = fixedCostDateForMonth(fixedCostToday.getFullYear(), fixedCostToday.getMonth(), baseDay);
+    if (thisMonth >= fixedCostToday) return thisMonth;
+    return fixedCostDateForMonth(fixedCostToday.getFullYear(), fixedCostToday.getMonth() + 1, baseDay);
+  }
+  function fixedCostDueLabel(row: Record<string, unknown>) {
+    const baseDay = fixedCostBaseDay(row);
+    const nextDue = fixedCostNextDueDate(row);
+    if (baseDay === "last") return `매월 ${nextDue.getDate()}일`;
+    return baseDay ? `매월 ${baseDay}일` : accountingShortDate(String(row.due_date || ""));
+  }
+  function fixedCostPaymentLabel(row: Record<string, unknown>) {
+    if (String(row.row_type || "") === "loan") return "통장";
+    return String(row.payment_type || "") === "card" ? "카드" : "통장";
+  }
+  function fixedCostPaid(row: Record<string, unknown>) {
+    return Boolean(row.matched_transaction_id || row.last_actual_date) || (String(row.status || "") === "overdue_or_paid" && String(row.due_date || "") < new Date().toISOString().slice(0, 10));
+  }
   const combinedFixedRows = combinedFixedSourceRows
     .filter((row: Record<string, unknown>) => {
+      const isLoan = String(row["row_type"] || "") === "loan";
+      if (fixedCostTypeFilter === "fixed" && isLoan) return false;
+      if (fixedCostTypeFilter === "loan" && !isLoan) return false;
       const q = fixedCostQuery.trim().toLowerCase();
       if (!q) return true;
       return `${row["fixed_cost_name"] || ""} ${row["loan_name"] || ""} ${row["title"] || ""} ${row["category_large"] || ""} ${row["category_middle"] || ""} ${row["payment_source"] || ""} ${row["bank_name"] || ""} ${row["memo"] || ""}`.toLowerCase().includes(q);
     })
     .sort((left: Record<string, unknown>, right: Record<string, unknown>) => {
-      if (fixedCostSort === "amount") return asNumber(right["amount"] || right["expected_amount"] || right["expected_payment_amount"]) - asNumber(left["amount"] || left["expected_amount"] || left["expected_payment_amount"]);
-      if (fixedCostSort === "category") return `${left["category_large"] || ""}${left["category_middle"] || ""}${left["title"] || left["loan_name"] || ""}`.localeCompare(`${right["category_large"] || ""}${right["category_middle"] || ""}${right["title"] || right["loan_name"] || ""}`);
-      return String(left["due_date"] || "").localeCompare(String(right["due_date"] || ""));
+      const activeSort = fixedCostSortState || { key: fixedCostSort === "amount" ? "amount" : fixedCostSort === "category" ? "category" : "due", dir: "asc" as const };
+      let diff = 0;
+      if (activeSort.key === "amount") diff = fixedCostRowAmount(left) - fixedCostRowAmount(right);
+      else if (activeSort.key === "category") diff = `${left["category_large"] || ""}${left["category_middle"] || ""}${fixedCostRowTitle(left)}`.localeCompare(`${right["category_large"] || ""}${right["category_middle"] || ""}${fixedCostRowTitle(right)}`, "ko-KR", { numeric: true });
+      else if (activeSort.key === "title") diff = fixedCostRowTitle(left).localeCompare(fixedCostRowTitle(right), "ko-KR", { numeric: true });
+      else if (activeSort.key === "payment") diff = fixedCostPaymentLabel(left).localeCompare(fixedCostPaymentLabel(right), "ko-KR", { numeric: true });
+      else if (activeSort.key === "paid") diff = Number(fixedCostPaid(left)) - Number(fixedCostPaid(right));
+      else diff = fixedCostNextDueDate(left).getTime() - fixedCostNextDueDate(right).getTime();
+      return activeSort.dir === "desc" ? -diff : diff;
     });
+  const fixedCostTotalAmount = combinedFixedRows.reduce((sum, row) => sum + fixedCostRowAmount(row), 0);
+  const fixedCostAllAmount = combinedFixedSourceRows.reduce((sum, row) => sum + fixedCostRowAmount(row), 0);
+  const fixedCostGroupedRows = fixedCostSort === "category"
+    ? combinedFixedRows.reduce<Array<{ key: string; rows: Array<Record<string, unknown>>; amount: number }>>((groups, row) => {
+      const key = String(row.category_large || (String(row.row_type || "") === "loan" ? "금융비용" : "기타"));
+      const group = groups.find((item) => item.key === key);
+      if (group) {
+        group.rows.push(row);
+        group.amount += fixedCostRowAmount(row);
+      } else {
+        groups.push({ key, rows: [row], amount: fixedCostRowAmount(row) });
+      }
+      return groups;
+    }, [])
+    : [{ key: "", rows: combinedFixedRows, amount: fixedCostTotalAmount }];
+  const fixedCostKeys = combinedFixedRows.map(fixedCostRowKey).filter(Boolean);
+  const allFixedCostsSelected = Boolean(fixedCostKeys.length) && fixedCostKeys.every((key) => fixedCostSelectedKeys.includes(key));
   const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const bankAccounts = summary?.bank_accounts || [];
   const cardAccounts = summary?.card_accounts || [];
@@ -16936,6 +17145,136 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     if (restored.filters) setLedgerFilters((prev) => ({ ...prev, ...restored.filters }));
     ledgerSessionRestoredRef.current = true;
   }, [activeTab]);
+
+  function setFixedCostSelected(key: string, selected: boolean) {
+    setFixedCostSelectedKeys((prev) => {
+      if (selected) return prev.includes(key) ? prev : [...prev, key];
+      return prev.filter((item) => item !== key);
+    });
+  }
+
+  function toggleFixedCostSort(key: string) {
+    setFixedCostSortState((prev) => prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  }
+
+  function openNewFixedCost() {
+    setFixedCostMode("fixed");
+    setFixedCostDraft(emptyFixedCostDraft);
+    setFixedCostEditorOpen(true);
+  }
+
+  function openNewLoan() {
+    setFixedCostMode("loan");
+    setLoanDraft({
+      ...emptyLoanDraft,
+      loan_type: "principal_interest",
+      category_large: "",
+      category_middle: "",
+      expected_payment_amount: "",
+    });
+    setFixedCostEditorOpen(true);
+  }
+
+  function openFixedCostRow(row: Record<string, unknown>) {
+    const isLoan = String(row.row_type || "") === "loan";
+    if (isLoan) {
+      setFixedCostMode("loan");
+      setLoanDraft({
+        id: String(row.loan_id || row.id || ""),
+        loan_name: String(row.loan_name || row.title || ""),
+        loan_type: String(row.loan_type || "principal_interest"),
+        category_large: String(row.category_large || "금융비용"),
+        category_middle: String(row.category_middle || "대출 원리금"),
+        principal_amount: String(row.principal_amount || ""),
+        current_balance: String(row.current_balance || ""),
+        bank_name: String(row.bank_name || row.payment_source || ""),
+        account_holder: String(row.account_holder || ""),
+        account_number: String(row.account_number || ""),
+        deposit_account_number: String(row.deposit_account_number || ""),
+        loan_start_date: String(row.loan_start_date || "").slice(0, 10),
+        loan_end_date: String(row.loan_end_date || "").slice(0, 10),
+        loan_period_months: String(row.loan_period_months || ""),
+        payment_day: String(row.payment_day || row.base_day || ""),
+        expected_principal_amount: String(row.expected_principal_amount || ""),
+        expected_interest_amount: String(row.expected_interest_amount || ""),
+        expected_payment_amount: String(row.expected_payment_amount || row.amount || ""),
+        payer_name: String(row.payer_name || ""),
+        memo: String(row.memo || ""),
+      });
+      setFixedCostEditorOpen(true);
+      return;
+    }
+    setFixedCostMode("fixed");
+    const source = fixedCosts.find((item) => String(item.id || "") === String(row.fixed_cost_id || row.id)) || row;
+    setFixedCostDraft({
+      id: String(source.id || row.fixed_cost_id || ""),
+      fixed_cost_name: String(source.fixed_cost_name || row.title || row.display_title || ""),
+      category_large: String(source.category_large || "업무 비용"),
+      category_middle: String(source.category_middle || ""),
+      category_small: "",
+      expected_amount: String(source.expected_amount || row.amount || ""),
+      base_day: String(source.base_day || row.base_day || ""),
+      payment_type: String(source.payment_type || "bank"),
+      payment_source: String(source.payment_source || ""),
+      match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
+      affects_profit: source.affects_profit !== false,
+      affects_cashflow: source.affects_cashflow !== false,
+      is_active: true,
+      sort_order: String(source.sort_order || 0),
+      memo: String(source.memo || ""),
+    });
+    setFixedCostEditorOpen(true);
+  }
+
+  function openFixedCostBulkEdit() {
+    if (!fixedCostSelectedKeys.length) {
+      setMessage("수정할 고정비를 먼저 선택해 주세요.");
+      return;
+    }
+    const selectedRows = combinedFixedRows.filter((row) => fixedCostSelectedKeys.includes(fixedCostRowKey(row)));
+    const types = new Set(selectedRows.map((row) => String(row.row_type || "fixed")));
+    if (types.size > 1) {
+      window.alert("속성값이 다른 고정비는 함께 수정이 불가합니다.");
+      return;
+    }
+    if (selectedRows.length) openFixedCostRow(selectedRows[0]);
+  }
+
+  function downloadFixedCostTemplate() {
+    void downloadTableXlsx(
+      "FN_OS_고정비_엑셀폼.xlsx",
+      "고정비",
+      ["속성", "카테고리1", "카테고리2", "고정비명/대출명", "금액", "결제일", "결제구분", "연동계좌/카드", "메모"],
+      [["비용", "유지비", "임대료", "임대료 최석윤(아진가)", "2205000", "말일", "통장", "국민", ""]],
+    );
+  }
+
+  function downloadFixedCosts() {
+    const rows = combinedFixedRows.map((row) => [
+      String(row.row_type || "") === "loan" ? "대출" : "비용",
+      String(row.category_large || ""),
+      String(row.category_middle || ""),
+      fixedCostRowTitle(row),
+      String(fixedCostRowAmount(row)),
+      fixedCostDueLabel(row),
+      fixedCostPaymentLabel(row),
+      String(row.payment_source || row.bank_name || ""),
+      String(row.memo || ""),
+    ]);
+    void downloadTableXlsx(`FN_OS_고정비_${rows.length}건_${todayMmdd()}.xlsx`, "고정비", ["속성", "카테고리1", "카테고리2", "고정비명", "금액", "결제일", "결제구분", "연동정보", "메모"], rows);
+  }
+
+  function loanPeriodMonths() {
+    const start = String(loanDraft.loan_start_date || "");
+    const end = String((loanDraft as Record<string, string>).loan_end_date || "");
+    if (!start || !end) return Number(loanDraft.loan_period_months || 0) || 0;
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return 0;
+    const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + endDate.getMonth() - startDate.getMonth() + 1;
+    return Math.max(0, months);
+  }
+
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
@@ -17108,116 +17447,149 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           <Card className="p-5">
             <SectionHeader
               title="고정비 현황"
-              description="고정비와 대출 납입 항목을 같은 기준일로 관리합니다. 납부 상태는 업로드된 통장/카드 실제 거래와 매칭된 값이 우선입니다."
-              actions={<StatusBadge tone="orange">{combinedFixedRows.length.toLocaleString("ko-KR")}개</StatusBadge>}
+              actions={<div className="text-sm font-black text-slate-700">총 고정비: <span className="text-[#ff6a00]">{krw(fixedCostAllAmount)}</span></div>}
             />
-            <FilterBar className="mt-4">
-              <input
-                className="field-input h-10 min-w-[220px] flex-1 rounded-md border border-gray-200 px-3 text-sm font-semibold"
-                value={fixedCostQuery}
-                onChange={(event) => setFixedCostQuery(event.target.value)}
-                placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
-              />
-              <div className="flex rounded-md border border-gray-200 bg-white p-1">
-                {[
-                  ["due", "도래일 순"],
-                  ["category", "카테고리 순"],
-                  ["amount", "금액 순"],
-                ].map(([value, label]) => (
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
+              {[
+                { key: "all" as const, label: "전체 고정비" },
+                { key: "loan" as const, label: "대출" },
+                { key: "fixed" as const, label: "비용" },
+              ].map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => {
+                    setFixedCostTypeFilter(filter.key);
+                    setFixedCostSelectedKeys([]);
+                  }}
+                  className={`font-black underline-offset-4 hover:underline ${fixedCostTypeFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"}`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+              <span className="rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">고정비 {combinedFixedRows.length.toLocaleString("ko-KR")}개 : {krw(fixedCostTotalAmount)}</span>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <ActionButton type="button" onClick={openNewFixedCost}>F2 새 고정비</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={openNewLoan}>대출 추가</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={() => setMessage("고정비 엑셀등록은 업로드 파서 연결 후 활성화 예정입니다.")}>엑셀등록</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={downloadFixedCosts}>고정비정보 다운로드</ActionButton>
+                <button
+                  type="button"
+                  onClick={downloadFixedCostTemplate}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
+                  aria-label="엑셀폼 다운로드"
+                  title="엑셀폼 다운로드"
+                >
+                  <ExcelFormIcon />
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <ActionButton type="button" variant="secondary" onClick={openFixedCostBulkEdit}>수정</ActionButton>
+                <span className="text-xs font-bold text-slate-500">선택 {fixedCostSelectedKeys.length.toLocaleString("ko-KR")}개</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-md border border-gray-200 bg-white p-1">
+                  {[
+                    ["due", "도래일 순"],
+                    ["category", "카테고리 별"],
+                    ["amount", "금액 순"],
+                  ].map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
-                    onClick={() => setFixedCostSort(value as "due" | "category" | "amount")}
+                    onClick={() => {
+                      setFixedCostSort(value as "due" | "category" | "amount");
+                      setFixedCostSortState(null);
+                    }}
                     className={`h-8 rounded px-3 text-xs font-black ${fixedCostSort === value ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}
                   >
                     {label}
                   </button>
-                ))}
+                  ))}
+                </div>
+                <input
+                  className="field-input w-72 rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  value={fixedCostQuery}
+                  onChange={(event) => setFixedCostQuery(event.target.value)}
+                  placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
+                />
               </div>
-            </FilterBar>
-            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-              <table className="w-full min-w-[1040px] text-sm">
-                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left">속성</th>
-                    <th className="px-3 py-2 text-left">고정비명</th>
-                    <th className="px-3 py-2 text-left">카테고리</th>
-                    <th className="px-3 py-2 text-center">결제일</th>
-                    <th className="px-3 py-2 text-right">비용 금액</th>
-                    <th className="px-3 py-2 text-center">결제 구분</th>
-                    <th className="px-3 py-2 text-center">납입현황</th>
-                    <th className="px-3 py-2 text-left">메모</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {combinedFixedRows.map((row, index) => {
-                    const isLoan = String(row.row_type || "") === "loan";
-                    const title = String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-");
-                    const amount = asNumber(row.amount || row.last_actual_amount || row.expected_amount || row.expected_payment_amount);
-                    const paid = Boolean(row.matched_transaction_id || row.last_actual_date) || String(row.status || "") === "overdue_or_paid" && String(row.due_date || "") < new Date().toISOString().slice(0, 10);
-                    return (
-                      <tr
-                        key={`${String(row.id || row.fixed_cost_id || row.loan_id)}-${index}`}
-                        className="cursor-pointer border-t border-gray-100 hover:bg-orange-50/60"
-                        onClick={() => {
-                          if (isLoan) {
-                            setFixedCostMode("loan");
-                            setLoanDraft({
-                              id: String(row.loan_id || row.id || ""),
-                              loan_name: String(row.loan_name || row.title || ""),
-                              loan_type: String(row.loan_type || "principal_interest"),
-                              principal_amount: String(row.principal_amount || ""),
-                              current_balance: String(row.current_balance || ""),
-                              bank_name: String(row.bank_name || row.payment_source || ""),
-                              account_holder: String(row.account_holder || ""),
-                              account_number: String(row.account_number || ""),
-                              deposit_account_number: String(row.deposit_account_number || ""),
-                              loan_start_date: String(row.loan_start_date || "").slice(0, 10),
-                              loan_period_months: String(row.loan_period_months || ""),
-                              payment_day: String(row.payment_day || row.base_day || ""),
-                              expected_principal_amount: String(row.expected_principal_amount || ""),
-                              expected_interest_amount: String(row.expected_interest_amount || ""),
-                              expected_payment_amount: String(row.expected_payment_amount || row.amount || ""),
-                              payer_name: String(row.payer_name || ""),
-                              memo: String(row.memo || ""),
-                            });
-                            return;
-                          }
-                          setFixedCostMode("fixed");
-                          const source = fixedCosts.find((item) => String(item.id || "") === String(row.fixed_cost_id || row.id)) || row;
-                          setFixedCostDraft({
-                            id: String(source.id || row.fixed_cost_id || ""),
-                            fixed_cost_name: String(source.fixed_cost_name || row.title || row.display_title || ""),
-                            category_large: String(source.category_large || "업무 비용"),
-                            category_middle: String(source.category_middle || ""),
-                            category_small: "",
-                            expected_amount: String(source.expected_amount || ""),
-                            base_day: String(source.base_day || ""),
-                            payment_type: String(source.payment_type || "bank"),
-                            payment_source: String(source.payment_source || ""),
-                            match_keywords: Array.isArray(source.match_keywords) ? source.match_keywords.join(",") : String(source.match_keywords || ""),
-                            affects_profit: source.affects_profit !== false,
-                            affects_cashflow: source.affects_cashflow !== false,
-                            is_active: true,
-                            sort_order: String(source.sort_order || 0),
-                            memo: String(source.memo || ""),
-                          });
-                        }}
-                      >
-                        <td className="px-3 py-2"><StatusBadge tone={isLoan ? "orange" : "muted"}>{isLoan ? "대출" : String(row.category_large || "고정비")}</StatusBadge></td>
-                        <td className="px-3 py-2 font-semibold text-gray-900">{title}</td>
-                        <td className="px-3 py-2 text-gray-500">{[row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || (isLoan ? "금융비용 > 대출 원리금" : "-")}</td>
-                        <td className="px-3 py-2 text-center font-semibold text-gray-900">{String(row.due_date || "-")}</td>
-                        <td className="px-3 py-2 text-right font-bold">{krw(amount)}</td>
-                        <td className="px-3 py-2 text-center">{String(row.payment_source || row.bank_name || row.payment_type || "통장")}</td>
-                        <td className="px-3 py-2 text-center"><StatusBadge tone={paid ? "success" : "danger"}>{paid ? "완납" : "미납"}</StatusBadge></td>
-                        <td className="max-w-[220px] truncate px-3 py-2 text-gray-500" title={String(row.memo || "")}>{String(row.memo || "-")}</td>
-                      </tr>
-                    );
-                  })}
-                  {!combinedFixedRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="고정비는 모달에서 추가할 수 있습니다." className="min-h-24" /></td></tr>}
-                </tbody>
-              </table>
+            </div>
+            <div className="mt-4 space-y-4">
+              {fixedCostGroupedRows.map((group) => (
+                <div key={group.key || "all"} className="rounded-xl border border-gray-200">
+                  {fixedCostSort === "category" && group.key && (
+                    <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2 text-sm font-black text-slate-700">
+                      <span>{group.key}</span>
+                      <span className="text-[#ff6a00]">{krw(group.amount)}</span>
+                    </div>
+                  )}
+                  <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
+                    <table className="w-full min-w-[980px] table-fixed text-sm">
+                      <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+                        <tr>
+                          <th className="w-16 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              className="h-5 w-5"
+                              checked={allFixedCostsSelected}
+                              onChange={(event) => setFixedCostSelectedKeys(event.target.checked ? fixedCostKeys : [])}
+                              aria-label="고정비 전체선택"
+                            />
+                          </th>
+                          <th className="w-32 py-2 text-center" onDoubleClick={() => toggleFixedCostSort("category")}>카테고리</th>
+                          <th className="w-64 py-2 text-left" onDoubleClick={() => toggleFixedCostSort("title")}>고정비명</th>
+                          <th className="w-32 py-2 text-right" onDoubleClick={() => toggleFixedCostSort("amount")}>금액</th>
+                          <th className="w-28 py-2 text-center" onDoubleClick={() => toggleFixedCostSort("due")}>결제일</th>
+                          <th className="w-24 py-2 text-center" onDoubleClick={() => toggleFixedCostSort("payment")}>결제 구분</th>
+                          <th className="w-24 py-2 text-center" onDoubleClick={() => toggleFixedCostSort("paid")}>납입</th>
+                          <th className="w-52 py-2 text-left">메모</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row, index) => {
+                          const key = fixedCostRowKey(row) || `${group.key}-${index}`;
+                          const selected = fixedCostSelectedKeys.includes(key);
+                          const isLoan = String(row.row_type || "") === "loan";
+                          const category = String(row.category_middle || (isLoan ? "대출 원리금" : row.category_large || "-"));
+                          return (
+                            <tr key={key} onClick={() => openFixedCostRow(row)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
+                              <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    const mode = selected ? "deselect" : "select";
+                                    fixedCostSelectModeRef.current = mode;
+                                    setFixedCostSelecting(true);
+                                    setFixedCostSelected(key, mode === "select");
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (fixedCostSelecting) setFixedCostSelected(key, fixedCostSelectModeRef.current === "select");
+                                  }}
+                                  className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                                >
+                                  {combinedFixedRows.findIndex((item) => fixedCostRowKey(item) === key) + 1}
+                                </button>
+                              </td>
+                              <td className="py-2 text-center"><AccountingCategoryBadge large={String(row.category_large || (isLoan ? "금융비용" : category))}>{category}</AccountingCategoryBadge></td>
+                              <td className="truncate py-2 font-black text-slate-900" title={fixedCostRowTitle(row)}>{fixedCostRowTitle(row)}</td>
+                              <td className="py-2 text-right font-black">{krw(fixedCostRowAmount(row))}</td>
+                              <td className="py-2 text-center font-bold text-slate-700">{fixedCostDueLabel(row)}</td>
+                              <td className="py-2 text-center">{fixedCostPaymentLabel(row)}</td>
+                              <td className="py-2 text-center"><StatusBadge tone={fixedCostPaid(row) ? "success" : "danger"}>{fixedCostPaid(row) ? "완납" : "미납"}</StatusBadge></td>
+                              <td className="truncate py-2 text-slate-500" title={String(row.memo || "")}>{String(row.memo || "-")}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {!group.rows.length && <EmptyState title="고정비 설정 없음" description="F2 새 고정비로 추가할 수 있습니다." className="min-h-24" />}
+                  </div>
+                </div>
+              ))}
             </div>
           </Card>
         </section>
@@ -17339,6 +17711,131 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             </form>
           </Card>
         </section>
+      )}
+
+      {fixedCostEditorOpen && (
+        <FormModal
+          title={fixedCostMode === "loan" ? (loanDraft.id ? "대출 수정" : "대출 추가") : (fixedCostDraft.id ? "고정비 수정" : "새 고정비")}
+          description={fixedCostMode === "loan" ? "대출 원리금/이자 납입 기준을 고정비와 같은 화면에서 관리합니다." : "반복 출금/카드 사용 기준일과 매칭 정보를 저장합니다."}
+          onClose={() => setFixedCostEditorOpen(false)}
+          size="lg"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setFixedCostEditorOpen(false)}>닫기</ActionButton>
+              <ActionButton type="submit" form={fixedCostMode === "loan" ? "accounting-loan-form" : "accounting-fixed-cost-form"}>{fixedCostMode === "loan" ? "대출 저장" : "고정비 저장"}</ActionButton>
+            </>
+          }
+        >
+          <div className="mb-4 flex rounded-lg border border-gray-200 bg-white p-1">
+            {[
+              ["fixed", "비용"],
+              ["loan", "대출"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`h-9 flex-1 rounded-md text-sm font-black ${fixedCostMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
+                onClick={() => setFixedCostMode(value as "fixed" | "loan")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {fixedCostMode === "fixed" ? (
+            <form id="accounting-fixed-cost-form" onSubmit={saveFixedCost} className="grid gap-3 md:grid-cols-2">
+              <FormField label="카테고리1" required>
+                <select className={modalSelectClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value, category_middle: "" }))}>
+                  <option value="">선택</option>
+                  {fixedCostCategoryLargeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </FormField>
+              <FormField label="카테고리2" required>
+                <select className={modalSelectClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))}>
+                  <option value="">선택</option>
+                  {fixedCostCategoryMiddleOptions(fixedCostDraft.category_large).map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </FormField>
+              <FormField label="고정비명" required className="md:col-span-2">
+                <input className={modalInputClass} value={fixedCostDraft.fixed_cost_name} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, fixed_cost_name: event.target.value }))} />
+              </FormField>
+              <FormField label="비용 금액" required>
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(fixedCostDraft.expected_amount)} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, expected_amount: String(asNumber(event.target.value)) }))} />
+              </FormField>
+              <FormField label="결제일" required>
+                <input className={modalInputClass} value={fixedCostDraft.base_day} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, base_day: event.target.value }))} placeholder="5, 10, 말일" />
+              </FormField>
+              <FormField label="결제 구분" required>
+                <select className={modalSelectClass} value={fixedCostDraft.payment_type} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_type: event.target.value, payment_source: "" }))}>
+                  <option value="bank">통장 출금</option>
+                  <option value="card">카드 사용</option>
+                </select>
+              </FormField>
+              <FormField label={fixedCostDraft.payment_type === "card" ? "연동 카드" : "연동 계좌"} required>
+                <select className={modalSelectClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))}>
+                  <option value="">선택</option>
+                  {(fixedCostDraft.payment_type === "card" ? activeCardAccounts : activeBankAccounts).map((row) => {
+                    const value = String(fixedCostDraft.payment_type === "card" ? row.card_name || row.source_name : row.account_name || row.bank_name || row.source_name);
+                    const label = accountingSourceFilterLabel(value, fixedCostDraft.payment_type === "card" ? "card" : "bank");
+                    return <option key={`${fixedCostDraft.payment_type}-${value}`} value={label}>{label}</option>;
+                  })}
+                </select>
+              </FormField>
+              <FormField label="메모" className="md:col-span-2">
+                <textarea className={modalTextareaClass} value={fixedCostDraft.memo} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+              </FormField>
+            </form>
+          ) : (
+            <form id="accounting-loan-form" onSubmit={saveLoan} className="grid gap-3 md:grid-cols-2">
+              <FormField label="납입 방식" required>
+                <select className={modalSelectClass} value={loanDraft.loan_type} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_type: event.target.value }))}>
+                  <option value="principal_interest">원리금상환</option>
+                  <option value="interest_only">이자납입</option>
+                </select>
+              </FormField>
+              <FormField label="카테고리" required>
+                <div className="grid grid-cols-2 gap-2">
+                  <select className={modalSelectClass} value={String((loanDraft as Record<string, string>).category_large || "금융비용")} onChange={(event) => setLoanDraft((prev) => ({ ...prev, category_large: event.target.value, category_middle: "" }))}>
+                    {fixedCostCategoryLargeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <select className={modalSelectClass} value={String((loanDraft as Record<string, string>).category_middle || "대출 원리금")} onChange={(event) => setLoanDraft((prev) => ({ ...prev, category_middle: event.target.value }))}>
+                    {fixedCostCategoryMiddleOptions(String((loanDraft as Record<string, string>).category_large || "금융비용")).map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </div>
+              </FormField>
+              <FormField label="대출명" required className="md:col-span-2">
+                <input className={modalInputClass} value={loanDraft.loan_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_name: event.target.value }))} />
+              </FormField>
+              <FormField label="대출금액" required>
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, principal_amount: String(asNumber(event.target.value)) }))} />
+              </FormField>
+              <FormField label="예상 납입액" required>
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_payment_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_payment_amount: String(asNumber(event.target.value)) }))} />
+              </FormField>
+              <FormField label="은행" required>
+                <input className={modalInputClass} value={loanDraft.bank_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, bank_name: event.target.value }))} />
+              </FormField>
+              <FormField label="예금주" required>
+                <input className={modalInputClass} value={loanDraft.account_holder} onChange={(event) => setLoanDraft((prev) => ({ ...prev, account_holder: event.target.value }))} />
+              </FormField>
+              <FormField label="계좌번호" required>
+                <input className={modalInputClass} value={loanDraft.account_number} onChange={(event) => setLoanDraft((prev) => ({ ...prev, account_number: event.target.value }))} />
+              </FormField>
+              <FormField label="원리금 납입일" required>
+                <input className={modalInputClass} value={loanDraft.payment_day} onChange={(event) => setLoanDraft((prev) => ({ ...prev, payment_day: event.target.value }))} placeholder="3, 15, 말일" />
+              </FormField>
+              <FormField label="대출 시작일" required>
+                <input className={modalInputClass} type="date" value={loanDraft.loan_start_date} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_start_date: event.target.value }))} />
+              </FormField>
+              <FormField label="대출 만료일" required>
+                <input className={modalInputClass} type="date" value={String((loanDraft as Record<string, string>).loan_end_date || "")} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_end_date: event.target.value, loan_period_months: String(loanPeriodMonths()) }))} />
+                <p className="mt-1 text-xs font-bold text-slate-500">{loanPeriodMonths().toLocaleString("ko-KR")}개월</p>
+              </FormField>
+              <FormField label="메모" className="md:col-span-2">
+                <textarea className={modalTextareaClass} value={loanDraft.memo} onChange={(event) => setLoanDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+              </FormField>
+            </form>
+          )}
+        </FormModal>
       )}
 
       {manualExpenseModalOpen && (
@@ -17759,7 +18256,7 @@ function ExpenseTable({
                 <span>출금: <strong className="text-base text-rose-600">{krw(filteredDebitTotal)}</strong></span>
               </>
             ) : (
-              <span>결제금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
+              <span>사용금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
             )}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
