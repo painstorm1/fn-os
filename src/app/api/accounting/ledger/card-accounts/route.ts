@@ -4,7 +4,7 @@ import { FnosDbError, selectRows } from "@/lib/fnos-db";
 
 export async function GET() {
   try {
-    const cardAccounts = await selectRows("accounting_card_accounts", { order: "sort_order.asc", limit: 500 });
+    const cardAccounts = await selectRows("accounting_card_accounts", { or: "(is_active.is.null,is_active.eq.true)", order: "sort_order.asc", limit: 500 });
     return NextResponse.json({ ok: true, card_accounts: cardAccounts });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

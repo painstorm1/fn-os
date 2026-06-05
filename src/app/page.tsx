@@ -17975,8 +17975,12 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
   const [copiedKey, setCopiedKey] = useState("");
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionDragModeRef = useRef<boolean | null>(null);
+  const selectionDragLastKeyRef = useRef("");
+  const keyboardIndexRef = useRef<number | null>(null);
   const rowKeys = accounts.map((account) => account.id || "").filter(Boolean);
   const selectedAccounts = accounts.filter((account) => account.id && selectedKeys.includes(account.id));
+  const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
   async function loadAccounts() {
@@ -18012,6 +18016,44 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [modalOpen, fileAccount, secretView]);
 
+  useEffect(() => {
+    function stopSelectionDrag() {
+      selectionDragModeRef.current = null;
+      selectionDragLastKeyRef.current = "";
+    }
+    window.addEventListener("mouseup", stopSelectionDrag);
+    window.addEventListener("blur", stopSelectionDrag);
+    return () => {
+      window.removeEventListener("mouseup", stopSelectionDrag);
+      window.removeEventListener("blur", stopSelectionDrag);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (!event.shiftKey || modalOpen || fileAccount || secretView) return;
+      if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) return;
+      if (!rowKeys.length || !selectedKeys.length) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
+      const fallbackIndex = rowKeys.findIndex((key) => key === selectedKeys[selectedKeys.length - 1]);
+      const currentIndex = keyboardIndexRef.current !== null ? keyboardIndexRef.current : fallbackIndex;
+      if (currentIndex < 0) return;
+      const targetIndex = Math.max(0, Math.min(rowKeys.length - 1, currentIndex + step));
+      if (targetIndex === currentIndex) return;
+      if (step > 0) {
+        setSelectedKeys((prev) => Array.from(new Set([...prev, rowKeys[targetIndex]])));
+        keyboardIndexRef.current = targetIndex;
+      } else {
+        const currentKey = rowKeys[currentIndex];
+        setSelectedKeys((prev) => prev.filter((key) => key !== currentKey));
+        keyboardIndexRef.current = targetIndex;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [fileAccount, modalOpen, rowKeys, secretView, selectedKeys]);
+
   function updateDraft(key: keyof FnBankAccount, value: string | boolean) {
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
@@ -18026,12 +18068,44 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setModalOpen(true);
   }
 
-  function openSelectedEdit() {
+  function setRowSelected(key: string, selected: boolean, index: number) {
+    if (!key) return;
+    keyboardIndexRef.current = index;
+    setSelectedKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function beginSelectionDrag(key: string, index: number, selected?: boolean) {
+    const nextSelected = selected ?? !selectedKeySet.has(key);
+    selectionDragModeRef.current = nextSelected;
+    selectionDragLastKeyRef.current = key;
+    setRowSelected(key, nextSelected, index);
+  }
+
+  function continueSelectionDrag(key: string, index: number) {
+    if (selectionDragModeRef.current === null || selectionDragLastKeyRef.current === key) return;
+    selectionDragLastKeyRef.current = key;
+    setRowSelected(key, selectionDragModeRef.current, index);
+  }
+
+  async function deleteSelectedAccounts() {
     if (!selectedAccounts.length) {
-      setMessage("수정할 통장을 먼저 선택해 주세요.");
+      setMessage("삭제할 통장을 먼저 선택해 주세요.");
       return;
     }
-    openEdit(selectedAccounts[0]);
+    if (!window.confirm(`선택한 통장 ${selectedAccounts.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    for (const account of selectedAccounts) {
+      const res = await fetch(`/api/accounting/ledger/bank-accounts?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(data.error || "통장 삭제 실패");
+        return;
+      }
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    setMessage("통장 설정을 삭제했습니다.");
+    setSelectedKeys([]);
+    await loadAccounts();
   }
 
   async function saveDraft() {
@@ -18124,7 +18198,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <ActionButton type="button" variant="secondary" onClick={openSelectedEdit}>수정</ActionButton>
+            <ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 예금주 / 계좌번호 검색" />
@@ -18140,7 +18214,20 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                 const selected = selectedKeys.includes(key);
                 return (
                   <tr key={key || `${account.bank_name}-${index}`} onClick={() => openEdit(account)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
-                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()} onMouseEnter={() => continueSelectionDrag(key, index)}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          beginSelectionDrag(key, index);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                      >
+                        {index + 1}
+                      </button>
+                    </td>
                     <td className="truncate py-2 font-black" title={account.bank_name || ""}>{account.bank_name || "-"}</td>
                     <td className="truncate py-2 font-bold">{account.account_holder || "-"}</td>
                     <td className="py-2 font-mono text-slate-700">
@@ -18207,8 +18294,12 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [draft, setDraft] = useState<FnCardAccount>(emptyDraft);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
+  const selectionDragModeRef = useRef<boolean | null>(null);
+  const selectionDragLastKeyRef = useRef("");
+  const keyboardIndexRef = useRef<number | null>(null);
   const rowKeys = accounts.map((account) => account.id || "").filter(Boolean);
   const selectedAccounts = accounts.filter((account) => account.id && selectedKeys.includes(account.id));
+  const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
   async function loadAccounts() {
@@ -18238,6 +18329,44 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [modalOpen, secretView]);
 
+  useEffect(() => {
+    function stopSelectionDrag() {
+      selectionDragModeRef.current = null;
+      selectionDragLastKeyRef.current = "";
+    }
+    window.addEventListener("mouseup", stopSelectionDrag);
+    window.addEventListener("blur", stopSelectionDrag);
+    return () => {
+      window.removeEventListener("mouseup", stopSelectionDrag);
+      window.removeEventListener("blur", stopSelectionDrag);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (!event.shiftKey || modalOpen || secretView) return;
+      if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) return;
+      if (!rowKeys.length || !selectedKeys.length) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
+      const fallbackIndex = rowKeys.findIndex((key) => key === selectedKeys[selectedKeys.length - 1]);
+      const currentIndex = keyboardIndexRef.current !== null ? keyboardIndexRef.current : fallbackIndex;
+      if (currentIndex < 0) return;
+      const targetIndex = Math.max(0, Math.min(rowKeys.length - 1, currentIndex + step));
+      if (targetIndex === currentIndex) return;
+      if (step > 0) {
+        setSelectedKeys((prev) => Array.from(new Set([...prev, rowKeys[targetIndex]])));
+        keyboardIndexRef.current = targetIndex;
+      } else {
+        const currentKey = rowKeys[currentIndex];
+        setSelectedKeys((prev) => prev.filter((key) => key !== currentKey));
+        keyboardIndexRef.current = targetIndex;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [modalOpen, rowKeys, secretView, selectedKeys]);
+
   function updateDraft(key: keyof FnCardAccount, value: string | boolean) {
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
@@ -18260,12 +18389,44 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setModalOpen(true);
   }
 
-  function openSelectedEdit() {
+  function setRowSelected(key: string, selected: boolean, index: number) {
+    if (!key) return;
+    keyboardIndexRef.current = index;
+    setSelectedKeys((prev) => selected ? Array.from(new Set([...prev, key])) : prev.filter((item) => item !== key));
+  }
+
+  function beginSelectionDrag(key: string, index: number, selected?: boolean) {
+    const nextSelected = selected ?? !selectedKeySet.has(key);
+    selectionDragModeRef.current = nextSelected;
+    selectionDragLastKeyRef.current = key;
+    setRowSelected(key, nextSelected, index);
+  }
+
+  function continueSelectionDrag(key: string, index: number) {
+    if (selectionDragModeRef.current === null || selectionDragLastKeyRef.current === key) return;
+    selectionDragLastKeyRef.current = key;
+    setRowSelected(key, selectionDragModeRef.current, index);
+  }
+
+  async function deleteSelectedAccounts() {
     if (!selectedAccounts.length) {
-      setMessage("수정할 카드를 먼저 선택해 주세요.");
+      setMessage("삭제할 카드를 먼저 선택해 주세요.");
       return;
     }
-    openEdit(selectedAccounts[0]);
+    if (!window.confirm(`선택한 카드 ${selectedAccounts.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    for (const account of selectedAccounts) {
+      const res = await fetch(`/api/accounting/ledger/card-accounts?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(data.error || "카드 삭제 실패");
+        return;
+      }
+    }
+    invalidateClientCache("/api/accounting/summary");
+    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    setMessage("카드 설정을 삭제했습니다.");
+    setSelectedKeys([]);
+    await loadAccounts();
   }
 
   async function saveDraft() {
@@ -18330,7 +18491,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     <div className="space-y-4">
       <Panel title="카드관리" subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체카드</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">카드수 {accounts.length.toLocaleString("ko-KR")}개</span></div>} action={<ActionButton type="button" onClick={openNew}>F2 새 카드</ActionButton>}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2"><ActionButton type="button" variant="secondary" onClick={openSelectedEdit}>수정</ActionButton><span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span></div>
+          <div className="flex flex-wrap items-center gap-2"><ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton><span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span></div>
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 카드번호 / 소유자 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
@@ -18342,7 +18503,20 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                 const selected = selectedKeys.includes(key);
                 return (
                   <tr key={key || `${account.card_name}-${index}`} onClick={() => openEdit(account)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
-                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
+                    <td className="py-2 text-center" onClick={(event) => event.stopPropagation()} onMouseEnter={() => continueSelectionDrag(key, index)}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          beginSelectionDrag(key, index);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}
+                      >
+                        {index + 1}
+                      </button>
+                    </td>
                     <td className="truncate py-2 font-black" title={account.card_name || ""}>{cardExpiryWarning(account) && <span className="mr-2 rounded bg-rose-50 px-2 py-0.5 text-xs font-black text-rose-600">유효기간 만료</span>}{account.card_name || "-"}</td>
                     <td className="truncate py-2 font-mono text-slate-700">{formatCardNumber(account.card_number) || "-"}</td>
                     <td className="truncate py-2 font-mono text-slate-700">{formatCardExpiry(account.expiry_date)} / {account.cvc_hint || "-"}</td>
