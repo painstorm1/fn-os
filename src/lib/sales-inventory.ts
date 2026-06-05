@@ -58,20 +58,35 @@ function buildSourceRef(sourceFileName: string | undefined, date: string, sequen
   return [sourceFileName || "FN_OS_WEB", date, sequence, productCode, qty].map(cleanForRef).join("|");
 }
 
-function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
+function vatIsExcluded(row: RawRow) {
+  const vatType = text(first(row, ["VAT 포함/별도", "vat_type", "VAT_TYPE"])).toLowerCase();
+  return vatType.includes("별도") || vatType.includes("excluded");
+}
+
+function calculatedAmounts(row: RawRow) {
   const qty = numberValue(first(row, ["수량", "qty", "QTY"]));
   const price = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
-  const supplyAmt = numberValue(first(row, ["공급가액", "정산예정금액", "supply_amt", "SUPPLY_AMT"])) || qty * price;
-  const totalAmt = numberValue(first(row, ["총금액", "판매금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
+  const explicitTax = numberValue(first(row, ["세액", "부가세", "tax_amt", "vat_amount", "VAT_AMT"]));
+  const tax = explicitTax || (vatIsExcluded(row) ? qty * price * 0.1 : 0);
+  const calculatedSupply = qty * price + tax;
+  const supplyAmt = numberValue(first(row, ["공급가액", "정산예정금액", "supply_amt", "SUPPLY_AMT"])) || calculatedSupply;
+  const totalAmt = numberValue(first(row, ["합계금액", "총금액", "판매금액", "구매금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
+  return { qty, price, tax, supplyAmt, totalAmt };
+}
+
+function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
+  const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
   const saleDate = text(first(row, ["일자", "판매일", "sale_date", "io_date", "IO_DATE"])) || todayCompact();
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
+  const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
   const sku = text(first(row, ["SKU", "sku"])) || productCode;
+  const productKey = productCode || prodName;
 
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
-    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, saleDate, uploadSerNo, productCode, qty),
+    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, saleDate, uploadSerNo, productKey, qty),
     upload_batch_id: batchId,
     io_date: saleDate,
     sale_date: saleDate,
@@ -79,12 +94,12 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
     cust_code: text(first(row, ["거래처코드", "customer_code", "cust_code", "CUST"])),
     cust_name: text(first(row, ["거래처명", "쇼핑몰", "customer_name", "cust_name", "CUST_DES"])),
     emp_cd: text(first(row, ["담당자", "emp_cd", "EMP_CD"])),
-    wh_cd: text(first(row, ["출하창고", "창고코드", "warehouse_code", "wh_cd", "WH_CD"])) || "100",
+    wh_cd: text(first(row, ["출하창고", "입고창고", "창고코드", "warehouse_code", "wh_cd", "WH_CD"])) || "100",
     io_type: text(first(row, ["거래유형", "io_type", "IO_TYPE"])),
     currency: text(first(row, ["통화", "currency", "CURRENCY"])),
     exchange_rate: numberValue(first(row, ["환율", "exchange_rate", "EXCHANGE_RATE"])),
     prod_cd: productCode,
-    prod_name: text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"])),
+    prod_name: prodName,
     size_des: text(first(row, ["규격", "옵션", "size_des", "SIZE_DES"])),
     sku,
     qty,
@@ -93,7 +108,7 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
     foreign_amt: numberValue(first(row, ["외화금액", "foreign_amt", "FOREIGN_AMT"])),
     supply_amt: supplyAmt,
     supply_amount: supplyAmt,
-    vat_amount: numberValue(first(row, ["부가세", "vat_amount", "VAT_AMT"])),
+    vat_amount: tax,
     total_amount: totalAmt,
     remarks: text(first(row, ["적요", "배송요청사항", "remarks", "REMARKS"])),
     make_flag: text(first(row, ["생산전표생성", "make_flag", "MAKE_FLAG"])),
@@ -106,19 +121,18 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
 }
 
 function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
-  const qty = numberValue(first(row, ["수량", "qty", "QTY"]));
-  const price = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
-  const supplyAmt = numberValue(first(row, ["공급가액", "supply_amt", "SUPPLY_AMT"])) || qty * price;
-  const totalAmt = numberValue(first(row, ["총금액", "구매금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
+  const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
   const purchaseDate = text(first(row, ["일자", "구매일", "purchase_date", "io_date", "IO_DATE"])) || todayCompact();
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
+  const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
   const sku = text(first(row, ["SKU", "sku"])) || productCode;
+  const productKey = productCode || prodName;
 
   return {
     source_type: "fn_os",
     source_file_name: sourceFileName || null,
-    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, purchaseDate, uploadSerNo, productCode, qty),
+    source_ref_id: text(first(row, ["source_ref_id", "SOURCE_REF_ID"])) || buildSourceRef(sourceFileName, purchaseDate, uploadSerNo, productKey, qty),
     upload_batch_id: batchId,
     io_date: purchaseDate,
     purchase_date: purchaseDate,
@@ -127,15 +141,15 @@ function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFi
     cust_name: text(first(row, ["거래처명", "공급처", "supplier_name", "cust_name", "CUST_DES"])),
     wh_cd: text(first(row, ["입고창고", "출하창고", "창고코드", "warehouse_code", "wh_cd", "WH_CD"])) || "100",
     prod_cd: productCode,
-    prod_name: text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"])),
+    prod_name: prodName,
     sku,
     qty,
     price,
     unit_price: price,
     supply_amt: supplyAmt,
     supply_amount: supplyAmt,
-    vat_amt: numberValue(first(row, ["부가세", "vat_amt", "VAT_AMT"])),
-    vat_amount: numberValue(first(row, ["부가세", "vat_amount", "VAT_AMT"])),
+    vat_amt: tax,
+    vat_amount: tax,
     total_amount: totalAmt,
     remarks: text(first(row, ["적요", "memo", "remarks", "REMARKS"])),
     sync_status: "SAVED",
@@ -216,12 +230,17 @@ async function existingSourceRefs(table: "sales" | "purchases", refs: string[]) 
 async function findProduct(row: RawRow) {
   const productCode = text(row.prod_cd || row.product_code);
   const sku = text(row.sku) || productCode;
+  const name = text(row.prod_name || row.product_name);
   const byCode = productCode ? await optionalRows("products", { product_code: `eq.${productCode}`, limit: 1 }) : [];
   if (byCode[0]) return byCode[0];
   const byLegacyCode = productCode ? await optionalRows("products", { prod_cd: `eq.${productCode}`, limit: 1 }) : [];
   if (byLegacyCode[0]) return byLegacyCode[0];
   const bySku = sku ? await optionalRows("products", { sku: `eq.${sku}`, limit: 1 }) : [];
-  return bySku[0] || null;
+  if (bySku[0]) return bySku[0];
+  const byProductName = name ? await optionalRows("products", { product_name: `eq.${name}`, limit: 1 }) : [];
+  if (byProductName[0]) return byProductName[0];
+  const byLegacyName = name ? await optionalRows("products", { prod_name: `eq.${name}`, limit: 1 }) : [];
+  return byLegacyName[0] || null;
 }
 
 function productCode(row: RawRow | null | undefined) {
@@ -349,11 +368,28 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
   return saved.length;
 }
 
+function salesInventoryEntryRequiredError(row: RawRow, kind: "sales" | "purchases", index: number) {
+  const date = text(first(row, ["date", "sale_date", "purchase_date", "io_date", "IO_DATE", "일자"]));
+  const customer = text(first(row, ["customer_code", "customer_name", "supplier_code", "supplier_name", "cust_code", "cust_name", "CUST", "CUST_DES", "거래처코드", "거래처명", "공급처코드", "공급처"]));
+  const warehouse = text(first(row, ["warehouse_code", "wh_cd", "WH_CD", "입고창고", "출하창고", "창고코드"]));
+  const product = text(first(row, ["product_code", "product_name", "prod_cd", "prod_name", "PROD_CD", "PROD_DES", "품목코드", "품목명"]));
+  const qty = numberValue(first(row, ["qty", "QTY", "수량"]));
+  const missing: string[] = [];
+  if (!date) missing.push("date");
+  if (!customer) missing.push("customer");
+  if (!warehouse) missing.push(kind === "purchases" ? "purchase warehouse" : "warehouse");
+  if (!product) missing.push("product");
+  if (qty <= 0) missing.push("qty");
+  return missing.length ? `${index + 1}: missing ${missing.join(", ")}` : "";
+}
+
 export async function importSalesRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
   const batch = await createUploadBatch("sales", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
+  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index)).filter(Boolean);
+  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "sales", index));
+  const normalized = validRows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
@@ -368,9 +404,9 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
-    duplicate_count: rows.length - freshRows.length,
+    duplicate_count: validRows.length - freshRows.length,
     inventory_movement_count: movementCount,
-    errors: [],
+    errors: invalidErrors,
     batch_id: batch.id,
     external_sync_enabled: false,
   };
@@ -380,7 +416,9 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   if (!hasDbConfig()) return noDbResult(rows);
 
   const batch = await createUploadBatch("purchases", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
+  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "purchases", index)).filter(Boolean);
+  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "purchases", index));
+  const normalized = validRows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
   const existingRefs = await existingSourceRefs("purchases", normalized.map((row) => row.source_ref_id));
   const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("purchases", freshRows) : { saved: [], removedColumns: [] };
@@ -395,9 +433,9 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
-    duplicate_count: rows.length - freshRows.length,
+    duplicate_count: validRows.length - freshRows.length,
     inventory_movement_count: movementCount,
-    errors: [],
+    errors: invalidErrors,
     batch_id: batch.id,
     external_sync_enabled: false,
   };
