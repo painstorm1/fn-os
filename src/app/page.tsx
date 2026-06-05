@@ -1296,6 +1296,23 @@ function formatCommaNumber(value: unknown) {
   return digits ? Number(digits).toLocaleString("ko-KR") : "";
 }
 
+function formatResidentNo(value: unknown) {
+  const digits = onlyDigits(value).slice(0, 13);
+  if (digits.length <= 6) return digits;
+  return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+}
+
+function formatKoreanPhone(value: unknown) {
+  const digits = onlyDigits(value).slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.startsWith("02")) {
+    if (digits.length <= 6) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}-${digits.slice(2, digits.length - 4)}-${digits.slice(-4)}`;
+  }
+  if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
 function personnelWorkingMonths(joinedAt: string) {
   if (!joinedAt) return "";
   const joined = new Date(`${joinedAt}T00:00:00`);
@@ -11869,6 +11886,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       id: value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       status: normalizePersonnelStatus(value.status),
       role: normalizePersonnelRole(value.role),
+      resident_no: formatResidentNo(value.resident_no),
+      phone: formatKoreanPhone(value.phone),
       salary: onlyDigits(value.salary),
       address: composePersonnelAddress(value) || String(value.address || ""),
     };
@@ -11887,7 +11906,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   function updateDraft(key: keyof PersonnelEmployee, value: string) {
     setDraft((prev) => ({
       ...prev,
-      [key]: key === "status" ? normalizePersonnelStatus(value) : key === "role" ? normalizePersonnelRole(value) : key === "salary" ? onlyDigits(value) : value,
+      [key]: key === "status" ? normalizePersonnelStatus(value) : key === "role" ? normalizePersonnelRole(value) : key === "salary" ? onlyDigits(value) : key === "resident_no" ? formatResidentNo(value) : key === "phone" ? formatKoreanPhone(value) : value,
       ...(key === "detail_address" ? { address: composePersonnelAddress({ ...prev, detail_address: value }) } : {}),
     }));
   }
