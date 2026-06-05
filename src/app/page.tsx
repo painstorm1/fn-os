@@ -10935,6 +10935,9 @@ type DaumPostcodeData = {
   autoRoadAddress?: string;
   autoJibunAddress?: string;
   userSelectedType?: string;
+  bname?: string;
+  buildingName?: string;
+  apartment?: string;
 };
 
 type DaumPostcodeConstructor = new (options: {
@@ -11250,6 +11253,16 @@ function composePersonnelAddress(employee: Partial<PersonnelEmployee>) {
   return [base, detail].filter(Boolean).join(" ");
 }
 
+function daumRoadAddressWithExtra(data: DaumPostcodeData) {
+  const road = String(data.roadAddress || data.autoRoadAddress || "").trim();
+  const buildingName = String(data.buildingName || "").trim();
+  const bname = /[동로가]$/u.test(String(data.bname || "")) ? String(data.bname || "").trim() : "";
+  const extras = [buildingName || bname].filter(Boolean);
+  if (!road || !extras.length) return road;
+  const extraText = extras.join(", ");
+  return road.includes(extraText) ? road : `${road} (${extraText})`;
+}
+
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 function loadDaumPostcodeScript() {
@@ -11308,11 +11321,11 @@ function DaumPostcodeModal({ onClose, onSelect }: { onClose: () => void; onSelec
   }, [onClose, onSelect]);
 
   return (
-    <SelectionModal title="주소검색" description="Daum/Kakao 우편번호 서비스에서 주소를 검색하고 선택해 주세요." onClose={onClose} size="xl" className="overflow-hidden">
+    <SelectionModal title="주소검색" description="Daum/Kakao 우편번호 서비스에서 주소를 검색하고 선택해 주세요." onClose={onClose} size="md" className="overflow-hidden">
       {error ? (
         <div className="rounded-md bg-rose-50 px-4 py-6 text-sm font-bold text-rose-600">{error}</div>
       ) : (
-        <div ref={containerRef} className="h-[560px] min-h-[420px] w-full overflow-hidden rounded-md border border-slate-200 bg-white" />
+        <div ref={containerRef} className="h-[440px] w-full overflow-hidden rounded-md border border-slate-200 bg-white" />
       )}
     </SelectionModal>
   );
@@ -11634,7 +11647,9 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   const [bulkCommonValue, setBulkCommonValue] = useState("");
   const [bulkDrafts, setBulkDrafts] = useState<Record<string, Partial<Record<PersonnelBulkField, string>>>>({});
   const [addressSearchOpen, setAddressSearchOpen] = useState(false);
+  const [copiedAddressField, setCopiedAddressField] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const detailAddressInputRef = useRef<HTMLInputElement | null>(null);
   const selectModeRef = useRef<"select" | "deselect">("select");
   const storageKey = "fnos-personnel-employees";
   const pageSize = 20;
@@ -11765,11 +11780,24 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
       const next = {
         ...prev,
         postal_code: String(data.zonecode || "").trim(),
-        road_address: String(data.roadAddress || data.autoRoadAddress || "").trim(),
+        road_address: daumRoadAddressWithExtra(data),
         jibun_address: String(data.jibunAddress || data.autoJibunAddress || "").trim(),
       };
       return { ...next, address: composePersonnelAddress(next) };
     });
+    window.setTimeout(() => detailAddressInputRef.current?.focus(), 0);
+  }
+
+  async function copyAddressText(value: string, field: string) {
+    const text = value.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedAddressField(field);
+      window.setTimeout(() => setCopiedAddressField((prev) => prev === field ? "" : prev), 1000);
+    } catch {
+      window.alert("복사하지 못했습니다. 브라우저 권한을 확인해 주세요.");
+    }
   }
 
   function setSelected(key: string, selected: boolean) {
@@ -12087,16 +12115,32 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
               <FormField label="이메일" required><input className={modalInputClass} value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} placeholder="name@example.com" /></FormField>
               <FormField label="주소" required className="md:col-span-2">
                 <div className="grid gap-2">
-                  <div className="grid gap-2 md:grid-cols-[160px_120px_1fr]">
-                    <input className={modalInputClass} value={draft.postal_code || ""} readOnly placeholder="우편번호" />
+                  <div className="grid gap-2 md:grid-cols-[120px_180px_1fr]">
                     <ActionButton type="button" variant="secondary" onClick={() => setAddressSearchOpen(true)}>주소검색</ActionButton>
-                    <input className={modalInputClass} value={composePersonnelAddress(draft)} readOnly placeholder="선택한 주소" />
+                    <div className="relative">
+                      <input className={`${modalInputClass} pr-10`} value={draft.postal_code || ""} readOnly placeholder="우편번호" />
+                      <button type="button" onClick={() => void copyAddressText(String(draft.postal_code || ""), "postal")} className="absolute right-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-orange-50 hover:text-orange-600" title="우편번호 복사" aria-label="우편번호 복사">
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                      {copiedAddressField === "postal" && <span className="absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-black text-white shadow-lg">복사되었습니다.</span>}
+                    </div>
+                    <input ref={detailAddressInputRef} className={modalInputClass} value={draft.detail_address || ""} onChange={(event) => updateDraft("detail_address", event.target.value)} placeholder="상세주소" />
                   </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <input className={modalInputClass} value={draft.road_address || ""} readOnly placeholder="도로명주소" />
-                    <input className={modalInputClass} value={draft.jibun_address || ""} readOnly placeholder="지번주소" />
+                  <div className="grid gap-2 md:grid-cols-[1fr_40px]">
+                    <input className={modalInputClass} value={composePersonnelAddress(draft)} readOnly placeholder="주소" />
+                    <div className="relative">
+                      <button type="button" onClick={() => void copyAddressText(composePersonnelAddress(draft), "address")} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-slate-500 hover:bg-orange-50 hover:text-orange-600" title="주소 복사" aria-label="주소 복사">
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                      {copiedAddressField === "address" && <span className="absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-black text-white shadow-lg">복사되었습니다.</span>}
+                    </div>
                   </div>
-                  <input className={modalInputClass} value={draft.detail_address || ""} onChange={(event) => updateDraft("detail_address", event.target.value)} placeholder="상세주소" />
                 </div>
               </FormField>
               <FormField label="입사일자" required>
