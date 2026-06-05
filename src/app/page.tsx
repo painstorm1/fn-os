@@ -8007,6 +8007,8 @@ type SalesPurchaseEntryPrefill = {
   vatMode?: SalesPurchaseVatMode;
   sourceRefBase?: string;
   sourceFileName?: string;
+  replaceGroupKey?: string;
+  title?: string;
   lines?: Array<Partial<SalesPurchaseEntryLine>>;
 };
 type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
@@ -9478,7 +9480,36 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   });
 
   const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
+  const historyLineRows = historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
   const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters);
+
+  function openEntryEditModal(row: Record<string, unknown>) {
+    const groupKey = entryRowKey(row, historyMode);
+    const sourceRefBase = entryRowSourceRefBase(row, historyMode);
+    const matchingLines = historyLineRows.filter((line, index) => entryRowKey(line, historyMode, index) === groupKey);
+    const lines = (matchingLines.length ? matchingLines : [row]).map((line) => ({
+      prod_cd: entryRowProductCode(line),
+      prod_name: entryRowProduct(line),
+      qty: String(entryRowQty(line) || 1),
+      price: String(Number(line.price ?? line.unit_price ?? 0) || ""),
+      memo: entryRowMemo(line) === "-" ? "" : entryRowMemo(line),
+    }));
+    setEntryPrefill({
+      title: historyMode === "sales" ? "판매 수정" : "구매 수정",
+      entryDate: entryRowDate(row) || entryDateToday(),
+      customerCode: String(row.cust_code || row.customer_code || row.supplier_code || ""),
+      customerText: entryRowCustomer(row, historyMode),
+      warehouseCode: entryRowWarehouse(row),
+      warehouseText: entryRowWarehouse(row),
+      vatMode: String(row.vat_type || "").includes("별도") || String(row.vat_type || "").includes("excluded") ? "excluded" : "included",
+      sourceRefBase,
+      sourceFileName: historyMode === "sales" ? "FN_OS_SALES_ENTRY_EDIT" : "FN_OS_PURCHASE_ENTRY_EDIT",
+      replaceGroupKey: groupKey,
+      lines,
+    });
+    setEntryModalMode(historyMode);
+  }
+
   const inventorySalesStats = buildInventorySalesStats(summary?.sales_inventory_basis || summary?.recent_sales || [], inventoryFilters.date);
   const inventoryWarehouseByCode = new Map(inventoryWarehouses.map((warehouse) => [warehouse.warehouse_code, warehouse]));
   const inventoryListRows = inventoryProducts.flatMap((product) => {
@@ -10167,7 +10198,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               }}>이번달</button>
             </div>
           </div>
-          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }} />
+          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }} onEditEntry={openEntryEditModal} />
         </Panel>
       )}
 
@@ -11049,6 +11080,19 @@ function SalesPurchaseEntryModal({
     setSaving(true);
     try {
       const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+      if (initialDraft?.replaceGroupKey) {
+        const deleteRes = await fetch(endpoint, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ group_keys: [initialDraft.replaceGroupKey] }),
+        });
+        const deleteData = await deleteRes.json().catch(() => ({}));
+        if (!deleteRes.ok || deleteData.ok === false) {
+          setLocalError(deleteData.error || "기존 입력 삭제 실패");
+          return;
+        }
+      }
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -11089,7 +11133,7 @@ function SalesPurchaseEntryModal({
 
   return (
     <FormModal
-      title={mode === "sales" ? "판매입력" : "구매입력"}
+      title={initialDraft?.title || (mode === "sales" ? "판매입력" : "구매입력")}
       onClose={onClose}
       size="full"
       footer={
@@ -14998,7 +15042,17 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
   );
 }
 
-function SalesInventoryTable({ rows, mode, onChanged }: { rows: Array<Record<string, unknown>>; mode: SalesPurchaseMode; onChanged: () => void }) {
+function SalesInventoryTable({
+  rows,
+  mode,
+  onChanged,
+  onEditEntry,
+}: {
+  rows: Array<Record<string, unknown>>;
+  mode: SalesPurchaseMode;
+  onChanged: () => void;
+  onEditEntry: (row: Record<string, unknown>) => void;
+}) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [editingRows, setEditingRows] = useState<Array<Record<string, unknown>>>([]);
   const [editFields, setEditFields] = useState<Array<"date" | "customer" | "warehouse" | "vat">>(["date", "customer", "warehouse", "vat"]);
@@ -15191,7 +15245,7 @@ function SalesInventoryTable({ rows, mode, onChanged }: { rows: Array<Record<str
               const key = entryRowKey(row, mode, index);
               const selected = selectedKeys.includes(key);
               return (
-                <tr key={key} onDoubleClick={() => openEdit([row])} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
+                <tr key={key} onClick={() => onEditEntry(row)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
                   <td className="py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => selection.beginSelection(key, index, event)} onMouseEnter={() => selection.continueSelection(key, index)} /></td>
                   <td className="truncate py-2 font-bold text-blue-700">{entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), index + 1)}</td>
                   <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
