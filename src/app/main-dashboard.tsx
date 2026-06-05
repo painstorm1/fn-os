@@ -329,7 +329,7 @@ export default function MainDashboard() {
         <div>
           <h1 className="text-[28px] font-bold leading-[1.3] tracking-normal text-gray-900">FN OS</h1>
           <p className="mt-1.5 text-sm font-medium text-gray-500">{dateText(summary?.today)}</p>
-          {loading && <p className="mt-1 text-xs font-medium text-gray-400">대시보드 데이터를 불러오는 중입니다.</p>}
+
           {summary?.ok === false && <p className="mt-1 text-xs font-semibold text-rose-600">{summary.error}</p>}
         </div>
         <div className="grid grid-cols-3 gap-5 pt-2">

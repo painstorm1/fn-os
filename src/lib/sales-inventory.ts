@@ -58,6 +58,13 @@ function buildSourceRef(sourceFileName: string | undefined, date: string, sequen
   return [sourceFileName || "FN_OS_WEB", date, sequence, productCode, qty].map(cleanForRef).join("|");
 }
 
+function legacyProductEntryRequiredError(row: RawRow, mode: "sales" | "purchases", index: number) {
+  const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
+  const productName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
+  if (productCode || productName) return "";
+  return `${mode === "sales" ? "판매" : "구매"} ${index + 1}행: 품목코드 또는 품목명이 필요합니다.`;
+}
+
 function vatIsExcluded(row: RawRow) {
   const vatType = text(first(row, ["VAT 포함/별도", "vat_type", "VAT_TYPE"])).toLowerCase();
   return vatType.includes("별도") || vatType.includes("excluded");
@@ -72,6 +79,21 @@ function calculatedAmounts(row: RawRow) {
   const supplyAmt = numberValue(first(row, ["공급가액", "정산예정금액", "supply_amt", "SUPPLY_AMT"])) || calculatedSupply;
   const totalAmt = numberValue(first(row, ["합계금액", "총금액", "판매금액", "구매금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
   return { qty, price, tax, supplyAmt, totalAmt };
+}
+
+function legacyEntryRequiredError(row: RawRow, kind: "sales" | "purchases", index: number) {
+  const date = text(first(row, ["일자", "판매일", "구매일", "sale_date", "purchase_date", "io_date", "IO_DATE"]));
+  const customer = text(first(row, ["거래처코드", "거래처명", "공급처코드", "공급처", "customer_code", "customer_name", "supplier_code", "supplier_name", "cust_code", "cust_name", "CUST", "CUST_DES"]));
+  const warehouse = text(first(row, ["입고창고", "출하창고", "창고코드", "warehouse_code", "wh_cd", "WH_CD"]));
+  const product = text(first(row, ["품목코드", "품목명", "product_code", "product_name", "prod_cd", "prod_name", "PROD_CD", "PROD_DES"]));
+  const qty = numberValue(first(row, ["수량", "qty", "QTY"]));
+  const missing: string[] = [];
+  if (!date) missing.push("일자");
+  if (!customer) missing.push("거래처코드 또는 거래처명");
+  if (!warehouse) missing.push(kind === "purchases" ? "입고창고" : "창고");
+  if (!product) missing.push("품목코드 또는 품목명");
+  if (qty <= 0) missing.push("수량");
+  return missing.length ? `${index + 1}행 필수값 누락: ${missing.join(", ")}` : "";
 }
 
 function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string) {

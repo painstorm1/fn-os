@@ -201,10 +201,9 @@ const salesSubMenus = [
 
 const accountingSubMenus = [
   { label: "대시보드", tab: "dashboard" },
+  { label: "DB작업실", tab: "db" },
   { label: "통장/카드 내역", tab: "ledger" },
   { label: "고정비", tab: "fixed" },
-  { label: "설정", tab: "settings" },
-  { label: "검토필요", tab: "review" },
 ];
 
 const sidebarSubMenuContainerClass = "ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3";
@@ -5217,11 +5216,20 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                           {linkedSkus.length.toLocaleString("ko-KR")}개 품목 연동
                         </button>
                         {expandedSkuLines[index] && (
-                          <div className="flex flex-wrap gap-1">
+                          <div className="grid max-w-3xl gap-1 rounded-lg border border-orange-100 bg-orange-50/50 p-2">
                             {linkedSkus.map((link) => (
-                              <span key={`${linkOptionName(link)}:${link.product_id}`} className="rounded-md border border-orange-100 bg-orange-50 px-2 py-1 text-orange-700">
-                                {linkVariantLabel(link) || fnProductSku(link.product)}{link.default_qty ? ` ${Number(link.default_qty).toLocaleString("ko-KR")}개` : ""}
-                              </span>
+                              <label key={`${linkOptionName(link)}:${link.product_id}`} className="grid items-center gap-2 rounded-md bg-white px-2 py-1 text-orange-700 md:grid-cols-[1fr_100px_32px]">
+                                <span className="truncate">{linkVariantLabel(link) || fnProductSku(link.product)}</span>
+                                <input
+                                  className="h-8 rounded-md border border-orange-200 px-2 text-right text-xs font-black outline-orange-400"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={linkPurchaseQty(line, link)}
+                                  onChange={(event) => updateLineSkuQty(index, link, event.target.value)}
+                                />
+                                <span className="text-xs font-black">개</span>
+                              </label>
                             ))}
                           </div>
                         )}
@@ -8099,6 +8107,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [showJsonTool, setShowJsonTool] = useState(false);
   const [historyMode, setHistoryMode] = useState<SalesPurchaseMode>("sales");
   const [entryModalMode, setEntryModalMode] = useState<SalesPurchaseMode | null>(null);
+  const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
@@ -8148,6 +8157,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
   const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed"; message: string }>>([]);
   const [shippingPreviewTab, setShippingPreviewTab] = useState<"shipping" | DirectShippingPartner>("shipping");
+  const isOnlineSection = section === "online";
+  const isHistorySection = section === "history";
+  const isInventorySection = section === "inventory";
+  const isMasterSection = section === "master";
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
@@ -8223,6 +8236,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }, []);
 
   useEffect(() => {
+    if (section !== "history") return;
+    const raw = localStorage.getItem(IMPORT_PURCHASE_PREFILL_STORAGE_KEY);
+    if (!raw) return;
+    localStorage.removeItem(IMPORT_PURCHASE_PREFILL_STORAGE_KEY);
+    try {
+      const prefill = JSON.parse(raw) as SalesPurchaseEntryPrefill;
+      setHistoryMode("purchases");
+      setEntryPrefill(prefill);
+      setEntryModalMode("purchases");
+    } catch {
+      setHistoryMode("purchases");
+      setEntryPrefill(null);
+      setEntryModalMode("purchases");
+    }
+  }, [section]);
+
+  useEffect(() => {
     const inventoryUrl = `/api/fnos/products/master?page=1&pageSize=5000&asOf=${encodeURIComponent(inventoryFilters.date)}`;
     const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>(inventoryUrl, { storageTtl: 10 * 60_000 });
     if (cached) {
@@ -8257,10 +8287,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }, [inventorySettings]);
 
-  const isOnlineSection = section === "online";
-  const isHistorySection = section === "history";
-  const isInventorySection = section === "inventory";
-  const isMasterSection = section === "master";
   const sectionTitle = isOnlineSection ? "온라인 발주" : isHistorySection ? "판매/구매" : isInventorySection ? "재고현황" : "기초관리";
   const sectionDescription = isOnlineSection || isHistorySection
     ? undefined
@@ -8285,6 +8311,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function openEntryModal(mode: "sales" | "purchases") {
+    setEntryPrefill(null);
     setEntryModalMode(mode);
     setEntryRows([]);
     setEditingEntryIndex(null);
@@ -9868,10 +9895,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     <span className={`h-3 w-3 rounded-full ${
                       item.status === "done" ? "bg-emerald-500" : item.status === "running" ? "bg-amber-400" : item.status === "failed" ? "bg-rose-500" : "bg-slate-300"
                     }`} />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
-                      <div className="truncate text-xs font-semibold text-gray-500">{item.message}</div>
-                    </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
+                      </div>
                   </div>
                 ))}
               </div>
@@ -10365,13 +10391,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <SalesPurchaseEntryModal
           mode={entryModalMode}
           recentRows={entryModalMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []}
-          onClose={() => setEntryModalMode(null)}
+          initialDraft={entryPrefill || undefined}
+          onClose={() => {
+            setEntryPrefill(null);
+            setEntryModalMode(null);
+          }}
           onSaved={(savedRows) => {
             if (savedRows.length) {
               const key = entryModalMode === "sales" ? "recent_sales" : "recent_purchases";
               setSummary((prev) => prev ? { ...prev, [key]: [...savedRows, ...((prev[key] as Array<Record<string, unknown>> | undefined) || [])].slice(0, 30) } : prev);
             }
             invalidateSalesInventoryCaches();
+            setEntryPrefill(null);
             setEntryModalMode(null);
             loadSummary(true);
           }}
@@ -10418,23 +10449,28 @@ function OrderCheckTable({ orders, items }: { orders: Array<Record<string, unkno
 function SalesPurchaseEntryModal({
   mode,
   recentRows,
+  initialDraft,
   onClose,
   onSaved,
 }: {
   mode: SalesPurchaseMode;
   recentRows: Array<Record<string, unknown>>;
+  initialDraft?: SalesPurchaseEntryPrefill;
   onClose: () => void;
   onSaved: (savedRows: Array<Record<string, unknown>>) => void;
 }) {
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   const defaultLine = (): SalesPurchaseEntryLine => ({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, prod_cd: "", prod_name: "", qty: "1", price: "", memo: "" });
-  const [entryDate, setEntryDate] = useState(entryDateToday());
-  const [customerText, setCustomerText] = useState("");
-  const [customerCode, setCustomerCode] = useState("");
-  const [warehouseText, setWarehouseText] = useState("100");
-  const [warehouseCode, setWarehouseCode] = useState("100");
-  const [vatMode, setVatMode] = useState<SalesPurchaseVatMode>("included");
-  const [lines, setLines] = useState<SalesPurchaseEntryLine[]>([defaultLine()]);
+  const prefillLines = initialDraft?.lines?.length
+    ? initialDraft.lines.map((line) => ({ ...defaultLine(), ...line }))
+    : [defaultLine()];
+  const [entryDate, setEntryDate] = useState(initialDraft?.entryDate || entryDateToday());
+  const [customerText, setCustomerText] = useState(initialDraft?.customerText || "");
+  const [customerCode, setCustomerCode] = useState(initialDraft?.customerCode || "");
+  const [warehouseText, setWarehouseText] = useState(initialDraft?.warehouseText || "100");
+  const [warehouseCode, setWarehouseCode] = useState(initialDraft?.warehouseCode || "100");
+  const [vatMode, setVatMode] = useState<SalesPurchaseVatMode>(initialDraft?.vatMode || "included");
+  const [lines, setLines] = useState<SalesPurchaseEntryLine[]>(prefillLines);
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [customers, setCustomers] = useState<FnCustomer[]>([]);
   const [warehouses, setWarehouses] = useState<FnWarehouse[]>([]);
@@ -11574,7 +11610,6 @@ function loadDaumPostcodeScript() {
 
 function DaumPostcodeModal({ onClose, onSelect }: { onClose: () => void; onSelect: (data: DaumPostcodeData) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [error, setError] = useState("");
 
   useEscapeToClose(true, onClose);
 
@@ -11594,7 +11629,9 @@ function DaumPostcodeModal({ onClose, onSelect }: { onClose: () => void; onSelec
         }).embed(containerRef.current);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : "주소검색을 불러오지 못했습니다.");
+        if (!alive) return;
+        window.alert(err instanceof Error ? err.message : "주소검색을 불러오지 못했습니다.");
+        onClose();
       });
     return () => {
       alive = false;
@@ -11603,11 +11640,7 @@ function DaumPostcodeModal({ onClose, onSelect }: { onClose: () => void; onSelec
 
   return (
     <SelectionModal title="주소검색" description="Daum/Kakao 우편번호 서비스에서 주소를 검색하고 선택해 주세요." onClose={onClose} size="md" className="overflow-hidden">
-      {error ? (
-        <div className="rounded-md bg-rose-50 px-4 py-6 text-sm font-bold text-rose-600">{error}</div>
-      ) : (
-        <div ref={containerRef} className="h-[440px] w-full overflow-hidden rounded-md border border-slate-200 bg-white" />
-      )}
+      <div ref={containerRef} className="h-[440px] w-full overflow-hidden rounded-md border border-slate-200 bg-white" />
     </SelectionModal>
   );
 }
@@ -12310,7 +12343,6 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
           </table>
           {!visibleEmployees.length && <EmptyState title="등록된 직원이 없습니다." />}
         </div>
-        {personnelMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{personnelMessage}</div>}
       </Panel>
 
       {fileEmployee && (
@@ -13047,7 +13079,6 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             <button key={number} type="button" onClick={() => setPage(number)} className={`h-7 min-w-7 rounded px-2 text-xs font-black ${page === number ? "bg-slate-950 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{number}</button>
           ))}
         </div>
-        {customerMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{customerMessage}</div>}
       </Panel>
       {customerBulkOpen && (
         <BulkMultiEditModal<CustomerBulkField, FnCustomer>
@@ -13663,7 +13694,6 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             </button>
           ))}
         </div>
-        {productMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{productMessage}</div>}
       </Panel>
 
       {productBulkOpen && (
@@ -16399,10 +16429,9 @@ const jaewookPersonalPaymentItems = [
 ] as const;
 const accountingTabLabel: Record<string, string> = {
   dashboard: "대시보드",
+  db: "DB작업실",
   ledger: "통장/카드 내역",
   fixed: "고정비",
-  settings: "설정",
-  review: "검토필요",
 };
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
@@ -16502,13 +16531,17 @@ function invalidateAccountingCache() {
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const normalizedTab = tab === "bank" || tab === "card" ? "ledger" : tab;
-  const activeTab = accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
+  const activeTab = normalizedTab === "settings" || normalizedTab === "review" ? "db" : accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [ledgerRows, setLedgerRows] = useState<Array<Record<string, unknown>>>([]);
   const ledgerMonthInitializedRef = useRef(false);
   const ledgerSessionRestoredRef = useRef(false);
   const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
+  const uploadDefaultRange = adRangeForPreset("30d");
+  const [uploadDateFrom, setUploadDateFrom] = useState(uploadDefaultRange.from);
+  const [uploadDateTo, setUploadDateTo] = useState(uploadDefaultRange.to);
+  const [expenseUploadDragOver, setExpenseUploadDragOver] = useState(false);
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const [parsedFiles, setParsedFiles] = useState<Array<Record<string, unknown>>>([]);
@@ -16517,6 +16550,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [message, setMessage] = useState("");
   const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
@@ -16777,6 +16811,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setMessage(`${uploadedExpenseFiles.length}개 파일을 읽어 비용 데이터를 생성하는 중입니다.`);
     const form = new FormData();
     form.append("source_type", sourceType);
+    form.append("date_from", uploadDateFrom);
+    form.append("date_to", uploadDateTo);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
     uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
     const res = await fetch("/api/accounting/ledger/parse", { method: "POST", body: form });
@@ -16819,6 +16855,31 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setParsedFiles(Array.isArray(data.files) ? data.files : []);
     invalidateAccountingCache();
     loadSummary(true);
+  }
+
+  function resetCategoryDraft() {
+    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+  }
+
+  function openNewCategoryModal() {
+    resetCategoryDraft();
+    setCategoryModalOpen(true);
+  }
+
+  function openEditCategoryModal(row: Record<string, unknown>) {
+    setCategoryDraft({
+      id: String(row.id || ""),
+      category_large: String(row.category_large || ""),
+      category_middle: String(row.category_middle || ""),
+      category_small: "",
+      is_active: true,
+      affects_profit: row.affects_profit !== false,
+      affects_cashflow: row.affects_cashflow !== false,
+      affects_card_settlement: row.affects_card_settlement === true,
+      sort_order: String(row.sort_order || 0),
+      memo: String(row.memo || ""),
+    });
+    setCategoryModalOpen(true);
   }
 
   async function saveManualExpense(event: FormEvent<HTMLFormElement>) {
@@ -17227,6 +17288,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const expenseCategoryRows = summary?.by_expense_category || categoryRows;
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
   const reviewSuggestions = summary?.review_suggestions || {};
+  const pendingReviewRows = expenses.filter((row) => String(row.review_status || "") === "pending");
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
   const activeBankAccounts = bankAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
@@ -17754,17 +17816,98 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         </section>
       )}
 
-      {activeTab === "review" && (
-        <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      {activeTab === "db" && (
+        <section className="space-y-4">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_280px]">
+            <Card className="p-5">
+              <SectionHeader
+                title="회계 업로드"
+                actions={<StatusBadge tone={pendingUploadCount ? "orange" : "muted"}>{pendingUploadCount.toLocaleString("ko-KR")}개 대기</StatusBadge>}
+              />
+              <div
+                className={`mt-4 rounded-xl border border-dashed px-4 py-6 text-center transition ${expenseUploadDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
+                onDragOver={(event) => { event.preventDefault(); setExpenseUploadDragOver(true); }}
+                onDragLeave={() => setExpenseUploadDragOver(false)}
+                onDrop={(event) => {
+                  setExpenseUploadDragOver(false);
+                  onExpenseDrop(event);
+                }}
+              >
+                <p className="text-sm font-black text-gray-900">통장/카드 엑셀·CSV 업로드</p>
+                <p className="mt-1 text-xs font-semibold text-gray-500">여러 파일을 한 번에 올린 뒤 미리보기 또는 DB 저장을 실행합니다.</p>
+                <label className="mt-4 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-orange-200 bg-white px-4 text-xs font-bold text-[#ff6a00] hover:bg-orange-50">
+                  파일 선택
+                  <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
+                </label>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-[180px_1fr_1fr]">
+                <FormField label="분류 방식">
+                  <select className={modalSelectClass} value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+                    <option>자동 분류</option>
+                    {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="저장 기준 시작일">
+                  <input className={modalInputClass} type="date" value={uploadDateFrom} onChange={(event) => setUploadDateFrom(event.target.value)} />
+                </FormField>
+                <FormField label="저장 기준 종료일">
+                  <input className={modalInputClass} type="date" value={uploadDateTo} onChange={(event) => setUploadDateTo(event.target.value)} />
+                </FormField>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+                <button type="button" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-[#ff6a00]" onClick={() => { const range = adRangeForPreset("yesterday"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>어제</button>
+                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("7d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 7일</button>
+                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("14d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 2주</button>
+                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("30d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 30일</button>
+              </div>
+              {!!uploadedExpenseFiles.length && (
+                <div className="mt-4 grid gap-2">
+                  {uploadedExpenseFiles.map((item) => (
+                    <div key={expenseFileKey(item)} className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs">
+                      <span className="truncate font-bold text-gray-700">{item.file.name}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <StatusBadge>{item.sourceType}</StatusBadge>
+                        <button type="button" className="font-black text-rose-500 hover:underline" onClick={() => removeExpenseFile(item)}>제외</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <ActionButton type="button" variant="secondary" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length}>미리보기</ActionButton>
+                <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionHeader
+                title="DB 관리"
+                actions={
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]"
+                    onClick={openNewCategoryModal}
+                  >
+                    카테고리 관리
+                  </button>
+                }
+              />
+              <div className="mt-4 grid gap-3">
+                <AccountingMetric label="카테고리" value={`${categories.length.toLocaleString("ko-KR")}개`} note="입출금/비용 분류 기준" />
+                <AccountingMetric label="검토필요" value={`${pendingReviewRows.length.toLocaleString("ko-KR")}건`} note="분류 확정 대기" tone="rose" />
+                <AccountingMetric label="최근 업로드" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
+              </div>
+            </Card>
+          </div>
+
           <Card className="p-5">
             <SectionHeader
               title="검토필요 거래"
-              description="KCP, 네이버, 미분류, 일반명 거래, 자금이동 확인 건을 바로 분류하고 확정합니다."
-              actions={<StatusBadge tone="danger">{expenses.filter((row) => String(row.review_status || "") === "pending").length.toLocaleString("ko-KR")}건</StatusBadge>}
+              actions={<StatusBadge tone="danger">{pendingReviewRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
             />
             <div className="mt-4">
               <ReviewQuickGrid
-                rows={expenses.filter((row) => String(row.review_status || "") === "pending")}
+                rows={pendingReviewRows}
                 categories={categories}
                 categoryById={categoryById}
                 suggestions={reviewSuggestions}
@@ -17774,71 +17917,54 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               />
             </div>
           </Card>
-          <ReportList title="검토 사유 요약" rows={(summary?.review_queue || []).map((row) => ({ label: row.reason || "미분류", amount: 1 }))} />
         </section>
       )}
 
-      {activeTab === "settings" && (
-        <section className="grid gap-4 xl:grid-cols-[1fr_380px]">
-          <Card className="p-5">
-            <SectionHeader
-              title="비용/입출금 카테고리"
-              description="업로드 파일의 정리 열에서 들어온 분류를 DB 카테고리로 관리합니다."
-            />
+      {categoryModalOpen && (
+        <FormModal
+          title="비용/입출금 카테고리"
+          description="업로드 파일의 정리 열에서 들어온 분류를 DB 카테고리로 관리합니다."
+          onClose={() => setCategoryModalOpen(false)}
+          size="xl"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setCategoryModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="submit" form="accounting-category-form">{categoryDraft.id ? "수정" : "추가"}</ActionButton>
+            </>
+          }
+        >
+          <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
             <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
                   <tr><th className="px-3 py-2 text-left">1차 카테고리</th><th className="px-3 py-2 text-left">2차 카테고리</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-right">관리</th></tr>
                 </thead>
                 <tbody>
-                  {categories.map((row) => {
-                    return (
-                      <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                        <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
-                        <td className="px-3 py-2 text-gray-500">{String(row.category_middle || "-")}</td>
-                        <td className="px-3 py-2 text-center">
-                          <div className="flex justify-center gap-1">
-                            {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
-                            {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
-                            {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex justify-end gap-2">
-                            <ActionButton
-                              type="button"
-                              variant="secondary"
-                              className="h-8 px-3 text-xs"
-                              onClick={() => setCategoryDraft({
-                                id: String(row.id || ""),
-                                category_large: String(row.category_large || ""),
-                                category_middle: String(row.category_middle || ""),
-                                category_small: "",
-                                is_active: true,
-                                affects_profit: row.affects_profit !== false,
-                                affects_cashflow: row.affects_cashflow !== false,
-                                affects_card_settlement: row.affects_card_settlement === true,
-                                sort_order: String(row.sort_order || 0),
-                                memo: String(row.memo || ""),
-                              })}
-                            >
-                              수정
-                            </ActionButton>
-                            <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(String(row.id || ""))}>삭제</ActionButton>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {categories.map((row) => (
+                    <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
+                      <td className="px-3 py-2 text-gray-500">{String(row.category_middle || "-")}</td>
+                      <td className="px-3 py-2 text-center">
+                        <div className="flex justify-center gap-1">
+                          {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
+                          {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
+                          {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-2">
+                          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row)}>수정</ActionButton>
+                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(String(row.id || ""))}>삭제</ActionButton>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {!categories.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
                 </tbody>
               </table>
             </div>
-          </Card>
-
-          <Card className="p-5">
-            <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "카테고리 추가"} />
-            <form onSubmit={saveExpenseCategory} className="space-y-3">
+            <form id="accounting-category-form" onSubmit={saveExpenseCategory} className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "새 카테고리"} actions={<ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={resetCategoryDraft}>초기화</ActionButton>} />
               <FormField label="1차 카테고리" required>
                 <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
               </FormField>
@@ -17863,13 +17989,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <FormField label="메모">
                 <textarea className={modalTextareaClass} value={categoryDraft.memo} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, memo: event.target.value }))} />
               </FormField>
-              <div className="flex justify-end gap-2 pt-2">
-                <ActionButton type="button" variant="secondary" onClick={() => setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" })}>초기화</ActionButton>
-                <ActionButton type="submit">{categoryDraft.id ? "수정" : "추가"}</ActionButton>
-              </div>
             </form>
-          </Card>
-        </section>
+          </div>
+        </FormModal>
       )}
 
       {fixedCostEditorOpen && (
@@ -18599,16 +18721,11 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
 
 function AccountingRightPanel() {
   const defaultRange = adRangeForPreset("30d");
-  const [dateFrom, setDateFrom] = useState(defaultRange.from);
-  const [dateTo, setDateTo] = useState(defaultRange.to);
+  const dateFrom = defaultRange.from;
+  const dateTo = defaultRange.to;
   const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [sourceType, setSourceType] = useState("자동 분류");
-  const [uploading, setUploading] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -18647,84 +18764,8 @@ function AccountingRightPanel() {
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
 
-  function pickFiles(files: FileList | File[] | null) {
-    const next = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
-    if (!next.length) {
-      setMessage("엑셀 또는 CSV 파일을 선택해 주세요.");
-      return;
-    }
-    setUploadedFiles((prev) => [...prev, ...next]);
-    setMessage(`${next.length.toLocaleString("ko-KR")}개 파일을 대기 목록에 올렸습니다.`);
-  }
-
-  async function uploadAccountingFiles() {
-    if (!uploadedFiles.length) {
-      setMessage("먼저 파일을 선택해 주세요.");
-      return;
-    }
-    setUploading(true);
-    setMessage("회계/비용 데이터를 생성하는 중입니다.");
-    const form = new FormData();
-    form.append("source_type", sourceType);
-    form.append("date_from", dateFrom);
-    form.append("date_to", dateTo);
-    form.append("file_source_types", JSON.stringify(uploadedFiles.map(() => sourceType)));
-    uploadedFiles.forEach((file) => form.append("files", file));
-    const res = await fetch("/api/accounting/ledger/upload", { method: "POST", body: form });
-    const data = await res.json();
-    setUploading(false);
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "업로드 실패");
-      return;
-    }
-    setUploadedFiles([]);
-    setMessage(`저장 완료: ${Number(data.success_count || 0).toLocaleString("ko-KR")}건`);
-    invalidateAccountingCache();
-    cachedClientJson<AccountingSummary>(endpoint, { ttl: ACCOUNTING_CACHE_TTL, storageTtl: ACCOUNTING_STORAGE_TTL, force: true }).then(setSummary).catch(() => undefined);
-  }
-
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <Card className="mb-3 p-4 shadow-none">
-        <SectionHeader title="회계 업로드" />
-        <div
-          className={`mt-3 rounded-xl border border-dashed px-3 py-4 text-center transition ${isDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
-          onDragOver={(event) => { event.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragOver(false);
-            pickFiles(event.dataTransfer.files);
-          }}
-        >
-          <p className="text-sm font-bold text-gray-800">파일 업로드</p>
-          <p className="mt-1 text-xs font-semibold text-gray-500">통장/카드 엑셀·CSV를 한번에 드래그</p>
-          <label className="mt-3 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-orange-200 bg-white px-4 text-xs font-bold text-[#ff6a00] hover:bg-orange-50">
-            파일 선택
-            <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={(event) => { pickFiles(event.target.files); event.target.value = ""; }} />
-          </label>
-        </div>
-        <select className="field-input mt-3 w-full px-3 py-2 text-xs font-semibold" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-          <option>자동 분류</option>
-          {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
-        </select>
-        <ActionButton type="button" className="mt-3 w-full" disabled={uploading || !uploadedFiles.length} onClick={uploadAccountingFiles}>
-          {`업로드${uploadedFiles.length ? ` (${uploadedFiles.length})` : ""}`}
-        </ActionButton>
-      </Card>
-      <Card className="mb-3 p-4 shadow-none">
-        <SectionHeader title="저장 기준기간" />
-        <div className="mt-3 grid gap-2">
-          <input className="field-input w-full px-3 py-2 text-sm font-semibold" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          <input className="field-input w-full px-3 py-2 text-sm font-semibold" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
-          <button type="button" className="rounded-lg border border-orange-200 bg-orange-50 px-2 py-2 text-[#ff6a00]" onClick={() => { const range = adRangeForPreset("yesterday"); setDateFrom(range.from); setDateTo(range.to); }}>어제</button>
-          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("7d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 7일</button>
-          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("14d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 2주</button>
-          <button type="button" className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("30d"); setDateFrom(range.from); setDateTo(range.to); }}>최근 30일</button>
-        </div>
-      </Card>
       <div className="space-y-3">
         <AccountingMetric label="업로드 상태" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
         <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
@@ -20034,7 +20075,11 @@ function HomeContent() {
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
   const requestedAccountingTab = searchParams.get("accountingTab") || "dashboard";
-  const normalizedAccountingTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card" ? "ledger" : requestedAccountingTab;
+  const normalizedAccountingTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card"
+    ? "ledger"
+    : requestedAccountingTab === "settings" || requestedAccountingTab === "review"
+      ? "db"
+      : requestedAccountingTab;
   const accountingTab = accountingSubMenus.some((sub) => sub.tab === normalizedAccountingTab) ? normalizedAccountingTab : "dashboard";
 
   useEffect(() => {

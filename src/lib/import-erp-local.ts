@@ -76,6 +76,11 @@ function parseJsonRecord(value: unknown): AnyRecord | null {
   }
 }
 
+function safeJsonObject(value: unknown) {
+  const parsed = typeof value === "string" ? parseJsonRecord(value) : value;
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as AnyRecord : null;
+}
+
 function hasMeaningfulDate(value: unknown) {
   return Boolean(text(value));
 }
@@ -719,6 +724,10 @@ async function insertRows(table: string, rows: AnyRecord[]) {
   await db(`insert into ${q(table)} (${keys.map(q).join(", ")}) values ${groups.join(", ")}`, values);
 }
 
+async function ensureOrderItemSkuAllocationColumn() {
+  await db(`alter table ${q(TABLES.orderItems)} add column if not exists sku_allocation_json jsonb`);
+}
+
 async function orderDetail(id: number) {
   const [order] = await db(
     `select o.*, f.name as factory_name
@@ -919,6 +928,7 @@ async function saveOrder(request: NextRequest, id?: number) {
       item_currency: itemCurrency,
       item_fx_rate: numberValue(currentRates[itemCurrency]) || numberValue(line.item_fx_rate) || numberValue(values.fx_rate),
       line_note: text(line.line_note) || null,
+      sku_allocation_json: safeJsonObject(line.sku_allocation_json || line.sku_allocations || line.linked_sku_qty),
       sort_order: sortOrder++,
     };
     itemRows.push(row);
@@ -939,6 +949,7 @@ async function saveOrder(request: NextRequest, id?: number) {
       }
     }
   }
+  if (itemRows.length) await ensureOrderItemSkuAllocationColumn();
   await insertRows(TABLES.orderItems, itemRows);
   const movementIds = await nextIds(TABLES.materialMovements, movementRows.length);
   await insertRows(TABLES.materialMovements, movementRows.map((row, index) => ({ id: movementIds[index], ...row })));

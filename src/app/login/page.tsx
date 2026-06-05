@@ -5,13 +5,11 @@ import { FormEvent, useState } from "react";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
-    setError("");
 
     const response = await fetch("/api/login", {
       method: "POST",
@@ -22,7 +20,7 @@ export default function LoginPage() {
     setLoading(false);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      setError(data.error || "로그인에 실패했습니다.");
+      window.alert(data.error || "로그인에 실패했습니다.");
       return;
     }
 
@@ -50,14 +48,12 @@ export default function LoginPage() {
           required
         />
 
-        {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
-
         <button
           type="submit"
           className="mt-5 h-10 w-full rounded-lg bg-[#ff6a00] text-sm font-semibold text-white shadow-sm shadow-orange-100 hover:bg-[#ea580c] disabled:opacity-60"
           disabled={loading}
         >
-          {loading ? "확인 중..." : "들어가기"}
+          {"들어가기"}
         </button>
       </form>
     </main>

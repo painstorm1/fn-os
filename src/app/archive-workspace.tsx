@@ -574,7 +574,7 @@ export default function ArchiveWorkspace() {
   async function organizeTextWithAi(nextText = autoText) {
     if (!nextText.trim()) return setMessage("정리할 텍스트를 입력해 주세요.");
     setAutoWorking(true);
-    setMessage("텍스트를 AI로 정리 중입니다.");
+    setMessage("");
     try {
       const formData = new FormData();
       formData.set("text", nextText);
@@ -609,7 +609,7 @@ export default function ArchiveWorkspace() {
   async function processImageFile(file?: File) {
     if (!file) return setMessage("링크가 보이는 이미지 파일을 선택해 주세요.");
     setAutoWorking(true);
-    setMessage("이미지에서 링크를 읽는 중입니다.");
+    setMessage("");
     try {
       try {
         await organizeImageWithAi(file);
@@ -661,7 +661,7 @@ export default function ArchiveWorkspace() {
   async function saveAutoDrafts() {
     if (!autoDrafts.length) return setMessage("저장할 자동 정리 항목이 없습니다.");
     setAutoWorking(true);
-    setMessage("자동 정리 항목을 저장 중입니다.");
+    setMessage("");
     try {
       const results = await Promise.all(autoDrafts.map((draft) => {
         const { warning: _warning, project_name: _projectName, ...saveDraft } = draft;
@@ -708,7 +708,7 @@ export default function ArchiveWorkspace() {
 
   async function saveLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("링크 저장 중...");
+    setMessage("");
     try {
       const title = linkForm.title || shortenTitle(urlSlug(linkForm.url), sourceFromUrl(linkForm.url));
       const { project_name: projectName, ...saveLinkForm } = linkForm;
@@ -728,7 +728,7 @@ export default function ArchiveWorkspace() {
     event.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return setMessage("업로드할 파일을 선택해 주세요.");
-    setMessage("파일 업로드 중...");
+    setMessage("");
     try {
       const formData = new FormData();
       formData.set("file", file);

@@ -423,7 +423,7 @@ function SpreadsheetPreview({ url, name }: { url: string; name: string }) {
   }, [url]);
 
   if (loading) {
-    return <section className="p-8 text-sm font-bold text-slate-500">엑셀 미리보기를 불러오는 중...</section>;
+    return null;
   }
 
   if (error || !preview) {
