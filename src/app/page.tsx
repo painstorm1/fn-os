@@ -15990,6 +15990,7 @@ const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
+const ACCOUNTING_LEDGER_SESSION_KEY = "fnos.accounting.ledger.state.v1";
 
 function accountingMonthValue(offset = 0) {
   const date = new Date();
@@ -16043,6 +16044,25 @@ function accountingShiftMonth(month: string, offset: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function readAccountingSessionState<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeAccountingSessionState(key: string, value: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Session restore is a convenience feature; ignore blocked storage.
+  }
+}
+
 function readCachedAccountingSummary() {
   return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
 }
@@ -16090,8 +16110,16 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     save_rule: true,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
-  const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(tab === "card" ? "card" : "bank");
-  const [ledgerFilters, setLedgerFilters] = useState({ q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0) });
+  const defaultLedgerFilters = { q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0) };
+  const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(() => {
+    const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: "" }).mode;
+    if (tab === "card" || tab === "bank") return tab;
+    return restored === "card" || restored === "bank" ? restored : "bank";
+  });
+  const [ledgerFilters, setLedgerFilters] = useState(() => {
+    const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { filters: defaultLedgerFilters }).filters as typeof defaultLedgerFilters;
+    return { ...defaultLedgerFilters, ...restored };
+  });
   const [categoryDraft, setCategoryDraft] = useState({
     id: "",
     category_large: "",
@@ -16734,6 +16762,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     if (activeTab !== "ledger" || ledgerMonthInitializedRef.current || !ledgerSourceRows.length) return;
     ledgerMonthInitializedRef.current = true;
     const currentMonth = accountingMonthValue(0);
+    if (ledgerFilters.month !== currentMonth) return;
     const hasCurrentMonthRows = ledgerSourceRows.some((row) => String(row.transaction_date || row.expense_date || "").startsWith(currentMonth));
     if (hasCurrentMonthRows) return;
     const latestMonth = ledgerSourceRows
@@ -16741,7 +16770,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       .filter(Boolean)
       .sort((left, right) => right.localeCompare(left))[0];
     if (latestMonth) setLedgerFilters((prev) => ({ ...prev, month: latestMonth }));
-  }, [activeTab, ledgerSourceRows]);
+  }, [activeTab, ledgerSourceRows, ledgerFilters.month]);
+  useEffect(() => {
+    if (activeTab !== "ledger") return;
+    writeAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
+  }, [activeTab, ledgerMode, ledgerFilters]);
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
@@ -16820,8 +16853,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <FilterBar className="mt-4">
-            <div className="flex rounded-lg border border-gray-200 bg-white p-1">
+          <FilterBar className="mt-4 overflow-x-auto" style={{ flexWrap: "nowrap" }}>
+            <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
               {[
                 ["bank", "통장 내역"],
                 ["card", "카드 내역"],
@@ -16840,7 +16873,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               ))}
             </div>
             <select
-              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              className="h-9 w-24 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
               value={ledgerFilters.source}
               onChange={(event) => {
                 setLedgerFilters((prev) => ({ ...prev, source: event.target.value }));
@@ -16850,7 +16883,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {effectiveLedgerSourceOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <select
-              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              className="h-9 w-36 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
               value={ledgerFilters.categoryLarge}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryLarge: event.target.value, categoryMiddle: "" }))}
             >
@@ -16858,7 +16891,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {ledgerCategoryLargeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <select
-              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              className="h-9 w-36 shrink-0 truncate rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400 disabled:bg-gray-50 disabled:text-gray-400"
               value={ledgerFilters.categoryMiddle}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryMiddle: event.target.value }))}
               disabled={!ledgerFilters.categoryLarge}
@@ -16867,13 +16900,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               {ledgerFilters.categoryLarge && ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
             <input
-              className="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm outline-orange-400"
+              className="h-9 w-56 shrink-0 rounded-md border border-gray-200 bg-white px-3 text-sm outline-orange-400"
               value={ledgerFilters.q}
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
             />
-            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
-            <div className="flex h-9 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 shrink-0 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
+            <div className="flex h-9 shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
               <button type="button" className="h-full px-3 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, -1) }))}>◀</button>
               <input
                 className="h-full w-[118px] border-x border-gray-200 bg-white px-2 text-center text-sm font-bold outline-orange-400"
@@ -16887,7 +16920,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             </div>
             <button
               type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
               aria-label="엑셀다운"
               title="엑셀다운"
               onClick={() => exportExpenses(currentLedgerRows, ledgerMode === "bank" ? "bank" : "card")}
@@ -16897,11 +16930,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           </FilterBar>
           <div className="mt-4">
             <ExpenseTable
+              key={ledgerMode}
               mode={ledgerMode}
               rows={currentLedgerRows}
               categoryById={categoryById}
               onOpen={openTransaction}
               onMemoSave={saveExpenseMemo}
+              storageKey={`fnos.accounting.ledger.table.${ledgerMode}.v1`}
             />
           </div>
         </Card>
@@ -17474,6 +17509,7 @@ function ExpenseTable({
   onSelect,
   onOpen,
   onMemoSave,
+  storageKey,
 }: {
   rows: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
@@ -17483,11 +17519,12 @@ function ExpenseTable({
   onSelect?: (row: Record<string, unknown>) => void;
   onOpen?: (row: Record<string, unknown>) => void;
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
+  storageKey?: string;
 }) {
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(30);
-  const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  useEffect(() => setPage(1), [rows.length, mode, pageSize]);
+  const restoredTableState = readAccountingSessionState(storageKey || "", { page: 1, pageSize: 30, sortState: null as { key: string; dir: "asc" | "desc" } | null });
+  const [page, setPage] = useState(Number(restoredTableState.page) || 1);
+  const [pageSize, setPageSize] = useState(Number(restoredTableState.pageSize) || 30);
+  const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(restoredTableState.sortState);
   const effectivePageSize = compact ? rows.length || 1 : pageSize;
   const tableMode = mode || (rows.length && rows.every((row) => String(row.source_type || "") === "bank")
     ? "bank"
@@ -17515,6 +17552,16 @@ function ExpenseTable({
   const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * effectivePageSize, currentPage * effectivePageSize);
   const pageGroupStart = Math.floor((currentPage - 1) / 5) * 5 + 1;
   const visiblePageNumbers = Array.from({ length: Math.min(5, totalPages - pageGroupStart + 1) }, (_, index) => pageGroupStart + index);
+  const filteredDebitTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.debit_amount), 0);
+  const filteredCreditTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.credit_amount), 0);
+  const filteredCardTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.amount_krw ?? row.total_amount ?? row.amount), 0);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  useEffect(() => {
+    if (!storageKey) return;
+    writeAccountingSessionState(storageKey, { page: currentPage, pageSize, sortState });
+  }, [storageKey, currentPage, pageSize, sortState]);
   const toggleSort = (key: string) => {
     setPage(1);
     setSortState((prev) => prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -17544,6 +17591,16 @@ function ExpenseTable({
           >
             {[30, 100, 300, 500, 1000].map((size) => <option key={size} value={size}>{size}</option>)}
           </select>
+          <div className="flex flex-wrap items-center gap-3 text-xs font-black text-slate-700">
+            {tableMode === "bank" ? (
+              <>
+                <span>입금: <strong className="text-emerald-600">{krw(filteredCreditTotal)}</strong></span>
+                <span>출금: <strong className="text-rose-600">{krw(filteredDebitTotal)}</strong></span>
+              </>
+            ) : (
+              <span>결제금액: <strong className="text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
+            )}
+          </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {pageGroupStart > 1 && <button type="button" className="text-xs font-black text-slate-600 hover:text-[#ff6a00]" onClick={() => setPage(pageGroupStart - 1)}>◀</button>}
             {visiblePageNumbers.map((pageNumber) => (
