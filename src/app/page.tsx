@@ -16794,7 +16794,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   };
   const [fixedCostMode, setFixedCostMode] = useState<"fixed" | "loan">("fixed");
   const [fixedCostQuery, setFixedCostQuery] = useState("");
-  const [fixedCostSort, setFixedCostSort] = useState<"due" | "category" | "amount">("due");
+  const [fixedCostSort, setFixedCostSort] = useState<"due" | "category">("due");
   const [fixedCostTypeFilter, setFixedCostTypeFilter] = useState<"all" | "fixed" | "loan">("all");
   const [fixedCostEditorOpen, setFixedCostEditorOpen] = useState(false);
   const [fixedCostBulkOpen, setFixedCostBulkOpen] = useState(false);
@@ -17408,7 +17408,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return `${row["fixed_cost_name"] || ""} ${row["loan_name"] || ""} ${row["title"] || ""} ${row["category_large"] || ""} ${row["category_middle"] || ""} ${row["payment_source"] || ""} ${row["bank_name"] || ""} ${row["memo"] || ""}`.toLowerCase().includes(q);
     })
     .sort((left: Record<string, unknown>, right: Record<string, unknown>) => {
-      const activeSort = fixedCostSortState || { key: fixedCostSort === "amount" ? "amount" : fixedCostSort === "category" ? "category" : "due", dir: "asc" as const };
+      const activeSort = fixedCostSortState || { key: fixedCostSort === "category" ? "category" : "due", dir: "asc" as const };
       let diff = 0;
       if (activeSort.key === "amount") diff = fixedCostRowAmount(left) - fixedCostRowAmount(right);
       else if (activeSort.key === "category") diff = `${left["category_large"] || ""}${left["category_middle"] || ""}${fixedCostRowTitle(left)}`.localeCompare(`${right["category_large"] || ""}${right["category_middle"] || ""}${fixedCostRowTitle(right)}`, "ko-KR", { numeric: true });
@@ -17419,10 +17419,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return activeSort.dir === "desc" ? -diff : diff;
     });
   const fixedCostTotalAmount = combinedFixedRows.reduce((sum, row) => sum + fixedCostRowAmount(row), 0);
-  const fixedCostAllAmount = combinedFixedSourceRows.reduce((sum, row) => sum + fixedCostRowAmount(row), 0);
   const fixedCostGroupedRows = fixedCostSort === "category"
     ? combinedFixedRows.reduce<Array<{ key: string; rows: Array<Record<string, unknown>>; amount: number }>>((groups, row) => {
-      const key = String(row.category_large || (String(row.row_type || "") === "loan" ? "금융비용" : "기타"));
+      const key = String(row.category_middle || row.category_large || (String(row.row_type || "") === "loan" ? "대출 원리금" : "기타"));
       const group = groups.find((item) => item.key === key);
       if (group) {
         group.rows.push(row);
@@ -17433,8 +17432,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return groups;
     }, [])
     : [{ key: "", rows: combinedFixedRows, amount: fixedCostTotalAmount }];
-  const fixedCostKeys = combinedFixedRows.map(fixedCostRowKey).filter(Boolean);
-  const allFixedCostsSelected = Boolean(fixedCostKeys.length) && fixedCostKeys.every((key) => fixedCostSelectedKeys.includes(key));
   const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const bankAccounts = summary?.bank_accounts || [];
   const cardAccounts = summary?.card_accounts || [];
@@ -17970,18 +17967,17 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <ActionButton type="button" variant="secondary" onClick={openFixedCostBulkEdit}>수정</ActionButton>
                 <span className="text-xs font-bold text-slate-500">선택 {fixedCostSelectedKeys.length.toLocaleString("ko-KR")}개</span>
               </div>
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 lg:flex-nowrap">
+              <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
                 <div className="flex shrink-0 rounded-md border border-gray-200 bg-white p-1">
                   {[
                     ["due", "도래일 순"],
                     ["category", "카테고리 별"],
-                    ["amount", "금액 순"],
                   ].map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
                     onClick={() => {
-                      setFixedCostSort(value as "due" | "category" | "amount");
+                      setFixedCostSort(value as "due" | "category");
                       setFixedCostSortState(null);
                     }}
                     className={`h-8 rounded px-2.5 text-xs font-black ${fixedCostSort === value ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}
@@ -17991,7 +17987,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   ))}
                 </div>
                 <input
-                  className="field-input min-w-[220px] flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  className="field-input w-48 rounded-md border border-slate-200 px-3 py-2 text-sm"
                   value={fixedCostQuery}
                   onChange={(event) => setFixedCostQuery(event.target.value)}
                   placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
@@ -18012,13 +18008,25 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                       <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
                         <tr>
                           <th className="w-16 py-2 text-center">
+                            {(() => {
+                              const groupKeys = group.rows.map(fixedCostRowKey).filter(Boolean);
+                              const allGroupSelected = Boolean(groupKeys.length) && groupKeys.every((key) => fixedCostSelectedKeys.includes(key));
+                              return (
                             <input
                               type="checkbox"
                               className="h-5 w-5"
-                              checked={allFixedCostsSelected}
-                              onChange={(event) => setFixedCostSelectedKeys(event.target.checked ? fixedCostKeys : [])}
-                              aria-label="고정비 전체선택"
+                              checked={allGroupSelected}
+                              onChange={(event) => {
+                                setFixedCostSelectedKeys((prev) => {
+                                  const groupKeySet = new Set(groupKeys);
+                                  const withoutGroup = prev.filter((key) => !groupKeySet.has(key));
+                                  return event.target.checked ? [...withoutGroup, ...groupKeys] : withoutGroup;
+                                });
+                              }}
+                              aria-label={group.key ? `${group.key} 선택` : "고정비 전체선택"}
                             />
+                              );
+                            })()}
                           </th>
                           <th className="w-32 py-2 text-center" onDoubleClick={() => toggleFixedCostSort("category")}>카테고리</th>
                           <th className="w-64 py-2 text-left" onDoubleClick={() => toggleFixedCostSort("title")}>고정비명</th>
