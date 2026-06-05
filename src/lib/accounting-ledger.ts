@@ -88,6 +88,15 @@ function previousBusinessDay(date: string) {
   return current;
 }
 
+function addMonthsToDate(date: string, months: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return "";
+  const next = new Date(Date.UTC(year, month - 1 + months, 1));
+  const nextYear = next.getUTCFullYear();
+  const nextMonth = next.getUTCMonth() + 1;
+  return dateText(nextYear, nextMonth, Math.min(day, lastDayOfMonth(nextYear, nextMonth)));
+}
+
 function monthDueDate(baseDay: unknown, today = kstToday()) {
   const [year, month] = today.split("-").map(Number);
   const raw = text(baseDay);
@@ -580,6 +589,73 @@ function loanOccurrence(row: RawRow, today = kstToday()) {
   };
 }
 
+function loanMaturityOccurrence(row: RawRow) {
+  const startDate = isoDate(row.loan_start_date);
+  const periodMonths = numberValue(row.loan_period_months);
+  if (!startDate || !periodMonths) return null;
+  const maturityDate = addMonthsToDate(startDate, periodMonths);
+  if (!maturityDate) return null;
+  const calendarDate = previousBusinessDay(addDays(maturityDate, -7));
+  return {
+    id: `loan-maturity-${text(row.id)}`,
+    loan_id: row.id,
+    title: `[대출만기] ${text(row.loan_name) || "대출"} 만기 예정`,
+    display_title: `[대출만기] ${text(row.loan_name) || "대출"} 만기 예정`,
+    category_large: "금융비용",
+    category_middle: "대출 원리금",
+    expected_amount: numberValue(row.current_balance) || numberValue(row.principal_amount),
+    amount: numberValue(row.current_balance) || numberValue(row.principal_amount),
+    due_date: calendarDate,
+    maturity_date: maturityDate,
+    base_day: "만기 7일 전",
+    days_until: 0,
+    payment_type: "loan_maturity",
+    payment_source: row.bank_name,
+    status: "scheduled",
+    memo: row.memo,
+    row_type: "loan_maturity",
+  };
+}
+
+function suggestReview(row: RawRow, rules: RawRow[], confirmedRows: RawRow[]) {
+  const matchingRule = rules.find((rule) => ruleMatches(rule, row) && (text(rule.category_id) || text(rule.category_large)));
+  if (matchingRule) {
+    return {
+      source: "rule",
+      label: "저장 규칙",
+      category_id: matchingRule.category_id || null,
+      category_large: matchingRule.category_large || null,
+      category_middle: matchingRule.category_middle || null,
+      direction: matchingRule.direction_condition || row.direction,
+      affects_profit: text(matchingRule.category_large) === "카드대금" || text(matchingRule.category_middle) === "내부이체" ? false : undefined,
+      affects_cashflow: true,
+      memo: matchingRule.memo || null,
+      confidence: 0.85,
+    };
+  }
+  const merchant = text(row.merchant_name || row.description);
+  if (!merchant) return null;
+  const normalized = merchant.replace(/\s+/g, "").toLowerCase();
+  const previous = confirmedRows.find((item) => {
+    const haystack = text(item.merchant_name || item.description).replace(/\s+/g, "").toLowerCase();
+    return haystack && (haystack.includes(normalized) || normalized.includes(haystack));
+  });
+  if (!previous) return null;
+  return {
+    source: "history",
+    label: "최근 확정",
+    category_id: previous.category_id || null,
+    category_large: previous.category_large || null,
+    category_middle: previous.category_middle || null,
+    direction: previous.direction || row.direction,
+    affects_profit: previous.affects_profit,
+    affects_cashflow: previous.affects_cashflow,
+    affects_card_settlement: previous.affects_card_settlement,
+    memo: previous.memo || null,
+    confidence: 0.65,
+  };
+}
+
 function cleanBankAccountPayload(row: RawRow) {
   return {
     account_type: text(row.account_type || row.accountType) || "business",
@@ -781,7 +857,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const threeDaysLater = addDays(today, 3);
   const fixedCostOccurrences = activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
   const loanOccurrences = activeLoans.map((row) => loanOccurrence(row, today));
-  const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences];
+  const loanMaturityOccurrences = activeLoans.map((row) => loanMaturityOccurrence(row)).filter(Boolean) as RawRow[];
+  const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences, ...loanMaturityOccurrences];
   const upcomingFixedCosts = [...fixedCostOccurrences, ...loanOccurrences]
     .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
@@ -792,12 +869,12 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const cashIn = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.credit_amount), 0);
   const cashOut = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.debit_amount), 0);
   const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.domestic_amount), 0);
-  const group = (pick: (row: RawRow) => string) => {
+  const group = (pick: (row: RawRow) => string, sourceRows = filtered, amountPick: (row: RawRow) => number = (row) => numberValue(row.amount_krw ?? row.amount)) => {
     const map = new Map<string, { label: string; amount: number; count: number }>();
-    for (const row of filtered) {
+    for (const row of sourceRows) {
       const label = pick(row) || "기타";
       const prev = map.get(label) || { label, amount: 0, count: 0 };
-      prev.amount += numberValue(row.amount_krw ?? row.amount);
+      prev.amount += amountPick(row);
       prev.count += 1;
       map.set(label, prev);
     }
@@ -814,7 +891,15 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     map.set(label, prev);
     return map;
   }, new Map<string, { label: string; income: number; expense: number; amount: number; count: number }>()).values()).sort((a, b) => a.label.localeCompare(b.label));
+  const incomeRows = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false);
+  const expenseRows = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false);
   const categoryLarge = group((row) => text(row.category_large));
+  const reviewSuggestions = Object.fromEntries(
+    filtered
+      .filter((row) => text(row.review_status) === "pending")
+      .map((row) => [text(row.id), suggestReview(row, rules, filtered.filter((item) => text(item.review_status) === "confirmed"))])
+      .filter(([id, suggestion]) => id && suggestion),
+  );
   return {
     transactions: filtered.slice(0, 300),
     expenses: filtered.slice(0, 300),
@@ -826,6 +911,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     fixed_costs: fixedCosts,
     fixed_cost_occurrences: calendarFixedCostOccurrences,
     loan_occurrences: loanOccurrences,
+    loan_maturity_occurrences: loanMaturityOccurrences,
     loans,
     upcoming_fixed_costs: upcomingFixedCosts,
     bank_accounts: bankAccounts,
@@ -843,7 +929,11 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     by_category_large: categoryLarge,
     by_category: categoryLarge,
     by_vendor: group((row) => text(row.merchant_name)),
+    by_income_vendor: group((row) => text(row.merchant_name || row.source_name), incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
+    by_expense_category: group((row) => text(row.category_large), expenseRows),
+    by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows),
     by_card: group((row) => text(row.card_name || row.source_name)),
     by_month: byMonth,
+    review_suggestions: reviewSuggestions,
   };
 }

@@ -15479,34 +15479,46 @@ function AccountingMetric({ label, value, note, tone = "slate" }: { label: strin
   return <KpiCard label={label} value={value} note={note} tone={tone === "green" ? "success" : tone === "rose" ? "danger" : tone === "orange" ? "orange" : "default"} />;
 }
 
-function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<string, unknown>>; compact?: boolean }) {
+function AccountingLineChart({
+  rows,
+  compact = false,
+  title = "월별 비용 추이",
+  valueKey = "amount",
+  color = "#f97316",
+}: {
+  rows: Array<Record<string, unknown>>;
+  compact?: boolean;
+  title?: string;
+  valueKey?: string;
+  color?: string;
+}) {
   const chartRows = rows.slice(0, 8).reverse();
-  const max = Math.max(1, ...chartRows.map((row) => asNumber(row.amount)));
+  const max = Math.max(1, ...chartRows.map((row) => asNumber(row[valueKey])));
   const points = chartRows.length
     ? chartRows.map((row, index) => {
         const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
-        const y = 92 - (asNumber(row.amount) / max) * 76;
+        const y = 92 - (asNumber(row[valueKey]) / max) * 76;
         return `${x},${y}`;
       }).join(" ")
     : "";
   return (
     <Card className={compact ? "border-0 p-0 shadow-none" : "p-5"}>
-      {!compact && <SectionHeader title="월별 비용 추이" />}
+      {!compact && <SectionHeader title={title} />}
       <div className="rounded-xl bg-gray-50 p-3">
-        <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label="월별 비용 추이 그래프">
+        <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
           <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
-          {points && <polyline points={points} fill="none" stroke="#f97316" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+          {points && <polyline points={points} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
           {chartRows.map((row, index) => {
             const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
-            const y = 92 - (asNumber(row.amount) / max) * 76;
-            return <circle key={`${String(row.label)}-${index}`} cx={x} cy={y} r="2.8" fill="#f97316" />;
+            const y = 92 - (asNumber(row[valueKey]) / max) * 76;
+            return <circle key={`${String(row.label)}-${index}`} cx={x} cy={y} r="2.8" fill={color} />;
           })}
         </svg>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {chartRows.slice(-4).map((row, index) => (
             <div key={`${String(row.label)}-${index}`} className="rounded bg-white px-2 py-2 text-xs">
               <p className="font-black text-slate-500">{String(row.label || "-")}</p>
-              <p className="mt-1 font-black text-slate-950">{krw(asNumber(row.amount))}</p>
+              <p className="mt-1 font-black text-slate-950">{krw(asNumber(row[valueKey]))}</p>
             </div>
           ))}
           {!chartRows.length && <div className="col-span-full"><EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" /></div>}
@@ -15516,14 +15528,24 @@ function AccountingLineChart({ rows, compact = false }: { rows: Array<Record<str
   );
 }
 
-function AccountingCategoryChart({ rows, compact = false }: { rows: Array<Record<string, unknown>>; compact?: boolean }) {
+function AccountingCategoryChart({
+  rows,
+  compact = false,
+  title = "카테고리 비중",
+  centerLabel = "비용",
+}: {
+  rows: Array<Record<string, unknown>>;
+  compact?: boolean;
+  title?: string;
+  centerLabel?: string;
+}) {
   const chartRows = rows.slice(0, 6);
   const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
   const colors = ["#f97316", "#0ea5e9", "#10b981", "#f43f5e", "#64748b", "#a855f7"];
   let offset = 0;
   return (
     <Card className={compact ? "border-0 p-0 shadow-none" : "p-5"}>
-      {!compact && <SectionHeader title="카테고리 비중" />}
+      {!compact && <SectionHeader title={title} />}
       <div className="grid gap-4 rounded-xl bg-gray-50 p-3 md:grid-cols-[160px_1fr]">
         <svg viewBox="0 0 42 42" className="h-40 w-40">
           <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" strokeWidth="6" />
@@ -15547,7 +15569,7 @@ function AccountingCategoryChart({ rows, compact = false }: { rows: Array<Record
               />
             );
           })}
-          <text x="21" y="20" textAnchor="middle" className="fill-slate-950 text-[4px] font-black">비용</text>
+          <text x="21" y="20" textAnchor="middle" className="fill-slate-950 text-[4px] font-black">{centerLabel}</text>
           <text x="21" y="25" textAnchor="middle" className="fill-orange-600 text-[4px] font-black">{chartRows.length}개</text>
         </svg>
         <div className="space-y-2">
@@ -15587,6 +15609,7 @@ type AccountingSummary = {
   fixed_cost_occurrences?: Array<Record<string, unknown>>;
   loans?: Array<Record<string, unknown>>;
   loan_occurrences?: Array<Record<string, unknown>>;
+  loan_maturity_occurrences?: Array<Record<string, unknown>>;
   upcoming_fixed_costs?: Array<Record<string, unknown>>;
   bank_accounts?: Array<Record<string, unknown>>;
   card_accounts?: Array<Record<string, unknown>>;
@@ -15594,8 +15617,12 @@ type AccountingSummary = {
   by_category?: Array<Record<string, unknown>>;
   by_category_large?: Array<Record<string, unknown>>;
   by_vendor?: Array<Record<string, unknown>>;
+  by_income_vendor?: Array<Record<string, unknown>>;
+  by_expense_category?: Array<Record<string, unknown>>;
+  by_expense_vendor?: Array<Record<string, unknown>>;
   by_card?: Array<Record<string, unknown>>;
   by_month?: Array<Record<string, unknown>>;
+  review_suggestions?: Record<string, Record<string, unknown>>;
 };
 
 type ExpenseUploadItem = {
@@ -16227,6 +16254,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
+  const incomeVendorRows = summary?.by_income_vendor || [];
+  const expenseCategoryRows = summary?.by_expense_category || categoryRows;
+  const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
+  const reviewSuggestions = summary?.review_suggestions || {};
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
   const sourceOptions = Array.from(new Set(expenses.map((row) => String(row.source_name || row.source_type || "")).filter(Boolean)));
@@ -16277,9 +16308,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {activeTab === "dashboard" && (
         <>
-          <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-            <AccountingLineChart rows={monthRows} />
-            <AccountingCategoryChart rows={categoryRows} />
+          <section className="grid gap-4 xl:grid-cols-2">
+            <AccountingLineChart rows={monthRows} title="월별 입금 추이" valueKey="income" color="#10b981" />
+            <AccountingCategoryChart rows={incomeVendorRows} title="입금 거래처 비중" centerLabel="입금" />
+            <AccountingLineChart rows={monthRows} title="월별 비용 추이" valueKey="expense" color="#f97316" />
+            <AccountingCategoryChart rows={expenseCategoryRows} title="비용 카테고리 비중" centerLabel="비용" />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
@@ -16293,7 +16326,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </div>
             </Card>
             <div className="space-y-4">
-              <ReportList title="업체별 비용" rows={vendorRows} />
+              <ReportList title="업체별 비용" rows={expenseVendorRows} />
             </div>
           </section>
         </>
@@ -16519,6 +16552,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 rows={expenses.filter((row) => String(row.review_status || "") === "pending")}
                 categories={categories}
                 categoryById={categoryById}
+                suggestions={reviewSuggestions}
                 onOpen={openTransaction}
                 onSave={saveReviewQuick}
                 onJaewook={(row) => setJaewookModalRow(row)}
@@ -16798,6 +16832,7 @@ function ReviewQuickGrid({
   rows,
   categories,
   categoryById,
+  suggestions,
   onOpen,
   onSave,
   onJaewook,
@@ -16805,6 +16840,7 @@ function ReviewQuickGrid({
   rows: Array<Record<string, unknown>>;
   categories: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
+  suggestions?: Record<string, Record<string, unknown>>;
   onOpen: (row: Record<string, unknown>) => void;
   onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void;
   onJaewook?: (row: Record<string, unknown>) => void;
@@ -16831,6 +16867,10 @@ function ReviewQuickGrid({
           {sortedRows.map((row, index) => {
             const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
             const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
+            const suggestion = suggestions?.[String(row.id || "")];
+            const suggestionCategory = suggestion
+              ? categoryById.get(String(suggestion.category_id || "")) || [suggestion.category_large, suggestion.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")
+              : "";
             return (
               <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
                 <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
@@ -16849,6 +16889,24 @@ function ReviewQuickGrid({
                     <option value="">미지정</option>
                     {categories.map((category) => <option key={String(category.id)} value={String(category.id)}>{categoryById.get(String(category.id))}</option>)}
                   </select>
+                  {suggestion && (
+                    <button
+                      type="button"
+                      className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100"
+                      title={`추천 적용: ${suggestionCategory || "분류 없음"}`}
+                      onClick={() => onSave(row, {
+                        category_id: suggestion.category_id || row.category_id,
+                        category_large: suggestion.category_large || row.category_large,
+                        category_middle: suggestion.category_middle || row.category_middle,
+                        direction: suggestion.direction || row.direction,
+                        affects_profit: suggestion.affects_profit ?? row.affects_profit,
+                        affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow,
+                        affects_card_settlement: suggestion.affects_card_settlement ?? row.affects_card_settlement,
+                      })}
+                    >
+                      {String(suggestion.label || "추천")} · {suggestionCategory || "분류 확인"}
+                    </button>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <select
