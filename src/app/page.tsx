@@ -19553,8 +19553,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       payment_day: onlyDigits(draft.payment_day).slice(0, 2),
       card_limit: onlyDigits(draft.card_limit),
     };
-    if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.secure_message || !payload.payment_password_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
-      window.alert("실물 소유자와 메모를 제외한 모든 항목은 필수입니다.");
+    if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
+      window.alert("해외안심 결제 개인 확인 메세지, 결제 비밀번호, 실물 소유자, 메모를 제외한 항목은 필수입니다.");
       return;
     }
     if (!validDayString(payload.cutoff_start_day) || !validDayString(payload.cutoff_end_day) || !validDayString(payload.payment_day)) {
@@ -19657,8 +19657,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="해외안심 결제 개인 확인 메세지" required><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
-              <FormField label="결제 비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
+              <FormField label="해외안심 결제 개인 확인 메세지"><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
+              <FormField label="결제 비밀번호"><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
             </div>
             <div className="grid gap-4 xl:grid-cols-[1.1fr_0.7fr_1fr_0.9fr_1fr]">
               <FormField label="결제 기준기간" required><input className={`${modalInputClass} text-center font-mono`} inputMode="numeric" value={billingPeriodDraft} onChange={(event) => setBillingPeriodDraft(formatBillingPeriodInput(event.target.value))} placeholder="  일-  일" maxLength={7} /></FormField>
