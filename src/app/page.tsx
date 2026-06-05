@@ -27,10 +27,10 @@ import {
 import { cachedJson as cachedClientJson, invalidateClientCache, markClientCacheReady, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
-  loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">대시보드를 불러오는 중...</div>,
+  loading: () => null,
 });
 const ArchiveWorkspace = dynamic(() => import("./archive-workspace"), {
-  loading: () => <div className="rounded-md border border-slate-200 bg-white p-6 text-sm font-bold text-slate-500">아카이브를 불러오는 중...</div>,
+  loading: () => null,
 });
 
 type XlsxModule = typeof import("xlsx-js-style");
@@ -518,7 +518,7 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
             onClick={() => void savePassword()}
             disabled={loading || !currentPassword || !newPassword || !confirmPassword}
           >
-            {loading ? "저장 중..." : "변경"}
+            {"변경"}
           </ActionButton>
         </>
       }
@@ -569,9 +569,6 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
             </FormField>
           </div>
         </div>
-
-        {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
-        {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
     </FormModal>
   );
 }
@@ -1496,6 +1493,7 @@ type OrderLine = {
   unit_price: string;
   item_currency: string;
   line_note: string;
+  sku_allocation_json?: Record<string, string>;
   image_path?: string;
   item_type?: string;
   materials?: ProductMaterialLink[];
@@ -1510,6 +1508,9 @@ type ImportOrderItem = {
   unit_price?: string | number;
   item_currency?: string;
   line_note?: string;
+  sku_allocation_json?: Record<string, string> | string | null;
+  sku_allocations?: Record<string, string> | string | null;
+  linked_sku_qty?: Record<string, string> | string | null;
   image_path?: string;
   item_type?: string;
   materials?: ProductMaterialLink[];
@@ -1737,6 +1738,8 @@ function importHref(path: string) {
   return `/?menu=import&section=${encodeURIComponent(path)}`;
 }
 
+const IMPORT_PURCHASE_PREFILL_STORAGE_KEY = "fnos-import-purchase-entry-prefill";
+
 type ImportProductTab = "products" | "materials";
 
 function isImportProductTab(value: unknown): value is ImportProductTab {
@@ -1765,6 +1768,23 @@ function savableOrderLine(line: OrderLine) {
   if (!line.product_name) return false;
   if (isMaterialOrderLine(line)) return true;
   return Boolean(line.quantity && line.unit_price);
+}
+
+function parseSkuAllocation(value: unknown): Record<string, string> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" && !Array.isArray(value) ? value as Record<string, string> : {};
+}
+
+function skuAllocationKey(link: ImportSkuLink) {
+  return String(link.product_id || fnProductSku(link.product) || link.sku || "");
 }
 
 function isMaterialItem(item?: ImportOrderItem | null) {
@@ -2330,7 +2350,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
     };
   }, []);
 
-  if (loading) return <Panel title="수입제품 현황"><p className="text-sm text-slate-500">수입관리 데이터를 불러오는 중...</p></Panel>;
+  if (loading) return <Panel title="수입제품 현황">{null}</Panel>;
 
   return (
     <div className={`grid gap-4 ${compact ? "xl:grid-cols-[1fr_320px]" : "2xl:grid-cols-[1fr_360px]"}`}>
@@ -2576,7 +2596,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
                 />
               </label>
               <input value={note} onChange={(event) => setNote(event.target.value)} className={modalInputClass} placeholder="메모" />
-              <ActionButton type="button" onClick={uploadAttachment} disabled={uploading}>{uploading ? "업로드 중" : "업로드"}</ActionButton>
+              <ActionButton type="button" onClick={uploadAttachment} disabled={uploading}>{"업로드"}</ActionButton>
             </div>
             <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm font-bold text-slate-500">
               파일을 여기로 끌어다 놓거나, 파일 선택 버튼으로 여러 개를 한 번에 선택하세요.
@@ -2592,7 +2612,6 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
             </div>
           </div>
           <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
-          {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
           <div className="mt-5 overflow-hidden rounded-md border border-slate-200">
             <div className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
               <span>파일명</span>
@@ -2602,7 +2621,7 @@ function OrderAttachmentModal({ order, onClose, onChanged }: { order: ImportOrde
               <span className="text-center">작업</span>
             </div>
             {loading ? (
-              <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
+              <div className="px-4 py-8" />
             ) : attachments.length ? attachments.map((item) => (
               <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
                 <button type="button" onClick={() => openAttachment(item)} className="flex min-w-0 cursor-pointer items-center gap-2 text-left font-bold underline-offset-4 hover:text-orange-600 hover:underline">
@@ -2707,7 +2726,7 @@ function NativeOrders({
 
   return (
     <div className="space-y-3">
-      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
+      {loading ? null : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <form
             className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[120px_1fr_150px_150px_78px]"
@@ -2781,7 +2800,7 @@ function NativeOrders({
                     }));
                     void loadOrders();
                   }} />
-                  : <div className="border-b border-slate-200 p-5 text-sm font-bold text-slate-500">상세 불러오는 중...</div>
+                  : null
               )}
             </div>
           ))}
@@ -2947,7 +2966,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
             <button type="button" onClick={deleteOrder} className="inline-flex h-9 items-center rounded-md border border-rose-300 px-3 text-sm font-black text-rose-600">삭제</button>
-            <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{saving ? "저장 중..." : "저장"}</button>
+            <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{"저장"}</button>
           </div>
         </div>
         <section className="grid gap-3">
@@ -3154,7 +3173,7 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
     <section className="rounded-md border border-slate-200 bg-white">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-3">
         <h3 className="font-black">옵션별 원가/마진표</h3>
-        {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>}
+        {!isMaterialOnlyGrid && <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 px-4 text-sm font-black text-blue-600 disabled:opacity-50">{"마진 저장"}</button>}
       </div>
       <div className="overflow-x-auto">
         <table className="table-fixed text-xs" style={{ minWidth: tableWidth, width: `max(100%, ${tableWidth}px)` }}>
@@ -3291,7 +3310,7 @@ function MarginCalculator({ orderId, unitCost, margin }: { orderId: number; unit
           <p className="mt-1 flex justify-between"><span>MG금액:</span><b>{naverResult.amount}</b></p>
           <p className="flex justify-between"><span>MG%:</span><b>{naverResult.pct}</b></p>
         </div>
-        <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 text-sm font-black text-blue-600 disabled:opacity-50">{saving ? "저장 중..." : "마진 저장"}</button>
+        <button type="button" onClick={save} disabled={saving} className="h-9 rounded-md border border-blue-500 text-sm font-black text-blue-600 disabled:opacity-50">{"마진 저장"}</button>
       </div>
     </section>
   );
@@ -3327,7 +3346,7 @@ function LegacyNativeOrders() {
       subtitle="FN OS 안으로 흡수한 수입관리 발주 목록"
       action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}
     >
-      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
+      {loading ? null : (
         <div className="grid gap-2">
           {orders.map((order) => (
             <Link key={order.id} href={importHref(`/orders/${order.id}`)} className="grid grid-cols-[56px_1.2fr_1fr_100px_130px_90px] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm hover:border-orange-200">
@@ -3395,7 +3414,7 @@ function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProduc
 
   return (
     <div className="space-y-3">
-      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : (
+      {loading ? null : (
         <>
         <div className="mb-4 grid gap-3">
           <div className="grid gap-2 md:grid-cols-[120px_1fr]">
@@ -3406,7 +3425,7 @@ function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProduc
             <button type="button" onClick={() => switchTab("products")} className={!query.trim() && tab === "products" ? "text-orange-600" : "text-slate-500"}>상품</button>
             <span className="text-slate-300">|</span>
             <button type="button" onClick={() => switchTab("materials")} className={!query.trim() && tab === "materials" ? "text-orange-600" : "text-slate-500"}>부자재</button>
-            {query.trim() && <span className="text-xs text-slate-500">검색 중에는 상품/부자재 전체에서 찾습니다.</span>}
+
           </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
@@ -3520,7 +3539,7 @@ function NativeProductDetail({ id }: { id: number }) {
         <Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref(`/products/${id}/edit?tab=${isMaterial(product) ? "materials" : "products"}`)}>수정</Link>
       </div>}
     >
-      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : product ? (
+      {loading ? null : product ? (
         <div className="grid gap-5 xl:grid-cols-[280px_1fr]">
           <div className="space-y-3">
             <div className="aspect-square overflow-hidden rounded-md bg-slate-100">
@@ -3645,7 +3664,7 @@ function GptMiniProductBox() {
     const name = productName.trim();
     if (!name) return;
     setLoading(true);
-    setResult("GPTmini 조회 중...");
+    setResult("");
     try {
       const res = await fetch(apiUrl("/api/gptmini/hs"), {
         method: "POST",
@@ -3685,7 +3704,7 @@ function GptMiniProductBox() {
         onClick={ask}
         className="mt-2 w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-white disabled:opacity-60"
       >
-        {loading ? "조회 중..." : "HS/관세 물어보기"}
+        {"HS/관세 물어보기"}
       </button>
       <div className="mt-2 min-h-24 whitespace-pre-wrap rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
         {result}
@@ -3824,7 +3843,7 @@ function FnProductPickerModal({
                 })}
                 {!products.length && (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-sm font-bold text-slate-400">{loading ? "검색 중..." : "검색 결과가 없습니다."}</td>
+                    <td colSpan={8} className="py-8 text-center text-sm font-bold text-slate-400">{loading ? "" : "검색 결과가 없습니다."}</td>
                   </tr>
                 )}
               </tbody>
@@ -4133,7 +4152,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
           <h2 className="text-xl font-semibold text-gray-900">{id ? "제품 수정" : "새 제품 등록"}</h2>
         </div>
       </div>
-      {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+      {loading || detailLoading ? null : (
         <>
         <form key={product?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
           <div className="space-y-3" onPaste={handleImagePaste}>
@@ -4348,7 +4367,6 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
                 </div>
               </section>
             )}
-            {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
             <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-4">
               <div>
                 {id && (
@@ -4364,7 +4382,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
               </div>
               <div className="flex gap-2">
                 <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={productListHref()}>취소</Link>
-                <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{saving ? "저장 중..." : "저장"}</button>
+                <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{"저장"}</button>
               </div>
             </div>
           </div>
@@ -4589,7 +4607,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
       footer={
         <>
           <ActionButton type="button" variant="secondary" onClick={onClose}>나중에</ActionButton>
-          <ActionButton type="button" disabled={saving} onClick={saveReceipt}>{saving ? "생성 중..." : "구매/입고 생성"}</ActionButton>
+          <ActionButton type="button" disabled={saving} onClick={saveReceipt}>{"구매/입고 생성"}</ActionButton>
         </>
       }
     >
@@ -4634,7 +4652,6 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
               </section>
             );
           })}
-          {message && <p className="rounded-md bg-orange-50 px-3 py-3 text-sm font-black text-orange-600">{message}</p>}
         </div>
     </SelectionModal>
   );
@@ -4706,7 +4723,7 @@ function NativeOrderDetail({ id }: { id: number }) {
         ) : null
       }
     >
-      {loading ? <p className="text-sm text-slate-500">불러오는 중...</p> : order ? (
+      {loading ? null : order ? (
         <div className="grid gap-5">
           <div className="flex justify-end">
             <div className="flex gap-2">
@@ -4834,6 +4851,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           unit_price: item.unit_price ? String(item.unit_price) : "",
           item_currency: item.item_currency || "CNY",
           line_note: item.line_note || "",
+          sku_allocation_json: parseSkuAllocation(item.sku_allocation_json || item.sku_allocations || item.linked_sku_qty),
           image_path: item.image_path || "",
           item_type: item.item_type || "",
           materials: item.materials || [],
@@ -4910,6 +4928,63 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
 
   function updateLine(index: number, patch: Partial<OrderLine>) {
     setLines((prev) => prev.map((line, i) => i === index ? { ...line, ...patch } : line));
+  }
+
+  function updateLineSkuQty(lineIndex: number, link: ImportSkuLink, value: string) {
+    const key = skuAllocationKey(link);
+    if (!key) return;
+    setLines((prev) => prev.map((line, index) => {
+      if (index !== lineIndex) return line;
+      return {
+        ...line,
+        sku_allocation_json: {
+          ...(line.sku_allocation_json || {}),
+          [key]: value,
+        },
+      };
+    }));
+  }
+
+  function linkedSkusForOrderLine(line: OrderLine) {
+    const links = orderLineLinks[String(line.product_id || "")] || [];
+    const optionLinks = line.option_value ? links.filter((link) => sameImportOption(link, line.option_value)) : [];
+    return optionLinks.length ? optionLinks : links.filter((link) => !linkOptionName(link));
+  }
+
+  function linkPurchaseQty(line: OrderLine, link: ImportSkuLink) {
+    const saved = String(line.sku_allocation_json?.[skuAllocationKey(link)] ?? "").trim();
+    if (saved) return saved;
+    const defaultQty = Number(link.default_qty || 0);
+    if (defaultQty > 0) return String(defaultQty);
+    return String(line.quantity || "1");
+  }
+
+  function buildImportPurchasePrefill(savedOrderId: number | string): SalesPurchaseEntryPrefill {
+    const purchaseLines = lines
+      .filter((line) => savableOrderLine(line) && !isMaterialOrderLine(line))
+      .flatMap((line) => linkedSkusForOrderLine(line).map((link) => {
+        const product = link.product || null;
+        const productCode = fnProductSku(product);
+        const productName = fnProductName(product);
+        if (!productCode || productCode === "-") return null;
+        return {
+          prod_cd: productCode,
+          prod_name: productName,
+          qty: linkPurchaseQty(line, link),
+          price: fnProductPrice(product) ? String(fnProductPrice(product)) : "",
+          memo: `${order?.order_code || savedOrderId} ${line.product_name || ""}`.trim(),
+        };
+      }).filter(Boolean) as Array<Partial<SalesPurchaseEntryLine>>);
+
+    return {
+      entryDate: visibleStageValues.fn_arrived || entryDateToday(),
+      customerText: "FN해외 상품 구매(소싱)",
+      customerCode: "",
+      warehouseText: "100",
+      warehouseCode: "100",
+      vatMode: "included",
+      lines: purchaseLines,
+    };
   }
 
   function addProduct(product: ImportProduct) {
@@ -5050,7 +5125,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
         </div>
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>
       </div>
-      {loading || detailLoading ? <p className="text-sm text-slate-500">데이터를 불러오는 중...</p> : (
+      {loading || detailLoading ? null : (
         <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <input type="hidden" name="platform" value={order?.platform || "FN_OS"} />
           <input type="hidden" name="currency" value={order?.currency || "CNY"} />
@@ -5221,11 +5296,10 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           </section>
 
           <Field label="메모"><textarea className="field-input" name="note" defaultValue={order?.note || ""} /></Field>
-          {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref("/orders")}>취소</Link>
             {id && <button type="button" className="inline-flex h-10 items-center justify-center rounded-md border border-rose-300 px-4 text-sm font-black text-rose-600" onClick={deleteOrder}>삭제</button>}
-            <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+            <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{"저장"}</button>
           </div>
 
           {catalogOpen && (
@@ -5344,7 +5418,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
 
   return (
     <Panel title={id ? "발주 수정" : "새 발주 등록"} subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
-      {loading || detailLoading ? <p className="text-sm text-slate-500">폼 데이터를 불러오는 중...</p> : (
+      {loading || detailLoading ? null : (
         <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <div className="grid gap-4 md:grid-cols-4">
             <Field label="주공장">
@@ -5390,10 +5464,9 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
           </section>
 
           <Field label="메모"><textarea className="field-input min-h-24" name="note" defaultValue={order?.note || ""} /></Field>
-          {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Link className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold" href={importHref("/orders")}>취소</Link>
-            <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+            <button className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{"저장"}</button>
           </div>
         </form>
       )}
@@ -5492,7 +5565,7 @@ function NativeSettings() {
             </Field>
           ))}
           <div className="sm:col-span-2 flex justify-end">
-            <button className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{saving ? "저장 중..." : "저장"}</button>
+            <button className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{"저장"}</button>
           </div>
         </form>
       </Panel>
@@ -5574,7 +5647,7 @@ function FactorySettingsCard({ factory, onSaved }: { factory: ImportFactory; onS
           <div className="md:col-span-4"><p className="mb-1.5 text-sm font-black text-slate-700">메모</p><textarea className="field-input" value={draft.note || ""} onChange={(e) => setDraft((prev) => ({ ...prev, note: e.target.value }))} /></div>
           <div className="md:col-span-4 flex justify-end gap-2">
             <button type="button" className="inline-flex h-10 items-center rounded-md border border-rose-300 px-5 text-sm font-black text-rose-600" disabled={saving} onClick={deleteFactory}>삭제</button>
-            <button type="button" className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" disabled={saving} onClick={save}>{saving ? "저장 중..." : "저장"}</button>
+            <button type="button" className="inline-flex h-10 items-center rounded-md bg-orange-500 px-5 text-sm font-black text-white" disabled={saving} onClick={save}>{"저장"}</button>
           </div>
         </div>
       )}
@@ -5660,8 +5733,8 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
 };
 
 const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
-  "FN판매입력": ["일자", "출하창고", "품목코드", "품목명", "수량"],
-  "FN구매입력": ["일자", "입고창고", "품목코드", "품목명", "수량"],
+  "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "품목코드", "품목명", "수량"],
+  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "품목코드", "품목명", "수량"],
 };
 
 const visibleSalesSheetNames: SalesSheetName[] = ["발주 진행 단계", "송장출력용", "FN판매입력", "FN구매입력"];
@@ -5859,6 +5932,75 @@ function salesQuantityValue(value: unknown) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function isSalesEntrySheet(sheet: SalesSheetName) {
+  return sheet === "FN판매입력" || sheet === "FN구매입력";
+}
+
+function salesEntryWarehouseHeader(sheet: SalesSheetName) {
+  return sheet === "FN구매입력" ? "입고창고" : "출하창고";
+}
+
+function salesEntryVatIsExcluded(value: unknown) {
+  const text = entryVatLabel(value).toLowerCase();
+  return text.includes("별도") || text.includes("excluded");
+}
+
+function salesEntryCalculatedAmounts(item: Record<string, string>) {
+  const qty = salesQuantityValue(item.수량);
+  const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
+  const hasQty = Boolean(salesCellText(item.수량));
+  const hasPrice = Boolean(salesCellText(item.단가 || item["단가(vat포함)"]));
+  if (!hasQty || !hasPrice) {
+    return {
+      qty,
+      price,
+      tax: salesMoneyValue(item.세액),
+      supply: salesMoneyValue(item.공급가액),
+      total: salesMoneyValue(item.합계금액),
+      calculated: false,
+    };
+  }
+  const tax = salesEntryVatIsExcluded(item["VAT 포함/별도"]) ? qty * price * 0.1 : 0;
+  const supply = qty * price + tax;
+  return {
+    qty,
+    price,
+    tax,
+    supply,
+    total: salesMoneyValue(item.합계금액) || supply,
+    calculated: true,
+  };
+}
+
+function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHeader?: string) {
+  if (!isSalesEntrySheet(sheet)) return row;
+  const rec = salesRowObject(sheet, row) as Record<string, string>;
+  const changedTriggersCalculation = !changedHeader || ["수량", "단가", "단가(vat포함)", "세액", "VAT 포함/별도"].includes(changedHeader);
+  if (!changedTriggersCalculation) return row;
+  const amounts = salesEntryCalculatedAmounts(rec);
+  if (!amounts.calculated) return row;
+  const next = salesSheetHeaders[sheet].map((_, index) => row[index] || "");
+  const set = (header: string, value: string) => {
+    const index = salesSheetHeaders[sheet].indexOf(header);
+    if (index >= 0) next[index] = value;
+  };
+  set("세액", amounts.tax ? String(Math.round(amounts.tax)) : "");
+  set("공급가액", String(Math.round(amounts.supply)));
+  set("합계금액", String(Math.round(amounts.supply)));
+  return next;
+}
+
+function salesEntryRecordHasRequiredValues(item: Record<string, string>, mode: "sales" | "purchases") {
+  const warehouse = mode === "sales" ? item.출하창고 : item.입고창고;
+  return Boolean(
+    salesCellText(item.일자)
+    && (salesCellText(item.거래처코드) || salesCellText(item.거래처명))
+    && salesCellText(warehouse)
+    && (salesCellText(item.품목코드) || salesCellText(item.품목명))
+    && salesQuantityValue(item.수량) > 0,
+  );
+}
+
 function normalizeEntryDateValue(value: unknown) {
   const raw = salesCellText(value);
   if (!raw) return "";
@@ -5895,10 +6037,11 @@ function aggregateSalesEntryRows(
     const warehouse = salesCellText(mode === "sales" ? item.출하창고 : item.입고창고) || "100";
     const productCode = salesCellText(item.품목코드);
     const productName = salesCellText(item.품목명);
-    const qty = salesQuantityValue(item.수량) || 1;
-    const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
-    const tax = salesMoneyValue(item.세액);
-    const supply = salesMoneyValue(item.공급가액) || qty * price + tax;
+    const amounts = salesEntryCalculatedAmounts(item);
+    const qty = amounts.qty;
+    const price = amounts.price;
+    const tax = salesMoneyValue(item.세액) || amounts.tax;
+    const supply = salesMoneyValue(item.공급가액) || amounts.supply;
     const total = salesMoneyValue(item.합계금액) || supply;
     const vat = entryVatLabel(item["VAT 포함/별도"]);
     const statementKey = [date, customerCode || customerName].join("|");
@@ -6788,7 +6931,12 @@ function SalesExcelGrid({
   }, [resize]);
 
   function updateCell(rowIndex: number, colIndex: number, value: string) {
-    onChange(rows.map((row, r) => r === rowIndex ? row.map((cell, c) => c === colIndex ? value : cell) : row));
+    const changedHeader = headers[colIndex];
+    onChange(rows.map((row, r) => {
+      if (r !== rowIndex) return row;
+      const nextRow = row.map((cell, c) => c === colIndex ? value : cell);
+      return normalizeSalesEntryRow(sheet, nextRow, changedHeader);
+    }));
   }
   async function searchFnOsProducts(query: string) {
     const keyword = query.trim();
@@ -6984,6 +7132,8 @@ function SalesExcelGrid({
         const colIndex = range.startCol + colOffset;
         if (colIndex < headers.length) next[rowIndex][colIndex] = value;
       });
+      const rowIndex = range.startRow + rowOffset;
+      next[rowIndex] = normalizeSalesEntryRow(sheet, next[rowIndex]);
     });
     onChange(next);
     setRange(normalizeRange(
@@ -7236,11 +7386,10 @@ function SalesExcelGrid({
                 onClick={() => void searchFnOsProducts(productSearch.query)}
                 disabled={productSearch.loading}
               >
-                {productSearch.loading ? "검색중" : "검색"}
+                {"검색"}
               </ActionButton>
             </div>
             <div className="mt-4 max-h-[420px] overflow-auto rounded-xl border border-gray-200">
-              {productSearch.error && <div className="mb-2 rounded bg-rose-50 p-3 text-sm font-black text-rose-600">{productSearch.error}</div>}
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-gray-600">
@@ -7448,9 +7597,8 @@ function SalesRightTools() {
           placeholder="상품명 조회"
         />
         <button type="button" onClick={quickLookup} disabled={lookupLoading} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
-          {lookupLoading ? "조회 중" : "조회"}
+          {"조회"}
         </button>
-        {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
         {lookupResult?.product && (
           <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
             <button type="button" onClick={() => copyLookupText(lookupResult.product?.name)} className="mb-2 block w-full truncate text-left font-black text-slate-950 underline-offset-2 hover:text-orange-600 hover:underline" title="클릭해서 품목명 복사">
@@ -7524,9 +7672,8 @@ function SalesRightTools() {
           )}
           <input value={registerForm.remarks} onChange={(event) => updateRegisterField("remarks", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="비고" />
           <button type="button" onClick={submitRegister} disabled={registerLoading} className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
-            {registerLoading ? "전송 중" : registerMode === "product" ? "제품등록 전송" : "거래처등록 전송"}
+            {registerMode === "product" ? "제품등록 전송" : "거래처등록 전송"}
           </button>
-          {registerMessage && <div className="rounded-md bg-white px-2 py-2 text-xs font-black text-slate-600">{registerMessage}</div>}
         </div>
       </ToolSection>
 
@@ -7548,9 +7695,8 @@ function SalesRightTools() {
           </div>
           <input value={inputForm.remarks} onChange={(event) => updateInputField("remarks", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="적요" />
           <button type="button" onClick={submitInput} disabled={inputLoading} className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
-            {inputLoading ? "전송 중" : inputMode === "sales" ? "판매입력 전송" : "구매입력 전송"}
+            {inputMode === "sales" ? "판매입력 전송" : "구매입력 전송"}
           </button>
-          {inputMessage && <div className="rounded-md bg-white px-2 py-2 text-xs font-black text-slate-600">{inputMessage}</div>}
         </div>
       </ToolSection>
     </aside>
@@ -7630,10 +7776,8 @@ function SalesQuickLookupContent() {
           placeholder="상품명 조회"
         />
         <button type="button" onClick={quickLookup} disabled={lookupLoading} className="w-full rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
-          {lookupLoading ? "조회 중" : "조회"}
+          {"조회"}
         </button>
-        {lookupResult?.error && <div className="mt-2 rounded-md bg-rose-50 p-3 text-xs font-black text-rose-600">{lookupResult.error}</div>}
-        {lookupResult?.message && !lookupProducts.length && <div className="mt-2 rounded-md bg-amber-50 p-3 text-xs font-black text-amber-700">{lookupResult.message}</div>}
         {lookupProducts.length > 0 && (
           <div className="mt-2 overflow-hidden rounded-md border border-slate-200">
             <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">
@@ -7745,6 +7889,15 @@ type SalesPurchaseEntryLine = {
   qty: string;
   price: string;
   memo: string;
+};
+type SalesPurchaseEntryPrefill = {
+  entryDate?: string;
+  customerText?: string;
+  customerCode?: string;
+  warehouseText?: string;
+  warehouseCode?: string;
+  vatMode?: SalesPurchaseVatMode;
+  lines?: Array<Partial<SalesPurchaseEntryLine>>;
 };
 type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
 const productSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter; label: string }> = [
@@ -8744,7 +8897,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const sourceRows = sheets["FN판매입력"]
       .filter(rowHasValue)
       .map((row) => {
-        const item = salesRowObject("FN판매입력", row);
+        const item = salesRowObject("FN판매입력", normalizeSalesEntryRow("FN판매입력", row));
         return {
           일자: item.일자,
           거래처코드: item.거래처코드,
@@ -8761,9 +8914,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    const missingRequired = sourceRows.filter((item) => !item.일자 || !(item.거래처코드 || item.거래처명) || !item.출하창고 || !item.품목코드 || !item.품목명);
+    const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
     if (missingRequired.length) {
-      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
@@ -8825,7 +8978,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const sourceRows = sheets["FN구매입력"]
       .filter(rowHasValue)
       .map((row) => {
-        const item = salesRowObject("FN구매입력", row);
+        const item = salesRowObject("FN구매입력", normalizeSalesEntryRow("FN구매입력", row));
         return {
           일자: item.일자,
           거래처코드: item.거래처코드,
@@ -8842,9 +8995,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    const missingRequired = sourceRows.filter((item) => !item.일자 || !(item.거래처코드 || item.거래처명) || !item.입고창고 || !item.품목코드 || !item.품목명);
+    const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
     if (missingRequired.length) {
-      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드, 품목명을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
@@ -9650,7 +9803,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, 송장 엑셀 모달에서 거래처별 직송파일과 함께 내보낼 수 있습니다.
           </p>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
           <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
             <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
@@ -9931,7 +10083,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
           )}
           {!inventoryListRows.length && <EmptyState title="표시할 재고가 없습니다." description="창고 또는 품목 검색 조건을 확인해 주세요." />}
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
 
@@ -9969,7 +10120,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </tbody>
             </table>
           </div>
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
 
@@ -10163,7 +10313,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           footer={
             <div className="flex w-full justify-end gap-2">
               <ActionButton type="button" variant="secondary" onClick={() => setInventoryEditKey("")}>취소</ActionButton>
-              <ActionButton type="button" onClick={() => void saveInventoryEdit()} disabled={inventorySaving}>{inventorySaving ? "저장 중..." : "저장"}</ActionButton>
+              <ActionButton type="button" onClick={() => void saveInventoryEdit()} disabled={inventorySaving}>{"저장"}</ActionButton>
             </div>
           }
         >
@@ -10648,9 +10798,9 @@ function SalesPurchaseEntryModal({
 
   async function saveRows() {
     setLocalError("");
-    const validLines = lines.filter((line) => line.prod_cd.trim());
+    const validLines = lines.filter((line) => (line.prod_cd.trim() || line.prod_name.trim()) && lineQty(line) > 0);
     if (!entryDate || !(customerText.trim() || customerCode.trim()) || !warehouseCode.trim() || !validLines.length) {
-      setLocalError("날짜, 거래처명, 창고, 품목코드 1개 이상은 필수입니다.");
+      setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 또는 품목명 1개 이상, 수량은 필수입니다.");
       return;
     }
     const sourceRefBase = `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
@@ -10724,7 +10874,7 @@ function SalesPurchaseEntryModal({
           <div className="flex gap-2">
             <ActionButton type="button" variant="secondary" onClick={onClose}>취소</ActionButton>
             <ActionButton type="button" variant="danger" onClick={deleteSelectedLines}>삭제</ActionButton>
-            <ActionButton type="button" onClick={() => void saveRows()} disabled={saving}>{saving ? "저장 중" : "저장"}</ActionButton>
+            <ActionButton type="button" onClick={() => void saveRows()} disabled={saving}>{"저장"}</ActionButton>
           </div>
         </div>
       }
@@ -10790,8 +10940,6 @@ function SalesPurchaseEntryModal({
             </select>
           </FormField>
         </div>
-
-        {localError && <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{localError}</div>}
 
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 text-sm font-black text-gray-700">품목(VAT{vatMode === "included" ? "포함" : "별도"})</div>
@@ -10930,7 +11078,6 @@ function SalesPurchaseEntryModal({
                 }} />
                 <ActionButton type="button" onClick={() => void openProductSearch(productSearch.lineIndex, productSearch.query)}>찾기</ActionButton>
               </div>
-              {productSearch.error && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{productSearch.error}</div>}
               <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
                 <table className="w-full table-fixed text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500">
@@ -11610,7 +11757,6 @@ function MasterManagementPanel({
           }}>기본 채널 생성</button>}
         >
           <ChannelTable rows={summary?.sales_channels || []} />
-          {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
         </Panel>
       )}
 
@@ -12894,7 +13040,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
               );})}
             </tbody>
           </table>
-          {!customers.length && <EmptyState title={loading ? "불러오는 중..." : "거래처가 없습니다."} />}
+          {!customers.length && <EmptyState title={loading ? "" : "거래처가 없습니다."} />}
         </div>
         <div className="mt-4 flex items-center justify-center gap-1">
           {pageNumbers.map((number) => (
@@ -13503,7 +13649,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
               );})}
             </tbody>
           </table>
-          {!products.length && <EmptyState title={loading ? "불러오는 중..." : "품목이 없습니다."} />}
+          {!products.length && <EmptyState title={loading ? "" : "품목이 없습니다."} />}
         </div>
         <div className="mt-4 flex items-center justify-center gap-1">
           {pageNumbers.map((number) => (
@@ -13978,9 +14124,8 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
               })}
             </tbody>
           </table>
-          {!warehouses.length && <EmptyState title={loading ? "불러오는 중..." : "창고가 없습니다."} />}
+          {!warehouses.length && <EmptyState title={loading ? "" : "창고가 없습니다."} />}
         </div>
-        {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
       </Panel>
 
       {warehouseBulkOpen && (
@@ -14606,7 +14751,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={downloadTemplate} className="inline-flex h-11 w-11 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀폼 다운로드" title="엑셀폼 다운로드"><ExcelFormIcon /></button>
           <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600">
-            {uploading ? "업로드 중" : "엑셀 업로드"}
+            {"엑셀 업로드"}
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void uploadExcel(file);
@@ -14748,9 +14893,8 @@ function SalesProductMasterPanel({ message, setMessage, sync }: { message: strin
             ))}
           </tbody>
         </table>
-        {!products.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{loading ? "불러오는 중..." : "품목이 없습니다."}</p>}
+        {!products.length && <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">{loading ? "" : "품목이 없습니다."}</p>}
       </div>
-      {message && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{message}</div>}
     </Panel>
   );
 }
@@ -15837,7 +15981,7 @@ function AdsRightPanel() {
             <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => onFileChange(event)} />
           </label>
           <ActionButton type="button" onClick={() => uploadRows()} disabled={uploading || !uploadedAdFiles.length} className="h-9 w-full">
-            {uploading ? "생성 중" : `데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
+            {`데이터 생성${uploadedAdFiles.length ? ` (${uploadedAdFiles.length})` : ""}`}
           </ActionButton>
           <label className="block rounded-md border border-slate-200 bg-white px-3 py-2">
             <span className="text-xs font-black text-slate-700">저장 기준일</span>
@@ -15849,7 +15993,6 @@ function AdsRightPanel() {
             />
             <span className="mt-1 block text-[11px] font-bold text-slate-400">파일 안 날짜가 없으면 이 날짜로 광고 DB에 저장됩니다.</span>
           </label>
-          {message && <p className="rounded-md bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">{message}</p>}
           {!!uploadedAdFiles.length && (
             <div className="max-h-32 space-y-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
               {uploadedAdFiles.map((item) => (
@@ -17334,10 +17477,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         title="회계/비용"
         description={accountingTabLabel[activeTab]}
       />
-
-      {loading && <Card className="p-4 text-sm font-semibold text-gray-500">회계 데이터를 불러오는 중입니다.</Card>}
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{summary.error}</Card>}
-      {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-700">{message}</Card>}
 
       {activeTab === "dashboard" && (
         <>
@@ -17886,7 +18026,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             <>
               <ActionButton type="button" variant="secondary" onClick={() => setPreviewModalOpen(false)}>닫기</ActionButton>
               <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>
-                {uploading ? "저장 중" : "DB 저장"}
+                {"DB 저장"}
               </ActionButton>
             </>
           }
@@ -18569,9 +18709,8 @@ function AccountingRightPanel() {
           {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
         </select>
         <ActionButton type="button" className="mt-3 w-full" disabled={uploading || !uploadedFiles.length} onClick={uploadAccountingFiles}>
-          {uploading ? "저장 중" : `업로드${uploadedFiles.length ? ` (${uploadedFiles.length})` : ""}`}
+          {`업로드${uploadedFiles.length ? ` (${uploadedFiles.length})` : ""}`}
         </ActionButton>
-        {message && <p className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">{message}</p>}
       </Card>
       <Card className="mb-3 p-4 shadow-none">
         <SectionHeader title="저장 기준기간" />
@@ -18673,8 +18812,6 @@ function DashboardNew() {
         <h1 className="text-2xl font-black">FN OS 메인 대시보드</h1>
         <p className="mt-1 text-sm font-bold text-slate-500">쇼핑몰 API, 엑셀 업로드, 자체 입력 데이터를 FN OS 자체 DB 기준으로 요약합니다.</p>
       </div>
-
-      {loading && <div className="rounded-md border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">대시보드 데이터를 불러오는 중입니다.</div>}
       {summary?.ok === false && <div className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm font-bold text-rose-700">{summary.error}</div>}
 
       <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
@@ -18846,7 +18983,7 @@ function AccountFileModal({
               />
             </label>
             <input value={note} onChange={(event) => setNote(event.target.value)} className={modalInputClass} placeholder="메모" />
-            <ActionButton type="button" onClick={uploadFiles} disabled={uploading}>{uploading ? "업로드 중" : "업로드"}</ActionButton>
+            <ActionButton type="button" onClick={uploadFiles} disabled={uploading}>{"업로드"}</ActionButton>
           </div>
           <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm font-bold text-slate-500">
             파일을 여기로 끌어다 놓거나, 파일 선택 버튼으로 여러 개를 한 번에 선택하세요.
@@ -18862,7 +18999,6 @@ function AccountFileModal({
           </div>
         </div>
         <p className="mt-2 text-xs font-bold text-slate-500">허용: PDF, JPG, PNG, WebP, Excel, DOCX · 파일당 최대 10MB</p>
-        {error && <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-bold text-rose-600">{error}</div>}
         <div className="mt-5 overflow-hidden rounded-md border border-slate-200">
           <div className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] bg-slate-50 px-4 py-3 text-xs font-black text-slate-500">
             <span>파일명</span>
@@ -18872,7 +19008,7 @@ function AccountFileModal({
             <span className="text-center">작업</span>
           </div>
           {loading ? (
-            <div className="px-4 py-8 text-sm font-bold text-slate-500">불러오는 중...</div>
+            <div className="px-4 py-8" />
           ) : attachments.length ? attachments.map((item) => (
             <div key={item.id} className="grid grid-cols-[2.4fr_90px_130px_0.5fr_130px] items-center border-t border-slate-100 px-4 py-3 text-sm">
               <button type="button" onClick={() => openFile(item)} className="flex min-w-0 cursor-pointer items-center gap-2 text-left font-bold underline-offset-4 hover:text-orange-600 hover:underline">
@@ -19209,7 +19345,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               })}
             </tbody>
           </table>
-          {!filteredAccounts.length && <EmptyState title={loading ? "불러오는 중..." : "등록된 통장이 없습니다."} />}
+          {!filteredAccounts.length && <EmptyState title={loading ? "" : "등록된 통장이 없습니다."} />}
         </div>
       </Panel>
 
@@ -19506,7 +19642,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               })}
             </tbody>
           </table>
-          {!filteredAccounts.length && <EmptyState title={loading ? "불러오는 중..." : "등록된 카드가 없습니다."} />}
+          {!filteredAccounts.length && <EmptyState title={loading ? "" : "등록된 카드가 없습니다."} />}
         </div>
       </Panel>
 
@@ -19720,7 +19856,6 @@ function FnSettingsWorkspace() {
               />
             </FormField>
           </div>
-          {error && <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm font-black text-red-600">{error}</div>}
         </Card>
       ) : (
         <>
@@ -19742,7 +19877,6 @@ function FnSettingsWorkspace() {
           </div>
 
           {activeTab === "personnel" && <PersonnelManagementPanel onLock={() => setUnlocked(false)} />}
-          {message && <Card className="border-orange-200 bg-orange-50 p-3 text-sm font-black text-orange-700">{message}</Card>}
 
           {activeTab === "password" && (
             <Card className="p-5">
@@ -19889,9 +20023,6 @@ function AdminPasswordSettingsModal({ open, onClose }: { open: boolean; onClose:
           </FormField>
         </div>
       </div>
-
-      {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
-      {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
     </FormModal>
   );
 }
