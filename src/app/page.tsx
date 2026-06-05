@@ -19353,7 +19353,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
           <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
-              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-44 py-2 text-left">예금주</th><th className="w-56 py-2 text-left">계좌번호</th><th className="w-36 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr>
+              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-24 py-2 text-center">속성</th><th className="w-44 py-2 text-left">예금주</th><th className="w-56 py-2 text-left">계좌번호</th><th className="w-20 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr>
             </thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
@@ -19376,6 +19376,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                       </button>
                     </td>
                     <td className="truncate py-2 font-black" title={account.bank_name || ""}>{account.bank_name || "-"}</td>
+                    <td className="py-2 text-center"><StatusBadge tone={account.account_type === "personal" ? "muted" : "orange"}>{account.account_type === "personal" ? "개인" : "기업"}</StatusBadge></td>
                     <td className="truncate py-2 font-bold">{account.account_holder || "-"}</td>
                     <td className="py-2 font-mono text-slate-700">
                       <div className="flex min-w-0 items-center gap-2">
