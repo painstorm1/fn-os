@@ -1224,12 +1224,12 @@ function ArchiveList({
   }, [selectMode, viewMode]);
 
   useEffect(() => {
-    if (!selectMode || viewMode !== "list") return;
+    if (!selectMode) return;
     function onKeyDown(event: KeyboardEvent) {
       if (!event.shiftKey || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
       if (!items.length || !selectedIds.length) return;
       event.preventDefault();
-      const columns = 3;
+      const columns = viewMode === "list" ? 3 : window.innerWidth >= 1536 ? 10 : 5;
       const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowDown" ? columns : event.key === "ArrowLeft" ? -1 : -columns;
       const fallbackIndex = items.findIndex((item) => item.id === selectedIds[selectedIds.length - 1]);
       const currentIndex = keyboardIndexRef.current !== null ? keyboardIndexRef.current : fallbackIndex;
