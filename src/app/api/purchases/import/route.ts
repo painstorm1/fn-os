@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError } from "@/lib/fnos-db";
-import { dashboardSummary, importPurchaseRows } from "@/lib/sales-inventory";
+import { dashboardSummary, deleteEntryGroups, importPurchaseRows, updateEntryGroup } from "@/lib/sales-inventory";
 
 export async function GET() {
   try {
@@ -24,5 +24,31 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "구매입력 처리 실패" }, { status });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const groupKey = String(body.group_key || body.groupKey || "");
+    if (!groupKey) return NextResponse.json({ ok: false, error: "group_key is required." }, { status: 400 });
+    const rows = await updateEntryGroup("purchases", groupKey, body.values || body);
+    return NextResponse.json({ ok: true, updated_count: rows.length, rows });
+  } catch (error) {
+    const status = error instanceof FnosDbError ? error.status : 500;
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "구매입력 수정 실패" }, { status });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const groupKeys = Array.isArray(body.group_keys) ? body.group_keys.map(String) : body.group_key ? [String(body.group_key)] : [];
+    if (!groupKeys.length) return NextResponse.json({ ok: false, error: "group_keys is required." }, { status: 400 });
+    const rows = await deleteEntryGroups("purchases", groupKeys);
+    return NextResponse.json({ ok: true, deleted_count: rows.length });
+  } catch (error) {
+    const status = error instanceof FnosDbError ? error.status : 500;
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "구매입력 삭제 실패" }, { status });
   }
 }

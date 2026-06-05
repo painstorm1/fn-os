@@ -1,4 +1,4 @@
-import { createUploadBatch, hasDbConfig, insertRows, patchRows, selectRows, updateUploadBatch, upsertRows } from "./fnos-db";
+import { createUploadBatch, deleteRows, hasDbConfig, insertRows, patchRows, selectRows, updateUploadBatch, upsertRows } from "./fnos-db";
 
 type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
@@ -195,6 +195,42 @@ function noDbResult(rows: RawRow[]): ImportResult {
 
 async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<Record<string, unknown>>(table, query).catch(() => []);
+}
+
+function groupFilters(groupKey: string) {
+  const key = text(groupKey);
+  if (key.startsWith("batch:")) return { upload_batch_id: `eq.${key.slice(6)}` };
+  if (key.startsWith("manual:")) return { source_ref_id: `ilike.${key.slice(7)}%` };
+  if (key.startsWith("row:")) return { id: `eq.${key.slice(4)}` };
+  return { upload_batch_id: `eq.${key}` };
+}
+
+export async function updateEntryGroup(table: "sales" | "purchases", groupKey: string, values: RawRow) {
+  if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
+  const date = text(values.io_date || values.sale_date || values.purchase_date);
+  const updateValues: RawRow = {
+    updated_at: nowIso(),
+  };
+  if (date) {
+    updateValues.io_date = date;
+    if (table === "sales") updateValues.sale_date = date;
+    else updateValues.purchase_date = date;
+  }
+  if (text(values.cust_code)) updateValues.cust_code = text(values.cust_code);
+  if (text(values.cust_name)) updateValues.cust_name = text(values.cust_name);
+  if (text(values.wh_cd)) updateValues.wh_cd = text(values.wh_cd);
+  if (text(values.vat_type)) updateValues.vat_type = text(values.vat_type);
+  return patchRows(table, groupFilters(groupKey), updateValues);
+}
+
+export async function deleteEntryGroups(table: "sales" | "purchases", groupKeys: string[]) {
+  if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
+  const deleted: RawRow[] = [];
+  for (const groupKey of groupKeys) {
+    const rows = await deleteRows<RawRow>(table, groupFilters(groupKey));
+    deleted.push(...rows);
+  }
+  return deleted;
 }
 
 function missingColumnName(error: unknown) {

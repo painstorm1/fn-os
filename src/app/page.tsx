@@ -1680,10 +1680,12 @@ type SalesInventorySummary = {
   inventory_risk_count?: number;
   sync_fail_count?: number;
   recent_sales?: Array<Record<string, unknown>>;
+  recent_sales_lines?: Array<Record<string, unknown>>;
   sales_by_date?: Array<Record<string, unknown>>;
   sales_by_customer?: Array<Record<string, unknown>>;
   sales_by_product?: Array<Record<string, unknown>>;
   recent_purchases?: Array<Record<string, unknown>>;
+  recent_purchase_lines?: Array<Record<string, unknown>>;
   recent_orders?: Array<Record<string, unknown>>;
   recent_order_items?: Array<Record<string, unknown>>;
   recent_shipments?: Array<Record<string, unknown>>;
@@ -8072,12 +8074,33 @@ function entryRowQty(row: Record<string, unknown>) {
   return Number(row.qty || row.quantity || row.order_qty || 0);
 }
 
+function entryRowMemo(row: Record<string, unknown>) {
+  return String(row.remarks || row.memo || "-");
+}
+
+function entryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode, index = 0) {
+  const sourceRef = String(row.source_ref_id || "");
+  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+  return String(row.entry_group_key || row.upload_batch_id || manualMatch?.[1] || row.id || `${mode}-${index}`);
+}
+
+function entryRowSourceRefBase(row: Record<string, unknown>, mode: SalesPurchaseMode) {
+  const sourceRef = String(row.source_ref_id || "");
+  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+  if (manualMatch?.[1]) return manualMatch[1];
+  return `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
+}
+
+function compactEntryNumber(date: string, sequence: number) {
+  const key = entryDateFilterKey(date);
+  const yymmdd = key.length === 8 ? key.slice(2) : entryDateToday().replace(/\D/g, "").slice(2);
+  return `${yymmdd}-${sequence}`;
+}
+
 function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode) {
   const groups = new Map<string, { rows: Array<Record<string, unknown>>; firstSeen: number }>();
   rows.forEach((row, index) => {
-    const sourceRef = String(row.source_ref_id || "");
-    const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
-    const key = String(row.entry_group_key || row.upload_batch_id || manualMatch?.[1] || row.id || `${mode}-${index}`);
+    const key = entryRowKey(row, mode, index);
     const group = groups.get(key) || { rows: [], firstSeen: index };
     group.rows.push(row);
     groups.set(key, group);
@@ -8089,7 +8112,7 @@ function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: S
       ...first,
       id: key,
       entry_group_key: key,
-      line_count: sorted.length,
+      line_count: sorted.length === 1 ? Number(first.line_count || 1) : sorted.length,
       qty: sorted.reduce((total, row) => total + entryRowQty(row), 0),
       supply_amt: sorted.reduce((total, row) => total + entryRowAmount(row), 0),
       supply_amount: sorted.reduce((total, row) => total + entryRowAmount(row), 0),
@@ -8245,6 +8268,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [showJsonTool, setShowJsonTool] = useState(false);
   const [historyMode, setHistoryMode] = useState<SalesPurchaseMode>("sales");
   const [entryModalMode, setEntryModalMode] = useState<SalesPurchaseMode | null>(null);
+  const [partnerBalanceMode, setPartnerBalanceMode] = useState<SalesPurchaseMode | null>(null);
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
@@ -10110,6 +10134,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             >
               {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
             </button>
+            <button
+              type="button"
+              onClick={() => setPartnerBalanceMode(historyMode)}
+              className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600 hover:bg-orange-100"
+            >
+              {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
+            </button>
           </div>
           <div className="mb-3 grid gap-2 xl:grid-cols-[1fr_1fr_1fr_150px_150px_auto]">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
@@ -10136,7 +10167,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               }}>이번달</button>
             </div>
           </div>
-          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} />
+          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }} />
         </Panel>
       )}
 
@@ -10528,7 +10559,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {entryModalMode && (
         <SalesPurchaseEntryModal
           mode={entryModalMode}
-          recentRows={entryModalMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || []}
+          recentRows={entryModalMode === "sales" ? summary?.recent_sales_lines || summary?.recent_sales || [] : summary?.recent_purchase_lines || summary?.recent_purchases || []}
           initialDraft={entryPrefill || undefined}
           onClose={() => {
             setEntryPrefill(null);
@@ -10545,6 +10576,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             loadSummary(true);
           }}
         />
+      )}
+      {partnerBalanceMode && (
+        <FormModal
+          title={partnerBalanceMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
+          description="거래 발생, 회계 업로드 자동 후보 입력, 사용자 저장 확정까지 추적하려면 전용 원장 테이블이 필요합니다."
+          onClose={() => setPartnerBalanceMode(null)}
+          size="lg"
+          footer={<ActionButton type="button" onClick={() => setPartnerBalanceMode(null)}>닫기</ActionButton>}
+        >
+          <div className="space-y-3 text-sm font-bold leading-6 text-slate-700">
+            <p className="rounded-lg border border-orange-100 bg-orange-50 p-3 text-orange-700">공통 DB 테이블 변경 제안 승인 후 연결할 영역입니다.</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>판매는 미수금, 구매는 미지급금 발생 원장을 누적합니다.</li>
+              <li>쇼핑몰 속성 거래처는 두 리스트에서 제외합니다.</li>
+              <li>회계/비용 업로드 금액은 입력창에 후보로 자동 반영하고, 저장 버튼을 눌러야 잔액 차감이 확정됩니다.</li>
+              <li>잔액이 0이면 리스트에서 제거되고, 새 거래가 발생하면 다시 자동 추가됩니다.</li>
+            </ul>
+          </div>
+        </FormModal>
       )}
     </div>
   );
@@ -14948,48 +14998,250 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
   );
 }
 
-function SalesInventoryTable({ rows, mode }: { rows: Array<Record<string, unknown>>; mode: SalesPurchaseMode }) {
+function SalesInventoryTable({ rows, mode, onChanged }: { rows: Array<Record<string, unknown>>; mode: SalesPurchaseMode; onChanged: () => void }) {
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [editingRows, setEditingRows] = useState<Array<Record<string, unknown>>>([]);
+  const [editFields, setEditFields] = useState<Array<"date" | "customer" | "warehouse" | "vat">>(["date", "customer", "warehouse", "vat"]);
+  const [editDraft, setEditDraft] = useState({ date: "", customerCode: "", customerName: "", warehouse: "", vat: "included" });
+  const rowKeys = rows.map((row, index) => entryRowKey(row, mode, index));
+  const selection = useCheckboxColumnSelection({ keys: rowKeys, selectedKeys, setSelectedKeys });
+  const entryNumbers = new Map<string, string>();
+  const dateCounts = new Map<string, number>();
+  rows.forEach((row, index) => {
+    const date = entryDateFilterKey(entryRowDate(row)) || entryDateToday().replace(/\D/g, "");
+    const next = (dateCounts.get(date) || 0) + 1;
+    dateCounts.set(date, next);
+    entryNumbers.set(entryRowKey(row, mode, index), compactEntryNumber(date, next));
+  });
+
+  function selectedRows() {
+    const set = new Set(selectedKeys);
+    return rows.filter((row, index) => set.has(entryRowKey(row, mode, index)));
+  }
+
+  function openEdit(targetRows = selectedRows()) {
+    if (!targetRows.length) {
+      window.alert("수정할 행을 선택해 주세요.");
+      return;
+    }
+    const first = targetRows[0] || {};
+    setEditingRows(targetRows);
+    setEditDraft({
+      date: entryRowDate(first) || entryDateToday(),
+      customerCode: String(first.cust_code || first.customer_code || first.supplier_code || ""),
+      customerName: entryRowCustomer(first, mode),
+      warehouse: entryRowWarehouse(first),
+      vat: String(first.vat_type || "").includes("별도") || String(first.vat_type || "").includes("excluded") ? "excluded" : "included",
+    });
+  }
+
+  async function saveEdit() {
+    const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+    for (const row of editingRows) {
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          group_key: entryRowKey(row, mode),
+          values: {
+            io_date: editDraft.date,
+            cust_code: editDraft.customerCode,
+            cust_name: editDraft.customerName,
+            wh_cd: editDraft.warehouse,
+            vat_type: editDraft.vat === "included" ? "VAT포함" : "VAT별도",
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(data.error || "수정 실패");
+        return;
+      }
+    }
+    setEditingRows([]);
+    setSelectedKeys([]);
+    onChanged();
+  }
+
+  async function deleteSelected() {
+    const targetRows = selectedRows();
+    if (!targetRows.length) {
+      window.alert("삭제할 행을 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 ${targetRows.length.toLocaleString("ko-KR")}건을 삭제할까요?`)) return;
+    const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+    const res = await fetch(endpoint, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ group_keys: targetRows.map((row) => entryRowKey(row, mode)) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "삭제 실패");
+      return;
+    }
+    setSelectedKeys([]);
+    onChanged();
+  }
+
+  function statementHtml(row: Record<string, unknown>) {
+    const today = entryDateToday().replace(/\D/g, "").slice(2);
+    const title = mode === "sales" ? "판매 거래명세서" : "구매 거래명세서";
+    const lines = [{
+      productCode: entryRowProductCode(row),
+      productName: entryRowProduct(row),
+      qty: entryRowQty(row),
+      amount: entryRowAmount(row),
+      memo: entryRowMemo(row),
+    }];
+    const totalQty = lines.reduce((sum, line) => sum + line.qty, 0);
+    const totalAmount = lines.reduce((sum, line) => sum + line.amount, 0);
+    const rowsHtml = lines.map((line) => `
+      <tr>
+        <td>${line.productCode || ""}</td>
+        <td class="left">${line.productName || ""}</td>
+        <td class="right">${line.qty.toLocaleString("ko-KR")}</td>
+        <td class="right"></td>
+        <td class="right">${Math.round(line.amount).toLocaleString("ko-KR")}</td>
+        <td>${line.memo === "-" ? "" : line.memo}</td>
+      </tr>`).join("");
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
+      body{font-family:Arial,"Malgun Gothic",sans-serif;margin:24px;color:#111}
+      .page{width:760px;margin:0 auto}
+      h1{text-align:center;font-size:30px;margin:18px 0}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      td,th{border:1px solid #111;padding:6px;text-align:center}
+      .left{text-align:left}.right{text-align:right}
+      .top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+      .box{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}
+      .amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}
+      .toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}
+      .toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}
+      @media print{.toolbar{display:none}body{margin:0}.page{width:auto;margin:18mm}}
+    </style></head><body><div class="page">
+      <h1>거래명세서</h1>
+      <div class="top">
+        <div class="box">${entryRowCustomer(row, mode)} 귀중</div>
+        <table><tbody>
+          <tr><th>일련번호</th><td>${compactEntryNumber(entryRowDate(row), 1)}</td><th>TEL</th><td></td></tr>
+          <tr><th>상호</th><td colspan="3">에프엔</td></tr>
+          <tr><th>주소</th><td colspan="3"></td></tr>
+        </tbody></table>
+      </div>
+      <div class="amount"><span>금액</span><span>${krw(totalAmount)}</span></div>
+      <table><thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가</th><th>합계</th><th>메모</th></tr></thead><tbody>${rowsHtml}
+        <tr><th colspan="2">종합계</th><th class="right">${totalQty.toLocaleString("ko-KR")}</th><th></th><th class="right">${Math.round(totalAmount).toLocaleString("ko-KR")}</th><th></th></tr>
+      </tbody></table>
+      <div class="toolbar"><button onclick="window.print()">인쇄/PDF저장</button><button onclick="window.close()">닫기</button></div>
+    </div></body></html>`;
+  }
+
+  function openStatement(row: Record<string, unknown>) {
+    const popup = window.open("", "_blank", "width=980,height=900");
+    if (!popup) return;
+    popup.document.write(statementHtml(row));
+    popup.document.close();
+  }
+
+  function emailStatement(row: Record<string, unknown>) {
+    const fallback = window.prompt("거래처 이메일 주소를 입력해 주세요.", String(row.email || ""));
+    if (!fallback) return;
+    const date = entryDateToday().replace(/\D/g, "").slice(2);
+    const subject = `${date} - ${mode === "sales" ? "판매" : "구매"} 거래명세서 - 에프엔`;
+    const body = "거래명세서 내용을 확인해 주세요.\n\n보내는 사람: fn_kjw@nate.com\n\n※ 현재 FN OS에는 SMTP 발송 설정이 없어 메일 작성창으로 연결합니다.";
+    window.location.href = `mailto:${encodeURIComponent(fallback)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
   if (!rows.length) {
     return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
   }
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   return (
-    <div className="fn-table-shell overflow-x-auto">
-      <table className="w-full min-w-[1240px] table-fixed text-sm">
-        <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
-          <tr>
-            <th className="w-32 py-2 pl-4 text-left">일자-NO.</th>
-            <th className="w-28 py-2 text-left">{partnerLabel}코드</th>
-            <th className="w-44 py-2 text-left">{partnerLabel}명</th>
-            <th className="w-24 py-2 text-left">창고</th>
-            <th className="w-32 py-2 text-left">대표품목코드</th>
-            <th className="py-2 text-left">대표품목명</th>
-            <th className="w-24 py-2 text-right">품목수</th>
-            <th className="w-24 py-2 text-right">수량합계</th>
-            <th className="w-36 py-2 text-right">금액합계</th>
-            <th className="w-40 py-2 text-left">적요</th>
-            <th className="w-24 py-2 text-center">상태</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={String(row.id || index)} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/50">
-              <td className="truncate py-2 pl-4 font-bold text-blue-700">{entryRowDate(row) || "-"} - {String(row.upload_ser_no || row.no || index + 1)}</td>
-              <td className="truncate py-2">{String(row.cust_code || row.customer_code || row.supplier_code || "-")}</td>
-              <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
-              <td className="truncate py-2">{entryRowWarehouse(row)}</td>
-              <td className="truncate py-2">{entryRowProductCode(row) || "-"}</td>
-              <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
-              <td className="py-2 text-right">{Number(row.line_count || 1).toLocaleString("ko-KR")}</td>
-              <td className="py-2 text-right">{entryRowQty(row).toLocaleString("ko-KR")}</td>
-              <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
-              <td className="truncate py-2">{String(row.remarks || row.memo || "-")}</td>
-              <td className="py-2 text-center"><StatusPill status={String(row.sync_status || "SAVED")} /></td>
+    <>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
+          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("이메일로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) openStatement(row); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
+        </div>
+      </div>
+      <div className="fn-table-shell overflow-x-auto">
+        <table className="w-full min-w-[1180px] table-fixed text-sm">
+          <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+            <tr>
+              <th className="w-14 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selection.allSelected} onChange={(event) => selection.toggleAll(event.target.checked)} /></th>
+              <th className="w-32 py-2 text-left">일자-NO.</th>
+              <th className="w-44 py-2 text-left">{partnerLabel}명</th>
+              <th className="w-24 py-2 text-left">창고</th>
+              <th className="w-32 py-2 text-left">대표품목코드</th>
+              <th className="py-2 text-left">대표품목명</th>
+              <th className="w-24 py-2 text-right">품목수</th>
+              <th className="w-24 py-2 text-right">수량합계</th>
+              <th className="w-36 py-2 text-right">금액합계</th>
+              <th className="w-40 py-2 text-center">메모</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => {
+              const key = entryRowKey(row, mode, index);
+              const selected = selectedKeys.includes(key);
+              return (
+                <tr key={key} onDoubleClick={() => openEdit([row])} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
+                  <td className="py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => selection.beginSelection(key, index, event)} onMouseEnter={() => selection.continueSelection(key, index)} /></td>
+                  <td className="truncate py-2 font-bold text-blue-700">{entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), index + 1)}</td>
+                  <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
+                  <td className="truncate py-2">{entryRowWarehouse(row)}</td>
+                  <td className="truncate py-2">{entryRowProductCode(row) || "-"}</td>
+                  <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
+                  <td className="py-2 text-right">{Number(row.line_count || 1).toLocaleString("ko-KR")}</td>
+                  <td className="py-2 text-right">{entryRowQty(row).toLocaleString("ko-KR")}</td>
+                  <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
+                  <td className="truncate py-2 text-center">{entryRowMemo(row)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {editingRows.length > 0 && (
+        <FormModal
+          title={`${mode === "sales" ? "판매" : "구매"}입력 수정`}
+          description="품목은 개별 라인 수정에서만 변경할 수 있습니다."
+          onClose={() => setEditingRows([])}
+          size="lg"
+          footer={<><ActionButton type="button" variant="secondary" onClick={() => setEditingRows([])}>닫기</ActionButton><ActionButton type="button" onClick={() => void saveEdit()}>저장</ActionButton></>}
+        >
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 text-sm font-black text-slate-900">수정할 컬럼</div>
+            <div className="flex flex-wrap gap-3 text-sm font-bold text-slate-600">
+              {[
+                ["date", "날짜"],
+                ["customer", partnerLabel],
+                ["warehouse", "창고"],
+                ["vat", "VAT포함/별도"],
+              ].map(([key, label]) => (
+                <label key={key} className="inline-flex items-center gap-2">
+                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={editFields.includes(key as typeof editFields[number])} onChange={(event) => setEditFields((prev) => event.target.checked ? Array.from(new Set([...prev, key as typeof editFields[number]])) : prev.filter((item) => item !== key))} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {editFields.includes("date") && <FormField label="날짜"><input type="date" className={modalInputClass} value={editDraft.date} onChange={(event) => setEditDraft((prev) => ({ ...prev, date: event.target.value }))} /></FormField>}
+            {editFields.includes("customer") && <FormField label={`${partnerLabel}코드`}><input className={modalInputClass} value={editDraft.customerCode} onChange={(event) => setEditDraft((prev) => ({ ...prev, customerCode: event.target.value }))} /></FormField>}
+            {editFields.includes("customer") && <FormField label={`${partnerLabel}명`}><input className={modalInputClass} value={editDraft.customerName} onChange={(event) => setEditDraft((prev) => ({ ...prev, customerName: event.target.value }))} /></FormField>}
+            {editFields.includes("warehouse") && <FormField label="창고"><input className={modalInputClass} value={editDraft.warehouse} onChange={(event) => setEditDraft((prev) => ({ ...prev, warehouse: event.target.value }))} /></FormField>}
+            {editFields.includes("vat") && <FormField label="VAT"><select className={modalSelectClass} value={editDraft.vat} onChange={(event) => setEditDraft((prev) => ({ ...prev, vat: event.target.value }))}><option value="included">포함</option><option value="excluded">별도</option></select></FormField>}
+          </div>
+        </FormModal>
+      )}
+    </>
   );
 }
 

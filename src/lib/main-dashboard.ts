@@ -472,6 +472,8 @@ export async function mainDashboardSummary() {
     sales_inventory_basis: sales.slice(0, 1500),
     recent_sales: summarizeEntryRows(sales, "sales", 80),
     recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
+    recent_sales_lines: sales.slice(0, 500),
+    recent_purchase_lines: purchases.slice(0, 500),
     inquiry_channels: inquiryChannels,
     ad_label: metricTitle("광고비", latestAdDate, today, yesterday),
     ad_latest_date: iso(latestAdDate),
