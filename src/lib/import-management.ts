@@ -426,3 +426,98 @@ export async function createImportReceipt(payload: {
     count: savedPurchases.length,
   };
 }
+
+async function decrementCurrentInventoryForPurchase(row: AnyRecord) {
+  const qty = numberValue(row.qty);
+  if (qty <= 0) return false;
+  const filters: Record<string, string | number> = { limit: 1 };
+  const productId = text(row.product_id);
+  const warehouseId = text(row.warehouse_id);
+  const productCode = text(row.prod_cd || row.product_code || row.sku);
+  const warehouseCode = text(row.wh_cd || row.warehouse_code) || "100";
+  if (productId) filters.product_id = `eq.${productId}`;
+  else if (productCode) filters.prod_cd = `eq.${productCode}`;
+  else return false;
+  if (warehouseId) filters.warehouse_id = `eq.${warehouseId}`;
+  else filters.wh_cd = `eq.${warehouseCode}`;
+
+  const [current] = await selectRows<AnyRecord>("inventory_current", filters).catch(() => []);
+  if (!current?.id) return false;
+  const previous = numberValue(current.on_hand_qty ?? current.bal_qty);
+  const nextQty = previous - qty;
+  const reserved = numberValue(current.reserved_qty);
+  await patchRows("inventory_current", { id: `eq.${current.id}` }, {
+    on_hand_qty: nextQty,
+    available_qty: nextQty - reserved,
+    bal_qty: nextQty,
+    updated_at: nowIso(),
+    synced_at: nowIso(),
+  });
+  return true;
+}
+
+export async function deleteImportReceiptForOrder(orderId: string | number) {
+  if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
+  const orderKey = text(orderId);
+  if (!orderKey) throw new Error("orderId is required.");
+
+  const allocations = await selectRows<AnyRecord>("import_purchase_sku_allocations", {
+    import_order_id: `eq.${orderKey}`,
+    limit: 1000,
+  }).catch(() => []);
+  const allocationPurchaseIds = allocations.map((row) => text(row.purchase_id)).filter(Boolean);
+  const purchasesByAllocation = await Promise.all(allocationPurchaseIds.map((purchaseId) => (
+    selectRows<AnyRecord>("purchases", { id: `eq.${purchaseId}`, limit: 1 }).then((rows) => rows[0]).catch(() => null)
+  )));
+  const directPurchases = await selectRows<AnyRecord>("purchases", {
+    source_type: "eq.import_order",
+    source_ref_id: `eq.${orderKey}`,
+    limit: 1000,
+  }).catch(() => []);
+  const entryPurchases = await selectRows<AnyRecord>("purchases", {
+    source_ref_id: `like.import-order-${orderKey}-%`,
+    limit: 1000,
+  }).catch(() => []);
+  const purchaseMap = new Map<string, AnyRecord>();
+  for (const row of [...purchasesByAllocation, ...directPurchases, ...entryPurchases]) {
+    if (!row) continue;
+    const purchase = row as AnyRecord;
+    const key = text(purchase.id || purchase.source_ref_id);
+    if (key) purchaseMap.set(key, purchase);
+  }
+  const purchases = Array.from(purchaseMap.values());
+
+  let inventoryAdjusted = 0;
+  for (const purchase of purchases) {
+    if (await decrementCurrentInventoryForPurchase(purchase)) inventoryAdjusted += 1;
+  }
+
+  let movementsDeleted = 0;
+  let purchasesDeleted = 0;
+  for (const purchase of purchases) {
+    const purchaseId = text(purchase.id);
+    if (purchaseId) {
+      movementsDeleted += (await deleteRows<AnyRecord>("inventory_movements", {
+        source_type: "eq.purchases",
+        source_ref_id: `eq.${purchaseId}`,
+      }).catch(() => [])).length;
+      purchasesDeleted += (await deleteRows<AnyRecord>("purchases", { id: `eq.${purchaseId}` }).catch(() => [])).length;
+    } else {
+      const sourceRefId = text(purchase.source_ref_id);
+      if (sourceRefId) {
+        purchasesDeleted += (await deleteRows<AnyRecord>("purchases", { source_ref_id: `eq.${sourceRefId}` }).catch(() => [])).length;
+      }
+    }
+  }
+  const allocationsDeleted = (await deleteRows<AnyRecord>("import_purchase_sku_allocations", {
+    import_order_id: `eq.${orderKey}`,
+  }).catch(() => [])).length;
+
+  return {
+    ok: true,
+    purchases_deleted: purchasesDeleted,
+    allocations_deleted: allocationsDeleted,
+    movements_deleted: movementsDeleted,
+    inventory_adjusted: inventoryAdjusted,
+  };
+}

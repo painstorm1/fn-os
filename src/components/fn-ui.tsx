@@ -83,6 +83,10 @@ function ensureF4SaveShortcut() {
   }, true);
 }
 
+export function useF4SaveShortcut() {
+  useEffect(() => ensureF4SaveShortcut(), []);
+}
+
 export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <section className={cn("rounded-[14px] border border-gray-200 bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)]", className)} {...props} />;
 }
@@ -167,7 +171,7 @@ export function ActionButton({
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost" | "danger";
 }) {
-  useEffect(() => ensureF4SaveShortcut(), []);
+  useF4SaveShortcut();
   const variants = {
     primary: "bg-[#ff6a00] text-white hover:bg-[#ea580c]",
     secondary: "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50",

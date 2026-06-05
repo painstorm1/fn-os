@@ -23,6 +23,7 @@ import {
   modalSelectClass,
   modalTextareaClass,
   useEscapeToClose,
+  useF4SaveShortcut,
 } from "@/components/fn-ui";
 import { cachedJson as cachedClientJson, invalidateClientCache, markClientCacheReady, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
@@ -1500,6 +1501,22 @@ function sameImportOption(link: ImportSkuLink, optionName: string) {
   return linkOptionName(link) === String(optionName || "").trim();
 }
 
+async function deleteImportPurchaseEntriesForOrder(orderId: number | string) {
+  const res = await fetch(`/api/fnos/import-receipts?orderId=${encodeURIComponent(String(orderId))}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || "구매입력 삭제에 실패했습니다.");
+  invalidateClientCache("/api/dashboard/summary");
+  invalidateClientCache("/api/purchases/import");
+  invalidateClientCache("/api/fnos/products/master");
+  invalidateClientCache("/api/fnos/products/search");
+  invalidateClientCache("/api/fnos/products");
+  invalidateClientCache("/api/fnos/orders");
+  return data;
+}
+
 type OrderLine = {
   product_id: string;
   product_name: string;
@@ -2834,6 +2851,7 @@ function NativeOrders({
 }
 
 function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail; onSaved: (detail: ImportOrderDetail | null) => void }) {
+  useF4SaveShortcut();
   const order = detail.order;
   const [saving, setSaving] = useState(false);
   const [stageValues, setStageValues] = useState<StageValues>(stageValuesFromOrder(order));
@@ -2874,6 +2892,50 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
   const supplierPaymentWon = actualPaymentKrw > 0 ? actualPaymentKrw : convertedOrderTotalWon;
   const panelTotalWon = supplierPaymentWon + koreaExtraWon;
   const materialOnlyCost = materialOnlyCostSummary(detail, panelTotalWon);
+
+  async function buildQuickImportPurchasePrefill(savedOrderId: number | string): Promise<SalesPurchaseEntryPrefill> {
+    const productIds = Array.from(new Set((detail.items || []).map((item) => String(item.product_id || "")).filter(Boolean)));
+    const linkEntries = await Promise.all(productIds.map((productId) => (
+      cachedJson<{ links?: ImportSkuLink[] }>(`/api/fnos/import-product-links?import_product_id=${productId}`, 60_000)
+        .then((json) => [productId, json.links || []] as const)
+        .catch(() => [productId, []] as const)
+    )));
+    const linksByProduct = Object.fromEntries(linkEntries) as Record<string, ImportSkuLink[]>;
+    const purchaseLines = (detail.items || [])
+      .filter((item) => String(item.item_type || "").toUpperCase() !== "MATERIAL")
+      .flatMap((item) => {
+        const allLinks = linksByProduct[String(item.product_id || "")] || [];
+        const optionValue = String(item.option_value || "").trim();
+        const optionLinks = optionValue ? allLinks.filter((link) => sameImportOption(link, optionValue)) : [];
+        const links = optionLinks.length ? optionLinks : allLinks.filter((link) => !linkOptionName(link));
+        const skuAllocations = parseSkuAllocation(item.sku_allocation_json || item.sku_allocations || item.linked_sku_qty);
+        return links.map((link) => {
+          const product = link.product || null;
+          const productCode = fnProductSku(product);
+          if (!productCode || productCode === "-") return null;
+          const savedQty = String(skuAllocations[skuAllocationKey(link)] ?? "").trim();
+          const defaultQty = Number(link.default_qty || 0);
+          return {
+            prod_cd: productCode,
+            prod_name: fnProductName(product),
+            qty: savedQty || (defaultQty > 0 ? String(defaultQty) : String(item.quantity || "1")),
+            price: fnProductPrice(product) ? String(fnProductPrice(product)) : "",
+            memo: `${order.order_code || savedOrderId} ${item.product_name || ""}`.trim(),
+          };
+        }).filter(Boolean) as Array<Partial<SalesPurchaseEntryLine>>;
+      });
+    return {
+      entryDate: stageValues.fn_arrived || entryDateToday(),
+      customerText: "FN해외 상품 구매(소싱)",
+      customerCode: "",
+      warehouseText: "100",
+      warehouseCode: "100",
+      vatMode: "included",
+      sourceRefBase: `import-order-${savedOrderId}`,
+      sourceFileName: "FN_OS_IMPORT_PURCHASE_ENTRY",
+      lines: purchaseLines,
+    };
+  }
 
   useEffect(() => {
     setProductionDays(order.production_days != null ? String(order.production_days) : "");
@@ -2947,6 +3009,18 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       invalidateApiCache("/api/fnos/dashboard");
       invalidateApiCache("/api/fnos/calendar-production-memos");
       window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      if (!order.fn_arrived && stageValues.fn_arrived) {
+        const createNow = window.confirm("입고일이 저장되었습니다.\n해당 주문건 구매입력 바로가기를 열까요?");
+        if (createNow) {
+          localStorage.setItem(IMPORT_PURCHASE_PREFILL_STORAGE_KEY, JSON.stringify(await buildQuickImportPurchasePrefill(order.id)));
+          window.location.href = "/?menu=sales&salesSection=history";
+          return;
+        }
+      }
+      if (order.fn_arrived && !stageValues.fn_arrived) {
+        const deletePurchase = window.confirm("FN입고가 취소되었습니다.\n해당 구매입력을 취소하시겠습니까?");
+        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(order.id);
+      }
       onSaved(next);
     }
   }
@@ -2981,7 +3055,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <Link className="inline-flex h-9 items-center rounded-md border border-blue-300 px-3 text-sm font-black text-blue-600" href={importHref(`/orders/${order.id}/edit`)}>수정</Link>
             <Link className="inline-flex h-9 items-center rounded-md border border-slate-400 px-3 text-sm font-black text-slate-600" href={importHref(`/orders/new?copy=${order.id}`)}>주문서 복사</Link>
             <button type="button" onClick={deleteOrder} className="inline-flex h-9 items-center rounded-md border border-rose-300 px-3 text-sm font-black text-rose-600">삭제</button>
-            <button type="button" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{"저장"}</button>
+            <button type="button" data-f4-save="true" title="F4 저장" onClick={saveQuick} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-orange-500 px-4 text-sm font-black text-white disabled:opacity-50">{"F4 저장"}</button>
           </div>
         </div>
         <section className="grid gap-3">
@@ -3870,6 +3944,7 @@ function FnProductPickerModal({
 }
 
 function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProductTab }) {
+  useF4SaveShortcut();
   const { data, loading } = useImportFormData();
   const [product, setProduct] = useState<ImportProduct | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(id));
@@ -4397,7 +4472,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
               </div>
               <div className="flex gap-2">
                 <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={productListHref()}>취소</Link>
-                <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{"저장"}</button>
+                <button data-f4-save="true" title="F4 저장" className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving || deleting}>{"F4 저장"}</button>
               </div>
             </div>
           </div>
@@ -4788,6 +4863,7 @@ function NativeOrderDetail({ id }: { id: number }) {
 }
 
 function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
+  useF4SaveShortcut();
   const { data, loading } = useImportFormData();
   const [order, setOrder] = useState<ImportOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(id || copyId));
@@ -4998,6 +5074,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       warehouseText: "100",
       warehouseCode: "100",
       vatMode: "included",
+      sourceRefBase: `import-order-${savedOrderId}`,
+      sourceFileName: "FN_OS_IMPORT_PURCHASE_ENTRY",
       lines: purchaseLines,
     };
   }
@@ -5081,10 +5159,14 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       if (!order?.fn_arrived && visibleStageValues.fn_arrived && savedId) {
         const createNow = window.confirm("입고일이 저장되었습니다.\n이 발주건을 FN OS 구매/입고로 반영하시겠습니까?");
         if (createNow) {
-          localStorage.setItem(`fnos-open-import-receipt-${savedId}`, "1");
-          window.location.href = importHref(`/orders/${savedId}`);
+          localStorage.setItem(IMPORT_PURCHASE_PREFILL_STORAGE_KEY, JSON.stringify(buildImportPurchasePrefill(savedId)));
+          window.location.href = "/?menu=sales&salesSection=history";
           return;
         }
+      }
+      if (order?.fn_arrived && !visibleStageValues.fn_arrived && savedId) {
+        const deletePurchase = window.confirm("FN입고가 취소되었습니다.\n해당 구매입력을 취소하시겠습니까?");
+        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(savedId);
       }
       window.location.href = importHref("/orders");
     } catch (err) {
@@ -5323,7 +5405,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-bold" href={importHref("/orders")}>취소</Link>
             {id && <button type="button" className="inline-flex h-10 items-center justify-center rounded-md border border-rose-300 px-4 text-sm font-black text-rose-600" onClick={deleteOrder}>삭제</button>}
-            <button className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{"저장"}</button>
+            <button data-f4-save="true" title="F4 저장" className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-black text-white disabled:opacity-50" disabled={saving}>{"F4 저장"}</button>
           </div>
 
           {catalogOpen && (
@@ -7921,6 +8003,8 @@ type SalesPurchaseEntryPrefill = {
   warehouseText?: string;
   warehouseCode?: string;
   vatMode?: SalesPurchaseVatMode;
+  sourceRefBase?: string;
+  sourceFileName?: string;
   lines?: Array<Partial<SalesPurchaseEntryLine>>;
 };
 type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
@@ -10893,7 +10977,7 @@ function SalesPurchaseEntryModal({
       setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 또는 품목명 1개 이상, 수량은 필수입니다.");
       return;
     }
-    const sourceRefBase = `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
+    const sourceRefBase = initialDraft?.sourceRefBase || `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
     const rows = validLines.map((line, index) => ({
       io_date: entryDate,
       sale_date: mode === "sales" ? entryDate : "",
@@ -10919,7 +11003,7 @@ function SalesPurchaseEntryModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ rows, source_file_name: mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY" }),
+        body: JSON.stringify({ rows, source_file_name: initialDraft?.sourceFileName || (mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY") }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -10940,7 +11024,7 @@ function SalesPurchaseEntryModal({
         created_at: new Date().toISOString(),
         sync_status: "SAVED",
         source_type: "fn_os",
-        source_file_name: mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY",
+        source_file_name: initialDraft?.sourceFileName || (mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY"),
       })));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "저장 실패");
