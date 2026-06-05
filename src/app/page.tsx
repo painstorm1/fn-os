@@ -1780,11 +1780,41 @@ function listEnabledLabel(value?: boolean) {
   return value === false ? "미반영" : "반영";
 }
 
+function formatCardNumber(value?: string | number | null) {
+  const digits = onlyDigits(value).slice(0, 16);
+  return digits.replace(/(\d{4})(?=\d)/g, "$1-");
+}
+
 function formatCardExpiry(value?: string) {
   const textValue = String(value || "").trim();
   const match = textValue.match(/^(\d{4})-(\d{2})/);
   if (match) return `${match[2]}/${match[1].slice(2)}`;
+  const slashMatch = textValue.match(/^(\d{2})\/(\d{2})$/);
+  if (slashMatch) return textValue;
+  const digits = onlyDigits(textValue).slice(0, 4);
+  if (digits.length === 4) return `${digits.slice(2)}/${digits.slice(0, 2)}`;
   return textValue || "-";
+}
+
+function formatCardExpiryInput(value?: string | number | null) {
+  const textValue = String(value || "").trim();
+  const isoMatch = textValue.match(/^(\d{4})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[2]}/${isoMatch[1].slice(2)}`;
+  const digits = onlyDigits(textValue).slice(0, 4);
+  if (digits.length < 4) return digits;
+  return `${digits.slice(2)}/${digits.slice(0, 2)}`;
+}
+
+function cardExpiryInputToIso(value?: string | number | null) {
+  const textValue = String(value || "").trim();
+  const isoMatch = textValue.match(/^(\d{4})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-01`;
+  const slashMatch = textValue.match(/^(\d{2})\/(\d{2})$/);
+  const month = slashMatch ? slashMatch[1] : onlyDigits(textValue).slice(2, 4);
+  const year = slashMatch ? slashMatch[2] : onlyDigits(textValue).slice(0, 2);
+  const monthNumber = Number(month);
+  if (!year || !month || monthNumber < 1 || monthNumber > 12) return "";
+  return `20${year}-${month.padStart(2, "0")}-01`;
 }
 
 function cardExpiryWarning(card: FnCardAccount) {
@@ -1796,6 +1826,23 @@ function cardExpiryWarning(card: FnCardAccount) {
   const warnFrom = new Date(expiry);
   warnFrom.setMonth(warnFrom.getMonth() - 3);
   return today >= warnFrom;
+}
+
+function formatCardPeriod(start?: number | string, end?: number | string) {
+  const startDay = onlyDigits(start);
+  const endDay = onlyDigits(end);
+  if (!startDay && !endDay) return "-";
+  return `${startDay || "-"}일-${endDay || "-"}일`;
+}
+
+function formatMonthlyDay(value?: number | string) {
+  const day = onlyDigits(value);
+  return day ? `매월 ${day}일` : "-";
+}
+
+function validDayString(value?: number | string) {
+  const day = Number(onlyDigits(value));
+  return day >= 1 && day <= 31;
 }
 
 async function openAttachment(item: OrderAttachment) {
@@ -9753,7 +9800,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       return (
                         <tr ref={(element) => { inventoryPickerRowRefs.current[index] = element; }} key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
                           <td className="py-2 text-center">
-                                                        <button
+                            <button
                               type="button"
                               className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}
                               onMouseDown={(event) => handleInventoryPickerSelection(index, event)}
@@ -9774,7 +9821,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       return (
                         <tr ref={(element) => { inventoryPickerRowRefs.current[index] = element; }} key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-blue-50" : index === inventoryPicker.index ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseDown={(event) => handleInventoryPickerSelection(index, event)}>
                           <td className="py-2 text-center">
-                                                        <button
+                            <button
                               type="button"
                               className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`}
                               onMouseDown={(event) => handleInventoryPickerSelection(index, event)}
@@ -16448,7 +16495,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       )}
 
       {activeTab === "fixed" && (
-        <section className="grid gap-4 xl:grid-cols-[1fr_400px]">
+        <section>
           <Card className="p-5">
             <SectionHeader
               title="고정비 현황"
@@ -16478,8 +16525,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   </button>
                 ))}
               </div>
-              <ActionButton type="button" onClick={() => { setFixedCostMode("fixed"); setFixedCostDraft(emptyFixedCostDraft); }}>F2 새 비용</ActionButton>
-              <ActionButton type="button" variant="secondary" onClick={() => { setFixedCostMode("loan"); setLoanDraft(emptyLoanDraft); }}>대출 추가</ActionButton>
             </FilterBar>
             <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full min-w-[1040px] text-sm">
@@ -16561,70 +16606,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                       </tr>
                     );
                   })}
-                  {!combinedFixedRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="오른쪽에서 새 비용 또는 대출 항목을 추가할 수 있습니다." className="min-h-24" /></td></tr>}
+                  {!combinedFixedRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="고정비 설정 없음" description="고정비는 모달에서 추가할 수 있습니다." className="min-h-24" /></td></tr>}
                 </tbody>
               </table>
             </div>
           </Card>
-          <div className="space-y-4">
-            <Card className="p-5">
-              <SectionHeader title="D-3 도래 고정비" />
-              <div className="mt-4 space-y-2">
-                {upcomingFixedCosts.map((row, index) => (
-                  <div key={`${String(row.fixed_cost_id || row.loan_id || row.id)}-${index}`} className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-gray-900">{String(row.title || row.display_title || "-")}</p>
-                      <StatusBadge tone="orange">D-{Math.max(0, asNumber(row.days_until))}</StatusBadge>
-                    </div>
-                    <p className="mt-1 text-xs font-medium text-gray-500">{String(row.due_date || "-")} / {String(row.payment_source || row.payment_type || "통장/카드")}</p>
-                    <p className="mt-1 text-right text-sm font-bold text-[#ff6a00]">{krw(asNumber(row.amount))}</p>
-                  </div>
-                ))}
-                {!upcomingFixedCosts.length && <EmptyState title="3일 내 고정비 없음" className="min-h-24" />}
-              </div>
-            </Card>
-            <Card className="p-5">
-              <div className="mb-4 flex rounded-md border border-gray-200 bg-white p-1">
-                <button type="button" onClick={() => setFixedCostMode("fixed")} className={`h-9 flex-1 rounded text-sm font-black ${fixedCostMode === "fixed" ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}>고정비</button>
-                <button type="button" onClick={() => setFixedCostMode("loan")} className={`h-9 flex-1 rounded text-sm font-black ${fixedCostMode === "loan" ? "bg-orange-500 text-white" : "text-gray-500 hover:bg-orange-50"}`}>대출</button>
-              </div>
-              {fixedCostMode === "fixed" ? (
-                <form onSubmit={saveFixedCost} className="space-y-3">
-                  <SectionHeader title={fixedCostDraft.id ? "고정비 수정" : "고정비 추가"} />
-                  <FormField label="고정비명" required><input className={modalInputClass} value={fixedCostDraft.fixed_cost_name} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, fixed_cost_name: event.target.value }))} /></FormField>
-                  <div className="grid grid-cols-2 gap-2">
-                    <FormField label="비용 금액" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(fixedCostDraft.expected_amount)} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, expected_amount: formatCommaNumber(event.target.value) }))} /></FormField>
-                    <FormField label="결제일" required><input className={modalInputClass} value={fixedCostDraft.base_day} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, base_day: event.target.value }))} placeholder="5, 20, 말일" /></FormField>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <FormField label="결제 구분" required><select className={modalSelectClass} value={fixedCostDraft.payment_type} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_type: event.target.value }))}><option value="bank">통장 출금</option><option value="card">카드 사용</option><option value="card_payment">카드 출금</option></select></FormField>
-                    <FormField label={fixedCostDraft.payment_type === "card" ? "연동 카드" : "연동 계좌"} required><select className={modalSelectClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))}><option value="">선택</option>{(fixedCostDraft.payment_type === "card" ? cardAccounts : bankAccounts).map((account) => <option key={String(account.id || account.card_name || account.bank_name)} value={String(account.card_name || account.bank_name)}>{String(account.card_name || account.bank_name)}</option>)}</select></FormField>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <FormField label="1차 카테고리"><input className={modalInputClass} value={fixedCostDraft.category_large} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_large: event.target.value, fixed_cost_name: prev.fixed_cost_name || `[${event.target.value}] ` }))} /></FormField>
-                    <FormField label="2차 카테고리"><input className={modalInputClass} value={fixedCostDraft.category_middle} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, category_middle: event.target.value }))} /></FormField>
-                  </div>
-                  <FormField label="매칭 키워드"><input className={modalInputClass} value={fixedCostDraft.match_keywords} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, match_keywords: event.target.value }))} placeholder="쉼표로 구분" /></FormField>
-                  <FormField label="메모"><textarea className={modalTextareaClass} value={fixedCostDraft.memo} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, memo: event.target.value }))} /></FormField>
-                  <div className="flex justify-end gap-2 pt-2"><ActionButton type="button" variant="secondary" onClick={() => setFixedCostDraft(emptyFixedCostDraft)}>초기화</ActionButton><ActionButton type="submit">{fixedCostDraft.id ? "수정" : "추가"}</ActionButton></div>
-                </form>
-              ) : (
-                <form onSubmit={saveLoan} className="space-y-3">
-                  <SectionHeader title={loanDraft.id ? "대출 수정" : "대출 추가"} />
-                  <FormField label="납입 방식" required><select className={modalSelectClass} value={loanDraft.loan_type} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_type: event.target.value }))}><option value="principal_interest">원리금상환</option><option value="interest_only">이자납입</option></select></FormField>
-                  <FormField label="대출명" required><input className={modalInputClass} value={loanDraft.loan_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_name: event.target.value }))} /></FormField>
-                  <div className="grid grid-cols-2 gap-2"><FormField label="대출금액"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, principal_amount: formatCommaNumber(event.target.value) }))} /></FormField><FormField label="예상 납입액" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_payment_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_payment_amount: formatCommaNumber(event.target.value) }))} /></FormField></div>
-                  <div className="grid grid-cols-2 gap-2"><FormField label="원금"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_principal_amount: formatCommaNumber(event.target.value) }))} /></FormField><FormField label="이자"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_interest_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_interest_amount: formatCommaNumber(event.target.value) }))} /></FormField></div>
-                  <div className="grid grid-cols-2 gap-2"><FormField label="은행"><input className={modalInputClass} value={loanDraft.bank_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, bank_name: event.target.value }))} /></FormField><FormField label="예금주"><input className={modalInputClass} value={loanDraft.account_holder} onChange={(event) => setLoanDraft((prev) => ({ ...prev, account_holder: event.target.value }))} /></FormField></div>
-                  <FormField label="입금계좌"><input className={modalInputClass} value={loanDraft.deposit_account_number || loanDraft.account_number} onChange={(event) => setLoanDraft((prev) => ({ ...prev, deposit_account_number: event.target.value }))} /></FormField>
-                  <div className="grid grid-cols-2 gap-2"><FormField label="대출 시작일"><input className={modalInputClass} type="date" value={loanDraft.loan_start_date} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_start_date: event.target.value }))} /></FormField><FormField label="대출 기간(개월)"><input className={`${modalInputClass} text-right`} inputMode="numeric" value={loanDraft.loan_period_months} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_period_months: event.target.value }))} /></FormField></div>
-                  <FormField label="납입 기준일" required><input className={modalInputClass} value={loanDraft.payment_day} onChange={(event) => setLoanDraft((prev) => ({ ...prev, payment_day: event.target.value }))} placeholder="3, 7, 15, 말일" /></FormField>
-                  <FormField label="메모"><textarea className={modalTextareaClass} value={loanDraft.memo} onChange={(event) => setLoanDraft((prev) => ({ ...prev, memo: event.target.value }))} /></FormField>
-                  <div className="flex justify-end gap-2 pt-2"><ActionButton type="button" variant="secondary" onClick={() => setLoanDraft(emptyLoanDraft)}>초기화</ActionButton><ActionButton type="submit">{loanDraft.id ? "수정" : "추가"}</ActionButton></div>
-                </form>
-              )}
-            </Card>
-          </div>
         </section>
       )}
 
@@ -17734,6 +17720,8 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
   const [fileAccount, setFileAccount] = useState<FnBankAccount | null>(null);
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
+  const [copiedKey, setCopiedKey] = useState("");
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowKeys = accounts.map((account) => account.id || "").filter(Boolean);
   const selectedAccounts = accounts.filter((account) => account.id && selectedKeys.includes(account.id));
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
@@ -17753,6 +17741,12 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   useEffect(() => {
     void loadAccounts();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -17833,6 +17827,35 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     await loadAccounts();
   }
 
+  async function copyAccountInfo(account: FnBankAccount) {
+    const key = String(account.id || account.account_number || account.bank_name || "");
+    const copyText = [
+      account.bank_name || "-",
+      account.account_holder || "-",
+      account.account_number || "-",
+    ].join("\n");
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(copyText);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = copyText;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setCopiedKey(key);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedKey(""), 1000);
+    } catch {
+      setMessage("클립보드 복사에 실패했습니다.");
+    }
+  }
+
   const filteredAccounts = accounts.filter((account) => {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
@@ -17867,7 +17890,26 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                     <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
                     <td className="truncate py-2 font-black" title={account.bank_name || ""}>{account.bank_name || "-"}</td>
                     <td className="truncate py-2 font-bold">{account.account_holder || "-"}</td>
-                    <td className="truncate py-2 font-mono text-slate-700">{account.account_number || "-"}</td>
+                    <td className="py-2 font-mono text-slate-700">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate">{account.account_number || "-"}</span>
+                        <span className="relative inline-flex shrink-0" onClick={(event) => event.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => void copyAccountInfo(account)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600"
+                            title="은행명, 예금주, 계좌번호 복사"
+                            aria-label="은행명, 예금주, 계좌번호 복사"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2" />
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                          </button>
+                          {copiedKey === key && <span className="absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-3 py-1.5 text-xs font-black text-white shadow-lg">복사되었습니다.</span>}
+                        </span>
+                      </div>
+                    </td>
                     <td className="py-2" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setFileAccount(account)} className="rounded-md border border-orange-200 bg-white px-3 py-1 text-xs font-black text-orange-600 hover:bg-orange-50">파일 {fileCounts[key] ? fileCounts[key].toLocaleString("ko-KR") : ""}</button></td>
                     <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
                   </tr>
@@ -17953,7 +17995,15 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }
 
   function openEdit(account: FnCardAccount) {
-    setDraft({ ...emptyDraft, ...account, card_type: account.card_type || "business", list_enabled: account.list_enabled !== false, card_limit: formatCommaNumber(account.card_limit) });
+    setDraft({
+      ...emptyDraft,
+      ...account,
+      card_type: account.card_type || "business",
+      card_number: formatCardNumber(account.card_number),
+      expiry_date: formatCardExpiryInput(account.expiry_date),
+      list_enabled: account.list_enabled !== false,
+      card_limit: formatCommaNumber(account.card_limit),
+    });
     setModalOpen(true);
   }
 
@@ -17969,14 +18019,22 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     const payload = {
       ...draft,
       card_name: String(draft.card_name || "").trim(),
-      card_number: String(draft.card_number || "").trim(),
+      card_number: formatCardNumber(draft.card_number),
+      expiry_date: cardExpiryInputToIso(draft.expiry_date),
       cvc_hint: String(draft.cvc_hint || "").trim(),
       secure_message: String(draft.secure_message || "").trim(),
       payment_password_hint: String(draft.payment_password_hint || "").trim(),
+      cutoff_start_day: onlyDigits(draft.cutoff_start_day).slice(0, 2),
+      cutoff_end_day: onlyDigits(draft.cutoff_end_day).slice(0, 2),
+      payment_day: onlyDigits(draft.payment_day).slice(0, 2),
       card_limit: onlyDigits(draft.card_limit),
     };
     if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.secure_message || !payload.payment_password_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
       window.alert("실물 소유자와 메모를 제외한 모든 항목은 필수입니다.");
+      return;
+    }
+    if (!validDayString(payload.cutoff_start_day) || !validDayString(payload.cutoff_end_day) || !validDayString(payload.payment_day)) {
+      window.alert("결제 기준일과 결제일은 1일부터 31일 사이로 입력해 주세요.");
       return;
     }
     const res = await fetch("/api/accounting/ledger/card-accounts", { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -18023,8 +18081,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 카드번호 / 소유자 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">소유자</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
+          <table className="w-full min-w-[1240px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">기간</th><th className="w-32 py-2 text-left">결제일</th><th className="w-36 py-2 text-left">소유자</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
                 const key = String(account.id || "");
@@ -18033,8 +18091,10 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                   <tr key={key || `${account.card_name}-${index}`} onClick={() => openEdit(account)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`}>
                     <td className="py-2 text-center" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setSelectedKeys((prev) => selected ? prev.filter((item) => item !== key) : Array.from(new Set([...prev, key])))} className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 bg-white text-gray-400"}`}>{index + 1}</button></td>
                     <td className="truncate py-2 font-black" title={account.card_name || ""}>{cardExpiryWarning(account) && <span className="mr-2 rounded bg-rose-50 px-2 py-0.5 text-xs font-black text-rose-600">유효기간 만료</span>}{account.card_name || "-"}</td>
-                    <td className="truncate py-2 font-mono text-slate-700">{account.card_number || "-"}</td>
-                    <td className="truncate py-2 font-mono text-slate-700">{formatCardExpiry(account.expiry_date)} / {maskedSecret(account.cvc_hint)}</td>
+                    <td className="truncate py-2 font-mono text-slate-700">{formatCardNumber(account.card_number) || "-"}</td>
+                    <td className="truncate py-2 font-mono text-slate-700">{formatCardExpiry(account.expiry_date)} / {account.cvc_hint || "-"}</td>
+                    <td className="truncate py-2 font-bold text-slate-700">{formatCardPeriod(account.cutoff_start_day, account.cutoff_end_day)}</td>
+                    <td className="truncate py-2 font-bold text-slate-700">{formatMonthlyDay(account.payment_day)}</td>
                     <td className="truncate py-2 font-bold">{account.physical_owner || "-"}</td>
                     <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
                   </tr>
@@ -18052,15 +18112,15 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
             <div><div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div><div className="flex flex-wrap gap-2">{[["business", "기업"], ["personal", "개인"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateDraft("card_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.card_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div></div>
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="카드명" required><input className={modalInputClass} value={draft.card_name || ""} onChange={(event) => updateDraft("card_name", event.target.value)} /></FormField>
-              <FormField label="카드번호" required><input className={modalInputClass} value={draft.card_number || ""} onChange={(event) => updateDraft("card_number", event.target.value)} /></FormField>
-              <FormField label="유효기간" required><input className={modalInputClass} type="date" value={String(draft.expiry_date || "").slice(0, 10)} onChange={(event) => updateDraft("expiry_date", event.target.value)} /></FormField>
+              <FormField label="카드번호" required><input className={modalInputClass} inputMode="numeric" value={draft.card_number || ""} onChange={(event) => updateDraft("card_number", formatCardNumber(event.target.value))} placeholder="1234-5678-9012-3456" /></FormField>
+              <FormField label="유효기간" required><input className={modalInputClass} inputMode="numeric" value={draft.expiry_date || ""} onChange={(event) => updateDraft("expiry_date", formatCardExpiryInput(event.target.value))} placeholder="10/28" maxLength={5} /></FormField>
               <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
               <FormField label="해외안심 결제 개인 확인 메세지" required><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
               <FormField label="결제 비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
               <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
-                <FormField label="결제 기준일 시작" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.cutoff_start_day || ""} onChange={(event) => updateDraft("cutoff_start_day", event.target.value)} /></FormField>
-                <FormField label="결제 기준일 종료" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.cutoff_end_day || ""} onChange={(event) => updateDraft("cutoff_end_day", event.target.value)} /></FormField>
-                <FormField label="결제일" required><input className={`${modalInputClass} text-right`} type="number" min="1" max="31" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", event.target.value)} /></FormField>
+                <FormField label="결제 기준일 시작" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.cutoff_start_day || ""} onChange={(event) => updateDraft("cutoff_start_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="22" /></FormField>
+                <FormField label="결제 기준일 종료" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.cutoff_end_day || ""} onChange={(event) => updateDraft("cutoff_end_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="21" /></FormField>
+                <FormField label="결제일" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="5" /></FormField>
               </div>
               <FormField label="한도" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(draft.card_limit)} onChange={(event) => updateDraft("card_limit", formatCommaNumber(event.target.value))} /></FormField>
               <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
@@ -18077,6 +18137,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
 function FnSettingsWorkspace() {
   const searchParams = useSearchParams();
+  const unlockStorageKey = "fnos-settings-admin-unlocked";
   const requestedTab = searchParams.get("settingsTab") || "personnel";
   const [activeTab, setActiveTab] = useState(requestedTab);
   const [unlocked, setUnlocked] = useState(false);
@@ -18099,6 +18160,32 @@ function FnSettingsWorkspace() {
   useEffect(() => {
     setActiveTab(requestedTab);
   }, [requestedTab]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(unlockStorageKey) || "null") as { date?: string; name?: string } | null;
+      const savedName = String(saved?.name || "").trim();
+      if (!savedName || saved?.date !== todayKstDateKey()) return;
+      setAdminName(savedName);
+      setUnlocked(true);
+    } catch {
+      localStorage.removeItem(unlockStorageKey);
+    }
+  }, []);
+
+  function todayKstDateKey() {
+    try {
+      return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  function rememberUnlockedAdmin(name: string) {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(unlockStorageKey, JSON.stringify({ date: todayKstDateKey(), name }));
+  }
 
   function openTab(tab: string) {
     setActiveTab(tab);
@@ -18171,6 +18258,7 @@ function FnSettingsWorkspace() {
       };
       localStorage.setItem("fnos-personnel-employees", JSON.stringify([initialAdmin]));
       setError("");
+      rememberUnlockedAdmin(name);
       setUnlocked(true);
       return;
     }
@@ -18180,6 +18268,7 @@ function FnSettingsWorkspace() {
       return;
     }
     setError("");
+    rememberUnlockedAdmin(name);
     setUnlocked(true);
   }
 
