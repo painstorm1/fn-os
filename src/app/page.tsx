@@ -7754,6 +7754,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const inventoryPickerDragModeRef = useRef<"select" | "deselect" | null>(null);
   const lastInventoryPickerSelectionIndexRef = useRef<number | null>(null);
   const inventoryPickerRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  const inventorySelectionDragModeRef = useRef<"select" | "deselect" | null>(null);
+  const lastInventorySelectionIndexRef = useRef<number | null>(null);
+  const inventoryRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [inventoryEditKey, setInventoryEditKey] = useState("");
   const [inventoryEditDraft, setInventoryEditDraft] = useState({
     qty: "",
@@ -9054,11 +9057,99 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function setInventoryPageSelected(selected: boolean) {
+    inventorySelectionDragModeRef.current = null;
+    lastInventorySelectionIndexRef.current = selected && inventoryPageRows.length ? 0 : null;
     setSelectedInventoryKeys((prev) => {
       if (selected) return Array.from(new Set([...prev, ...inventoryPageKeys]));
       return prev.filter((key) => !inventoryPageKeys.includes(key));
     });
   }
+
+  function setInventoryRowRangeSelected(startIndex: number, endIndex: number, selected: boolean) {
+    const start = Math.min(startIndex, endIndex);
+    const end = Math.max(startIndex, endIndex);
+    const rangeKeys = inventoryPageRows.slice(start, end + 1).map((row) => row.key);
+    setSelectedInventoryKeys((prev) => {
+      const next = new Set(prev);
+      rangeKeys.forEach((key) => {
+        if (selected) next.add(key);
+        else next.delete(key);
+      });
+      return Array.from(next);
+    });
+  }
+
+  function handleInventoryRowSelection(index: number, event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const row = inventoryPageRows[index];
+    if (!row) return;
+    const nextSelected = !selectedInventoryKeys.includes(row.key);
+    if (event.shiftKey && lastInventorySelectionIndexRef.current !== null) {
+      setInventoryRowRangeSelected(lastInventorySelectionIndexRef.current, index, nextSelected);
+    } else {
+      setInventorySelected(row.key, nextSelected);
+    }
+    inventorySelectionDragModeRef.current = nextSelected ? "select" : "deselect";
+    lastInventorySelectionIndexRef.current = index;
+  }
+
+  function handleInventoryRowSelectionDrag(index: number) {
+    const mode = inventorySelectionDragModeRef.current;
+    const row = inventoryPageRows[index];
+    if (!mode || !row) return;
+    setInventorySelected(row.key, mode === "select");
+    lastInventorySelectionIndexRef.current = index;
+  }
+
+  function moveInventoryListSelection(direction: 1 | -1, extend: boolean) {
+    if (!inventoryPageRows.length) return;
+    const fallbackIndex = inventoryPageRows.findIndex((row) => selectedInventoryKeys.includes(row.key));
+    const currentIndex = lastInventorySelectionIndexRef.current ?? fallbackIndex;
+    if (currentIndex < 0) return;
+    const nextIndex = Math.max(0, Math.min(inventoryPageRows.length - 1, currentIndex + direction));
+    if (nextIndex === currentIndex) return;
+    if (extend) {
+      setSelectedInventoryKeys((prev) => {
+        const next = new Set(prev);
+        const currentRow = inventoryPageRows[currentIndex];
+        const nextRow = inventoryPageRows[nextIndex];
+        if (direction > 0) {
+          if (currentRow) next.add(currentRow.key);
+          if (nextRow) next.add(nextRow.key);
+        } else if (currentRow) {
+          next.delete(currentRow.key);
+        }
+        return Array.from(next);
+      });
+    }
+    lastInventorySelectionIndexRef.current = nextIndex;
+    window.setTimeout(() => inventoryRowRefs.current[nextIndex]?.scrollIntoView({ block: "nearest" }), 0);
+  }
+
+  useEffect(() => {
+    if (section !== "inventory") return undefined;
+    const stopSelecting = () => {
+      inventorySelectionDragModeRef.current = null;
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!event.shiftKey || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      if (inventoryPicker || inventoryEditKey || entryModalMode || quickLookupOpen) return;
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeTag = activeElement?.tagName?.toLowerCase();
+      if (activeTag === "input" || activeTag === "select" || activeTag === "textarea" || activeElement?.isContentEditable) return;
+      event.preventDefault();
+      event.stopPropagation();
+      moveInventoryListSelection(event.key === "ArrowDown" ? 1 : -1, true);
+    };
+    window.addEventListener("mouseup", stopSelecting);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("mouseup", stopSelecting);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  });
 
   function openInventoryPicker(type: "warehouse" | "product") {
     inventoryPickerDragModeRef.current = null;
@@ -9583,11 +9674,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </tr>
               </thead>
               <tbody>
-                {inventoryPageRows.map((row) => {
+                {inventoryPageRows.map((row, index) => {
                   const selected = selectedInventoryKeys.includes(row.key);
                   return (
-                    <tr key={row.key} className={`border-b border-slate-100 ${selected ? "bg-orange-50/70" : "hover:bg-orange-50/40"}`} onDoubleClick={() => { setSelectedInventoryKeys([row.key]); setTimeout(openInventoryEdit, 0); }}>
-                      <td className="px-2 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selected} onChange={(event) => setInventorySelected(row.key, event.target.checked)} /></td>
+                    <tr
+                      key={row.key}
+                      ref={(element) => { inventoryRowRefs.current[index] = element; }}
+                      className={`border-b border-slate-100 ${selected ? "bg-orange-50/70" : "hover:bg-orange-50/40"}`}
+                      onDoubleClick={() => { setSelectedInventoryKeys([row.key]); setTimeout(openInventoryEdit, 0); }}
+                    >
+                      <td
+                        className="cursor-pointer px-2 py-2 text-center"
+                        onMouseDown={(event) => handleInventoryRowSelection(index, event)}
+                        onMouseEnter={() => handleInventoryRowSelectionDrag(index)}
+                        onMouseMove={() => handleInventoryRowSelectionDrag(index)}
+                      >
+                        <input type="checkbox" className="pointer-events-none h-4 w-4 rounded border-slate-300" checked={selected} readOnly />
+                      </td>
                       <td className="truncate px-2 py-2 font-black text-slate-900" title={row.productCode}>{row.productCode || "-"}</td>
                       <td className="truncate px-2 py-2 font-bold" title={row.productName}>{row.productName || "-"}</td>
                       <td className="truncate px-2 py-2" title={row.warehouseName || row.warehouseCode}>{row.warehouseCode || "-"}</td>
