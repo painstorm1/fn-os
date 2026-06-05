@@ -1468,9 +1468,11 @@ type OrderAttachment = {
 
 type AccountAttachment = Omit<OrderAttachment, "id" | "order_id"> & {
   id: string;
-  account_type?: "bank" | "card";
+  account_type?: FnSettingsAttachmentType;
   account_id?: string;
 };
+
+type FnSettingsAttachmentType = "bank" | "card" | "personnel";
 
 type FnBankAccount = {
   id?: string;
@@ -1759,6 +1761,28 @@ function FileTypeIcon({ name }: { name?: string }) {
         <text x="12" y="17" textAnchor="middle" className="fill-current stroke-0 text-[12px] font-black">{letter}</text>
       </svg>
     </span>
+  );
+}
+
+function FolderAttachmentButton({ count, title, onClick }: { count?: number; title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-orange-200 bg-white text-orange-600 hover:bg-orange-50"
+      title={title}
+      aria-label={title}
+    >
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-11z" />
+        <path d="M3 9h18" />
+      </svg>
+      {Number(count || 0) > 0 && (
+        <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-orange-500 px-1 text-[10px] font-black leading-4 text-white">
+          {Number(count).toLocaleString("ko-KR")}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -11462,6 +11486,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   const [draft, setDraft] = useState<PersonnelEmployee>(blankPersonnelEmployee());
   const [personnelMessage, setPersonnelMessage] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [fileEmployee, setFileEmployee] = useState<PersonnelEmployee | null>(null);
+  const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
   const [selecting, setSelecting] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkFields, setBulkFields] = useState<PersonnelBulkField[]>(["status"]);
@@ -11770,7 +11796,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="성명 / 전화번호 / 이메일 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1040px] table-fixed text-sm">
+          <table className="w-full min-w-[1100px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
                 <th className="w-16 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? visibleKeys : [])} aria-label="직원 전체선택" /></th>
@@ -11780,6 +11806,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                 <th className="w-36 py-2 text-left">전화번호</th>
                 <th className="w-48 py-2 text-left">이메일</th>
                 <th className="w-28 py-2 text-left">입사일자</th>
+                <th className="w-20 py-2 text-left">파일</th>
                 <th className="w-40 py-2 text-left">메모</th>
               </tr>
             </thead>
@@ -11813,6 +11840,9 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                     <td className="truncate py-2 text-slate-600">{employee.phone || "-"}</td>
                     <td className="truncate py-2 text-slate-600">{employee.email || "-"}</td>
                     <td className="truncate py-2 text-slate-600">{employee.joined_at || "-"}</td>
+                    <td className="py-2" onClick={(event) => event.stopPropagation()}>
+                      <FolderAttachmentButton count={fileCounts[key]} title="직원 첨부파일" onClick={() => setFileEmployee(employee)} />
+                    </td>
                     <td className="truncate py-2 text-slate-500" title={employee.memo || ""}>{employee.memo ? `${employee.memo.slice(0, 10)}${employee.memo.length > 10 ? "..." : ""}` : "-"}</td>
                   </tr>
                 );
@@ -11823,6 +11853,16 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
         </div>
         {personnelMessage && <div className="mt-3 rounded-md bg-orange-50 p-3 text-sm font-black text-orange-600">{personnelMessage}</div>}
       </Panel>
+
+      {fileEmployee && (
+        <AccountFileModal
+          accountType="personnel"
+          accountId={employeeKey(fileEmployee)}
+          title={fileEmployee.name || "직원"}
+          onClose={() => setFileEmployee(null)}
+          onChanged={(count) => setFileCounts((prev) => ({ ...prev, [employeeKey(fileEmployee)]: count }))}
+        />
+      )}
 
       {bulkOpen && (
         <BulkMultiEditModal<PersonnelBulkField, PersonnelEmployee>
@@ -17922,7 +17962,7 @@ function AccountFileModal({
   onClose,
   onChanged,
 }: {
-  accountType: "bank" | "card";
+  accountType: FnSettingsAttachmentType;
   accountId: string;
   title: string;
   onClose: () => void;
@@ -18016,7 +18056,7 @@ function AccountFileModal({
   }
 
   return (
-    <SelectionModal title={`첨부파일 - ${title}`} description="통장사본, 카드 이미지, 관련 확인 자료를 보관합니다." onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
+    <SelectionModal title={`첨부파일 - ${title}`} description={accountType === "personnel" ? "사진, 통장사본, 직원 관련 확인 자료를 보관합니다." : "통장사본, 카드 이미지, 관련 확인 자료를 보관합니다."} onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
       <div className="max-h-[calc(90vh-150px)] overflow-y-auto">
         <div
           onDragOver={(event) => {
@@ -18394,7 +18434,9 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                         </span>
                       </div>
                     </td>
-                    <td className="py-2" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setFileAccount(account)} className="rounded-md border border-orange-200 bg-white px-3 py-1 text-xs font-black text-orange-600 hover:bg-orange-50">파일 {fileCounts[key] ? fileCounts[key].toLocaleString("ko-KR") : ""}</button></td>
+                    <td className="py-2" onClick={(event) => event.stopPropagation()}>
+                      <FolderAttachmentButton count={fileCounts[key]} title="통장 첨부파일" onClick={() => setFileAccount(account)} />
+                    </td>
                     <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
                   </tr>
                 );

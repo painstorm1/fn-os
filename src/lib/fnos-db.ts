@@ -121,9 +121,22 @@ export async function deleteRows<T>(table: string, filters: Record<string, Query
 
 export async function uploadStorageFile(file: File, pathPrefix = "archive") {
   if (!hasDbConfig()) throw new FnosDbError("Supabase environment variables are not configured.", 503);
-  const safeName = file.name.replace(/[^\w.\-가-힣]/g, "_");
+  const safePrefix = pathPrefix
+    .split("/")
+    .map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "") || "item")
+    .join("/");
+  const nameParts = file.name.split(".");
+  const ext = nameParts.length > 1 ? `.${String(nameParts.pop() || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 12)}` : "";
+  const baseName = nameParts.join(".") || "upload";
+  const safeName =
+    baseName
+      .normalize("NFKD")
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80) || "upload";
   const date = new Date().toISOString().slice(0, 10);
-  const objectPath = `${pathPrefix}/${date}/${crypto.randomUUID()}-${safeName}`;
+  const objectPath = `${safePrefix}/${date}/${crypto.randomUUID()}-${safeName}${ext.toLowerCase()}`;
   const url = new URL(`/storage/v1/object/${SUPABASE_STORAGE_BUCKET}/${objectPath}`, SUPABASE_URL);
   const response = await fetch(url.toString(), {
     method: "POST",

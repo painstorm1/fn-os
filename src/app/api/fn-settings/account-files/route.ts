@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError, patchRows, selectRows, uploadStorageFile, upsertRows } from "@/lib/fnos-db";
 
-type AccountType = "bank" | "card";
+type AccountType = "bank" | "card" | "personnel";
 
 type AccountAttachment = {
   id: string;
@@ -27,7 +27,8 @@ function settingKey(accountType: AccountType, accountId: string) {
 }
 
 function readParams(request: NextRequest): { accountType: AccountType; accountId: string } {
-  const accountType: AccountType = request.nextUrl.searchParams.get("type") === "card" ? "card" : "bank";
+  const typeParam = request.nextUrl.searchParams.get("type");
+  const accountType: AccountType = typeParam === "card" ? "card" : typeParam === "personnel" ? "personnel" : "bank";
   const accountId = text(request.nextUrl.searchParams.get("id"));
   return { accountType, accountId };
 }
