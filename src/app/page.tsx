@@ -1839,6 +1839,30 @@ function formatCardPeriod(start?: number | string, end?: number | string) {
   return `${startDay || "-"}일-${endDay || "-"}일`;
 }
 
+function formatBillingPeriodInput(value?: string | number | null) {
+  const digits = onlyDigits(value).slice(0, 4);
+  if (digits.length <= 2) return digits;
+  if (digits.length < 4) return `${digits.slice(0, 2)}일-${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}일-${digits.slice(2, 4)}일`;
+}
+
+function billingPeriodInputValue(start?: number | string, end?: number | string) {
+  const rawStart = onlyDigits(start);
+  const rawEnd = onlyDigits(end);
+  if (!rawStart || !rawEnd) return "";
+  const startDay = rawStart.padStart(2, "0").slice(-2);
+  const endDay = rawEnd.padStart(2, "0").slice(-2);
+  return formatBillingPeriodInput(`${startDay}${endDay}`);
+}
+
+function billingPeriodParts(value?: string | number | null) {
+  const digits = onlyDigits(value).slice(0, 4);
+  return {
+    start: digits.length >= 2 ? digits.slice(0, 2) : "",
+    end: digits.length === 4 ? digits.slice(2, 4) : "",
+  };
+}
+
 function formatMonthlyDay(value?: number | string) {
   const day = onlyDigits(value);
   return day ? `매월 ${day}일` : "-";
@@ -18335,6 +18359,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<FnCardAccount>(emptyDraft);
+  const [billingPeriodDraft, setBillingPeriodDraft] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
   const selectionDragModeRef = useRef<boolean | null>(null);
@@ -18426,6 +18451,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   function openNew() {
     setDraft(emptyDraft);
+    setBillingPeriodDraft("");
     setModalOpen(true);
   }
 
@@ -18439,6 +18465,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       list_enabled: account.list_enabled !== false,
       card_limit: formatCommaNumber(account.card_limit),
     });
+    setBillingPeriodDraft(billingPeriodInputValue(account.cutoff_start_day, account.cutoff_end_day));
     setModalOpen(true);
   }
 
@@ -18483,6 +18510,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }
 
   async function saveDraft() {
+    const billingPeriod = billingPeriodParts(billingPeriodDraft);
     const payload = {
       ...draft,
       card_name: String(draft.card_name || "").trim(),
@@ -18491,8 +18519,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       cvc_hint: String(draft.cvc_hint || "").trim(),
       secure_message: String(draft.secure_message || "").trim(),
       payment_password_hint: String(draft.payment_password_hint || "").trim(),
-      cutoff_start_day: onlyDigits(draft.cutoff_start_day).slice(0, 2),
-      cutoff_end_day: onlyDigits(draft.cutoff_end_day).slice(0, 2),
+      cutoff_start_day: billingPeriod.start,
+      cutoff_end_day: billingPeriod.end,
       payment_day: onlyDigits(draft.payment_day).slice(0, 2),
       card_limit: onlyDigits(draft.card_limit),
     };
@@ -18590,22 +18618,25 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         <FormModal title={draft.id ? "카드 수정" : "새 카드"} description="필수 항목은 빨간 별표로 표시됩니다." onClose={() => setModalOpen(false)} size="xl" footer={<>{draft.id && <ActionButton type="button" variant="secondary" className="mr-auto border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteDraft()}>삭제</ActionButton>}<ActionButton type="button" variant="secondary" onClick={() => setModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={() => void saveDraft()}>저장</ActionButton></>}>
           <div className="space-y-5">
             <div><div className="mb-2 text-[13px] font-semibold text-gray-700">속성 <span className="text-[#ff6a00]">*</span></div><div className="flex flex-wrap gap-2">{[["business", "기업"], ["personal", "개인"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateDraft("card_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${draft.card_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div></div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 xl:grid-cols-4">
               <FormField label="카드명" required><input className={modalInputClass} value={draft.card_name || ""} onChange={(event) => updateDraft("card_name", event.target.value)} /></FormField>
               <FormField label="카드번호" required><input className={modalInputClass} inputMode="numeric" value={draft.card_number || ""} onChange={(event) => updateDraft("card_number", formatCardNumber(event.target.value))} placeholder="1234-5678-9012-3456" /></FormField>
               <FormField label="유효기간" required><input className={modalInputClass} inputMode="numeric" value={draft.expiry_date || ""} onChange={(event) => updateDraft("expiry_date", formatCardExpiryInput(event.target.value))} placeholder="10/28" maxLength={5} /></FormField>
               <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
               <FormField label="해외안심 결제 개인 확인 메세지" required><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
               <FormField label="결제 비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
-              <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
-                <FormField label="결제 기준일 시작" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.cutoff_start_day || ""} onChange={(event) => updateDraft("cutoff_start_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="22" /></FormField>
-                <FormField label="결제 기준일 종료" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.cutoff_end_day || ""} onChange={(event) => updateDraft("cutoff_end_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="21" /></FormField>
-                <FormField label="결제일" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="5" /></FormField>
-              </div>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.7fr_1fr_0.9fr_1fr]">
+              <FormField label="결제 기준기간" required><input className={`${modalInputClass} text-center font-mono`} inputMode="numeric" value={billingPeriodDraft} onChange={(event) => setBillingPeriodDraft(formatBillingPeriodInput(event.target.value))} placeholder="  일-  일" maxLength={7} /></FormField>
+              <FormField label="결제일" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="5" /></FormField>
               <FormField label="한도" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(draft.card_limit)} onChange={(event) => updateDraft("card_limit", formatCommaNumber(event.target.value))} /></FormField>
               <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
               <FormField label="실물 소유자"><input className={modalInputClass} value={draft.physical_owner || ""} onChange={(event) => updateDraft("physical_owner", event.target.value)} /></FormField>
-              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
+            </div>
+            <div>
+              <FormField label="메모"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
             </div>
           </div>
         </FormModal>

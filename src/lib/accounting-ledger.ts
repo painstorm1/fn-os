@@ -157,6 +157,8 @@ function directionFor(sourceType: string, row: RawRow, merchant: string, debit: 
   if (/KB카드출금/.test(haystack)) return "card_payment";
   if (/카드대금|카드결제|결제대금/.test(haystack)) return "card_payment";
   if (/계좌|이체|대표자|자금|대출원금|상환/.test(haystack)) return "transfer";
+  if (sourceType === "bank" && /입금/.test(text(row.cash_direction || row.category || row["분류"]))) return "income";
+  if (sourceType === "bank" && /출금/.test(text(row.cash_direction || row.category || row["분류"]))) return "expense";
   if (sourceType === "bank" && credit > 0) return "income";
   if (sourceType === "bank" && debit > 0) return "expense";
   if (sourceType === "card") return "expense";
@@ -258,6 +260,66 @@ function categoryKey(row: RawRow) {
   return `${text(row.category_large)}|${text(row.category_middle)}|`;
 }
 
+function manualCategoryPath(row: RawRow) {
+  const existingLarge = text(row.existing_category_large);
+  const existingMiddle = text(row.existing_category_middle);
+  const existingSmall = text(row.existing_category_small);
+  const merchant = text(row.merchant_name || row.description);
+  const sourceType = text(row.source_type);
+  const sourceName = text(row.source_name);
+  const haystack = `${existingLarge} ${existingMiddle} ${existingSmall} ${merchant} ${text(row.description)}`;
+  const pair = (large: string, middle: string) => ({ large, middle });
+
+  if (/카드대금|카드출금|가온글로벌|가온 글로벌/.test(haystack)) return pair("카드대금", "가온글로벌카드");
+  if (/국민기업카드|국민기업/.test(haystack) && /카드|출금/.test(haystack)) return pair("카드대금", "국민기업카드");
+  if (/통장이동|내부이체|계좌이체/.test(haystack)) return pair(existingLarge === "입금" ? "기타 입금" : "기타 출금", "내부이체");
+
+  if (existingLarge === "입금") {
+    if (existingMiddle === "판매 정산금") {
+      const channelAliases: Record<string, string> = { SSG: "신세계", 이지웰: "현대이지웰", ".옥션": "옥션" };
+      return pair("판매 정산금", channelAliases[existingSmall] || existingSmall || "기타 판매");
+    }
+    if (/환불|환급/.test(haystack)) return pair("금융비용", "환급금");
+    if (/대출/.test(haystack)) return pair("금융비용", "대출 입금");
+    if (/거래처 결제|반환/.test(haystack)) return pair("금융비용", "거래처 반환");
+    if (/재민|재욱|사비/.test(haystack)) return pair("기타 입금", "사비입금");
+    return pair("기타 입금", "검토필요");
+  }
+
+  const vendorAliases: Record<string, string> = { 제이비: "제이비컴퍼니", 아주: "아주레포츠" };
+  if (/거래처 결제/.test(haystack)) return pair("거래처 결제", vendorAliases[existingSmall] || existingSmall || "기타 구매");
+  if (/1688|알리바바|Alibaba|제품구매|수입제품 대금|해외/.test(haystack)) return pair("거래처 결제", "해외 거래처");
+  if (/메타|FACEBK/i.test(haystack)) return pair("마케팅·광고", "메타 광고");
+  if (/네이버|비즈월렛|KCP\(자동과금\)/.test(haystack)) return pair("마케팅·광고", "네이버 광고");
+  if (/브랜드커넥트|체험단|협찬/.test(haystack)) return pair("마케팅·광고", "체험단/협찬");
+  if (/박스구매|포장재|박스/.test(haystack)) return pair("업무 비용", "포장재/박스");
+  if (/구독료|포토샵|지피티|클로드|OPENAI|ANTHROPIC|CLAUDE|이카운트|고도호스팅|프로그램/.test(haystack)) return pair("업무 비용", "프로그램/구독료");
+  if (/세무|기장/.test(haystack)) return pair("업무 비용", "세무/기장");
+  if (/통신|인터넷/.test(haystack)) return pair("업무 비용", "통신비");
+  if (/텔레캅|보안/.test(haystack)) return pair("업무 비용", "보안/관리");
+  if (/수입 결제|관부과세|관부가세|통관|세관/.test(haystack)) return pair("업무 비용", "수입/통관");
+  if (/CJ|씨제이|CJ택배|대한통운/.test(haystack)) return pair("업무 비용", "CJ대한통운");
+  if (/N배송/.test(haystack)) return pair("업무 비용", "N배송");
+  if (/타배|화물|반품택배|국내배송비|배송비/.test(haystack)) return pair("업무 비용", "기타 화물비");
+  if (/월세|임대료/.test(haystack)) return pair("유지비", "임대료");
+  if (/전기세|전기요금|한전/.test(haystack)) return pair("유지비", "전기요금");
+  if (/차량렌트|렌트/.test(haystack)) return pair("유지비", "차량 렌트비");
+  if (/주차/.test(haystack)) return pair("유지비", "주차요금");
+  if (/주유/.test(haystack)) return pair("유지비", "주유비");
+  if (/하이패스/.test(haystack)) return pair("유지비", "하이패스");
+  if (/화재보험/.test(haystack)) return pair("유지비", "화재보험");
+  if (/급여/.test(haystack)) return pair("인건비", "급여");
+  if (/대출이자|대출|원리금|상환/.test(haystack)) return pair("금융비용", "대출 원리금");
+  if (/보증료|수수료|문자통지료|SMS/.test(haystack)) return pair("금융비용", "보증료/수수료");
+  if (/4대보험|산재보험|고용보험|국민연금|국민건강/.test(haystack)) return pair("복리후생비", "4대보험");
+  if (/식대|점심|커피|편의점|회식/.test(haystack)) return pair("복리후생비", "회식 식대");
+  if (/교통비|티머니/.test(haystack)) return pair("복리후생비", "직원 교통비");
+  if (/재민|재욱|사비/.test(haystack)) return pair("기타 출금", "사비출금");
+  if (sourceType === "bank" && /입금/.test(existingLarge)) return pair("기타 입금", "검토필요");
+  if (sourceType === "card" || /출금/.test(existingLarge) || /카드/.test(sourceName)) return pair("기타 출금", "검토필요");
+  return null;
+}
+
 export function normalizeAccountingTransaction(row: RawRow) {
   const meta = sourceMeta(row);
   const transactionDate = isoDate(first(row, ["transaction_date", "expense_date", "거래일", "일자", "날짜", "이용일자", "승인일자"]));
@@ -267,8 +329,9 @@ export function normalizeAccountingTransaction(row: RawRow) {
   const deposit = numberValue(first(row, ["credit_amount", "입금액", "deposit", "deposit_amount"]));
   const explicitAmount = numberValue(first(row, ["amount", "total_amount", "금액원", "금액", "이용금액", "승인금액", "결제금액", "사용금액"]));
   const amount = explicitAmount || withdrawal || deposit;
-  const debit = meta.sourceType === "card" ? amount : withdrawal;
-  const credit = meta.sourceType === "bank" ? deposit : 0;
+  const cashDirection = text(row.cash_direction || row.category || row["분류"]);
+  const debit = meta.sourceType === "card" ? amount : withdrawal || (/출금/.test(cashDirection) ? amount : 0);
+  const credit = meta.sourceType === "bank" ? deposit || (/입금/.test(cashDirection) ? amount : 0) : 0;
   const foreignAmount = numberValue(first(row, ["foreign_amount", "해외금액", "USD", "외화금액"]));
   const currency = text(first(row, ["currency", "통화"])) || (foreignAmount > 0 && amount === 0 ? "USD" : "KRW");
   const fxRate = numberValue(first(row, ["fx_rate", "환율"]));
@@ -328,13 +391,15 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const rule = rules.find((item) => ruleMatches(item, row));
     const isCardPayment = row.direction === "card_payment";
     const isTransfer = row.direction === "transfer";
+    const manualPath = manualCategoryPath(row);
+    const manualCategory = manualPath ? categoryByPath.get(`${manualPath.large}|${manualPath.middle}|`) : null;
     const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
-    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "기타 출금" : reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
-    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
+    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "기타 출금" : text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : text(manualCategory?.category_middle) || reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
     const categorySmall = "";
-    const category = categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
-    const needsReview = !isCardPayment && !isTransfer && (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required));
+    const category = manualCategory || categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
+    const needsReview = !manualCategory && !isCardPayment && !isTransfer && (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required));
     return {
       ...row,
       category_large: categoryLarge,
@@ -739,6 +804,9 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
   }
   for (const key of ["direction", "review_reason"]) {
     if (row[key] !== undefined) payload[key] = text(row[key]);
+  }
+  for (const key of ["debit_amount", "credit_amount", "amount", "amount_krw"]) {
+    if (row[key] !== undefined) payload[key] = numberValue(row[key]);
   }
   for (const key of ["affects_profit", "affects_cashflow", "affects_card_settlement"]) {
     if (row[key] !== undefined) payload[key] = row[key];
