@@ -807,23 +807,47 @@ export default function ArchiveWorkspace() {
 
       <section>
         <Card className="space-y-3 p-3">
-          <div className="flex flex-wrap items-center gap-2 pl-4">
-            {menuItems.map(([key, label]) => (
-              <ActionButton key={key} type="button" variant={(key === "save" ? saveModalOpen : activeMenu === key) ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
-                {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
+          <div className="flex flex-wrap items-center justify-between gap-3 pl-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {menuItems.map(([key, label]) => (
+                <ActionButton key={key} type="button" variant={(key === "save" ? saveModalOpen : activeMenu === key) ? "primary" : "secondary"} onClick={() => openMenu(key)} className="h-10 whitespace-nowrap px-4 text-sm">
+                  {label}{menuCount(key) !== null ? ` ${menuCount(key)}` : ""}
+                </ActionButton>
+              ))}
+            </div>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
+                <option value="">프로젝트 바로가기</option>
+                {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
+              </select>
+              <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
+                프로젝트 생성
               </ActionButton>
-            ))}
-            <select className="field-input h-10 !w-40 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={viewMode} onChange={(event) => setViewMode(event.target.value as ArchiveViewMode)}>
-              <option value="preview">미리보기</option>
-              <option value="list">리스트보기</option>
-            </select>
-            <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
-              <option value="">프로젝트 바로가기</option>
-              {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
-            </select>
-            <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
-              프로젝트 생성
-            </ActionButton>
+              <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("preview")}
+                  className={`flex h-8 w-9 items-center justify-center rounded-md transition ${viewMode === "preview" ? "bg-orange-500 text-white shadow-sm" : "text-slate-500 hover:bg-orange-50 hover:text-orange-600"}`}
+                  aria-label="미리보기"
+                  title="미리보기"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                    <path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`flex h-8 w-9 items-center justify-center rounded-md transition ${viewMode === "list" ? "bg-orange-500 text-white shadow-sm" : "text-slate-500 hover:bg-orange-50 hover:text-orange-600"}`}
+                  aria-label="리스트보기"
+                  title="리스트보기"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                    <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
           <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
               <ActionButton
@@ -1104,7 +1128,11 @@ function ArchiveList({
   const [bulkCategoryGroup, setBulkCategoryGroup] = useState<CategoryGroup | "">("");
   const [bulkCategoryName, setBulkCategoryName] = useState("");
   const [bulkProjectName, setBulkProjectName] = useState("");
+  const dragSelectModeRef = useRef<boolean | null>(null);
+  const dragLastIdRef = useRef("");
+  const keyboardIndexRef = useRef<number | null>(null);
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const allSelected = Boolean(items.length) && selectedIds.length === items.length;
   const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
 
@@ -1120,6 +1148,22 @@ function ArchiveList({
 
   function toggleSelected(id: string, checked: boolean) {
     setSelectedIds((prev) => checked ? Array.from(new Set([...prev, id])) : prev.filter((itemId) => itemId !== id));
+    const index = items.findIndex((item) => item.id === id);
+    if (index >= 0) keyboardIndexRef.current = index;
+  }
+
+  function beginListDragSelect(id: string, checked?: boolean) {
+    if (!selectMode || viewMode !== "list") return;
+    const nextChecked = checked ?? !selectedIdSet.has(id);
+    dragSelectModeRef.current = nextChecked;
+    dragLastIdRef.current = id;
+    toggleSelected(id, nextChecked);
+  }
+
+  function continueListDragSelect(id: string) {
+    if (!selectMode || viewMode !== "list" || dragSelectModeRef.current === null || dragLastIdRef.current === id) return;
+    dragLastIdRef.current = id;
+    toggleSelected(id, dragSelectModeRef.current);
   }
 
   async function moveSelectedCategory() {
@@ -1156,6 +1200,52 @@ function ArchiveList({
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
   }, [selectMode]);
+
+  useEffect(() => {
+    function stopListDragSelect() {
+      dragSelectModeRef.current = null;
+      dragLastIdRef.current = "";
+    }
+    function onListDragMove(event: MouseEvent) {
+      if (dragSelectModeRef.current === null) return;
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const row = element?.closest<HTMLElement>("[data-archive-list-row-id]");
+      const id = row?.dataset.archiveListRowId;
+      if (id) continueListDragSelect(id);
+    }
+    window.addEventListener("mousemove", onListDragMove, true);
+    window.addEventListener("mouseup", stopListDragSelect);
+    window.addEventListener("blur", stopListDragSelect);
+    return () => {
+      window.removeEventListener("mousemove", onListDragMove, true);
+      window.removeEventListener("mouseup", stopListDragSelect);
+      window.removeEventListener("blur", stopListDragSelect);
+    };
+  }, [selectMode, viewMode]);
+
+  useEffect(() => {
+    if (!selectMode || viewMode !== "list") return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+      if (!items.length || !selectedIds.length) return;
+      event.preventDefault();
+      const columns = 3;
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowDown" ? columns : event.key === "ArrowLeft" ? -1 : -columns;
+      const fallbackIndex = items.findIndex((item) => item.id === selectedIds[selectedIds.length - 1]);
+      const currentIndex = keyboardIndexRef.current !== null ? keyboardIndexRef.current : fallbackIndex;
+      if (currentIndex < 0) return;
+      const targetIndex = Math.max(0, Math.min(items.length - 1, currentIndex + step));
+      if (targetIndex === currentIndex) return;
+      if (step > 0) {
+        toggleSelected(items[targetIndex].id, true);
+      } else {
+        toggleSelected(items[currentIndex].id, false);
+        keyboardIndexRef.current = targetIndex;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [items, selectMode, selectedIds, viewMode]);
 
   return (
     <div className="space-y-4">
@@ -1200,12 +1290,24 @@ function ArchiveList({
             const category = categoryById.get(String(item.category_id || ""));
             const href = item.url || item.file_url || "";
             return (
-              <div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIds.includes(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}>
-                {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />}
-                <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
+              <div
+                key={item.id}
+                data-archive-list-row-id={item.id}
+                className={`flex min-w-0 select-none items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIdSet.has(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}
+                onMouseDown={(event) => {
+                  if (!selectMode) return;
+                  const target = event.target as HTMLElement;
+                  if (target.closest("button")) return;
+                  event.preventDefault();
+                  beginListDragSelect(item.id);
+                }}
+                onMouseEnter={() => continueListDragSelect(item.id)}
+              >
+                {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIdSet.has(item.id)} readOnly aria-label="아카이브 선택" />}
+                <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" onClick={(event) => { if (selectMode) event.preventDefault(); }} className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
                 <SourceBadge source={item.source_type} className="max-w-20" />
                 <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
-                <button type="button" onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
                     <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
                     <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -1223,10 +1325,10 @@ function ArchiveList({
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
           return (
-            <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-xl border bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)] ${selectedIds.includes(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200"}`}>
+            <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-xl border bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)] ${selectedIdSet.has(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200"}`}>
               {selectMode && (
                 <label className="absolute left-2 top-2 z-10 flex h-7 items-center rounded-md border border-slate-200 bg-white/95 px-2 shadow-sm">
-                  <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
+                  <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIdSet.has(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
                 </label>
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
