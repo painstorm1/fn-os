@@ -975,7 +975,7 @@ async function handleGet(path: string, request: NextRequest) {
       grouped[key] = [
         ...(grouped[key] || []),
         {
-          memo: `[제작완료] ${productName}`,
+          memo: `[입고예정] ${productName}`,
           order_id: Number(order.id),
           order_code: text(order.order_code),
           tone: "import",
