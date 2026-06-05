@@ -9297,7 +9297,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {isHistorySection && (
         <Panel>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
+            <div className="inline-flex items-center gap-2">
               {[
                 ["sales", "판매 관리"],
                 ["purchases", "구매 관리"],
@@ -9306,7 +9306,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   key={mode}
                   type="button"
                   onClick={() => setHistoryMode(mode as "sales" | "purchases")}
-                  className={`rounded px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "text-slate-600 hover:bg-white hover:text-orange-600"}`}
+                  className={`rounded-md px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
                 >
                   {label}
                 </button>

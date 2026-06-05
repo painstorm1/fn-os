@@ -23,6 +23,10 @@ export function hasDbConfig() {
 }
 
 function friendlySupabaseError(text: string, status: number) {
+  const missingColumn = text.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i) || text.match(/column ['"]?([^'"\s]+)['"]? does not exist/i);
+  if (missingColumn?.[1]) {
+    return `FN OS DB 컬럼 '${missingColumn[1]}'이 현재 Supabase 스키마에 없습니다. 저장 가능한 기존 컬럼만으로 다시 시도합니다.`;
+  }
   if (/PGRST205|Could not find the table|schema cache|fnos_settings|upload_batches|sales|purchases|products|product_boms|product_bom_items|customers|warehouses|sales_channels|sales_channel_credentials|inventory_current|inventory_snapshots|api_sync_logs|ad_daily_metrics|expense_entries|expense_categories|expense_upload_batches|expenses|payment_records|customer_payables|accounting_import_batches|accounting_transaction_sources|accounting_categories|accounting_category_rules|accounting_transactions|accounting_review_queue|accounting_card_settlements|accounting_fixed_costs|accounting_loans|accounting_bank_accounts|accounting_card_accounts|import_product_sku_links|import_purchase_sku_allocations|archive_items/i.test(text)) {
     return "FN OS DB 테이블이 아직 준비되지 않았습니다. Supabase SQL Editor에서 schema_sales_inventory.sql 전체를 실행해 주세요.";
   }
@@ -30,6 +34,11 @@ function friendlySupabaseError(text: string, status: number) {
     return "Supabase 권한 정책 때문에 요청이 차단되었습니다. Vercel에 SUPABASE_SERVICE_ROLE_KEY가 설정되어 있는지 확인해 주세요.";
   }
   return text || `Supabase request failed: ${status}`;
+}
+
+function missingColumnName(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
 }
 
 function restUrl(table: string, query?: Record<string, QueryValue>) {
@@ -141,7 +150,7 @@ export async function uploadStorageFile(file: File, pathPrefix = "archive") {
 }
 
 export async function createUploadBatch(batchType: string, sourceFileName: string | undefined, totalCount: number) {
-  const [batch] = await insertRows<{ id: string }>("upload_batches", {
+  let values: Record<string, unknown> = {
     batch_type: batchType,
     source_name: "fn_os",
     source_file_name: sourceFileName || null,
@@ -149,8 +158,19 @@ export async function createUploadBatch(batchType: string, sourceFileName: strin
     success_count: 0,
     fail_count: 0,
     status: "SAVED",
-  });
-  return batch;
+  };
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      const [batch] = await insertRows<{ id: string }>("upload_batches", values);
+      return batch;
+    } catch (error) {
+      const column = missingColumnName(error);
+      if (!column || !(column in values)) throw error;
+      const { [column]: _removed, ...rest } = values;
+      values = rest;
+    }
+  }
+  throw new FnosDbError("업로드 배치 저장 가능 컬럼 확인에 실패했습니다.");
 }
 
 export async function updateUploadBatch(id: string, successCount: number, failCount: number) {

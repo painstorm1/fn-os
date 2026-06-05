@@ -161,6 +161,31 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<Record<string, unknown>>(table, query).catch(() => []);
 }
 
+function missingColumnName(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+}
+
+async function insertRowsWithSchemaFallback(table: "sales" | "purchases", rows: RawRow[]) {
+  let nextRows = rows.map((row) => ({ ...row }));
+  const removedColumns = new Set<string>();
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      const saved = nextRows.length ? await insertRows<RawRow>(table, nextRows) : [];
+      return { saved, removedColumns: Array.from(removedColumns) };
+    } catch (error) {
+      const column = missingColumnName(error);
+      if (!column || removedColumns.has(column)) throw error;
+      removedColumns.add(column);
+      nextRows = nextRows.map((row) => {
+        const { [column]: _removed, ...rest } = row;
+        return rest;
+      });
+    }
+  }
+  throw new Error(`${table} 저장 가능 컬럼 확인에 실패했습니다.`);
+}
+
 function sum(rows: RawRow[], pick: (row: RawRow) => unknown) {
   return rows.reduce((total, row) => total + numberValue(pick(row)), 0);
 }
@@ -331,13 +356,15 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
   const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
-  const saved = freshRows.length ? await insertRows<RawRow>("sales", freshRows) : [];
-  const movementCount = await writeInventoryMovements(saved, "sale_out");
-  await updateUploadBatch(batch.id, saved.length, rows.length - saved.length);
+  const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
+  const movementCount = await writeInventoryMovements(saved, "sale_out").catch(() => 0);
+  await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
 
   return {
     ok: true,
-    message: `FN OS sales DB saved ${saved.length} rows.`,
+    message: removedColumns.length
+      ? `FN OS sales DB saved ${saved.length} rows. Skipped unavailable columns: ${removedColumns.join(", ")}.`
+      : `FN OS sales DB saved ${saved.length} rows.`,
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
@@ -356,13 +383,15 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
   const existingRefs = await existingSourceRefs("purchases", normalized.map((row) => row.source_ref_id));
   const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
-  const saved = freshRows.length ? await insertRows<RawRow>("purchases", freshRows) : [];
-  const movementCount = await writeInventoryMovements(saved, "purchase_in");
-  await updateUploadBatch(batch.id, saved.length, rows.length - saved.length);
+  const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("purchases", freshRows) : { saved: [], removedColumns: [] };
+  const movementCount = await writeInventoryMovements(saved, "purchase_in").catch(() => 0);
+  await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
 
   return {
     ok: true,
-    message: `FN OS purchases DB saved ${saved.length} rows.`,
+    message: removedColumns.length
+      ? `FN OS purchases DB saved ${saved.length} rows. Skipped unavailable columns: ${removedColumns.join(", ")}.`
+      : `FN OS purchases DB saved ${saved.length} rows.`,
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
