@@ -1504,6 +1504,11 @@ type FnCardAccount = {
   sort_order?: number | string;
 };
 
+const FN_BANK_ACCOUNTS_ENDPOINT = "/api/accounting/ledger/bank-accounts";
+const FN_CARD_ACCOUNTS_ENDPOINT = "/api/accounting/ledger/card-accounts";
+const FN_ACCOUNT_CACHE_TTL = 60_000;
+const FN_ACCOUNT_STORAGE_TTL = 10 * 60_000;
+
 type SalesInventorySummary = {
   ok?: boolean;
   error?: string;
@@ -15906,6 +15911,17 @@ function accountingMonthRange(month: string) {
   return { from, to };
 }
 
+function accountingSourceFilterLabel(value: string, mode: "bank" | "card") {
+  if (mode === "bank") {
+    if (/국민/.test(value)) return "국민";
+    if (/기업|IBK/i.test(value)) return "기업";
+    return value.replace(/은행|사업자통장|통장/g, "").trim() || value;
+  }
+  if (/가온/.test(value)) return "가온";
+  if (/국민/.test(value)) return "국민";
+  return value.replace(/글로벌|기업|카드/g, "").trim() || value;
+}
+
 function readCachedAccountingSummary() {
   return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
 }
@@ -15950,12 +15966,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     affects_cashflow: true,
     affects_card_settlement: false,
     memo: "",
-    save_rule: false,
+    save_rule: true,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
   const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(tab === "card" ? "card" : "bank");
-  const [ledgerFilters, setLedgerFilters] = useState({ q: "", source: "", month: accountingMonthValue(0) });
-  const [selectedLedgerId, setSelectedLedgerId] = useState("");
+  const [ledgerFilters, setLedgerFilters] = useState({ q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0) });
   const [categoryDraft, setCategoryDraft] = useState({
     id: "",
     category_large: "",
@@ -16377,7 +16392,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       affects_cashflow: row.affects_cashflow !== false,
       affects_card_settlement: row.affects_card_settlement === true,
       memo: String(row.memo || ""),
-      save_rule: false,
+      save_rule: true,
     });
   }
 
@@ -16542,6 +16557,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const reviewSuggestions = summary?.review_suggestions || {};
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
+  const activeBankAccounts = bankAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
+  const activeCardAccounts = cardAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
   const ledgerMonthRange = accountingMonthRange(ledgerFilters.month);
   const currentLedgerRows = ledgerSourceRows
     .filter((row) => String(row.source_type || "") === ledgerMode)
@@ -16549,19 +16566,43 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       const q = ledgerFilters.q.trim().toLowerCase();
       const rowDate = String(row.transaction_date || row.expense_date || "");
       const sourceName = String(row.account_name || row.card_name || row.source_name || row.source_type || "");
+      const categoryLarge = String(row.category_large || row.category || "미분류");
+      const categoryMiddle = String(row.category_middle || "-");
       if (ledgerMonthRange.from && rowDate < ledgerMonthRange.from) return false;
       if (ledgerMonthRange.to && rowDate > ledgerMonthRange.to) return false;
       if (ledgerFilters.source && sourceName !== ledgerFilters.source) return false;
+      if (ledgerFilters.categoryLarge && categoryLarge !== ledgerFilters.categoryLarge) return false;
+      if (ledgerFilters.categoryMiddle && categoryMiddle !== ledgerFilters.categoryMiddle) return false;
       if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${sourceName} ${row.amount_krw || ""} ${row.amount || ""} ${row.debit_amount || ""} ${row.credit_amount || ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  const ledgerSourceOptions = Array.from(new Set(
+  const ledgerSourceOptions = (ledgerMode === "bank" ? activeBankAccounts : activeCardAccounts)
+    .map((row) => {
+      const value = String(ledgerMode === "bank" ? row.account_name || row.bank_name || row.source_name : row.card_name || row.source_name);
+      const fallback = value || String(ledgerMode === "bank" ? row.bank_name || row.source_name : row.card_name || row.source_name);
+      return { value: value || fallback, label: accountingSourceFilterLabel(fallback || value, ledgerMode) };
+    })
+    .filter((row) => row.value);
+  const fallbackLedgerSourceOptions = Array.from(new Set(
     ledgerSourceRows
       .filter((row) => String(row.source_type || "") === ledgerMode)
       .map((row) => String(row.account_name || row.card_name || row.source_name || ""))
       .filter(Boolean),
-  ));
-  const selectedLedgerRow = currentLedgerRows.find((row) => String(row.id || "") === selectedLedgerId) || null;
+  )).map((value) => ({ value, label: accountingSourceFilterLabel(value, ledgerMode) }));
+  const effectiveLedgerSourceOptions = ledgerSourceOptions.length ? ledgerSourceOptions : fallbackLedgerSourceOptions;
+  const ledgerCategoryLargeOptions = Array.from(new Set(
+    ledgerSourceRows
+      .filter((row) => String(row.source_type || "") === ledgerMode)
+      .map((row) => String(row.category_large || row.category || "미분류"))
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, "ko-KR"));
+  const ledgerCategoryMiddleOptions = Array.from(new Set(
+    ledgerSourceRows
+      .filter((row) => String(row.source_type || "") === ledgerMode)
+      .filter((row) => !ledgerFilters.categoryLarge || String(row.category_large || row.category || "미분류") === ledgerFilters.categoryLarge)
+      .map((row) => String(row.category_middle || "-"))
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, "ko-KR"));
   const sourceOptions = Array.from(new Set(ledgerSourceRows.map((row) => String(row.source_name || row.source_type || "")).filter(Boolean)));
 
   useEffect(() => {
@@ -16665,8 +16706,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   type="button"
                   onClick={() => {
                     setLedgerMode(value as "bank" | "card");
-                    setLedgerFilters((prev) => ({ ...prev, source: "" }));
-                    setSelectedLedgerId("");
+                    setLedgerFilters((prev) => ({ ...prev, source: "", categoryLarge: "", categoryMiddle: "" }));
                   }}
                   className={`h-8 rounded-md px-3 text-xs font-black transition ${ledgerMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
                 >
@@ -16679,14 +16719,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               value={ledgerFilters.source}
               onChange={(event) => {
                 setLedgerFilters((prev) => ({ ...prev, source: event.target.value }));
-                setSelectedLedgerId("");
               }}
             >
               <option value="">{ledgerMode === "bank" ? "전체 통장" : "전체 카드"}</option>
-              {ledgerSourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-            <select className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400" value="month" onChange={() => undefined}>
-              <option value="month">기간선택(월)</option>
+              {effectiveLedgerSourceOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <input
               className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
@@ -16694,18 +16730,29 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               value={ledgerFilters.month}
               onChange={(event) => {
                 setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
-                setSelectedLedgerId("");
               }}
             />
-            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => { setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) })); setSelectedLedgerId(""); }}>이번달</ActionButton>
-            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(-1) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => { setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(-1) })); setSelectedLedgerId(""); }}>지난달</ActionButton>
+            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
+            <select
+              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              value={ledgerFilters.categoryLarge}
+              onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryLarge: event.target.value, categoryMiddle: "" }))}
+            >
+              <option value="">카테고리1 전체</option>
+              {ledgerCategoryLargeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select
+              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              value={ledgerFilters.categoryMiddle}
+              onChange={(event) => setLedgerFilters((prev) => ({ ...prev, categoryMiddle: event.target.value }))}
+            >
+              <option value="">카테고리2 전체</option>
+              {ledgerCategoryMiddleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
             <input
               className="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm outline-orange-400"
               value={ledgerFilters.q}
-              onChange={(event) => {
-                setLedgerFilters((prev) => ({ ...prev, q: event.target.value }));
-                setSelectedLedgerId("");
-              }}
+              onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
             />
             <ActionButton
@@ -16716,23 +16763,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             >
               엑셀다운
             </ActionButton>
-            <ActionButton
-              type="button"
-              variant="secondary"
-              className="h-9 px-4 text-xs"
-              disabled={!selectedLedgerRow}
-              onClick={() => selectedLedgerRow && openTransaction(selectedLedgerRow)}
-            >
-              수정
-            </ActionButton>
           </FilterBar>
           <div className="mt-4">
             <ExpenseTable
               mode={ledgerMode}
               rows={currentLedgerRows}
               categoryById={categoryById}
-              selectedId={selectedLedgerId}
-              onSelect={(row) => setSelectedLedgerId(String(row.id || ""))}
               onOpen={openTransaction}
               onMemoSave={saveExpenseMemo}
             />
@@ -17305,7 +17341,6 @@ function ExpenseTable({
     if (key === "amount") return asNumber(row.amount_krw ?? row.total_amount ?? row.amount ?? row.debit_amount ?? row.credit_amount);
     if (key === "debit") return asNumber(row.debit_amount);
     if (key === "credit") return asNumber(row.credit_amount);
-    if (key === "balance") return asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"]);
     return String(row[key] ?? row.source_name ?? row.merchant_name ?? row.description ?? "").toLowerCase();
   };
   const sortedRows = [...rows].sort((a, b) => {
@@ -17346,7 +17381,7 @@ function ExpenseTable({
           <span>{sortedRows.length.toLocaleString("ko-KR")}건 중 {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}~{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString("ko-KR")}건</span>
         </div>
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className={`w-full text-sm ${tableMode === "bank" ? "min-w-[1040px]" : "min-w-[980px]"}`}>
+          <table className={`w-full text-sm ${tableMode === "bank" ? "min-w-[920px]" : "min-w-[980px]"}`}>
             <thead className="bg-gray-50 text-xs">
               {tableMode === "bank" ? (
                 <tr>
@@ -17355,7 +17390,6 @@ function ExpenseTable({
                   <th className={headerClass} onDoubleClick={() => toggleSort("description")}>거래내용</th>
                   <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("debit")}>출금</th>
                   <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("credit")}>입금</th>
-                  <th className={`${headerClass} text-right`} onDoubleClick={() => toggleSort("balance")}>거래후 잔액</th>
                   <th className={headerClass} onDoubleClick={() => toggleSort("category_large")}>카테고리1</th>
                   <th className={headerClass} onDoubleClick={() => toggleSort("category_middle")}>카테고리2</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-500">메모</th>
@@ -17375,7 +17409,7 @@ function ExpenseTable({
             </thead>
             <tbody>
               {!visibleRows.length && (
-                <tr><td colSpan={tableMode === "bank" ? 9 : 8} className="px-3 py-8"><EmptyState title="데이터 없음" className="min-h-24" /></td></tr>
+                <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="데이터 없음" className="min-h-24" /></td></tr>
               )}
               {visibleRows.map((row, index) => {
                 const parts = categoryParts(row);
@@ -17387,10 +17421,9 @@ function ExpenseTable({
                   <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
                     <td className="px-3 py-2"><StatusBadge>{String(row.account_name || row.source_name || "-")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
-                    <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.description || row.merchant_name || "-")}</td>
+                    <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.debit_amount) ? krw(asNumber(row.debit_amount)) : "-"}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.credit_amount) ? krw(asNumber(row.credit_amount)) : "-"}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"]) ? krw(asNumber(row.balance_amount ?? row.after_balance ?? row["거래후잔액"])) : "-"}</td>
                     <td className="px-3 py-2"><StatusBadge tone="orange">{parts.large}</StatusBadge></td>
                     <td className="px-3 py-2 text-gray-600">{parts.middle}</td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
@@ -17983,10 +18016,20 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
-  async function loadAccounts() {
-    setLoading(true);
+  async function loadAccounts(force = false) {
+    const cached = force ? null : readCachedJson<{ ok?: boolean; error?: string; bank_accounts?: FnBankAccount[] }>(FN_BANK_ACCOUNTS_ENDPOINT, { storageTtl: FN_ACCOUNT_STORAGE_TTL });
+    if (cached?.bank_accounts) {
+      setAccounts(cached.bank_accounts.filter((row) => row && row.id));
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const data = await cachedClientJson<{ ok?: boolean; error?: string; bank_accounts?: FnBankAccount[] }>("/api/accounting/ledger/bank-accounts", { ttl: 0, storageTtl: 0, force: true });
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; bank_accounts?: FnBankAccount[] }>(FN_BANK_ACCOUNTS_ENDPOINT, {
+        ttl: FN_ACCOUNT_CACHE_TTL,
+        storageTtl: FN_ACCOUNT_STORAGE_TTL,
+        force,
+      });
       if (data.ok === false) throw new Error(data.error || "통장 설정 조회 실패");
       setAccounts((data.bank_accounts || []).filter((row) => row && row.id));
     } catch (error) {
@@ -18094,7 +18137,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     if (!window.confirm(`선택한 통장 ${selectedAccounts.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
     for (const account of selectedAccounts) {
-      const res = await fetch(`/api/accounting/ledger/bank-accounts?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
+    const res = await fetch(`${FN_BANK_ACCOUNTS_ENDPOINT}?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         window.alert(data.error || "통장 삭제 실패");
@@ -18102,10 +18145,10 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       }
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    invalidateClientCache(FN_BANK_ACCOUNTS_ENDPOINT);
     setMessage("통장 설정을 삭제했습니다.");
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   async function saveDraft() {
@@ -18120,7 +18163,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       window.alert("메모를 제외한 모든 항목은 필수입니다.");
       return;
     }
-    const res = await fetch("/api/accounting/ledger/bank-accounts", {
+    const res = await fetch(FN_BANK_ACCOUNTS_ENDPOINT, {
       method: payload.id ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -18131,27 +18174,27 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       return;
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    invalidateClientCache(FN_BANK_ACCOUNTS_ENDPOINT);
     setMessage(payload.id ? "통장 설정을 수정했습니다." : "통장 설정을 추가했습니다.");
     setModalOpen(false);
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   async function deleteDraft() {
     if (!draft.id || !window.confirm("이 통장 설정을 삭제할까요?")) return;
-    const res = await fetch(`/api/accounting/ledger/bank-accounts?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
+    const res = await fetch(`${FN_BANK_ACCOUNTS_ENDPOINT}?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
       window.alert(data.error || "통장 삭제 실패");
       return;
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/bank-accounts");
+    invalidateClientCache(FN_BANK_ACCOUNTS_ENDPOINT);
     setMessage("통장 설정을 삭제했습니다.");
     setModalOpen(false);
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   async function copyAccountInfo(account: FnBankAccount) {
@@ -18302,10 +18345,20 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
-  async function loadAccounts() {
-    setLoading(true);
+  async function loadAccounts(force = false) {
+    const cached = force ? null : readCachedJson<{ ok?: boolean; error?: string; card_accounts?: FnCardAccount[] }>(FN_CARD_ACCOUNTS_ENDPOINT, { storageTtl: FN_ACCOUNT_STORAGE_TTL });
+    if (cached?.card_accounts) {
+      setAccounts(cached.card_accounts.filter((row) => row && row.id));
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const data = await cachedClientJson<{ ok?: boolean; error?: string; card_accounts?: FnCardAccount[] }>("/api/accounting/ledger/card-accounts", { ttl: 0, storageTtl: 0, force: true });
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; card_accounts?: FnCardAccount[] }>(FN_CARD_ACCOUNTS_ENDPOINT, {
+        ttl: FN_ACCOUNT_CACHE_TTL,
+        storageTtl: FN_ACCOUNT_STORAGE_TTL,
+        force,
+      });
       if (data.ok === false) throw new Error(data.error || "카드 설정 조회 실패");
       setAccounts((data.card_accounts || []).filter((row) => row && row.id));
     } catch (error) {
@@ -18415,7 +18468,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     if (!window.confirm(`선택한 카드 ${selectedAccounts.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
     for (const account of selectedAccounts) {
-      const res = await fetch(`/api/accounting/ledger/card-accounts?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
+      const res = await fetch(`${FN_CARD_ACCOUNTS_ENDPOINT}?id=${encodeURIComponent(String(account.id))}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         window.alert(data.error || "카드 삭제 실패");
@@ -18423,10 +18476,10 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       }
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    invalidateClientCache(FN_CARD_ACCOUNTS_ENDPOINT);
     setMessage("카드 설정을 삭제했습니다.");
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   async function saveDraft() {
@@ -18451,34 +18504,34 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       window.alert("결제 기준일과 결제일은 1일부터 31일 사이로 입력해 주세요.");
       return;
     }
-    const res = await fetch("/api/accounting/ledger/card-accounts", { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const res = await fetch(FN_CARD_ACCOUNTS_ENDPOINT, { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
       window.alert(data.error || "카드 저장 실패");
       return;
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    invalidateClientCache(FN_CARD_ACCOUNTS_ENDPOINT);
     setMessage(payload.id ? "카드 설정을 수정했습니다." : "카드 설정을 추가했습니다.");
     setModalOpen(false);
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   async function deleteDraft() {
     if (!draft.id || !window.confirm("이 카드 설정을 삭제할까요?")) return;
-    const res = await fetch(`/api/accounting/ledger/card-accounts?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
+    const res = await fetch(`${FN_CARD_ACCOUNTS_ENDPOINT}?id=${encodeURIComponent(String(draft.id))}`, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
       window.alert(data.error || "카드 삭제 실패");
       return;
     }
     invalidateClientCache("/api/accounting/summary");
-    invalidateClientCache("/api/accounting/ledger/card-accounts");
+    invalidateClientCache(FN_CARD_ACCOUNTS_ENDPOINT);
     setMessage("카드 설정을 삭제했습니다.");
     setModalOpen(false);
     setSelectedKeys([]);
-    await loadAccounts();
+    await loadAccounts(true);
   }
 
   const filteredAccounts = accounts.filter((account) => {
@@ -18587,6 +18640,18 @@ function FnSettingsWorkspace() {
   useEffect(() => {
     setActiveTab(requestedTab);
   }, [requestedTab]);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    void cachedClientJson<{ ok?: boolean; bank_accounts?: FnBankAccount[] }>(FN_BANK_ACCOUNTS_ENDPOINT, {
+      ttl: FN_ACCOUNT_CACHE_TTL,
+      storageTtl: FN_ACCOUNT_STORAGE_TTL,
+    }).catch(() => undefined);
+    void cachedClientJson<{ ok?: boolean; card_accounts?: FnCardAccount[] }>(FN_CARD_ACCOUNTS_ENDPOINT, {
+      ttl: FN_ACCOUNT_CACHE_TTL,
+      storageTtl: FN_ACCOUNT_STORAGE_TTL,
+    }).catch(() => undefined);
+  }, [unlocked]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
