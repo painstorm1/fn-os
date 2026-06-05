@@ -8127,19 +8127,29 @@ function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: S
     .map(({ _recent_order: _removed, ...row }) => row);
 }
 
-function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode, filters: Record<string, string>) {
+function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode, filters: Record<string, string>, lineRows: Array<Record<string, unknown>> = []) {
   const from = entryDateFilterKey(filters.from);
   const to = entryDateFilterKey(filters.to);
   const customerNeedle = filters.customer.trim().toLowerCase();
   const warehouseNeedle = filters.warehouse.trim().toLowerCase();
   const productNeedle = filters.product.trim().toLowerCase();
+  const lineProductMatches = new Set<string>();
+  if (productNeedle) {
+    lineRows.forEach((line, index) => {
+      const haystack = `${entryRowProductCode(line)} ${entryRowProduct(line)}`.toLowerCase();
+      if (haystack.includes(productNeedle)) lineProductMatches.add(entryRowKey(line, mode, index));
+    });
+  }
   return summarizeEntryDisplayRows(rows, mode).filter((row) => {
     const date = entryDateFilterKey(entryRowDate(row));
     if (from && date && date < from) return false;
     if (to && date && date > to) return false;
     if (customerNeedle && !entryRowCustomer(row, mode).toLowerCase().includes(customerNeedle)) return false;
     if (warehouseNeedle && !entryRowWarehouse(row).toLowerCase().includes(warehouseNeedle)) return false;
-    if (productNeedle && !entryRowProduct(row).toLowerCase().includes(productNeedle)) return false;
+    if (productNeedle) {
+      const representativeHaystack = `${entryRowProductCode(row)} ${entryRowProduct(row)}`.toLowerCase();
+      if (!representativeHaystack.includes(productNeedle) && !lineProductMatches.has(entryRowKey(row, mode))) return false;
+    }
     return true;
   });
 }
@@ -8276,6 +8286,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
   const [historyFilters, setHistoryFilters] = useState({ customer: "", warehouse: "", product: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [historyFilterDraft, setHistoryFilterDraft] = useState({ customer: "", warehouse: "", product: "", from: entryDateDaysAgo(30), to: entryDateToday() });
   const [inventoryFilters, setInventoryFilters] = useState({ warehouse: "", product: "", date: entryDateToday() });
   const [inventoryProducts, setInventoryProducts] = useState<FnProduct[]>([]);
   const [inventoryWarehouses, setInventoryWarehouses] = useState<WarehouseOption[]>([]);
@@ -9481,7 +9492,40 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
   const historyLineRows = historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
-  const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters);
+  const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters, historyLineRows);
+
+  function applyHistorySearch() {
+    setHistoryFilters(historyFilterDraft);
+  }
+
+  function handleHistorySearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!historyFilterDraft.customer.trim() && !historyFilterDraft.warehouse.trim() && !historyFilterDraft.product.trim()) return;
+    applyHistorySearch();
+  }
+
+  function setHistoryQuickPeriod(days: number) {
+    const target = entryDateDaysAgo(days);
+    const nextFilters = {
+      ...historyFilterDraft,
+      from: days === 1 ? target : entryDateDaysAgo(days),
+      to: days === 1 ? target : entryDateToday(),
+    };
+    setHistoryFilterDraft(nextFilters);
+    setHistoryFilters(nextFilters);
+  }
+
+  function setHistoryThisMonth() {
+    const now = new Date();
+    const nextFilters = {
+      ...historyFilterDraft,
+      from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+      to: entryDateToday(),
+    };
+    setHistoryFilterDraft(nextFilters);
+    setHistoryFilters(nextFilters);
+  }
 
   function openEntryEditModal(row: Record<string, unknown>) {
     const groupKey = entryRowKey(row, historyMode);
@@ -10142,7 +10186,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
       {isHistorySection && (
         <Panel>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="hidden">
             <div className="inline-flex items-center gap-2">
               {[
                 ["sales", "판매 관리"],
@@ -10173,7 +10217,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
             </button>
           </div>
-          <div className="mb-3 grid gap-2 xl:grid-cols-[1fr_1fr_1fr_150px_150px_auto]">
+          <div className="hidden">
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.warehouse} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} placeholder="전체 창고" />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.product} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, product: event.target.value }))} placeholder="전체 품목" />
@@ -10198,7 +10242,68 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               }}>이번달</button>
             </div>
           </div>
-          <SalesInventoryTable rows={filteredHistoryRows} mode={historyMode} onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }} onEditEntry={openEntryEditModal} />
+          <SalesInventoryTable
+            rows={filteredHistoryRows}
+            mode={historyMode}
+            onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }}
+            onEditEntry={openEntryEditModal}
+            topLeft={(
+              <div className="inline-flex items-center gap-2">
+                {[
+                  ["sales", "판매관리"],
+                  ["purchases", "구매관리"],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setHistoryMode(mode as "sales" | "purchases")}
+                    className={`h-9 rounded-md px-5 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            topRight={(
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPartnerBalanceMode(historyMode)}
+                  className="h-9 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 hover:bg-orange-100"
+                >
+                  {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openEntryModal(historyMode)}
+                  className="h-9 rounded-md bg-orange-500 px-4 text-sm font-black text-white hover:bg-orange-600"
+                >
+                  {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
+                </button>
+              </>
+            )}
+            filterBar={(
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, customer: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
+                <input className="field-input h-9 w-28 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
+                <input className="field-input h-9 w-44 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
+                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
+                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    ["오늘", 0],
+                    ["어제", 1],
+                    ["최근7일", 7],
+                    ["최근30일", 30],
+                  ].map(([label, days]) => (
+                    <button key={String(label)} type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => setHistoryQuickPeriod(Number(days))}>{label}</button>
+                  ))}
+                  <button type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={setHistoryThisMonth}>이번달</button>
+                </div>
+                <button type="button" className="h-9 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyHistorySearch}>검색</button>
+              </div>
+            )}
+          />
         </Panel>
       )}
 
@@ -15047,11 +15152,17 @@ function SalesInventoryTable({
   mode,
   onChanged,
   onEditEntry,
+  topLeft,
+  topRight,
+  filterBar,
 }: {
   rows: Array<Record<string, unknown>>;
   mode: SalesPurchaseMode;
   onChanged: () => void;
   onEditEntry: (row: Record<string, unknown>) => void;
+  topLeft?: ReactNode;
+  topRight?: ReactNode;
+  filterBar?: ReactNode;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [editingRows, setEditingRows] = useState<Array<Record<string, unknown>>>([]);
@@ -15209,13 +15320,23 @@ function SalesInventoryTable({
     window.location.href = `mailto:${encodeURIComponent(fallback)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
-  if (!rows.length) {
-    return <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">아직 저장된 내역이 없습니다.</div>;
-  }
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   return (
     <>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">{topLeft}</div>
+        <div className="hidden w-[100px] shrink-0 lg:block" />
+        <div className="flex flex-wrap items-center gap-2">
+          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
+          <ActionButton type="button" variant="danger" className="h-9 px-3 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) openStatement(row); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
+          <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{topRight}</div>
+      </div>
+      {filterBar}
+      <div className="hidden">
         <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
         <div className="flex flex-wrap gap-2">
           <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
@@ -15259,6 +15380,11 @@ function SalesInventoryTable({
                 </tr>
               );
             })}
+            {!rows.length && (
+              <tr>
+                <td colSpan={10} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
