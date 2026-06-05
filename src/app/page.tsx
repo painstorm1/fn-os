@@ -1292,6 +1292,21 @@ function formatCommaNumber(value: unknown) {
   return digits ? Number(digits).toLocaleString("ko-KR") : "";
 }
 
+function compareManagementName(left: unknown, right: unknown) {
+  const leftName = String(left || "").trim();
+  const rightName = String(right || "").trim();
+  if (leftName && !rightName) return -1;
+  if (!leftName && rightName) return 1;
+  return leftName.localeCompare(rightName, "ko-KR", { numeric: true, sensitivity: "base" });
+}
+
+function sortRowsByManagementName<T>(rows: T[], getName: (row: T) => unknown, getFallback: (row: T) => unknown = () => "") {
+  return [...rows].sort((left, right) => (
+    compareManagementName(getName(left), getName(right)) ||
+    compareManagementName(getFallback(left), getFallback(right))
+  ));
+}
+
 function formatResidentNo(value: unknown) {
   const digits = onlyDigits(value).slice(0, 13);
   if (digits.length <= 6) return digits;
@@ -12005,8 +12020,9 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }
 
   function saveEmployees(nextEmployees: PersonnelEmployee[]) {
-    setEmployees(nextEmployees);
-    localStorage.setItem(storageKey, JSON.stringify(nextEmployees));
+    const sorted = sortRowsByManagementName(nextEmployees, (employee) => employee.name, (employee) => employee.resident_no);
+    setEmployees(sorted);
+    localStorage.setItem(storageKey, JSON.stringify(sorted));
   }
 
   function filteredEmployees() {
@@ -12029,7 +12045,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
 
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "[]") as PersonnelEmployee[];
-    setEmployees(Array.isArray(saved) ? saved.map(normalizePersonnelEmployee) : []);
+    setEmployees(Array.isArray(saved) ? sortRowsByManagementName(saved.map(normalizePersonnelEmployee), (employee) => employee.name, (employee) => employee.resident_no) : []);
   }, []);
 
   useEffect(() => {
@@ -12554,7 +12570,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       const endpoint = `/api/fnos/customers?${params.toString()}`;
       const cached = readCachedJson<{ customers?: FnCustomer[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 5 * 60_000 });
       if (cached) {
-        setCustomers(cached.customers || []);
+        setCustomers(sortRowsByManagementName(cached.customers || [], (customer) => customer.customer_name || customer.cust_name, (customer) => customer.customer_code || customer.cust_code));
         setTotal(Number(cached.total || 0));
         setLoading(false);
       }
@@ -12563,7 +12579,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         setCustomerMessage(data.error || "거래처 조회 실패");
         return;
       }
-      setCustomers(data.customers || []);
+      setCustomers(sortRowsByManagementName(data.customers || [], (customer) => customer.customer_name || customer.cust_name, (customer) => customer.customer_code || customer.cust_code));
       setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
@@ -13186,8 +13202,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       const endpoint = `/api/fnos/products/master?${params.toString()}`;
       const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
       if (cached) {
-        setProducts(cached.products || []);
-        setWarehouses(cached.warehouses || []);
+        setProducts(sortRowsByManagementName(cached.products || [], (product) => product.product_name || product.name, (product) => product.product_code || product.sku));
+        setWarehouses(sortRowsByManagementName(cached.warehouses || [], (warehouse) => warehouse.warehouse_name || warehouse.name, (warehouse) => warehouse.warehouse_code || warehouse.code));
         setTotal(Number(cached.total || 0));
         setLoading(false);
       }
@@ -13196,8 +13212,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         setProductMessage(data.error || "품목 조회 실패");
         return;
       }
-      setProducts(data.products || []);
-      setWarehouses(data.warehouses || []);
+      setProducts(sortRowsByManagementName(data.products || [], (product) => product.product_name || product.name, (product) => product.product_code || product.sku));
+      setWarehouses(sortRowsByManagementName(data.warehouses || [], (warehouse) => warehouse.warehouse_name || warehouse.name, (warehouse) => warehouse.warehouse_code || warehouse.code));
       setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
@@ -13822,7 +13838,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
       const endpoint = `/api/fnos/warehouses?${params.toString()}`;
       const cached = readCachedJson<{ warehouses?: FnWarehouse[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
       if (cached) {
-        setWarehouses(cached.warehouses || []);
+        setWarehouses(sortRowsByManagementName(cached.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
         setTotal(Number(cached.total || 0));
         setLoading(false);
       }
@@ -13831,7 +13847,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
         setMessage(data.error || "창고 조회 실패");
         return;
       }
-      setWarehouses(data.warehouses || []);
+      setWarehouses(sortRowsByManagementName(data.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
       setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
