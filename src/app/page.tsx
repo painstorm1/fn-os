@@ -15906,7 +15906,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       setSummary(cached);
       setLoading(false);
     }
-    fetchCachedAccountingSummary(force)
+    fetchCachedAccountingSummary(force || Boolean(cached))
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
       .finally(() => setLoading(false));
@@ -17303,6 +17303,7 @@ function AccountingRightPanel() {
     cachedClientJson<AccountingSummary>(endpoint, {
       ttl: ACCOUNTING_CACHE_TTL,
       storageTtl: ACCOUNTING_STORAGE_TTL,
+      force: Boolean(cached),
     })
       .then((data) => {
         if (alive) setSummary(data);
