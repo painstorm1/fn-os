@@ -13202,8 +13202,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       const endpoint = `/api/fnos/products/master?${params.toString()}`;
       const cached = readCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
       if (cached) {
-        setProducts(sortRowsByManagementName(cached.products || [], (product) => product.product_name || product.name, (product) => product.product_code || product.sku));
-        setWarehouses(sortRowsByManagementName(cached.warehouses || [], (warehouse) => warehouse.warehouse_name || warehouse.name, (warehouse) => warehouse.warehouse_code || warehouse.code));
+        setProducts(sortRowsByManagementName(cached.products || [], (product) => product.product_name, (product) => product.product_code || product.sku));
+        setWarehouses(sortRowsByManagementName(cached.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
         setTotal(Number(cached.total || 0));
         setLoading(false);
       }
@@ -13212,8 +13212,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         setProductMessage(data.error || "품목 조회 실패");
         return;
       }
-      setProducts(sortRowsByManagementName(data.products || [], (product) => product.product_name || product.name, (product) => product.product_code || product.sku));
-      setWarehouses(sortRowsByManagementName(data.warehouses || [], (warehouse) => warehouse.warehouse_name || warehouse.name, (warehouse) => warehouse.warehouse_code || warehouse.code));
+      setProducts(sortRowsByManagementName(data.products || [], (product) => product.product_name, (product) => product.product_code || product.sku));
+      setWarehouses(sortRowsByManagementName(data.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
       setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
@@ -19111,7 +19111,11 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
   function applyAccounts(nextAccounts: FnBankAccount[]) {
-    const next = nextAccounts.filter((row) => row && row.id);
+    const next = sortRowsByManagementName(
+      nextAccounts.filter((row) => row && row.id),
+      (account) => account.bank_name,
+      (account) => `${account.account_holder || ""} ${account.account_number || ""}`,
+    );
     setAccounts(next);
     void loadFnSettingsAttachmentCounts("bank", next.map((row) => String(row.id || "")), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
   }
@@ -19451,7 +19455,11 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
   function applyAccounts(nextAccounts: FnCardAccount[]) {
-    const next = nextAccounts.filter((row) => row && row.id);
+    const next = sortRowsByManagementName(
+      nextAccounts.filter((row) => row && row.id),
+      (account) => account.card_name,
+      (account) => account.card_number,
+    );
     setAccounts(next);
     void loadFnSettingsAttachmentCounts("card", next.map((row) => String(row.id || "")), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
   }
