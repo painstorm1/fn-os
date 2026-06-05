@@ -18179,26 +18179,28 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             <SectionHeader
               title="고정비 현황"
             />
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
-              {[
-                { key: "all" as const, label: "전체 고정비" },
-                { key: "loan" as const, label: "대출" },
-                { key: "fixed" as const, label: "비용" },
-              ].map((filter) => (
-                <button
-                  key={filter.key}
-                  type="button"
-                  onClick={() => {
-                    setFixedCostTypeFilter(filter.key);
-                    setFixedCostSelectedKeys([]);
-                  }}
-                  className={`font-black underline-offset-4 hover:underline ${fixedCostTypeFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"}`}
-                >
-                  {filter.label}
-                </button>
-              ))}
-              <span className="rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">고정비 {combinedFixedRows.length.toLocaleString("ko-KR")}개 : {krw(fixedCostTotalAmount)}</span>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="mt-4 grid gap-x-4 gap-y-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500">
+                {[
+                  { key: "all" as const, label: "전체 고정비" },
+                  { key: "loan" as const, label: "대출" },
+                  { key: "fixed" as const, label: "비용" },
+                ].map((filter) => (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    onClick={() => {
+                      setFixedCostTypeFilter(filter.key);
+                      setFixedCostSelectedKeys([]);
+                    }}
+                    className={`font-black underline-offset-4 hover:underline ${fixedCostTypeFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"}`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+                <span className="rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">고정비 {combinedFixedRows.length.toLocaleString("ko-KR")}개 : {krw(fixedCostTotalAmount)}</span>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <ActionButton type="button" onClick={openNewFixedCost}>F2 새 고정비</ActionButton>
                 <ActionButton type="button" variant="secondary" onClick={openNewLoan}>대출 추가</ActionButton>
                 <ActionButton type="button" variant="secondary" onClick={() => setMessage("고정비 엑셀등록은 업로드 파서 연결 후 활성화 예정입니다.")}>엑셀등록</ActionButton>
@@ -18213,13 +18215,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   <ExcelFormIcon />
                 </button>
               </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 lg:flex-nowrap">
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <ActionButton type="button" variant="secondary" onClick={openFixedCostBulkEdit}>수정</ActionButton>
                 <span className="text-xs font-bold text-slate-500">선택 {fixedCostSelectedKeys.length.toLocaleString("ko-KR")}개</span>
               </div>
-              <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
+              <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
                 <div className="flex shrink-0 rounded-md border border-gray-200 bg-white p-1">
                   {[
                     ["due", "도래일 순"],
@@ -18239,7 +18239,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   ))}
                 </div>
                 <input
-                  className="field-input w-[392px] min-w-[392px] shrink-0 rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  className="field-input !w-[280px] !min-w-[280px] !max-w-[280px] shrink-0 rounded-md border border-slate-200 px-3 py-2 text-sm"
                   value={fixedCostQuery}
                   onChange={(event) => setFixedCostQuery(event.target.value)}
                   placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
