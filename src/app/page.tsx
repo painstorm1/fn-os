@@ -94,8 +94,7 @@ const salesSubMenus = [
 
 const accountingSubMenus = [
   { label: "대시보드", tab: "dashboard" },
-  { label: "통장 내역", tab: "bank" },
-  { label: "카드 내역", tab: "card" },
+  { label: "통장/카드 내역", tab: "ledger" },
   { label: "고정비", tab: "fixed" },
   { label: "설정", tab: "settings" },
   { label: "검토필요", tab: "review" },
@@ -15778,8 +15777,7 @@ const jaewookPersonalPaymentItems = [
 ] as const;
 const accountingTabLabel: Record<string, string> = {
   dashboard: "대시보드",
-  bank: "통장 내역",
-  card: "카드 내역",
+  ledger: "통장/카드 내역",
   fixed: "고정비",
   settings: "설정",
   review: "검토필요",
@@ -15787,6 +15785,23 @@ const accountingTabLabel: Record<string, string> = {
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
+const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
+
+function accountingMonthValue(offset = 0) {
+  const date = new Date();
+  date.setMonth(date.getMonth() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function accountingMonthRange(month: string) {
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!year || monthIndex < 0) return { from: "", to: "" };
+  const from = formatDateKey(new Date(year, monthIndex, 1));
+  const to = formatDateKey(new Date(year, monthIndex + 1, 0));
+  return { from, to };
+}
 
 function readCachedAccountingSummary() {
   return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
@@ -15803,12 +15818,16 @@ function fetchCachedAccountingSummary(force = false) {
 function invalidateAccountingCache() {
   invalidateClientCache(ACCOUNTING_SUMMARY_ENDPOINT);
   invalidateClientCache("/api/accounting/ledger/summary");
+  invalidateClientCache(ACCOUNTING_TRANSACTIONS_ENDPOINT);
 }
 
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
-  const activeTab = accountingTabLabel[tab] ? tab : "dashboard";
+  const normalizedTab = tab === "bank" || tab === "card" ? "ledger" : tab;
+  const activeTab = accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
+  const [ledgerRows, setLedgerRows] = useState<Array<Record<string, unknown>>>([]);
+  const ledgerMonthInitializedRef = useRef(false);
   const [loading, setLoading] = useState(!initialSummary);
   const [sourceType, setSourceType] = useState("자동 분류");
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
@@ -15831,6 +15850,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     save_rule: false,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
+  const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(tab === "card" ? "card" : "bank");
+  const [ledgerFilters, setLedgerFilters] = useState({ q: "", source: "", month: accountingMonthValue(0) });
+  const [selectedLedgerId, setSelectedLedgerId] = useState("");
   const [categoryDraft, setCategoryDraft] = useState({
     id: "",
     category_large: "",
@@ -15959,10 +15981,28 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       .finally(() => setLoading(false));
   }
 
+  function loadLedgerRows(force = false) {
+    const cached = force ? null : readCachedJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+    if (cached?.transactions?.length && !force) setLedgerRows(cached.transactions);
+    cachedClientJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, {
+      ttl: ACCOUNTING_CACHE_TTL,
+      storageTtl: ACCOUNTING_STORAGE_TTL,
+      force: force || Boolean(cached),
+    })
+      .then((data) => setLedgerRows(data.transactions || []))
+      .catch(() => undefined);
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "ledger") return;
+    const timer = window.setTimeout(() => loadLedgerRows(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
 
   function expenseFileKey(item: ExpenseUploadItem) {
     return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
@@ -16267,6 +16307,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setMessage(transactionDraft.save_rule ? "거래를 확정하고 같은 패턴 규칙을 저장했습니다." : "이 거래만 수정했습니다.");
     setEditingTransaction(null);
     invalidateAccountingCache();
+    loadLedgerRows(true);
     loadSummary(true);
   }
 
@@ -16289,6 +16330,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage("메모를 저장했습니다.");
     invalidateAccountingCache();
+    loadLedgerRows(true);
     loadSummary(true);
   }
 
@@ -16339,16 +16381,17 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setJaewookModalRow(null);
   }
 
-  async function exportExpenses() {
+  async function exportExpenses(rows: Array<Record<string, unknown>> = filteredExpenses, sheetName = "expenses") {
     const xlsx = await loadXlsxModule();
-    const sheet = xlsx.utils.json_to_sheet(filteredExpenses);
+    const sheet = xlsx.utils.json_to_sheet(rows);
     const book = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(book, sheet, "expenses");
+    xlsx.utils.book_append_sheet(book, sheet, sheetName);
     xlsx.writeFile(book, `FN_OS_비용_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   const categories = summary?.categories || [];
   const expenses = summary?.transactions || summary?.expenses || [];
+  const ledgerSourceRows = ledgerRows.length ? ledgerRows : expenses;
   const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
   const filteredExpenses = expenses.filter((row) => {
     const q = filters.q.trim().toLowerCase();
@@ -16396,7 +16439,40 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const reviewSuggestions = summary?.review_suggestions || {};
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
-  const sourceOptions = Array.from(new Set(expenses.map((row) => String(row.source_name || row.source_type || "")).filter(Boolean)));
+  const ledgerMonthRange = accountingMonthRange(ledgerFilters.month);
+  const currentLedgerRows = ledgerSourceRows
+    .filter((row) => String(row.source_type || "") === ledgerMode)
+    .filter((row) => {
+      const q = ledgerFilters.q.trim().toLowerCase();
+      const rowDate = String(row.transaction_date || row.expense_date || "");
+      const sourceName = String(row.account_name || row.card_name || row.source_name || row.source_type || "");
+      if (ledgerMonthRange.from && rowDate < ledgerMonthRange.from) return false;
+      if (ledgerMonthRange.to && rowDate > ledgerMonthRange.to) return false;
+      if (ledgerFilters.source && sourceName !== ledgerFilters.source) return false;
+      if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${sourceName} ${row.amount_krw || ""} ${row.amount || ""} ${row.debit_amount || ""} ${row.credit_amount || ""}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  const ledgerSourceOptions = Array.from(new Set(
+    ledgerSourceRows
+      .filter((row) => String(row.source_type || "") === ledgerMode)
+      .map((row) => String(row.account_name || row.card_name || row.source_name || ""))
+      .filter(Boolean),
+  ));
+  const selectedLedgerRow = currentLedgerRows.find((row) => String(row.id || "") === selectedLedgerId) || null;
+  const sourceOptions = Array.from(new Set(ledgerSourceRows.map((row) => String(row.source_name || row.source_type || "")).filter(Boolean)));
+
+  useEffect(() => {
+    if (activeTab !== "ledger" || ledgerMonthInitializedRef.current || !ledgerSourceRows.length) return;
+    ledgerMonthInitializedRef.current = true;
+    const currentMonth = accountingMonthValue(0);
+    const hasCurrentMonthRows = ledgerSourceRows.some((row) => String(row.transaction_date || row.expense_date || "").startsWith(currentMonth));
+    if (hasCurrentMonthRows) return;
+    const latestMonth = ledgerSourceRows
+      .map((row) => String(row.transaction_date || row.expense_date || "").slice(0, 7))
+      .filter(Boolean)
+      .sort((left, right) => right.localeCompare(left))[0];
+    if (latestMonth) setLedgerFilters((prev) => ({ ...prev, month: latestMonth }));
+  }, [activeTab, ledgerSourceRows]);
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
@@ -16468,28 +16544,95 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         </>
       )}
 
-      {activeTab === "bank" && (
+      {activeTab === "ledger" && (
         <Card className="p-5">
           <SectionHeader
-            title="통장 내역"
-            description="국민은행/기업은행 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다."
-            actions={<StatusBadge>{expenses.filter((row) => String(row.source_type || "") === "bank").length.toLocaleString("ko-KR")}건</StatusBadge>}
+            title="통장/카드 내역"
+            description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
+            actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
+          <FilterBar className="mt-4">
+            <div className="flex rounded-lg border border-gray-200 bg-white p-1">
+              {[
+                ["bank", "통장 내역"],
+                ["card", "카드 내역"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setLedgerMode(value as "bank" | "card");
+                    setLedgerFilters((prev) => ({ ...prev, source: "" }));
+                    setSelectedLedgerId("");
+                  }}
+                  className={`h-8 rounded-md px-3 text-xs font-black transition ${ledgerMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <select
+              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              value={ledgerFilters.source}
+              onChange={(event) => {
+                setLedgerFilters((prev) => ({ ...prev, source: event.target.value }));
+                setSelectedLedgerId("");
+              }}
+            >
+              <option value="">{ledgerMode === "bank" ? "전체 통장" : "전체 카드"}</option>
+              {ledgerSourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400" value="month" onChange={() => undefined}>
+              <option value="month">기간선택(월)</option>
+            </select>
+            <input
+              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm font-bold outline-orange-400"
+              type="month"
+              value={ledgerFilters.month}
+              onChange={(event) => {
+                setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
+                setSelectedLedgerId("");
+              }}
+            />
+            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => { setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) })); setSelectedLedgerId(""); }}>이번달</ActionButton>
+            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(-1) ? "primary" : "secondary"} className="h-9 px-3 text-xs" onClick={() => { setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(-1) })); setSelectedLedgerId(""); }}>지난달</ActionButton>
+            <input
+              className="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm outline-orange-400"
+              value={ledgerFilters.q}
+              onChange={(event) => {
+                setLedgerFilters((prev) => ({ ...prev, q: event.target.value }));
+                setSelectedLedgerId("");
+              }}
+              placeholder="거래내용 / 금액 / 메모 검색"
+            />
+            <ActionButton
+              type="button"
+              variant="secondary"
+              className="h-9 px-4 text-xs"
+              onClick={() => exportExpenses(currentLedgerRows, ledgerMode === "bank" ? "bank" : "card")}
+            >
+              엑셀다운
+            </ActionButton>
+            <ActionButton
+              type="button"
+              variant="secondary"
+              className="h-9 px-4 text-xs"
+              disabled={!selectedLedgerRow}
+              onClick={() => selectedLedgerRow && openTransaction(selectedLedgerRow)}
+            >
+              수정
+            </ActionButton>
+          </FilterBar>
           <div className="mt-4">
-            <ExpenseTable mode="bank" rows={filteredExpenses.filter((row) => String(row.source_type || "") === "bank")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
-          </div>
-        </Card>
-      )}
-
-      {activeTab === "card" && (
-        <Card className="p-5">
-          <SectionHeader
-            title="카드 내역"
-            description="카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."
-            actions={<StatusBadge tone="orange">{expenses.filter((row) => String(row.source_type || "") === "card").length.toLocaleString("ko-KR")}건</StatusBadge>}
-          />
-          <div className="mt-4">
-            <ExpenseTable mode="card" rows={filteredExpenses.filter((row) => String(row.source_type || "") === "card")} categoryById={categoryById} onOpen={openTransaction} onMemoSave={saveExpenseMemo} />
+            <ExpenseTable
+              mode={ledgerMode}
+              rows={currentLedgerRows}
+              categoryById={categoryById}
+              selectedId={selectedLedgerId}
+              onSelect={(row) => setSelectedLedgerId(String(row.id || ""))}
+              onOpen={openTransaction}
+              onMemoSave={saveExpenseMemo}
+            />
           </div>
         </Card>
       )}
@@ -17031,6 +17174,8 @@ function ExpenseTable({
   categoryById,
   compact = false,
   mode,
+  selectedId,
+  onSelect,
   onOpen,
   onMemoSave,
 }: {
@@ -17038,11 +17183,14 @@ function ExpenseTable({
   categoryById: Map<string, string>;
   compact?: boolean;
   mode?: "bank" | "card";
+  selectedId?: string;
+  onSelect?: (row: Record<string, unknown>) => void;
   onOpen?: (row: Record<string, unknown>) => void;
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
 }) {
   const [page, setPage] = useState(1);
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  useEffect(() => setPage(1), [rows.length, mode]);
   const pageSize = compact ? rows.length || 1 : 30;
   const tableMode = mode || (rows.length && rows.every((row) => String(row.source_type || "") === "bank")
     ? "bank"
@@ -17130,8 +17278,10 @@ function ExpenseTable({
                 const parts = categoryParts(row);
                 const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
                 const isCancel = /취소|cancel/i.test(`${String(row.description || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`);
+                const selected = selectedId && String(row.id || "") === selectedId;
+                const rowClass = `border-t border-gray-100 ${selected ? "bg-orange-100/80" : accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onSelect || onOpen ? "cursor-pointer" : ""}`;
                 return tableMode === "bank" ? (
-                  <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                  <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
                     <td className="px-3 py-2"><StatusBadge>{String(row.account_name || row.source_name || "-")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.description || row.merchant_name || "-")}</td>
@@ -17143,7 +17293,7 @@ function ExpenseTable({
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
                   </tr>
                 ) : (
-                  <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onOpen ? "cursor-pointer" : ""}`} onClick={() => onOpen?.(row)}>
+                  <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
                     <td className="px-3 py-2"><StatusBadge tone="orange">{String(row.card_name || row.source_name || "-")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
                     <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
@@ -18483,7 +18633,8 @@ function HomeContent() {
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
   const requestedAccountingTab = searchParams.get("accountingTab") || "dashboard";
-  const accountingTab = accountingSubMenus.some((sub) => sub.tab === requestedAccountingTab) ? requestedAccountingTab : "dashboard";
+  const normalizedAccountingTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card" ? "ledger" : requestedAccountingTab;
+  const accountingTab = accountingSubMenus.some((sub) => sub.tab === normalizedAccountingTab) ? normalizedAccountingTab : "dashboard";
 
   useEffect(() => {
     markClientCacheReady();
