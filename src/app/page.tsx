@@ -1454,7 +1454,7 @@ type ImportProductDetail = {
 };
 
 type OrderAttachment = {
-  id: number;
+  id: number | string;
   order_id?: number;
   file_name?: string;
   file_path?: string;
@@ -1769,16 +1769,13 @@ function FolderAttachmentButton({ count, title, onClick }: { count?: number; tit
     <button
       type="button"
       onClick={onClick}
-      className="relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-orange-200 bg-white text-orange-600 hover:bg-orange-50"
+      className="relative inline-flex h-7 w-7 items-center justify-center text-lg leading-none hover:text-orange-600"
       title={title}
       aria-label={title}
     >
-      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-11z" />
-        <path d="M3 9h18" />
-      </svg>
+      📁
       {Number(count || 0) > 0 && (
-        <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-orange-500 px-1 text-[10px] font-black leading-4 text-white">
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-black text-white">
           {Number(count).toLocaleString("ko-KR")}
         </span>
       )}
@@ -1905,6 +1902,27 @@ function formatMonthlyDay(value?: number | string) {
 function validDayString(value?: number | string) {
   const day = Number(onlyDigits(value));
   return day >= 1 && day <= 31;
+}
+
+function fnSettingsAttachmentEndpoint(accountType: FnSettingsAttachmentType, accountId: string) {
+  return `/api/fn-settings/account-files?type=${accountType}&id=${encodeURIComponent(accountId)}`;
+}
+
+async function loadFnSettingsAttachmentCounts(accountType: FnSettingsAttachmentType, ids: string[], onLoaded: (counts: Record<string, number>) => void) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  if (!uniqueIds.length) return;
+  const entries = await Promise.all(uniqueIds.map(async (id) => {
+    try {
+      const data = await cachedClientJson<{ ok?: boolean; attachments?: AccountAttachment[] }>(fnSettingsAttachmentEndpoint(accountType, id), {
+        ttl: 60_000,
+        storageTtl: 60_000,
+      });
+      return [id, Array.isArray(data.attachments) ? data.attachments.length : 0] as const;
+    } catch {
+      return [id, 0] as const;
+    }
+  }));
+  onLoaded(Object.fromEntries(entries));
 }
 
 async function openAttachment(item: OrderAttachment) {
@@ -11574,6 +11592,10 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
   }, []);
 
   useEffect(() => {
+    void loadFnSettingsAttachmentCounts("personnel", employees.map(employeeKey), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+  }, [employees]);
+
+  useEffect(() => {
     setSelectedKeys([]);
   }, [query]);
 
@@ -17985,7 +18007,7 @@ function AccountFileModal({
   const [note, setNote] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
-  const endpoint = `/api/fn-settings/account-files?type=${accountType}&id=${encodeURIComponent(accountId)}`;
+  const endpoint = fnSettingsAttachmentEndpoint(accountType, accountId);
 
   useEscapeToClose(true, onClose);
 
@@ -18056,13 +18078,7 @@ function AccountFileModal({
   }
 
   function openFile(item: AccountAttachment) {
-    const fileUrl = attachmentFileUrl(item as unknown as OrderAttachment);
-    if (!fileUrl) {
-      window.alert("첨부파일 URL이 없습니다. 파일을 다시 업로드해 주세요.");
-      return;
-    }
-    const params = new URLSearchParams({ url: fileUrl, name: item.file_name || "첨부파일" });
-    window.open(`/attachment-viewer?${params.toString()}`, "_blank", "noopener,noreferrer");
+    void openAttachment(item);
   }
 
   return (
@@ -18167,10 +18183,16 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
+  function applyAccounts(nextAccounts: FnBankAccount[]) {
+    const next = nextAccounts.filter((row) => row && row.id);
+    setAccounts(next);
+    void loadFnSettingsAttachmentCounts("bank", next.map((row) => String(row.id || "")), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+  }
+
   async function loadAccounts(force = false) {
     const cached = force ? null : readCachedJson<{ ok?: boolean; error?: string; bank_accounts?: FnBankAccount[] }>(FN_BANK_ACCOUNTS_ENDPOINT, { storageTtl: FN_ACCOUNT_STORAGE_TTL });
     if (cached?.bank_accounts) {
-      setAccounts(cached.bank_accounts.filter((row) => row && row.id));
+      applyAccounts(cached.bank_accounts);
       setLoading(false);
     } else {
       setLoading(true);
@@ -18182,7 +18204,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         force,
       });
       if (data.ok === false) throw new Error(data.error || "통장 설정 조회 실패");
-      setAccounts((data.bank_accounts || []).filter((row) => row && row.id));
+      applyAccounts(data.bank_accounts || []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "통장 설정 조회 실패");
     } finally {
@@ -18491,6 +18513,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [billingPeriodDraft, setBillingPeriodDraft] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [secretView, setSecretView] = useState<{ title: string; label: string; value: string } | null>(null);
+  const [fileAccount, setFileAccount] = useState<FnCardAccount | null>(null);
+  const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
   const selectionDragModeRef = useRef<boolean | null>(null);
   const selectionDragLastKeyRef = useRef("");
   const keyboardIndexRef = useRef<number | null>(null);
@@ -18499,10 +18523,16 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const allSelected = Boolean(rowKeys.length) && rowKeys.every((key) => selectedKeys.includes(key));
 
+  function applyAccounts(nextAccounts: FnCardAccount[]) {
+    const next = nextAccounts.filter((row) => row && row.id);
+    setAccounts(next);
+    void loadFnSettingsAttachmentCounts("card", next.map((row) => String(row.id || "")), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+  }
+
   async function loadAccounts(force = false) {
     const cached = force ? null : readCachedJson<{ ok?: boolean; error?: string; card_accounts?: FnCardAccount[] }>(FN_CARD_ACCOUNTS_ENDPOINT, { storageTtl: FN_ACCOUNT_STORAGE_TTL });
     if (cached?.card_accounts) {
-      setAccounts(cached.card_accounts.filter((row) => row && row.id));
+      applyAccounts(cached.card_accounts);
       setLoading(false);
     } else {
       setLoading(true);
@@ -18514,7 +18544,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         force,
       });
       if (data.ok === false) throw new Error(data.error || "카드 설정 조회 실패");
-      setAccounts((data.card_accounts || []).filter((row) => row && row.id));
+      applyAccounts(data.card_accounts || []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "카드 설정 조회 실패");
     } finally {
@@ -18528,13 +18558,13 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "F2" || modalOpen || secretView) return;
+      if (event.key !== "F2" || modalOpen || fileAccount || secretView) return;
       event.preventDefault();
       openNew();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, secretView]);
+  }, [modalOpen, fileAccount, secretView]);
 
   useEffect(() => {
     function stopSelectionDrag() {
@@ -18551,7 +18581,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (!event.shiftKey || modalOpen || secretView) return;
+      if (!event.shiftKey || modalOpen || fileAccount || secretView) return;
       if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) return;
       if (!rowKeys.length || !selectedKeys.length) return;
       event.preventDefault();
@@ -18572,7 +18602,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [modalOpen, rowKeys, secretView, selectedKeys]);
+  }, [fileAccount, modalOpen, rowKeys, secretView, selectedKeys]);
 
   function updateDraft(key: keyof FnCardAccount, value: string | boolean) {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -18705,8 +18735,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 카드번호 / 소유자 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1240px] table-fixed text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">기간</th><th className="w-32 py-2 text-left">결제일</th><th className="w-36 py-2 text-left">소유자</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
+          <table className="w-full min-w-[1300px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">기간</th><th className="w-32 py-2 text-left">결제일</th><th className="w-36 py-2 text-left">소유자</th><th className="w-20 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
                 const key = String(account.id || "");
@@ -18733,6 +18763,9 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                     <td className="truncate py-2 font-bold text-slate-700">{formatCardPeriod(account.cutoff_start_day, account.cutoff_end_day)}</td>
                     <td className="truncate py-2 font-bold text-slate-700">{formatMonthlyDay(account.payment_day)}</td>
                     <td className="truncate py-2 font-bold">{account.physical_owner || "-"}</td>
+                    <td className="py-2" onClick={(event) => event.stopPropagation()}>
+                      <FolderAttachmentButton count={fileCounts[key]} title="카드 첨부파일" onClick={() => setFileAccount(account)} />
+                    </td>
                     <td className="truncate py-2 text-slate-500" title={account.memo || ""}>{account.memo || "-"}</td>
                   </tr>
                 );
@@ -18771,6 +18804,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         </FormModal>
       )}
       {secretView && <SecretViewModal title={secretView.title} label={secretView.label} value={secretView.value} onClose={() => setSecretView(null)} />}
+      {fileAccount?.id && <AccountFileModal accountType="card" accountId={String(fileAccount.id)} title={fileAccount.card_name || "카드"} onClose={() => setFileAccount(null)} onChanged={(count) => setFileCounts((prev) => ({ ...prev, [String(fileAccount.id)]: count }))} />}
     </div>
   );
 }
