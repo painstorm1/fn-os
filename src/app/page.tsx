@@ -17987,7 +17987,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   ))}
                 </div>
                 <input
-                  className="field-input w-[392px] rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  className="field-input w-[392px] min-w-[392px] shrink-0 rounded-md border border-slate-200 px-3 py-2 text-sm"
                   value={fixedCostQuery}
                   onChange={(event) => setFixedCostQuery(event.target.value)}
                   placeholder="고정비명 / 대출명 / 금액 / 메모 검색"
