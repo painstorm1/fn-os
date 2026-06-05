@@ -8083,13 +8083,18 @@ function entryRowMemo(row: Record<string, unknown>) {
 function entryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode, index = 0) {
   const sourceRef = String(row.source_ref_id || "");
   const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
-  return String(row.entry_group_key || row.upload_batch_id || manualMatch?.[1] || row.id || `${mode}-${index}`);
+  const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
+  const groupedSourceRef = sourceBase && sourceBase !== sourceRef ? sourceBase : "";
+  const batchId = String(row.upload_batch_id || "");
+  return String(row.entry_group_key || (batchId ? `batch:${batchId}` : "") || (manualMatch?.[1] ? `manual:${manualMatch[1]}` : "") || (groupedSourceRef ? `source:${groupedSourceRef}` : "") || row.id || `${mode}-${index}`);
 }
 
 function entryRowSourceRefBase(row: Record<string, unknown>, mode: SalesPurchaseMode) {
   const sourceRef = String(row.source_ref_id || "");
   const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
   if (manualMatch?.[1]) return manualMatch[1];
+  const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
+  if (sourceBase && sourceBase !== sourceRef) return sourceBase;
   return `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
 }
 
@@ -10810,6 +10815,7 @@ function SalesPurchaseEntryModal({
   const formRef = useRef<HTMLDivElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
+  const excelFileInputRef = useRef<HTMLInputElement | null>(null);
   const lineDragModeRef = useRef<"select" | "deselect" | null>(null);
   const lastLineSelectionIndexRef = useRef<number | null>(null);
   const productDragModeRef = useRef<"select" | "deselect" | null>(null);
@@ -10974,6 +10980,30 @@ function SalesPurchaseEntryModal({
     }, 0);
   }
 
+  function focusLineField(index: number, field: keyof SalesPurchaseEntryLine) {
+    window.setTimeout(() => {
+      const input = formRef.current?.querySelector<HTMLInputElement>(`[data-line-index="${index}"][data-line-field="${field}"]`);
+      input?.focus();
+      input?.select();
+    }, 0);
+  }
+
+  function handleLineArrowKey(event: KeyboardEvent<HTMLInputElement>, index: number, field: keyof SalesPurchaseEntryLine) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return false;
+    event.preventDefault();
+    const nextIndex = event.key === "ArrowDown" ? index + 1 : index - 1;
+    if (nextIndex < 0) return true;
+    if (nextIndex >= lines.length) {
+      if (event.key === "ArrowDown") {
+        setLines((prev) => [...prev, defaultLine()]);
+        focusLineField(nextIndex, field);
+      }
+      return true;
+    }
+    focusLineField(nextIndex, field);
+    return true;
+  }
+
   function moveFromMemo(index: number) {
     if (index < lines.length - 1) {
       focusProductCode(index + 1);
@@ -11088,6 +11118,120 @@ function SalesPurchaseEntryModal({
       return;
     }
     applyProducts(selectedProducts);
+  }
+
+  function entrySheetName() {
+    return mode === "sales" ? "FN판매입력" : "FN구매입력";
+  }
+
+  function entrySheetHeaders() {
+    return salesSheetHeaders[entrySheetName()];
+  }
+
+  function entrySheetRowsFromLines(targetLines = lines) {
+    const sheetName = entrySheetName();
+    const warehouseHeader = salesEntryWarehouseHeader(sheetName);
+    return targetLines
+      .filter((line) => line.prod_cd.trim() || line.prod_name.trim() || line.qty.trim() || line.price.trim() || line.memo.trim())
+      .map((line) => {
+        const values: Record<string, string> = {
+          "일자": entryDate,
+          "거래처코드": customerCode,
+          "거래처명": customerText,
+          [warehouseHeader]: warehouseCode || warehouseText,
+          "VAT 포함/별도": vatMode === "included" ? "포함" : "별도",
+          "품목코드": line.prod_cd,
+          "품목명": line.prod_name,
+          "수량": line.qty,
+          "단가": line.price,
+          "세액": String(Math.round(lineTax(line) * lineQty(line))),
+          "공급가액": String(Math.round(lineSupply(line))),
+          "합계금액": String(Math.round(lineSupply(line))),
+          "메모": line.memo,
+        };
+        return entrySheetHeaders().map((header) => values[header] || "");
+      });
+  }
+
+  function downloadEntryTemplate() {
+    const sheetName = entrySheetName();
+    const warehouseHeader = salesEntryWarehouseHeader(sheetName);
+    const sample: Record<string, string> = {
+      "일자": entryDateToday(),
+      "거래처코드": "",
+      "거래처명": mode === "sales" ? "예시거래처" : "예시구매처",
+      [warehouseHeader]: "100",
+      "VAT 포함/별도": "포함",
+      "품목코드": "ITEM001",
+      "품목명": "예시품목",
+      "수량": "1",
+      "단가": "1000",
+      "세액": "",
+      "공급가액": "1000",
+      "합계금액": "1000",
+      "메모": "예시",
+    };
+    const headers = [...salesSheetDisplayHeaders(sheetName), "삭제하세요", "삭제하세요"];
+    const row = [...entrySheetHeaders().map((header) => sample[header] || ""), "삭제하세요", "삭제하세요"];
+    void downloadTableXlsx(`FN_OS_${sheetName}_엑셀폼.xlsx`, sheetName, headers, [row]);
+  }
+
+  function downloadCurrentEntry() {
+    const sheetName = entrySheetName();
+    const rows = entrySheetRowsFromLines();
+    if (!rows.length) {
+      window.alert("다운로드할 품목 행이 없습니다.");
+      return;
+    }
+    void downloadTableXlsx(`FN_OS_${sheetName}_${todayMmdd()}.xlsx`, sheetName, entrySheetHeaders(), rows);
+  }
+
+  async function uploadEntryExcel(file: File) {
+    try {
+      const xlsx = await loadXlsxModule();
+      const data = await file.arrayBuffer();
+      const workbook = xlsx.read(data, { type: "array", cellDates: false });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = xlsx.utils.sheet_to_json<Array<string | number>>(worksheet, { header: 1, blankrows: false, defval: "" });
+      const headerRow = (rawRows[0] || []).map((value) => String(value || "").replace(/\*/g, "").trim());
+      const headerIndex = new Map(headerRow.map((header, index) => [header, index]));
+      const pick = (row: Array<string | number>, header: string) => String(row[headerIndex.get(header) ?? -1] || "").trim();
+      const sheetName = entrySheetName();
+      const warehouseHeader = salesEntryWarehouseHeader(sheetName);
+      const importedLines: SalesPurchaseEntryLine[] = [];
+      for (const rawRow of rawRows.slice(1)) {
+        const row = rawRow as Array<string | number>;
+        const prod_cd = pick(row, "품목코드");
+        const prod_name = pick(row, "품목명");
+        const qty = pick(row, "수량");
+        const price = pick(row, "단가");
+        const memo = pick(row, "메모");
+        if (!(prod_cd || prod_name || qty || price || memo)) continue;
+        if (!importedLines.length) {
+          const rowDate = normalizeEntryDate(pick(row, "일자"));
+          if (rowDate) setEntryDate(rowDate);
+          setCustomerCode(pick(row, "거래처코드"));
+          setCustomerText(pick(row, "거래처명") || pick(row, "거래처코드"));
+          const warehouse = pick(row, warehouseHeader);
+          if (warehouse) {
+            setWarehouseCode(warehouse);
+            setWarehouseText(warehouse);
+          }
+          const vatText = pick(row, "VAT 포함/별도");
+          if (vatText.includes("별도")) setVatMode("excluded");
+          if (vatText.includes("포함")) setVatMode("included");
+        }
+        importedLines.push({ ...defaultLine(), prod_cd, prod_name, qty: qty || "1", price, memo });
+      }
+      if (!importedLines.length) {
+        window.alert("읽어올 품목 행이 없습니다.");
+        return;
+      }
+      setLines([...importedLines, defaultLine()]);
+      setSelectedLineIds([]);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "엑셀등록 실패");
+    }
   }
 
   function moveProductSearchSelection(direction: 1 | -1, extend: boolean) {
@@ -11253,6 +11397,16 @@ function SalesPurchaseEntryModal({
       }
     >
       <div ref={formRef} className="space-y-4">
+        <div className="flex justify-end gap-2">
+          <ActionButton type="button" variant="secondary" onClick={() => excelFileInputRef.current?.click()}>엑셀등록</ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={downloadCurrentEntry}>현재 다운로드</ActionButton>
+          <button type="button" onClick={downloadEntryTemplate} className="inline-flex h-10 w-10 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50" aria-label="엑셀등록 폼 다운로드" title="엑셀등록 폼 다운로드"><ExcelFormIcon /></button>
+          <input ref={excelFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadEntryExcel(file);
+            event.target.value = "";
+          }} />
+        </div>
         <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 md:grid-cols-2">
           <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); datePickerOpenRef.current = false; window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onBlur={() => { datePickerOpenRef.current = false; }} onKeyDown={(event) => {
             if (event.key !== "Enter") return;
@@ -11354,14 +11508,16 @@ function SalesPurchaseEntryModal({
                     </button>
                   </td>
                   <td className="px-2 py-2">
-                    <input data-product-code-input="true" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_cd} onChange={(event) => updateLine(index, "prod_cd", event.target.value)} onKeyDown={(event) => {
+                    <input data-product-code-input="true" data-line-index={index} data-line-field="prod_cd" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_cd} onChange={(event) => updateLine(index, "prod_cd", event.target.value)} onKeyDown={(event) => {
+                      if (handleLineArrowKey(event, index, "prod_cd")) return;
                       if (event.key === "Enter") {
                         event.preventDefault();
                         void openProductSearch(index, line.prod_cd || line.prod_name);
                       }
                     }} />
                   </td>
-                  <td className="px-2 py-2"><input data-product-name-input="true" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_name} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "prod_name", event.target.value)} onKeyDown={(event) => {
+                  <td className="px-2 py-2"><input data-product-name-input="true" data-line-index={index} data-line-field="prod_name" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.prod_name} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "prod_name", event.target.value)} onKeyDown={(event) => {
+                    if (handleLineArrowKey(event, index, "prod_name")) return;
                     if (event.key !== "Enter") return;
                     event.preventDefault();
                     if (!event.currentTarget.value.trim()) {
@@ -11370,11 +11526,11 @@ function SalesPurchaseEntryModal({
                     }
                     moveToNextField(event.currentTarget);
                   }} /></td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => handleRequiredEnter(event)} /></td>
+                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
+                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
                   {vatMode === "excluded" && <td className="px-2 py-2 text-right font-bold text-gray-600">{Math.round(lineTax(line) * lineQty(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
-                  <td className="px-2 py-2"><input className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
+                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="memo" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "memo")) return; if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
                 </tr>
               );})}
             </tbody>

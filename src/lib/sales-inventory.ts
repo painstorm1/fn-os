@@ -201,7 +201,9 @@ function groupFilters(groupKey: string) {
   const key = text(groupKey);
   if (key.startsWith("batch:")) return { upload_batch_id: `eq.${key.slice(6)}` };
   if (key.startsWith("manual:")) return { source_ref_id: `ilike.${key.slice(7)}%` };
+  if (key.startsWith("source:")) return { source_ref_id: `ilike.${key.slice(7)}%` };
   if (key.startsWith("row:")) return { id: `eq.${key.slice(4)}` };
+  if (key.startsWith("manual-sale-") || key.startsWith("manual-purchase-")) return { source_ref_id: `ilike.${key}%` };
   return { upload_batch_id: `eq.${key}` };
 }
 
