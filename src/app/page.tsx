@@ -1828,6 +1828,13 @@ function formatCardExpiryInput(value?: string | number | null) {
   const textValue = String(value || "").trim();
   const isoMatch = textValue.match(/^(\d{4})-(\d{2})/);
   if (isoMatch) return `${isoMatch[2]}/${isoMatch[1].slice(2)}`;
+  const slashMatch = textValue.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const first = slashMatch[1].padStart(2, "0");
+    const second = slashMatch[2].padStart(2, "0");
+    if (Number(first) > 12 && Number(second) >= 1 && Number(second) <= 12) return `${second}/${first}`;
+    return `${first}/${second}`;
+  }
   const digits = onlyDigits(textValue).slice(0, 4);
   if (digits.length < 4) return digits;
   return `${digits.slice(2)}/${digits.slice(0, 2)}`;
@@ -1838,8 +1845,11 @@ function cardExpiryInputToIso(value?: string | number | null) {
   const isoMatch = textValue.match(/^(\d{4})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-01`;
   const slashMatch = textValue.match(/^(\d{2})\/(\d{2})$/);
-  const month = slashMatch ? slashMatch[1] : onlyDigits(textValue).slice(2, 4);
-  const year = slashMatch ? slashMatch[2] : onlyDigits(textValue).slice(0, 2);
+  const first = slashMatch ? slashMatch[1] : onlyDigits(textValue).slice(2, 4);
+  const second = slashMatch ? slashMatch[2] : onlyDigits(textValue).slice(0, 2);
+  const shouldSwap = Number(first) > 12 && Number(second) >= 1 && Number(second) <= 12;
+  const month = shouldSwap ? second : first;
+  const year = shouldSwap ? first : second;
   const monthNumber = Number(month);
   if (!year || !month || monthNumber < 1 || monthNumber > 12) return "";
   return `20${year}-${month.padStart(2, "0")}-01`;
