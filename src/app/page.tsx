@@ -19975,10 +19975,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {activeTab === "db" && (
         <section className="space-y-4">
-          <Card className="p-4">
-            <div className="grid gap-3 xl:grid-cols-[300px_repeat(3,minmax(180px,1fr))] 2xl:grid-cols-[300px_repeat(3,300px)]">
+          <div className="grid gap-3" style={{ gridTemplateColumns: "350px repeat(3, minmax(0, 1fr))" }}>
               <div
-                className={`flex min-h-[168px] flex-col justify-between rounded-xl border border-dashed p-4 transition ${expenseUploadDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
+                className={`flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-dashed p-4 transition ${expenseUploadDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
                 onDragOver={(event) => { event.preventDefault(); setExpenseUploadDragOver(true); }}
                 onDragLeave={() => setExpenseUploadDragOver(false)}
                 onDrop={(event) => {
@@ -20008,14 +20007,14 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                     파일 선택
                     <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
                   </label>
-                  <div className="flex gap-2">
+                  <div className="flex min-w-0 gap-2">
                     <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length}>미리보기</ActionButton>
                     <ActionButton type="button" className="h-9 px-3 text-xs" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
                   </div>
                 </div>
               </div>
 
-              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-xs font-black text-gray-500">카테고리</p>
@@ -20026,7 +20025,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <p className="text-xs font-semibold text-gray-500">입출금/비용 분류 기준</p>
               </div>
 
-              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
                 <div>
                   <p className="text-xs font-black text-gray-500">검토필요</p>
                   <p className="mt-2 text-2xl font-black text-red-600">{pendingReviewRows.length.toLocaleString("ko-KR")}건</p>
@@ -20034,33 +20033,30 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <p className="text-xs font-semibold text-gray-500">분류 확정 대기</p>
               </div>
 
-              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
                 <div>
                   <p className="text-xs font-black text-gray-500">최근 업로드</p>
                   <p className="mt-2 text-2xl font-black text-[#ff6a00]">{recentBatches.length.toLocaleString("ko-KR")}회</p>
                 </div>
                 <p className="truncate text-xs font-semibold text-gray-500">{String(recentBatches[0]?.status || "업로드 없음")}</p>
               </div>
-            </div>
-          </Card>
+          </div>
 
-          <Card className="p-5">
+          <div className="space-y-3">
             <SectionHeader
               title="검토필요 거래"
               actions={<StatusBadge tone="danger">{pendingReviewRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
             />
-            <div className="mt-4">
-              <ReviewQuickGrid
-                rows={pendingReviewRows}
-                categories={categories}
-                categoryById={categoryById}
-                suggestions={reviewSuggestions}
-                onOpen={openTransaction}
-                onSave={saveReviewQuick}
-                onJaewook={(row) => setJaewookModalRow(row)}
-              />
-            </div>
-          </Card>
+            <ReviewQuickGrid
+              rows={pendingReviewRows}
+              categories={categories}
+              categoryById={categoryById}
+              suggestions={reviewSuggestions}
+              onOpen={openTransaction}
+              onSave={saveReviewQuick}
+              onJaewook={(row) => setJaewookModalRow(row)}
+            />
+          </div>
         </section>
       )}
 
@@ -20650,7 +20646,7 @@ function ReviewQuickGrid({
   if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className="w-full min-w-[1080px] text-xs">
+      <table className="w-full min-w-[1160px] text-xs">
         <thead className="bg-gray-50 font-semibold text-gray-500">
           <tr>
             <th className="px-3 py-2 text-left">일자</th>
@@ -22376,14 +22372,6 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setLocationModalOpen(true);
   }
 
-  function openSelectedLocation() {
-    if (selectedLocations.length !== 1) {
-      window.alert("수정할 사무실/창고를 1개만 선택해 주세요.");
-      return;
-    }
-    openLocationEdit(selectedLocations[0]);
-  }
-
   function saveLocationBulkEdit() {
     if (!selectedLocations.length) {
       window.alert("수정할 사무실/창고를 먼저 선택해 주세요.");
@@ -22489,8 +22477,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
       <Panel title="사무실/창고" action={<ActionButton type="button" onClick={openNewLocation}>F2 추가</ActionButton>}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <ActionButton type="button" variant="secondary" onClick={openSelectedLocation}>수정</ActionButton>
-          <ActionButton type="button" variant="secondary" onClick={() => setLocationBulkOpen(true)}>다중수정</ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={() => setLocationBulkOpen(true)}>수정</ActionButton>
           <span className="text-xs font-bold text-slate-500">선택 {selectedLocationKeys.length.toLocaleString("ko-KR")}개</span>
         </div>
         <div className="fn-table-shell overflow-x-auto">
