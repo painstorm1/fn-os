@@ -8213,6 +8213,9 @@ function SalesHistoryCustomerPicker({
   const [customers, setCustomers] = useState<FnCustomer[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const keyboardRootRef = useRef<HTMLDivElement | null>(null);
+  const focusedOnceRef = useRef(false);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleCustomers = customers.filter((customer) => {
     if (!normalizedQuery) return true;
@@ -8221,6 +8224,18 @@ function SalesHistoryCustomerPicker({
   });
   const visibleKeys = visibleCustomers.map(customerSearchKey);
   const selection = useCheckboxColumnSelection({ keys: visibleKeys, selectedKeys, setSelectedKeys });
+
+  useEffect(() => {
+    if (activeIndex !== null && activeIndex >= visibleCustomers.length) {
+      setActiveIndex(visibleCustomers.length ? visibleCustomers.length - 1 : null);
+    }
+  }, [activeIndex, visibleCustomers.length]);
+
+  useEffect(() => {
+    if (focusedOnceRef.current || loading) return;
+    focusedOnceRef.current = true;
+    window.setTimeout(() => keyboardRootRef.current?.focus(), 0);
+  }, [loading]);
 
   useEffect(() => {
     let alive = true;
@@ -8251,6 +8266,33 @@ function SalesHistoryCustomerPicker({
     onApply(picked);
   }
 
+  function applyKeyboardSelection() {
+    const targetIndex = activeIndex ?? 0;
+    const picked = visibleCustomers[targetIndex];
+    if (!picked) {
+      window.alert("검색할 거래처를 선택해 주세요.");
+      return;
+    }
+    onApply([picked]);
+  }
+
+  function handleKeyboardPick(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((index) => index === null ? 0 : Math.min(visibleCustomers.length - 1, index + 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => index === null ? Math.max(0, visibleCustomers.length - 1) : Math.max(0, index - 1));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyKeyboardSelection();
+    }
+  }
+
   return (
     <FormModal
       title={mode === "sales" ? "거래처 검색" : "구매처 검색"}
@@ -8264,12 +8306,7 @@ function SalesHistoryCustomerPicker({
         </>
       }
     >
-      <div tabIndex={0} onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          applySelection();
-        }
-      }}>
+      <div ref={keyboardRootRef} tabIndex={0} onKeyDown={handleKeyboardPick} className="outline-none">
         <div className="mb-3 text-xs font-bold text-slate-500">
           검색값 {query || "-"} / 선택 {selectedKeys.length.toLocaleString("ko-KR")}개 / 결과 {visibleCustomers.length.toLocaleString("ko-KR")}건
         </div>
@@ -8291,8 +8328,9 @@ function SalesHistoryCustomerPicker({
               {visibleCustomers.map((customer, index) => {
                 const key = customerSearchKey(customer, index);
                 const selected = selectedKeys.includes(key);
+                const active = activeIndex === index;
                 return (
-                  <tr key={key} className={`border-t border-slate-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
+                  <tr key={key} className={`border-t border-slate-100 ${active ? "bg-orange-100 ring-1 ring-inset ring-orange-300" : selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
                     <td className="px-2 py-2 text-center">
                       <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => selection.beginSelection(key, index, event)} onMouseEnter={() => selection.continueSelection(key, index)} />
                     </td>
