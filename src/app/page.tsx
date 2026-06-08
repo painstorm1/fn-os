@@ -8135,7 +8135,7 @@ function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: S
 function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurchaseMode, filters: Record<string, string>, lineRows: Array<Record<string, unknown>> = []) {
   const from = entryDateFilterKey(filters.from);
   const to = entryDateFilterKey(filters.to);
-  const customerNeedle = filters.customer.trim().toLowerCase();
+  const customerNeedles = parseHistoryCustomerFilter(filters.customer);
   const warehouseNeedle = filters.warehouse.trim().toLowerCase();
   const productNeedle = filters.product.trim().toLowerCase();
   const lineProductMatches = new Set<string>();
@@ -8149,7 +8149,13 @@ function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurcha
     const date = entryDateFilterKey(entryRowDate(row));
     if (from && date && date < from) return false;
     if (to && date && date > to) return false;
-    if (customerNeedle && !entryRowCustomer(row, mode).toLowerCase().includes(customerNeedle)) return false;
+    if (customerNeedles.length) {
+      const sourceRow = row as Record<string, unknown>;
+      const customerHaystack = [entryRowCustomer(row, mode), sourceRow.cust_code, sourceRow.customer_code, sourceRow.supplier_code, sourceRow.cust_name, sourceRow.customer_name, sourceRow.supplier_name]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      if (!customerNeedles.some((needle) => customerHaystack.includes(needle))) return false;
+    }
     if (warehouseNeedle && !entryRowWarehouse(row).toLowerCase().includes(warehouseNeedle)) return false;
     if (productNeedle) {
       const representativeHaystack = `${entryRowProductCode(row)} ${entryRowProduct(row)}`.toLowerCase();
@@ -8157,6 +8163,158 @@ function filterEntryRows(rows: Array<Record<string, unknown>>, mode: SalesPurcha
     }
     return true;
   });
+}
+
+const historyCustomerFilterSeparator = "\u001f";
+
+function parseHistoryCustomerFilter(value: string) {
+  return value
+    .split(historyCustomerFilterSeparator)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function customerSearchKey(customer: FnCustomer, index = 0) {
+  return String(customer.id || customer.customer_code || customer.cust_code || customer.customer_name || customer.cust_name || index);
+}
+
+function customerSearchLabel(customer: FnCustomer) {
+  return String(customer.customer_name || customer.cust_name || customer.customer_code || customer.cust_code || "-");
+}
+
+function customerSearchSubLabel(customer: FnCustomer) {
+  const code = String(customer.customer_code || customer.cust_code || "");
+  const type = customerAttributeLabel(customer.customer_type || customer.customer_type_label);
+  return [code, type].filter(Boolean).join(" / ");
+}
+
+function customerHistoryFilterValue(customers: FnCustomer[]) {
+  return customers.flatMap((customer) => [
+    String(customer.customer_code || customer.cust_code || "").trim(),
+    String(customer.customer_name || customer.cust_name || "").trim(),
+  ]).filter(Boolean).join(historyCustomerFilterSeparator);
+}
+
+function customerHistoryDraftLabel(customers: FnCustomer[]) {
+  return customers.map(customerSearchLabel).filter(Boolean).join(", ");
+}
+
+function SalesHistoryCustomerPicker({
+  query,
+  mode,
+  onClose,
+  onApply,
+}: {
+  query: string;
+  mode: SalesPurchaseMode;
+  onClose: () => void;
+  onApply: (customers: FnCustomer[]) => void;
+}) {
+  const [customers, setCustomers] = useState<FnCustomer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleCustomers = customers.filter((customer) => {
+    if (!normalizedQuery) return true;
+    return [customer.customer_code, customer.cust_code, customer.customer_name, customer.cust_name, customer.contact_name, customer.phone, customer.memo]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedQuery));
+  });
+  const visibleKeys = visibleCustomers.map(customerSearchKey);
+  const selection = useCheckboxColumnSelection({ keys: visibleKeys, selectedKeys, setSelectedKeys });
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    cachedClientJson<{ customers?: FnCustomer[] }>("/api/fnos/customers?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 })
+      .then((data) => {
+        if (!alive) return;
+        setCustomers(sortRowsByManagementName(data.customers || [], (customer) => customer.customer_name || customer.cust_name, (customer) => customer.customer_code || customer.cust_code));
+      })
+      .catch(() => {
+        if (alive) setCustomers([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function applySelection() {
+    const selectedSet = new Set(selectedKeys);
+    const picked = visibleCustomers.filter((customer, index) => selectedSet.has(customerSearchKey(customer, index)));
+    if (!picked.length) {
+      window.alert("검색할 거래처를 선택해 주세요.");
+      return;
+    }
+    onApply(picked);
+  }
+
+  return (
+    <FormModal
+      title={mode === "sales" ? "거래처 검색" : "구매처 검색"}
+      description={`${query || "전체"} 검색 결과에서 거래처를 선택합니다.`}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
+          <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
+          <ActionButton type="button" onClick={applySelection}>검색</ActionButton>
+        </>
+      }
+    >
+      <div tabIndex={0} onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applySelection();
+        }
+      }}>
+        <div className="mb-3 text-xs font-bold text-slate-500">
+          검색값 {query || "-"} / 선택 {selectedKeys.length.toLocaleString("ko-KR")}개 / 결과 {visibleCustomers.length.toLocaleString("ko-KR")}건
+        </div>
+        <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full min-w-[720px] table-fixed text-sm">
+            <thead className="bg-slate-50 text-xs font-black text-slate-500">
+              <tr>
+                <th className="w-16 px-2 py-2 text-center">
+                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selection.allSelected} onChange={(event) => selection.toggleAll(event.target.checked)} />
+                </th>
+                <th className="w-36 px-2 py-2 text-left">거래처코드</th>
+                <th className="px-2 py-2 text-left">거래처명</th>
+                <th className="w-28 px-2 py-2 text-left">속성</th>
+                <th className="w-32 px-2 py-2 text-left">담당자</th>
+                <th className="w-36 px-2 py-2 text-left">전화번호</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleCustomers.map((customer, index) => {
+                const key = customerSearchKey(customer, index);
+                const selected = selectedKeys.includes(key);
+                return (
+                  <tr key={key} className={`border-t border-slate-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
+                    <td className="px-2 py-2 text-center">
+                      <SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => selection.beginSelection(key, index, event)} onMouseEnter={() => selection.continueSelection(key, index)} />
+                    </td>
+                    <td className="truncate px-2 py-2 font-bold text-slate-600">{customer.customer_code || customer.cust_code || "-"}</td>
+                    <td className="truncate px-2 py-2 font-black text-slate-900">{customerSearchLabel(customer)}</td>
+                    <td className="truncate px-2 py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
+                    <td className="truncate px-2 py-2 text-slate-500">{customer.contact_name || "-"}</td>
+                    <td className="truncate px-2 py-2 text-slate-500">{customer.phone || "-"}</td>
+                  </tr>
+                );
+              })}
+              {!visibleCustomers.length && (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center text-sm font-bold text-slate-400">{loading ? "" : "검색 결과가 없습니다."}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </FormModal>
+  );
 }
 
 type InventorySortKey = "product_code" | "product_name" | "warehouse" | "qty" | "cost" | "amount" | "avg" | "sales30" | "sales90" | "days" | "status" | "setting";
@@ -8292,6 +8450,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
   const [historyFilters, setHistoryFilters] = useState({ customer: "", warehouse: "", product: "", from: entryDateDaysAgo(30), to: entryDateToday() });
   const [historyFilterDraft, setHistoryFilterDraft] = useState({ customer: "", warehouse: "", product: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [historyCustomerSelection, setHistoryCustomerSelection] = useState({ label: "", filter: "" });
+  const [historyCustomerPickerQuery, setHistoryCustomerPickerQuery] = useState<string | null>(null);
   const [inventoryFilters, setInventoryFilters] = useState({ warehouse: "", product: "", date: entryDateToday() });
   const [inventoryProducts, setInventoryProducts] = useState<FnProduct[]>([]);
   const [inventoryWarehouses, setInventoryWarehouses] = useState<WarehouseOption[]>([]);
@@ -9499,15 +9659,37 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const historyLineRows = historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
   const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters, historyLineRows);
 
-  function applyHistorySearch() {
-    setHistoryFilters(historyFilterDraft);
+  function applyHistorySearch(nextDraft = historyFilterDraft) {
+    const customerText = nextDraft.customer.trim();
+    if (customerText && customerText !== historyCustomerSelection.label) {
+      setHistoryCustomerPickerQuery(nextDraft.customer.trim());
+      return;
+    }
+    setHistoryFilters({ ...nextDraft, customer: customerText ? historyCustomerSelection.filter : "" });
   }
 
   function handleHistorySearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter") return;
     event.preventDefault();
     if (!historyFilterDraft.customer.trim() && !historyFilterDraft.warehouse.trim() && !historyFilterDraft.product.trim()) return;
-    applyHistorySearch();
+    applyHistorySearch(historyFilterDraft);
+  }
+
+  function applyHistoryCustomerSelection(customers: FnCustomer[]) {
+    const label = customerHistoryDraftLabel(customers);
+    const filter = customerHistoryFilterValue(customers);
+    const nextDraft = {
+      ...historyFilterDraft,
+      customer: label,
+    };
+    const nextFilters = {
+      ...nextDraft,
+      customer: filter,
+    };
+    setHistoryCustomerSelection({ label, filter });
+    setHistoryFilterDraft(nextDraft);
+    setHistoryFilters(nextFilters);
+    setHistoryCustomerPickerQuery(null);
   }
 
   function setHistoryQuickPeriod(days: number) {
@@ -9518,7 +9700,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       to: days === 1 ? target : entryDateToday(),
     };
     setHistoryFilterDraft(nextFilters);
-    setHistoryFilters(nextFilters);
+    setHistoryFilters({ ...nextFilters, customer: nextFilters.customer.trim() === historyCustomerSelection.label ? historyCustomerSelection.filter : nextFilters.customer });
   }
 
   function setHistoryThisMonth() {
@@ -9529,7 +9711,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       to: entryDateToday(),
     };
     setHistoryFilterDraft(nextFilters);
-    setHistoryFilters(nextFilters);
+    setHistoryFilters({ ...nextFilters, customer: nextFilters.customer.trim() === historyCustomerSelection.label ? historyCustomerSelection.filter : nextFilters.customer });
   }
 
   function openEntryEditModal(row: Record<string, unknown>) {
@@ -10288,13 +10470,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </>
             )}
             filterBar={(
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, customer: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
-                <input className="field-input h-9 w-28 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
-                <input className="field-input h-9 w-44 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
-                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
-                <input className="field-input h-9 w-36 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
-                <div className="flex flex-wrap gap-1">
+              <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
+                  const value = event.target.value;
+                  setHistoryFilterDraft((prev) => ({ ...prev, customer: value }));
+                  if (value.trim() !== historyCustomerSelection.label) setHistoryCustomerSelection({ label: "", filter: "" });
+                }} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
+                <input className="field-input h-9 w-28 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
+                <input className="field-input h-9 w-40 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
+                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
+                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <div className="flex shrink-0 gap-1">
                   {[
                     ["오늘", 0],
                     ["어제", 1],
@@ -10305,10 +10491,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   ))}
                   <button type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={setHistoryThisMonth}>이번달</button>
                 </div>
-                <button type="button" className="h-9 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyHistorySearch}>검색</button>
+                <button type="button" className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={() => applyHistorySearch()}>검색</button>
               </div>
             )}
           />
+          {historyCustomerPickerQuery !== null && (
+            <SalesHistoryCustomerPicker
+              query={historyCustomerPickerQuery}
+              mode={historyMode}
+              onClose={() => setHistoryCustomerPickerQuery(null)}
+              onApply={applyHistoryCustomerSelection}
+            />
+          )}
         </Panel>
       )}
 
@@ -15479,19 +15673,19 @@ function SalesInventoryTable({
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-3">
+      <div className="mb-2 flex items-center gap-3 overflow-x-auto whitespace-nowrap pb-1">
         <div className="flex shrink-0 items-center gap-2">{topLeft}</div>
         <div className="hidden w-[100px] shrink-0 lg:block" />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
           <ActionButton type="button" variant="danger" className="h-9 px-3 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) openStatement(row); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
           <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
         </div>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{topRight}</div>
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-2">{topRight}</div>
       </div>
-      {filterBar}
+      <div className="mb-3">{filterBar}</div>
       <div className="hidden">
         <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
         <div className="flex flex-wrap gap-2">
