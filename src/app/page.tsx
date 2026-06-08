@@ -10470,16 +10470,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </>
             )}
             filterBar={(
-              <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
-                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
+              <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap pb-1">
+                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
                   const value = event.target.value;
                   setHistoryFilterDraft((prev) => ({ ...prev, customer: value }));
                   if (value.trim() !== historyCustomerSelection.label) setHistoryCustomerSelection({ label: "", filter: "" });
                 }} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
-                <input className="field-input h-9 w-28 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
-                <input className="field-input h-9 w-40 shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
-                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
-                <input className="field-input h-9 w-32 shrink-0 rounded-md border border-slate-200 px-3 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
+                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
+                <input className="field-input h-9 !w-28 shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
+                <input className="field-input h-9 !w-28 shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
                 <div className="flex shrink-0 gap-1">
                   {[
                     ["오늘", 0],
