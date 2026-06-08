@@ -10508,28 +10508,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </>
             )}
             filterBar={(
-              <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap pb-1">
-                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
+              <div className="flex items-center gap-2 whitespace-nowrap pb-1">
+                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
                   const value = event.target.value;
                   setHistoryFilterDraft((prev) => ({ ...prev, customer: value }));
                   if (value.trim() !== historyCustomerSelection.label) setHistoryCustomerSelection({ label: "", filter: "" });
                 }} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
-                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
-                <input className="field-input h-9 !w-14 shrink-0 rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
-                <input className="field-input h-9 !w-28 shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
-                <input className="field-input h-9 !w-28 shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
+                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
+                <input className="field-input h-9 !w-[150px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
+                <input className="field-input h-9 !w-[150px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
                 <div className="flex shrink-0 gap-1">
                   {[
                     ["오늘", 0],
-                    ["어제", 1],
-                    ["최근7일", 7],
-                    ["최근30일", 30],
                   ].map(([label, days]) => (
-                    <button key={String(label)} type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => setHistoryQuickPeriod(Number(days))}>{label}</button>
+                    <button key={String(label)} type="button" className="h-9 w-[50px] rounded-md border border-slate-200 bg-white px-1 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => setHistoryQuickPeriod(Number(days))}>{label}</button>
                   ))}
-                  <button type="button" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={setHistoryThisMonth}>이번달</button>
+                  <button type="button" className="h-9 w-[50px] rounded-md border border-slate-200 bg-white px-1 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={setHistoryThisMonth}>이번달</button>
                 </div>
-                <button type="button" className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={() => applyHistorySearch()}>검색</button>
+                <button type="button" className="h-9 w-[50px] shrink-0 rounded-md bg-slate-900 px-1 text-sm font-black text-white hover:bg-slate-800" onClick={() => applyHistorySearch()}>검색</button>
               </div>
             )}
           />
@@ -15553,9 +15550,6 @@ function SalesInventoryTable({
   filterBar?: ReactNode;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [editingRows, setEditingRows] = useState<Array<Record<string, unknown>>>([]);
-  const [editFields, setEditFields] = useState<Array<"date" | "customer" | "warehouse" | "vat">>(["date", "customer", "warehouse", "vat"]);
-  const [editDraft, setEditDraft] = useState({ date: "", customerCode: "", customerName: "", warehouse: "", vat: "included" });
   const rowKeys = rows.map((row, index) => entryRowKey(row, mode, index));
   const selection = useCheckboxColumnSelection({ keys: rowKeys, selectedKeys, setSelectedKeys });
   const entryNumbers = new Map<string, string>();
@@ -15570,51 +15564,6 @@ function SalesInventoryTable({
   function selectedRows() {
     const set = new Set(selectedKeys);
     return rows.filter((row, index) => set.has(entryRowKey(row, mode, index)));
-  }
-
-  function openEdit(targetRows = selectedRows()) {
-    if (!targetRows.length) {
-      window.alert("수정할 행을 선택해 주세요.");
-      return;
-    }
-    const first = targetRows[0] || {};
-    setEditingRows(targetRows);
-    setEditDraft({
-      date: entryRowDate(first) || entryDateToday(),
-      customerCode: String(first.cust_code || first.customer_code || first.supplier_code || ""),
-      customerName: entryRowCustomer(first, mode),
-      warehouse: entryRowWarehouse(first),
-      vat: String(first.vat_type || "").includes("별도") || String(first.vat_type || "").includes("excluded") ? "excluded" : "included",
-    });
-  }
-
-  async function saveEdit() {
-    const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
-    for (const row of editingRows) {
-      const res = await fetch(endpoint, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          group_key: entryRowKey(row, mode),
-          values: {
-            io_date: editDraft.date,
-            cust_code: editDraft.customerCode,
-            cust_name: editDraft.customerName,
-            wh_cd: editDraft.warehouse,
-            vat_type: editDraft.vat === "included" ? "VAT포함" : "VAT별도",
-          },
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        window.alert(data.error || "수정 실패");
-        return;
-      }
-    }
-    setEditingRows([]);
-    setSelectedKeys([]);
-    onChanged();
   }
 
   async function deleteSelected() {
@@ -15640,9 +15589,7 @@ function SalesInventoryTable({
     onChanged();
   }
 
-  function statementHtml(row: Record<string, unknown>) {
-    const today = entryDateToday().replace(/\D/g, "").slice(2);
-    const title = mode === "sales" ? "판매 거래명세서" : "구매 거래명세서";
+  function statementPageHtml(row: Record<string, unknown>, pageNumber: number, totalPages: number) {
     const lines = [{
       productCode: entryRowProductCode(row),
       productName: entryRowProduct(row),
@@ -15661,25 +15608,12 @@ function SalesInventoryTable({
         <td class="right">${Math.round(line.amount).toLocaleString("ko-KR")}</td>
         <td>${line.memo === "-" ? "" : line.memo}</td>
       </tr>`).join("");
-    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
-      body{font-family:Arial,"Malgun Gothic",sans-serif;margin:24px;color:#111}
-      .page{width:760px;margin:0 auto}
-      h1{text-align:center;font-size:30px;margin:18px 0}
-      table{width:100%;border-collapse:collapse;font-size:13px}
-      td,th{border:1px solid #111;padding:6px;text-align:center}
-      .left{text-align:left}.right{text-align:right}
-      .top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-      .box{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}
-      .amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}
-      .toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}
-      .toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}
-      @media print{.toolbar{display:none}body{margin:0}.page{width:auto;margin:18mm}}
-    </style></head><body><div class="page">
+    return `<section class="page" data-page="${pageNumber}">
       <h1>거래명세서</h1>
       <div class="top">
         <div class="box">${entryRowCustomer(row, mode)} 귀중</div>
         <table><tbody>
-          <tr><th>일련번호</th><td>${compactEntryNumber(entryRowDate(row), 1)}</td><th>TEL</th><td></td></tr>
+          <tr><th>일련번호</th><td>${compactEntryNumber(entryRowDate(row), pageNumber)}</td><th>TEL</th><td></td></tr>
           <tr><th>상호</th><td colspan="3">에프엔</td></tr>
           <tr><th>주소</th><td colspan="3"></td></tr>
         </tbody></table>
@@ -15688,14 +15622,58 @@ function SalesInventoryTable({
       <table><thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가</th><th>합계</th><th>메모</th></tr></thead><tbody>${rowsHtml}
         <tr><th colspan="2">종합계</th><th class="right">${totalQty.toLocaleString("ko-KR")}</th><th></th><th class="right">${Math.round(totalAmount).toLocaleString("ko-KR")}</th><th></th></tr>
       </tbody></table>
-      <div class="toolbar"><button onclick="window.print()">인쇄/PDF저장</button><button onclick="window.close()">닫기</button></div>
-    </div></body></html>`;
+      <div class="page-count">[${pageNumber}/${totalPages}]</div>
+    </section>`;
   }
 
-  function openStatement(row: Record<string, unknown>) {
+  function statementHtml(targetRows: Array<Record<string, unknown>>) {
+    const title = mode === "sales" ? "판매 거래명세서" : "구매 거래명세서";
+    const pages = targetRows.length ? targetRows : [];
+    const pagesHtml = pages.map((row, index) => statementPageHtml(row, index + 1, pages.length)).join("");
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
+      body{font-family:Arial,"Malgun Gothic",sans-serif;margin:24px;color:#111}
+      .page{width:760px;margin:0 auto;display:none}
+      .page.active{display:block}
+      h1{text-align:center;font-size:30px;margin:18px 0}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      td,th{border:1px solid #111;padding:6px;text-align:center}
+      .left{text-align:left}.right{text-align:right}
+      .top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+      .box{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}
+      .amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}
+      .toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}
+      .toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}
+      .pager{min-width:64px;text-align:center;font-weight:800}
+      .page-count{margin-top:10px;text-align:right;font-size:12px;font-weight:700}
+      @media print{.toolbar{display:none}body{margin:0}.page{display:block;break-after:page;width:auto;margin:18mm}.page:last-of-type{break-after:auto}}
+    </style></head><body>${pagesHtml}
+      <div class="toolbar">
+        <button id="prevPage" type="button">‹</button>
+        <span id="pager" class="pager">1/${pages.length}</span>
+        <button id="nextPage" type="button">›</button>
+        <button onclick="window.print()">인쇄/PDF저장</button>
+        <button onclick="window.close()">닫기</button>
+      </div>
+      <script>
+        const pages = Array.from(document.querySelectorAll(".page"));
+        let current = 0;
+        function render() {
+          pages.forEach((page, index) => page.classList.toggle("active", index === current));
+          document.getElementById("pager").textContent = (current + 1) + "/" + pages.length;
+          document.getElementById("prevPage").disabled = current === 0;
+          document.getElementById("nextPage").disabled = current >= pages.length - 1;
+        }
+        document.getElementById("prevPage").onclick = () => { current = Math.max(0, current - 1); render(); };
+        document.getElementById("nextPage").onclick = () => { current = Math.min(pages.length - 1, current + 1); render(); };
+        render();
+      </script>
+    </body></html>`;
+  }
+
+  function openStatement(targetRows: Array<Record<string, unknown>>) {
     const popup = window.open("", "_blank", "width=980,height=900");
     if (!popup) return;
-    popup.document.write(statementHtml(row));
+    popup.document.write(statementHtml(targetRows));
     popup.document.close();
   }
 
@@ -15711,27 +15689,17 @@ function SalesInventoryTable({
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
   return (
     <>
-      <div className="mb-2 flex items-center gap-3 overflow-x-auto whitespace-nowrap pb-1">
+      <div className="mb-2 flex items-center gap-3 whitespace-nowrap pb-1">
         <div className="flex shrink-0 items-center gap-2">{topLeft}</div>
         <div className="hidden w-[100px] shrink-0 lg:block" />
-        <div className="flex shrink-0 items-center gap-2">
-          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
-          <ActionButton type="button" variant="danger" className="h-9 px-3 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
-          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
-          <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) openStatement(row); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
-          <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
-        </div>
         <div className="ml-auto flex shrink-0 items-center justify-end gap-2">{topRight}</div>
       </div>
-      <div className="mb-3">{filterBar}</div>
-      <div className="hidden">
-        <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
-        <div className="flex flex-wrap gap-2">
-          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEdit()}>수정</ActionButton>
-          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
-          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("이메일로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
-          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) openStatement(row); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
-        </div>
+      <div className="mb-3 flex items-center gap-2 whitespace-nowrap">
+        <span className="shrink-0 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
+        <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
+        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
+        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
+        {filterBar}
       </div>
       <div className="fn-table-shell overflow-x-auto">
         <table className="w-full min-w-[1180px] table-fixed text-sm">
@@ -15776,39 +15744,6 @@ function SalesInventoryTable({
           </tbody>
         </table>
       </div>
-      {editingRows.length > 0 && (
-        <FormModal
-          title={`${mode === "sales" ? "판매" : "구매"}입력 수정`}
-          description="품목은 개별 라인 수정에서만 변경할 수 있습니다."
-          onClose={() => setEditingRows([])}
-          size="lg"
-          footer={<><ActionButton type="button" variant="secondary" onClick={() => setEditingRows([])}>닫기</ActionButton><ActionButton type="button" onClick={() => void saveEdit()}>저장</ActionButton></>}
-        >
-          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="mb-2 text-sm font-black text-slate-900">수정할 컬럼</div>
-            <div className="flex flex-wrap gap-3 text-sm font-bold text-slate-600">
-              {[
-                ["date", "날짜"],
-                ["customer", partnerLabel],
-                ["warehouse", "창고"],
-                ["vat", "VAT포함/별도"],
-              ].map(([key, label]) => (
-                <label key={key} className="inline-flex items-center gap-2">
-                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={editFields.includes(key as typeof editFields[number])} onChange={(event) => setEditFields((prev) => event.target.checked ? Array.from(new Set([...prev, key as typeof editFields[number]])) : prev.filter((item) => item !== key))} />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {editFields.includes("date") && <FormField label="날짜"><input type="date" className={modalInputClass} value={editDraft.date} onChange={(event) => setEditDraft((prev) => ({ ...prev, date: event.target.value }))} /></FormField>}
-            {editFields.includes("customer") && <FormField label={`${partnerLabel}코드`}><input className={modalInputClass} value={editDraft.customerCode} onChange={(event) => setEditDraft((prev) => ({ ...prev, customerCode: event.target.value }))} /></FormField>}
-            {editFields.includes("customer") && <FormField label={`${partnerLabel}명`}><input className={modalInputClass} value={editDraft.customerName} onChange={(event) => setEditDraft((prev) => ({ ...prev, customerName: event.target.value }))} /></FormField>}
-            {editFields.includes("warehouse") && <FormField label="창고"><input className={modalInputClass} value={editDraft.warehouse} onChange={(event) => setEditDraft((prev) => ({ ...prev, warehouse: event.target.value }))} /></FormField>}
-            {editFields.includes("vat") && <FormField label="VAT"><select className={modalSelectClass} value={editDraft.vat} onChange={(event) => setEditDraft((prev) => ({ ...prev, vat: event.target.value }))}><option value="included">포함</option><option value="excluded">별도</option></select></FormField>}
-          </div>
-        </FormModal>
-      )}
     </>
   );
 }
