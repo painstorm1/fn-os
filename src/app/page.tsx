@@ -1632,7 +1632,7 @@ type AccountAttachment = Omit<OrderAttachment, "id" | "order_id"> & {
   account_id?: string;
 };
 
-type FnSettingsAttachmentType = "bank" | "card" | "personnel";
+type FnSettingsAttachmentType = "bank" | "card" | "personnel" | "company" | "location";
 
 type FnBankAccount = {
   id?: string;
@@ -8012,6 +8012,46 @@ type SalesPurchaseEntryPrefill = {
   title?: string;
   lines?: Array<Partial<SalesPurchaseEntryLine>>;
 };
+
+type FnCompanyInfo = {
+  id: string;
+  company_name: string;
+  business_no: string;
+  representative_name: string;
+  representative_birth: string;
+  opened_at: string;
+  phone: string;
+  fax: string;
+  postal_code: string;
+  road_address: string;
+  jibun_address: string;
+  detail_address: string;
+  address: string;
+  business_types: string[];
+  business_items: string[];
+  seal_image_url: string;
+  seal_image_name: string;
+  memo: string;
+};
+
+type FnLocationInfo = {
+  id: string;
+  location_type: "office" | "warehouse";
+  postal_code: string;
+  road_address: string;
+  jibun_address: string;
+  detail_address: string;
+  address: string;
+  phone: string;
+  manager_name: string;
+  manager_phone: string;
+  rent_type: "owned" | "rented";
+  landlord_name: string;
+  landlord_phone: string;
+  rent_started_at: string;
+  rent_amount: string;
+  memo: string;
+};
 type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
 const productSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter; label: string }> = [
   { value: "plain", label: "일반" },
@@ -9853,7 +9893,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
       .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:164px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 24px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}.summaryCard.salesCard{background:linear-gradient(135deg,#eefcff 0%,#f8fdff 58%,#e8f6ff 100%)}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff1e8 0%,#ffd1b8 100%);border-color:#f7b390}.summaryTitle{transform:translateY(-6px);font-size:38px;line-height:1;font-weight:900;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#147df5}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px}.metricLabel{font-size:15px;color:#334155;font-weight:800}.metricValue{font-size:22px;font-weight:800;color:#0f172a}.totalLine{grid-column:1/3;font-size:22px;font-weight:800;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:36px;align-items:center;color:#334155;font-size:15px;font-weight:800}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:800;cursor:pointer;padding:0}.rankList{display:grid;gap:8px}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 2px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 132px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:7px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:176px;border-radius:10px;background:rgba(255,255,255,.78);padding:18px 14px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.purchaseSideLabel{font-size:17px;font-weight:800}.purchaseSideDate{font-size:25px;line-height:1.12;margin:8px 0 22px}.purchaseSideCycle{font-size:17px;font-weight:800}.purchaseSideDays{font-size:28px;line-height:1.1;font-weight:800}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
-      .tableWrap{max-height:calc(100vh - 310px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.groupSummaryName{font-size:14px}.groupSummaryMetric{font-size:14px;font-weight:950}
+      .tableWrap{overflow:visible;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.groupSummaryName{font-size:14px}.groupSummaryMetric{font-size:14px;font-weight:950}
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
       @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
     </style></head><body><div class="app">
@@ -13167,6 +13207,39 @@ function composeCustomerAddress(customer: Record<string, string>) {
   const detail = String(customer.detail_address || "").trim();
   const base = road || jibun || String(customer.address || "").trim();
   return [base, detail].filter(Boolean).join(" ");
+}
+
+function composeFnSettingsAddress(value: Partial<Pick<FnCompanyInfo & FnLocationInfo, "road_address" | "jibun_address" | "detail_address" | "address">>) {
+  const road = String(value.road_address || "").trim();
+  const jibun = String(value.jibun_address || "").trim();
+  const detail = String(value.detail_address || "").trim();
+  const base = road || jibun || String(value.address || "").trim();
+  return [base, detail].filter(Boolean).join(" ");
+}
+
+function formatKoreanDateText(value?: string) {
+  const digits = onlyDigits(value).slice(0, 8);
+  if (digits.length === 8) return `${Number(digits.slice(0, 4))}년 ${Number(digits.slice(4, 6))}월 ${Number(digits.slice(6, 8))}일`;
+  const date = String(value || "").trim();
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return date || "-";
+  return `${Number(match[1])}년 ${Number(match[2])}월 ${Number(match[3])}일`;
+}
+
+function formatDateDigitsInput(value?: string) {
+  const digits = onlyDigits(value).slice(0, 8);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+}
+
+function imageFileToDataUrlForSettings(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("이미지를 읽지 못했습니다."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function daumRoadAddressWithExtra(data: DaumPostcodeData) {
@@ -21688,10 +21761,344 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   );
 }
 
+function FnInfoImagePreviewModal({ title, src, onClose }: { title: string; src: string; onClose: () => void }) {
+  useEscapeToClose(true, onClose);
+  return (
+    <SelectionModal title={title} description="등록된 이미지를 확인합니다." onClose={onClose} size="md">
+      <div className="flex min-h-[320px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 p-4">
+        {src ? <img src={src} alt={title} className="max-h-[520px] max-w-full object-contain" /> : <div className="text-sm font-bold text-slate-500">등록된 이미지가 없습니다.</div>}
+      </div>
+    </SelectionModal>
+  );
+}
+
+function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
+  const companyStorageKey = "fnos-settings-company-info";
+  const locationsStorageKey = "fnos-settings-location-info";
+  const defaultCompany: FnCompanyInfo = {
+    id: "head-office",
+    company_name: "에프엔",
+    business_no: "599-26-00311",
+    representative_name: "김재욱",
+    representative_birth: "1981-03-19",
+    opened_at: "2017-03-13",
+    phone: "031-767-5455",
+    fax: "031-321-1060",
+    postal_code: "",
+    road_address: "",
+    jibun_address: "",
+    detail_address: "",
+    address: "",
+    business_types: [""],
+    business_items: [""],
+    seal_image_url: "",
+    seal_image_name: "",
+    memo: "",
+  };
+  const emptyLocation: FnLocationInfo = {
+    id: "",
+    location_type: "office",
+    postal_code: "",
+    road_address: "",
+    jibun_address: "",
+    detail_address: "",
+    address: "",
+    phone: "",
+    manager_name: "",
+    manager_phone: "",
+    rent_type: "owned",
+    landlord_name: "",
+    landlord_phone: "",
+    rent_started_at: "",
+    rent_amount: "",
+    memo: "",
+  };
+  const [company, setCompany] = useState<FnCompanyInfo>(defaultCompany);
+  const [locations, setLocations] = useState<FnLocationInfo[]>([]);
+  const [companyModalOpen, setCompanyModalOpen] = useState(false);
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
+  const [locationIsNew, setLocationIsNew] = useState(false);
+  const [companyDraft, setCompanyDraft] = useState<FnCompanyInfo>(defaultCompany);
+  const [locationDraft, setLocationDraft] = useState<FnLocationInfo>(emptyLocation);
+  const [addressSearchTarget, setAddressSearchTarget] = useState<"company" | "location" | null>(null);
+  const [fileTarget, setFileTarget] = useState<{ type: "company" | "location"; id: string; title: string } | null>(null);
+  const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
+  const [previewImage, setPreviewImage] = useState<{ title: string; src: string } | null>(null);
+  const companyDetailAddressRef = useRef<HTMLInputElement | null>(null);
+  const locationDetailAddressRef = useRef<HTMLInputElement | null>(null);
+
+  function normalizeCompany(value: Partial<FnCompanyInfo>): FnCompanyInfo {
+    const next = {
+      ...defaultCompany,
+      ...value,
+      id: value.id || "head-office",
+      business_no: formatBusinessNoInput(String(value.business_no || defaultCompany.business_no)),
+      representative_birth: formatDateDigitsInput(value.representative_birth || defaultCompany.representative_birth),
+      opened_at: formatDateDigitsInput(value.opened_at || defaultCompany.opened_at),
+      phone: formatKoreanPhone(value.phone || defaultCompany.phone),
+      fax: formatKoreanPhone(value.fax || defaultCompany.fax),
+      business_types: Array.isArray(value.business_types) && value.business_types.length ? value.business_types : [""],
+      business_items: Array.isArray(value.business_items) && value.business_items.length ? value.business_items : [""],
+    };
+    return { ...next, address: composeFnSettingsAddress(next) };
+  }
+
+  function normalizeLocation(value: Partial<FnLocationInfo>): FnLocationInfo {
+    const next = {
+      ...emptyLocation,
+      ...value,
+      id: value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      location_type: value.location_type === "warehouse" ? "warehouse" : "office",
+      phone: formatKoreanPhone(value.phone || ""),
+      manager_phone: formatKoreanPhone(value.manager_phone || ""),
+      rent_type: value.rent_type === "rented" ? "rented" : "owned",
+      landlord_phone: formatKoreanPhone(value.landlord_phone || ""),
+      rent_started_at: formatDateDigitsInput(value.rent_started_at || ""),
+      rent_amount: onlyDigits(value.rent_amount || ""),
+    } as FnLocationInfo;
+    return { ...next, address: composeFnSettingsAddress(next) };
+  }
+
+  function saveCompany(nextCompany: FnCompanyInfo) {
+    const normalized = normalizeCompany(nextCompany);
+    setCompany(normalized);
+    localStorage.setItem(companyStorageKey, JSON.stringify(normalized));
+  }
+
+  function saveLocations(nextLocations: FnLocationInfo[]) {
+    const normalized = sortRowsByManagementName(nextLocations.map(normalizeLocation), (item) => item.address, (item) => item.manager_name);
+    setLocations(normalized);
+    localStorage.setItem(locationsStorageKey, JSON.stringify(normalized));
+  }
+
+  useEffect(() => {
+    try {
+      const savedCompany = JSON.parse(localStorage.getItem(companyStorageKey) || "null") as Partial<FnCompanyInfo> | null;
+      setCompany(normalizeCompany(savedCompany || defaultCompany));
+      const savedLocations = JSON.parse(localStorage.getItem(locationsStorageKey) || "[]") as Partial<FnLocationInfo>[];
+      setLocations(Array.isArray(savedLocations) ? savedLocations.map(normalizeLocation) : []);
+    } catch {
+      setCompany(defaultCompany);
+      setLocations([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFnSettingsAttachmentCounts("company", ["head-office"], (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+    void loadFnSettingsAttachmentCounts("location", locations.map((item) => item.id), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+  }, [locations]);
+
+  function updateCompanyDraft(key: keyof FnCompanyInfo, value: string | string[]) {
+    setCompanyDraft((prev) => {
+      const next = {
+        ...prev,
+        [key]: key === "business_no" ? formatBusinessNoInput(String(value)) : key === "phone" || key === "fax" ? formatKoreanPhone(value) : key === "representative_birth" || key === "opened_at" ? formatDateDigitsInput(String(value)) : value,
+      } as FnCompanyInfo;
+      return { ...next, address: composeFnSettingsAddress(next) };
+    });
+  }
+
+  function updateCompanyArray(key: "business_types" | "business_items", index: number, value: string) {
+    setCompanyDraft((prev) => {
+      const nextValues = [...(prev[key] || [""])];
+      nextValues[index] = value;
+      return { ...prev, [key]: nextValues };
+    });
+  }
+
+  function addCompanyArray(key: "business_types" | "business_items") {
+    setCompanyDraft((prev) => ({ ...prev, [key]: [...(prev[key] || []), ""] }));
+  }
+
+  function removeCompanyArray(key: "business_types" | "business_items", index: number) {
+    setCompanyDraft((prev) => {
+      const next = (prev[key] || [""]).filter((_, itemIndex) => itemIndex !== index);
+      return { ...prev, [key]: next.length ? next : [""] };
+    });
+  }
+
+  function updateLocationDraft(key: keyof FnLocationInfo, value: string) {
+    setLocationDraft((prev) => {
+      const next = {
+        ...prev,
+        [key]: key === "phone" || key === "manager_phone" || key === "landlord_phone" ? formatKoreanPhone(value) : key === "rent_started_at" ? formatDateDigitsInput(value) : key === "rent_amount" ? onlyDigits(value) : value,
+      } as FnLocationInfo;
+      return { ...next, address: composeFnSettingsAddress(next) };
+    });
+  }
+
+  async function updateSealImage(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      window.alert("도장 이미지는 이미지 파일만 등록할 수 있습니다.");
+      return;
+    }
+    const dataUrl = await imageFileToDataUrlForSettings(file);
+    setCompanyDraft((prev) => ({ ...prev, seal_image_url: dataUrl, seal_image_name: file.name }));
+  }
+
+  function applyPostcode(data: DaumPostcodeData) {
+    const nextAddress = { postal_code: String(data.zonecode || "").trim(), road_address: daumRoadAddressWithExtra(data), jibun_address: String(data.jibunAddress || data.autoJibunAddress || "").trim() };
+    if (addressSearchTarget === "company") {
+      setCompanyDraft((prev) => {
+        const next = { ...prev, ...nextAddress };
+        return { ...next, address: composeFnSettingsAddress(next) };
+      });
+      window.setTimeout(() => companyDetailAddressRef.current?.focus(), 0);
+    }
+    if (addressSearchTarget === "location") {
+      setLocationDraft((prev) => {
+        const next = { ...prev, ...nextAddress };
+        return { ...next, address: composeFnSettingsAddress(next) };
+      });
+      window.setTimeout(() => locationDetailAddressRef.current?.focus(), 0);
+    }
+    setAddressSearchTarget(null);
+  }
+
+  function saveCompanyDraft() {
+    if (!companyDraft.company_name.trim() || !companyDraft.business_no.trim() || !companyDraft.representative_name.trim()) {
+      window.alert("상호, 사업자 등록 번호, 대표자 성명은 필수입니다.");
+      return;
+    }
+    saveCompany(companyDraft);
+    setCompanyModalOpen(false);
+    setMessage("본사 정보가 저장되었습니다.");
+  }
+
+  function saveLocationDraft() {
+    if (!composeFnSettingsAddress(locationDraft).trim() || !locationDraft.phone.trim() || !locationDraft.manager_name.trim() || !locationDraft.manager_phone.trim()) {
+      window.alert("주소, 전화번호, 담당자, 담당자 전화번호는 필수입니다.");
+      return;
+    }
+    if (locationDraft.rent_type === "rented" && (!locationDraft.landlord_name.trim() || !locationDraft.landlord_phone.trim() || !locationDraft.rent_started_at.trim() || !locationDraft.rent_amount.trim())) {
+      window.alert("임대 선택 시 임대인, 임대인 전화번호, 임대일, 임대료는 필수입니다.");
+      return;
+    }
+    const next = normalizeLocation(locationDraft);
+    saveLocations(locationIsNew ? [next, ...locations] : locations.map((item) => item.id === locationDraft.id ? next : item));
+    setLocationModalOpen(false);
+    setLocationIsNew(false);
+    setMessage("사무실/창고 정보가 저장되었습니다.");
+  }
+
+  function deleteLocationDraft() {
+    if (locationIsNew || !locationDraft.id || !window.confirm("이 장소 정보를 삭제할까요?")) return;
+    saveLocations(locations.filter((item) => item.id !== locationDraft.id));
+    setLocationModalOpen(false);
+    setLocationIsNew(false);
+    setMessage("사무실/창고 정보가 삭제되었습니다.");
+  }
+
+  function keyValue(label: string, value: ReactNode) {
+    return (
+      <div className="min-w-0 rounded-md border border-slate-200 bg-white px-3 py-2">
+        <div className="text-[11px] font-black text-slate-400">{label}</div>
+        <div className="mt-1 min-h-5 break-words text-sm font-bold text-slate-800">{value || "-"}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Panel title="본사 정보" subtitle={<div className="text-sm font-bold text-slate-500">FN OS 기본 사업자 정보를 관리합니다.</div>} action={<div className="flex flex-wrap gap-2"><ActionButton type="button" variant="secondary" onClick={() => { setCompanyDraft(normalizeCompany(company)); setCompanyModalOpen(true); }}>수정</ActionButton><ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>추가</ActionButton></div>}>
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr]">
+          <div className="grid gap-3 md:grid-cols-3">
+            {keyValue("상호", company.company_name)}
+            {keyValue("사업자 등록 번호", company.business_no)}
+            {keyValue("대표자 성명", company.representative_name)}
+            {keyValue("대표자 생년월일", formatKoreanDateText(company.representative_birth))}
+            {keyValue("개업연월일", formatKoreanDateText(company.opened_at))}
+            {keyValue("전화번호", company.phone)}
+            {keyValue("팩스번호", company.fax)}
+            {keyValue("업태", (company.business_types || []).filter(Boolean).join(", ") || "-")}
+            {keyValue("종목", (company.business_items || []).filter(Boolean).join(", ") || "-")}
+            <div className="md:col-span-3">{keyValue("사업장소재지", composeFnSettingsAddress(company))}</div>
+            <div className="md:col-span-3">{keyValue("메모", company.memo)}</div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div><div className="text-sm font-black text-slate-900">도장 이미지</div><div className="mt-1 text-xs font-bold text-slate-500">{company.seal_image_name || "등록된 도장 이미지 없음"}</div></div>
+              <div className="flex items-center gap-2"><ActionButton type="button" variant="secondary" disabled={!company.seal_image_url} onClick={() => setPreviewImage({ title: "도장 이미지", src: company.seal_image_url })}>보기</ActionButton><FolderAttachmentButton count={fileCounts["head-office"]} title="본사 첨부파일" onClick={() => setFileTarget({ type: "company", id: "head-office", title: "본사 정보" })} /></div>
+            </div>
+            <div className="mt-4 flex h-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-white">{company.seal_image_url ? <img src={company.seal_image_url} alt="도장 이미지" className="max-h-36 max-w-full object-contain" /> : <span className="text-sm font-bold text-slate-400">도장 이미지 미리보기</span>}</div>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="사무실/창고" subtitle={<div className="text-sm font-bold text-slate-500">추가 사업장, 사무실, 창고 정보를 보관합니다.</div>} action={<ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>추가</ActionButton>}>
+        <div className="fn-table-shell overflow-x-auto">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+              <tr><th className="w-24 py-2 text-left">속성</th><th className="w-80 py-2 text-left">주소</th><th className="w-36 py-2 text-left">전화번호</th><th className="w-32 py-2 text-left">담당자</th><th className="w-36 py-2 text-left">담당자 전화번호</th><th className="w-24 py-2 text-left">임대구분</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
+            </thead>
+            <tbody>
+              {locations.map((item) => (
+                <tr key={item.id} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60" onClick={() => { setLocationDraft(normalizeLocation(item)); setLocationIsNew(false); setLocationModalOpen(true); }}>
+                  <td className="py-2"><StatusBadge tone={item.location_type === "warehouse" ? "orange" : "muted"}>{item.location_type === "warehouse" ? "창고" : "사무실"}</StatusBadge></td>
+                  <td className="truncate py-2 font-bold" title={composeFnSettingsAddress(item)}>{composeFnSettingsAddress(item) || "-"}</td>
+                  <td className="truncate py-2">{item.phone || "-"}</td>
+                  <td className="truncate py-2">{item.manager_name || "-"}</td>
+                  <td className="truncate py-2">{item.manager_phone || "-"}</td>
+                  <td className="py-2">{item.rent_type === "rented" ? "임대" : "소유"}</td>
+                  <td className="py-2" onClick={(event) => event.stopPropagation()}><FolderAttachmentButton count={fileCounts[item.id]} title="장소 첨부파일" onClick={() => setFileTarget({ type: "location", id: item.id, title: composeFnSettingsAddress(item) || "장소" })} /></td>
+                  <td className="truncate py-2 text-slate-500" title={item.memo}>{item.memo || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!locations.length && <EmptyState title="등록된 사무실/창고 정보가 없습니다." />}
+        </div>
+      </Panel>
+
+      {companyModalOpen && (
+        <FormModal title="본사 정보 수정" description="FN OS 기본 사업자 정보를 수정합니다." onClose={() => setCompanyModalOpen(false)} size="xl" footer={<><ActionButton type="button" variant="secondary" onClick={() => setCompanyModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveCompanyDraft}>저장</ActionButton></>}>
+          <div className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <FormField label="상호" required><input className={modalInputClass} value={companyDraft.company_name} onChange={(event) => updateCompanyDraft("company_name", event.target.value)} /></FormField>
+              <FormField label="사업자 등록 번호" required><input className={modalInputClass} inputMode="numeric" value={companyDraft.business_no} onChange={(event) => updateCompanyDraft("business_no", event.target.value)} placeholder="599-26-00311" /></FormField>
+              <FormField label="대표자 성명" required><input className={modalInputClass} value={companyDraft.representative_name} onChange={(event) => updateCompanyDraft("representative_name", event.target.value)} /></FormField>
+              <FormField label="대표자 생년월일"><input className={modalInputClass} inputMode="numeric" value={companyDraft.representative_birth} onChange={(event) => updateCompanyDraft("representative_birth", event.target.value)} placeholder="19810319" /></FormField>
+              <FormField label="개업연월일"><input className={modalInputClass} inputMode="numeric" value={companyDraft.opened_at} onChange={(event) => updateCompanyDraft("opened_at", event.target.value)} placeholder="20170313" /></FormField>
+              <FormField label="전화번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.phone} onChange={(event) => updateCompanyDraft("phone", event.target.value)} placeholder="031-767-5455" /></FormField>
+              <FormField label="팩스번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.fax} onChange={(event) => updateCompanyDraft("fax", event.target.value)} placeholder="031-321-1060" /></FormField>
+              <FormField label="도장 이미지" className="md:col-span-2"><div className="flex gap-2"><label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 hover:bg-orange-50">이미지 업로드<input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void updateSealImage(file); event.target.value = ""; }} /></label><input className={`${modalInputClass} min-w-0 flex-1`} readOnly value={companyDraft.seal_image_name || ""} placeholder="도장 이미지 파일" /><ActionButton type="button" variant="secondary" disabled={!companyDraft.seal_image_url} onClick={() => setPreviewImage({ title: "도장 이미지", src: companyDraft.seal_image_url })}>보기</ActionButton></div></FormField>
+              <FormField label="사업장소재지" className="md:col-span-3"><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("company")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={companyDraft.postal_code || ""} placeholder="우편번호" /><input ref={companyDetailAddressRef} className={modalInputClass} value={companyDraft.detail_address || ""} onChange={(event) => updateCompanyDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(companyDraft)} placeholder="주소" /></div></FormField>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="업태"><div className="space-y-2">{(companyDraft.business_types || [""]).map((item, index) => <div key={`type-${index}`} className="flex gap-2"><input className={modalInputClass} value={item} onChange={(event) => updateCompanyArray("business_types", index, event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => addCompanyArray("business_types")}>+</ActionButton><ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => removeCompanyArray("business_types", index)}>-</ActionButton></div>)}</div></FormField>
+              <FormField label="종목"><div className="space-y-2">{(companyDraft.business_items || [""]).map((item, index) => <div key={`item-${index}`} className="flex gap-2"><input className={modalInputClass} value={item} onChange={(event) => updateCompanyArray("business_items", index, event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => addCompanyArray("business_items")}>+</ActionButton><ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => removeCompanyArray("business_items", index)}>-</ActionButton></div>)}</div></FormField>
+              <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={companyDraft.memo} onChange={(event) => updateCompanyDraft("memo", event.target.value)} /></FormField>
+            </div>
+          </div>
+        </FormModal>
+      )}
+
+      {locationModalOpen && (
+        <FormModal title={locationIsNew ? "사무실/창고 추가" : "사무실/창고 수정"} description="사무실 또는 창고 정보를 등록합니다." onClose={() => { setLocationModalOpen(false); setLocationIsNew(false); }} size="xl" footer={<><div className="mr-auto">{!locationIsNew && locationDraft.id && <ActionButton type="button" variant="danger" onClick={deleteLocationDraft}>삭제</ActionButton>}</div><ActionButton type="button" variant="secondary" onClick={() => { setLocationModalOpen(false); setLocationIsNew(false); }}>닫기</ActionButton><ActionButton type="button" onClick={saveLocationDraft}>저장</ActionButton></>}>
+          <div className="space-y-5">
+            <div><div className="mb-2 text-[13px] font-semibold text-gray-700">속성</div><div className="flex gap-2">{[["office", "사무실"], ["warehouse", "창고"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateLocationDraft("location_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${locationDraft.location_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div></div>
+            <FormField label="주소" required><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("location")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={locationDraft.postal_code || ""} placeholder="우편번호" /><input ref={locationDetailAddressRef} className={modalInputClass} value={locationDraft.detail_address || ""} onChange={(event) => updateLocationDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(locationDraft)} placeholder="주소" /></div></FormField>
+            <div className="grid gap-4 md:grid-cols-4"><FormField label="전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.phone} onChange={(event) => updateLocationDraft("phone", event.target.value)} /></FormField><FormField label="담당자" required><input className={modalInputClass} value={locationDraft.manager_name} onChange={(event) => updateLocationDraft("manager_name", event.target.value)} /></FormField><FormField label="담당자 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.manager_phone} onChange={(event) => updateLocationDraft("manager_phone", event.target.value)} /></FormField><FormField label="임대구분"><select className={modalSelectClass} value={locationDraft.rent_type} onChange={(event) => updateLocationDraft("rent_type", event.target.value)}><option value="owned">소유</option><option value="rented">임대</option></select></FormField></div>
+            {locationDraft.rent_type === "rented" && <div className="grid gap-4 rounded-md border border-orange-100 bg-orange-50/40 p-4 md:grid-cols-4"><FormField label="임대인" required><input className={modalInputClass} value={locationDraft.landlord_name} onChange={(event) => updateLocationDraft("landlord_name", event.target.value)} /></FormField><FormField label="임대인 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.landlord_phone} onChange={(event) => updateLocationDraft("landlord_phone", event.target.value)} /></FormField><FormField label="임대일" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.rent_started_at} onChange={(event) => updateLocationDraft("rent_started_at", event.target.value)} placeholder="YYYYMMDD" /></FormField><FormField label="임대료" required><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(locationDraft.rent_amount)} onChange={(event) => updateLocationDraft("rent_amount", event.target.value)} /></FormField></div>}
+            {locationDraft.id && <div><div className="mb-2 text-[13px] font-semibold text-gray-700">파일업로드</div><FolderAttachmentButton count={fileCounts[locationDraft.id]} title="장소 첨부파일" onClick={() => setFileTarget({ type: "location", id: locationDraft.id, title: composeFnSettingsAddress(locationDraft) || "장소" })} /></div>}
+            <FormField label="메모"><textarea className={modalTextareaClass} value={locationDraft.memo} onChange={(event) => updateLocationDraft("memo", event.target.value)} /></FormField>
+          </div>
+        </FormModal>
+      )}
+
+      {addressSearchTarget && <DaumPostcodeModal onClose={() => setAddressSearchTarget(null)} onSelect={applyPostcode} />}
+      {fileTarget && <AccountFileModal accountType={fileTarget.type} accountId={fileTarget.id} title={fileTarget.title} onClose={() => setFileTarget(null)} onChanged={(count) => setFileCounts((prev) => ({ ...prev, [fileTarget.id]: count }))} />}
+      {previewImage && <FnInfoImagePreviewModal title={previewImage.title} src={previewImage.src} onClose={() => setPreviewImage(null)} />}
+    </div>
+  );
+}
+
 function FnSettingsWorkspace() {
   const searchParams = useSearchParams();
   const unlockStorageKey = "fnos-settings-admin-unlocked";
-  const requestedTab = searchParams.get("settingsTab") || "personnel";
+  const requestedTabParam = searchParams.get("settingsTab") || "info";
+  const requestedTab = requestedTabParam === "etc" ? "info" : requestedTabParam;
   const [activeTab, setActiveTab] = useState(requestedTab);
   const [unlocked, setUnlocked] = useState(false);
   const [adminName, setAdminName] = useState("");
@@ -21702,6 +22109,7 @@ function FnSettingsWorkspace() {
   const [adminPasswordOpen, setAdminPasswordOpen] = useState(false);
 
   const tabs = [
+    { key: "info", label: "FN정보" },
     { key: "personnel", label: "인사관리" },
     { key: "bank", label: "통장관리" },
     { key: "card", label: "카드관리" },
@@ -21870,7 +22278,7 @@ function FnSettingsWorkspace() {
         <>
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
             <div className="flex min-w-max gap-1">
-              {tabs.map((tab) => (
+              {tabs.filter((tab) => tab.key !== "etc").map((tab) => (
                 <button
                   key={tab.key}
                   type="button"
@@ -21885,6 +22293,7 @@ function FnSettingsWorkspace() {
             </div>
           </div>
 
+          {activeTab === "info" && <FnInfoSettingsPanel setMessage={setMessage} />}
           {activeTab === "personnel" && <PersonnelManagementPanel onLock={() => setUnlocked(false)} />}
 
           {activeTab === "password" && (

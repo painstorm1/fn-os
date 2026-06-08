@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError, patchRows, selectRows, uploadStorageFile, upsertRows } from "@/lib/fnos-db";
 
-type AccountType = "bank" | "card" | "personnel";
+type AccountType = "bank" | "card" | "personnel" | "company" | "location";
 
 type AccountAttachment = {
   id: string;
@@ -28,7 +28,10 @@ function settingKey(accountType: AccountType, accountId: string) {
 
 function readParams(request: NextRequest): { accountType: AccountType; accountId: string } {
   const typeParam = request.nextUrl.searchParams.get("type");
-  const accountType: AccountType = typeParam === "card" ? "card" : typeParam === "personnel" ? "personnel" : "bank";
+  const accountType: AccountType =
+    typeParam === "card" || typeParam === "personnel" || typeParam === "company" || typeParam === "location"
+      ? typeParam
+      : "bank";
   const accountId = text(request.nextUrl.searchParams.get("id"));
   return { accountType, accountId };
 }
