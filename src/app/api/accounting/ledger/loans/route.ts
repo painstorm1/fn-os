@@ -4,7 +4,7 @@ import { FnosDbError, selectRows } from "@/lib/fnos-db";
 
 export async function GET() {
   try {
-    const loans = await selectRows("accounting_loans", { order: "payment_day.asc", limit: 500 });
+    const loans = await selectRows("accounting_loans", { is_active: "eq.true", order: "payment_day.asc", limit: 500 });
     return NextResponse.json({ ok: true, loans });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
@@ -31,9 +31,9 @@ export async function DELETE(request: NextRequest) {
   try {
     const id = request.nextUrl.searchParams.get("id") || "";
     const loans = await deactivateAccountingLoan(id);
-    return NextResponse.json({ ok: true, mode: "deactivated", loans });
+    return NextResponse.json({ ok: true, mode: "deleted", loans });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "대출 비활성화 실패" }, { status });
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "대출 삭제 실패" }, { status });
   }
 }

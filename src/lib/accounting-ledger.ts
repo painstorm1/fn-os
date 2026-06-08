@@ -1,4 +1,4 @@
-import { insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
+import { deleteRows, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
 
 type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
@@ -592,7 +592,7 @@ export async function upsertAccountingFixedCost(row: RawRow) {
 
 export async function deactivateAccountingFixedCost(id: string) {
   if (!id) throw new Error("고정비 id가 필요합니다.");
-  return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+  return deleteRows("accounting_fixed_costs", { id: `eq.${id}` });
 }
 
 
@@ -630,7 +630,7 @@ export async function upsertAccountingLoan(row: RawRow) {
 
 export async function deactivateAccountingLoan(id: string) {
   if (!id) throw new Error("대출 id가 필요합니다.");
-  return patchRows("accounting_loans", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
+  return deleteRows("accounting_loans", { id: `eq.${id}` });
 }
 
 function matchingLoanPaymentTransaction(loan: RawRow, transactions: RawRow[], dueDate: string, today: string, expectedAmount: number) {
@@ -1014,11 +1014,11 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     batches,
     review_queue: reviewQueue,
     card_settlements: settlements,
-    fixed_costs: fixedCosts,
+    fixed_costs: activeFixedCosts,
     fixed_cost_occurrences: calendarFixedCostOccurrences,
     loan_occurrences: loanOccurrences,
     loan_maturity_occurrences: loanMaturityOccurrences,
-    loans,
+    loans: activeLoans,
     upcoming_fixed_costs: upcomingFixedCosts,
     bank_accounts: bankAccounts,
     card_accounts: cardAccounts,
