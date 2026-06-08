@@ -1186,6 +1186,7 @@ type InventoryBulkField = "qty" | "transfer" | "risk";
 type FixedCostBulkField = "category_large" | "category_middle" | "fixed_cost_name" | "expected_amount" | "base_day" | "payment_type" | "payment_source" | "loan_name" | "principal_amount" | "expected_payment_amount" | "payment_day" | "bank_name" | "account_holder" | "account_number" | "loan_start_date" | "loan_end_date" | "memo";
 type CustomerBulkField = "customer_type" | "customer_name" | "business_no" | "contact_name" | "phone" | "memo";
 type WarehouseBulkField = "warehouse_type" | "warehouse_name" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
+type FnLocationBulkField = "location_type" | "location_name" | "address" | "phone" | "manager_name" | "manager_phone" | "rent_type" | "landlord_name" | "landlord_phone" | "rent_started_at" | "rent_amount" | "memo";
 type BulkFieldConfig<Field extends string> = {
   key: Field;
   label: string;
@@ -1325,6 +1326,17 @@ function formatKoreanPhone(value: unknown) {
   }
   if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
+function formatKoreanLandline(value: unknown) {
+  const digits = onlyDigits(value).slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.startsWith("02")) {
+    if (digits.length <= 5) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}-${digits.slice(2, digits.length - 4)}-${digits.slice(-4)}`;
+  }
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 function personnelWorkingMonths(joinedAt: string) {
@@ -2106,8 +2118,8 @@ function sortFnSettingsAttachments<T extends { file_name?: string }>(items: T[])
 }
 
 function isFnBusinessRegistrationFile(item?: Pick<AccountAttachment, "file_name"> | null) {
-  const name = String(item?.file_name || "").replace(/\s+/g, "").toLowerCase();
-  return Boolean(name && (/사업자.*등록증/.test(name) || /business.*registration/.test(name)));
+  const name = String(item?.file_name || "").trim().toLowerCase();
+  return name === "fn_사업자등록증(new).jpg";
 }
 
 async function loadFnSettingsAttachmentCounts(accountType: FnSettingsAttachmentType, ids: string[], onLoaded: (counts: Record<string, number>) => void) {
@@ -8058,6 +8070,7 @@ type FnCompanyInfo = {
 type FnLocationInfo = {
   id: string;
   location_type: "office" | "warehouse";
+  location_name: string;
   postal_code: string;
   road_address: string;
   jibun_address: string;
@@ -13194,6 +13207,21 @@ const warehouseBulkFields: Array<BulkFieldConfig<WarehouseBulkField>> = [
   { key: "manager_name", label: "담당자 이름" },
   { key: "manager_phone", label: "담당자 연락처" },
   { key: "manager_memo", label: "담당자 메모" },
+  { key: "memo", label: "메모" },
+];
+
+const fnLocationBulkFields: Array<BulkFieldConfig<FnLocationBulkField>> = [
+  { key: "location_type", label: "속성", inputType: "select", options: [{ value: "office", label: "사무실" }, { value: "warehouse", label: "창고" }] },
+  { key: "location_name", label: "명칭" },
+  { key: "address", label: "주소" },
+  { key: "phone", label: "전화번호" },
+  { key: "manager_name", label: "담당자" },
+  { key: "manager_phone", label: "담당자 전화번호" },
+  { key: "rent_type", label: "임대구분", inputType: "select", options: [{ value: "owned", label: "소유" }, { value: "rented", label: "임대" }] },
+  { key: "landlord_name", label: "임대인" },
+  { key: "landlord_phone", label: "임대인 전화번호" },
+  { key: "rent_started_at", label: "임대일" },
+  { key: "rent_amount", label: "임대료", inputType: "number" },
   { key: "memo", label: "메모" },
 ];
 
@@ -21854,6 +21882,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const emptyLocation: FnLocationInfo = {
     id: "",
     location_type: "office",
+    location_name: "",
     postal_code: "",
     road_address: "",
     jibun_address: "",
@@ -21881,8 +21910,23 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
   const [companyAttachments, setCompanyAttachments] = useState<AccountAttachment[]>([]);
   const [previewImage, setPreviewImage] = useState<{ title: string; src: string } | null>(null);
+  const [selectedLocationKeys, setSelectedLocationKeys] = useState<string[]>([]);
+  const [locationBulkOpen, setLocationBulkOpen] = useState(false);
+  const [locationBulkFields, setLocationBulkFields] = useState<FnLocationBulkField[]>(["location_type"]);
+  const [locationBulkFieldPickerOpen, setLocationBulkFieldPickerOpen] = useState(false);
+  const [locationBulkCommonField, setLocationBulkCommonField] = useState<FnLocationBulkField>("location_type");
+  const [locationBulkCommonValue, setLocationBulkCommonValue] = useState("");
+  const [locationBulkDrafts, setLocationBulkDrafts] = useState<Record<string, Partial<Record<FnLocationBulkField, string>>>>({});
   const companyDetailAddressRef = useRef<HTMLInputElement | null>(null);
   const locationDetailAddressRef = useRef<HTMLInputElement | null>(null);
+  const locationKeys = locations.map((item) => item.id).filter(Boolean);
+  const selectedLocations = locations.filter((item) => selectedLocationKeys.includes(item.id));
+  const locationSelection = useCheckboxColumnSelection({
+    keys: locationKeys,
+    selectedKeys: selectedLocationKeys,
+    setSelectedKeys: setSelectedLocationKeys,
+    enabled: !companyModalOpen && !locationModalOpen && !locationBulkOpen && !addressSearchTarget && !fileTarget,
+  });
 
   function normalizeCompany(value: Partial<FnCompanyInfo>): FnCompanyInfo {
     const next = {
@@ -21892,8 +21936,8 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       business_no: formatBusinessNoInput(String(value.business_no || defaultCompany.business_no)),
       representative_birth: formatDateDigitsInput(value.representative_birth || defaultCompany.representative_birth),
       opened_at: formatDateDigitsInput(value.opened_at || defaultCompany.opened_at),
-      phone: formatKoreanPhone(value.phone || defaultCompany.phone),
-      fax: formatKoreanPhone(value.fax || defaultCompany.fax),
+      phone: formatKoreanLandline(value.phone || defaultCompany.phone),
+      fax: formatKoreanLandline(value.fax || defaultCompany.fax),
       business_types: Array.isArray(value.business_types) && value.business_types.length ? value.business_types : [""],
       business_items: Array.isArray(value.business_items) && value.business_items.length ? value.business_items : [""],
     };
@@ -21906,7 +21950,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       ...value,
       id: value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       location_type: value.location_type === "warehouse" ? "warehouse" : "office",
-      phone: formatKoreanPhone(value.phone || ""),
+      phone: formatKoreanLandline(value.phone || ""),
       manager_phone: formatKoreanPhone(value.manager_phone || ""),
       rent_type: value.rent_type === "rented" ? "rented" : "owned",
       landlord_phone: formatKoreanPhone(value.landlord_phone || ""),
@@ -21923,7 +21967,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }
 
   function saveLocations(nextLocations: FnLocationInfo[]) {
-    const normalized = sortRowsByManagementName(nextLocations.map(normalizeLocation), (item) => item.address, (item) => item.manager_name);
+    const normalized = sortRowsByManagementName(nextLocations.map(normalizeLocation), (item) => item.location_name || item.address, (item) => item.manager_name);
     setLocations(normalized);
     localStorage.setItem(locationsStorageKey, JSON.stringify(normalized));
   }
@@ -21965,9 +22009,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "F2" || companyModalOpen || locationModalOpen || addressSearchTarget || fileTarget || previewImage) return;
       event.preventDefault();
-      setLocationDraft(normalizeLocation(emptyLocation));
-      setLocationIsNew(true);
-      setLocationModalOpen(true);
+      openNewLocation();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -21977,7 +22019,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setCompanyDraft((prev) => {
       const next = {
         ...prev,
-        [key]: key === "business_no" ? formatBusinessNoInput(String(value)) : key === "phone" || key === "fax" ? formatKoreanPhone(value) : key === "representative_birth" || key === "opened_at" ? formatDateDigitsInput(String(value)) : value,
+        [key]: key === "business_no" ? formatBusinessNoInput(String(value)) : key === "phone" || key === "fax" ? formatKoreanLandline(value) : key === "representative_birth" || key === "opened_at" ? formatDateDigitsInput(String(value)) : value,
       } as FnCompanyInfo;
       return { ...next, address: composeFnSettingsAddress(next) };
     });
@@ -22006,7 +22048,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setLocationDraft((prev) => {
       const next = {
         ...prev,
-        [key]: key === "phone" || key === "manager_phone" || key === "landlord_phone" ? formatKoreanPhone(value) : key === "rent_started_at" ? formatDateDigitsInput(value) : key === "rent_amount" ? onlyDigits(value) : value,
+        [key]: key === "phone" ? formatKoreanLandline(value) : key === "manager_phone" || key === "landlord_phone" ? formatKoreanPhone(value) : key === "rent_started_at" ? formatDateDigitsInput(value) : key === "rent_amount" ? onlyDigits(value) : value,
       } as FnLocationInfo;
       return { ...next, address: composeFnSettingsAddress(next) };
     });
@@ -22075,6 +22117,69 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setMessage("사무실/창고 정보가 삭제되었습니다.");
   }
 
+  function openNewLocation() {
+    setLocationDraft(normalizeLocation(emptyLocation));
+    setLocationIsNew(true);
+    setLocationModalOpen(true);
+  }
+
+  function openLocationEdit(location: FnLocationInfo) {
+    setLocationDraft(normalizeLocation(location));
+    setLocationIsNew(false);
+    setLocationModalOpen(true);
+  }
+
+  function openSelectedLocation() {
+    if (selectedLocations.length !== 1) {
+      window.alert("수정할 사무실/창고를 1개만 선택해 주세요.");
+      return;
+    }
+    openLocationEdit(selectedLocations[0]);
+  }
+
+  function saveLocationBulkEdit() {
+    if (!selectedLocations.length) {
+      window.alert("수정할 사무실/창고를 먼저 선택해 주세요.");
+      return;
+    }
+    const nextLocations = locations.map((location) => {
+      if (!selectedLocationKeys.includes(location.id)) return location;
+      const draftValues = locationBulkDrafts[location.id] || {};
+      const updates = Object.fromEntries(locationBulkFields.map((field) => {
+        const value = draftValues[field] ?? String(location[field] || "");
+        return [
+          field,
+          field === "phone" ? formatKoreanLandline(value)
+            : field === "manager_phone" || field === "landlord_phone" ? formatKoreanPhone(value)
+              : field === "rent_started_at" ? formatDateDigitsInput(value)
+                : field === "rent_amount" ? onlyDigits(value)
+                  : value,
+        ];
+      })) as Partial<Record<FnLocationBulkField, string>>;
+      const locationUpdates: Partial<FnLocationInfo> = {
+        ...(updates.location_type !== undefined ? { location_type: updates.location_type === "warehouse" ? "warehouse" : "office" } : {}),
+        ...(updates.location_name !== undefined ? { location_name: updates.location_name } : {}),
+        ...(updates.address !== undefined ? { address: updates.address, road_address: "", jibun_address: "", detail_address: "" } : {}),
+        ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+        ...(updates.manager_name !== undefined ? { manager_name: updates.manager_name } : {}),
+        ...(updates.manager_phone !== undefined ? { manager_phone: updates.manager_phone } : {}),
+        ...(updates.rent_type !== undefined ? { rent_type: updates.rent_type === "rented" ? "rented" : "owned" } : {}),
+        ...(updates.landlord_name !== undefined ? { landlord_name: updates.landlord_name } : {}),
+        ...(updates.landlord_phone !== undefined ? { landlord_phone: updates.landlord_phone } : {}),
+        ...(updates.rent_started_at !== undefined ? { rent_started_at: updates.rent_started_at } : {}),
+        ...(updates.rent_amount !== undefined ? { rent_amount: updates.rent_amount } : {}),
+        ...(updates.memo !== undefined ? { memo: updates.memo } : {}),
+      };
+      return normalizeLocation({ ...location, ...locationUpdates });
+    });
+    saveLocations(nextLocations);
+    setSelectedLocationKeys([]);
+    setLocationBulkOpen(false);
+    setLocationBulkDrafts({});
+    setLocationBulkCommonValue("");
+    setMessage(`사무실/창고 다중수정 완료: ${selectedLocations.length.toLocaleString("ko-KR")}개`);
+  }
+
   function keyValue(label: string, value: ReactNode) {
     return (
       <div className="min-w-0 rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -22086,7 +22191,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   return (
     <div className="space-y-4">
-      <Panel title="본사 정보" subtitle={<div className="text-sm font-bold text-slate-500">FN OS 기본 사업자 정보를 관리합니다.</div>} action={<ActionButton type="button" variant="secondary" onClick={() => { setCompanyDraft(normalizeCompany(company)); setCompanyModalOpen(true); }}>수정</ActionButton>}>
+      <Panel title="본사 정보" action={<ActionButton type="button" variant="secondary" onClick={() => { setCompanyDraft(normalizeCompany(company)); setCompanyModalOpen(true); }}>수정</ActionButton>}>
         <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr]">
           <div className="grid gap-3 md:grid-cols-3">
             {keyValue("상호", company.company_name)}
@@ -22127,16 +22232,25 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         </div>
       </Panel>
 
-      <Panel title="사무실/창고" subtitle={<div className="text-sm font-bold text-slate-500">추가 사업장, 사무실, 창고 정보를 보관합니다.</div>} action={<ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>F2 추가</ActionButton>}>
+      <Panel title="사무실/창고" action={<ActionButton type="button" onClick={openNewLocation}>F2 추가</ActionButton>}>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ActionButton type="button" variant="secondary" onClick={openSelectedLocation}>수정</ActionButton>
+          <ActionButton type="button" variant="secondary" onClick={() => setLocationBulkOpen(true)}>다중수정</ActionButton>
+          <span className="text-xs font-bold text-slate-500">선택 {selectedLocationKeys.length.toLocaleString("ko-KR")}개</span>
+        </div>
         <div className="fn-table-shell overflow-x-auto">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
+          <table className="w-full min-w-[1120px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
-              <tr><th className="w-24 py-2 text-left">속성</th><th className="w-80 py-2 text-left">주소</th><th className="w-36 py-2 text-left">전화번호</th><th className="w-32 py-2 text-left">담당자</th><th className="w-36 py-2 text-left">담당자 전화번호</th><th className="w-24 py-2 text-left">임대구분</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
+              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={locationSelection.allSelected} onChange={(event) => locationSelection.toggleAll(event.target.checked)} aria-label="사무실/창고 전체선택" /></th><th className="w-24 py-2 text-left">속성</th><th className="w-40 py-2 text-left">명칭</th><th className="w-72 py-2 text-left">주소</th><th className="w-36 py-2 text-left">전화번호</th><th className="w-32 py-2 text-left">담당자</th><th className="w-36 py-2 text-left">담당자 전화번호</th><th className="w-24 py-2 text-left">임대구분</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
             </thead>
             <tbody>
-              {locations.map((item) => (
-                <tr key={item.id} className="cursor-pointer border-b border-gray-100 hover:bg-orange-50/60" onClick={() => { setLocationDraft(normalizeLocation(item)); setLocationIsNew(false); setLocationModalOpen(true); }}>
+              {locations.map((item, index) => {
+                const selected = selectedLocationKeys.includes(item.id);
+                return (
+                <tr key={item.id} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-sky-50" : "hover:bg-orange-50/60"}`} onClick={() => openLocationEdit(item)}>
+                  <td className="py-2 text-center" onClick={(event) => event.stopPropagation()} onMouseEnter={() => locationSelection.continueSelection(item.id, index)}><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => locationSelection.beginSelection(item.id, index, event)} onMouseEnter={() => locationSelection.continueSelection(item.id, index)} /></td>
                   <td className="py-2"><StatusBadge tone={item.location_type === "warehouse" ? "orange" : "muted"}>{item.location_type === "warehouse" ? "창고" : "사무실"}</StatusBadge></td>
+                  <td className="truncate py-2 font-black" title={item.location_name || ""}>{item.location_name || "-"}</td>
                   <td className="truncate py-2 font-bold" title={composeFnSettingsAddress(item)}>{composeFnSettingsAddress(item) || "-"}</td>
                   <td className="truncate py-2">{item.phone || "-"}</td>
                   <td className="truncate py-2">{item.manager_name || "-"}</td>
@@ -22145,7 +22259,8 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                   <td className="py-2" onClick={(event) => event.stopPropagation()}><FolderAttachmentButton count={fileCounts[item.id]} title="장소 첨부파일" onClick={() => setFileTarget({ type: "location", id: item.id, title: composeFnSettingsAddress(item) || "장소" })} /></td>
                   <td className="truncate py-2 text-slate-500" title={item.memo}>{item.memo || "-"}</td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
           {!locations.length && <EmptyState title="등록된 사무실/창고 정보가 없습니다." />}
@@ -22153,7 +22268,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       </Panel>
 
       {companyModalOpen && (
-        <FormModal title="본사 정보 수정" description="FN OS 기본 사업자 정보를 수정합니다." onClose={() => setCompanyModalOpen(false)} size="xl" footer={<><ActionButton type="button" variant="secondary" onClick={() => setCompanyModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveCompanyDraft}>저장</ActionButton></>}>
+        <FormModal title="본사 정보 수정" onClose={() => setCompanyModalOpen(false)} size="xl" footer={<><ActionButton type="button" variant="secondary" onClick={() => setCompanyModalOpen(false)}>닫기</ActionButton><ActionButton type="button" onClick={saveCompanyDraft}>저장</ActionButton></>}>
           <div className="space-y-5">
             <div className="grid gap-4 md:grid-cols-3">
               <FormField label="상호" required><input className={modalInputClass} value={companyDraft.company_name} onChange={(event) => updateCompanyDraft("company_name", event.target.value)} /></FormField>
@@ -22175,9 +22290,10 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       )}
 
       {locationModalOpen && (
-        <FormModal title={locationIsNew ? "사무실/창고 추가" : "사무실/창고 수정"} description="사무실 또는 창고 정보를 등록합니다." onClose={() => { setLocationModalOpen(false); setLocationIsNew(false); }} size="xl" footer={<><div className="mr-auto">{!locationIsNew && locationDraft.id && <ActionButton type="button" variant="danger" onClick={deleteLocationDraft}>삭제</ActionButton>}</div><ActionButton type="button" variant="secondary" onClick={() => { setLocationModalOpen(false); setLocationIsNew(false); }}>닫기</ActionButton><ActionButton type="button" onClick={saveLocationDraft}>저장</ActionButton></>}>
+        <FormModal title={locationIsNew ? "사무실/창고 추가" : "사무실/창고 수정"} onClose={() => { setLocationModalOpen(false); setLocationIsNew(false); }} size="xl" footer={<><div className="mr-auto">{!locationIsNew && locationDraft.id && <ActionButton type="button" variant="danger" onClick={deleteLocationDraft}>삭제</ActionButton>}</div><ActionButton type="button" variant="secondary" onClick={() => { setLocationModalOpen(false); setLocationIsNew(false); }}>닫기</ActionButton><ActionButton type="button" onClick={saveLocationDraft}>저장</ActionButton></>}>
           <div className="space-y-5">
             <div><div className="mb-2 text-[13px] font-semibold text-gray-700">속성</div><div className="flex gap-2">{[["office", "사무실"], ["warehouse", "창고"]].map(([value, label]) => <button key={value} type="button" onClick={() => updateLocationDraft("location_type", value)} className={`h-10 rounded-md px-4 text-sm font-black ${locationDraft.location_type === value ? "bg-orange-500 text-white" : "border border-gray-200 bg-white text-slate-600 hover:bg-orange-50"}`}>{label}</button>)}</div></div>
+            <FormField label="명칭"><input className={modalInputClass} value={locationDraft.location_name} onChange={(event) => updateLocationDraft("location_name", event.target.value)} placeholder="천호동 사무실" /></FormField>
             <FormField label="주소" required><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("location")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={locationDraft.postal_code || ""} placeholder="우편번호" /><input ref={locationDetailAddressRef} className={modalInputClass} value={locationDraft.detail_address || ""} onChange={(event) => updateLocationDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(locationDraft)} placeholder="주소" /></div></FormField>
             <div className="grid gap-4 md:grid-cols-4"><FormField label="전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.phone} onChange={(event) => updateLocationDraft("phone", event.target.value)} /></FormField><FormField label="담당자" required><input className={modalInputClass} value={locationDraft.manager_name} onChange={(event) => updateLocationDraft("manager_name", event.target.value)} /></FormField><FormField label="담당자 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.manager_phone} onChange={(event) => updateLocationDraft("manager_phone", event.target.value)} /></FormField><FormField label="임대구분"><select className={modalSelectClass} value={locationDraft.rent_type} onChange={(event) => updateLocationDraft("rent_type", event.target.value)}><option value="owned">소유</option><option value="rented">임대</option></select></FormField></div>
             {locationDraft.rent_type === "rented" && <div className="grid gap-4 rounded-md border border-orange-100 bg-orange-50/40 p-4 md:grid-cols-4"><FormField label="임대인" required><input className={modalInputClass} value={locationDraft.landlord_name} onChange={(event) => updateLocationDraft("landlord_name", event.target.value)} /></FormField><FormField label="임대인 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.landlord_phone} onChange={(event) => updateLocationDraft("landlord_phone", event.target.value)} /></FormField><FormField label="임대일" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.rent_started_at} onChange={(event) => updateLocationDraft("rent_started_at", event.target.value)} placeholder="YYYYMMDD" /></FormField><FormField label="임대료" required><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(locationDraft.rent_amount)} onChange={(event) => updateLocationDraft("rent_amount", event.target.value)} /></FormField></div>}
@@ -22188,6 +22304,39 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       )}
 
       {addressSearchTarget && <DaumPostcodeModal onClose={() => setAddressSearchTarget(null)} onSelect={applyPostcode} />}
+      {locationBulkOpen && (
+        <BulkMultiEditModal<FnLocationBulkField, FnLocationInfo>
+          title="사무실/창고 다중수정"
+          description={`선택 ${selectedLocations.length.toLocaleString("ko-KR")}개 항목을 수정합니다.`}
+          fields={fnLocationBulkFields}
+          selectedFields={locationBulkFields}
+          setSelectedFields={setLocationBulkFields}
+          fieldPickerOpen={locationBulkFieldPickerOpen}
+          setFieldPickerOpen={setLocationBulkFieldPickerOpen}
+          commonField={locationBulkCommonField}
+          setCommonField={setLocationBulkCommonField}
+          commonValue={locationBulkCommonValue}
+          setCommonValue={setLocationBulkCommonValue}
+          rowDrafts={locationBulkDrafts}
+          setRowDrafts={setLocationBulkDrafts}
+          rows={selectedLocations}
+          rowKeys={selectedLocations.map((item) => item.id)}
+          selectedRowKeys={selectedLocationKeys}
+          setSelectedRowKeys={setSelectedLocationKeys}
+          getRowKey={(item) => item.id}
+          getRowName={(item) => item.location_name || composeFnSettingsAddress(item) || "-"}
+          getRowSubLabel={(item) => `${item.location_type === "warehouse" ? "창고" : "사무실"} · ${item.manager_name || "-"}`}
+          getCurrentValue={(item, field) => {
+            if (field === "location_type") return item.location_type || "office";
+            if (field === "rent_type") return item.rent_type || "owned";
+            if (field === "address") return composeFnSettingsAddress(item);
+            if (field === "rent_amount") return onlyDigits(item.rent_amount || "");
+            return String(item[field] || "");
+          }}
+          onClose={() => setLocationBulkOpen(false)}
+          onSave={saveLocationBulkEdit}
+        />
+      )}
       {fileTarget && <AccountFileModal accountType={fileTarget.type} accountId={fileTarget.id} title={fileTarget.title} onClose={() => setFileTarget(null)} onChanged={(count) => {
         setFileCounts((prev) => ({ ...prev, [fileTarget.id]: count }));
         if (fileTarget.type === "company") void loadCompanyAttachments();
