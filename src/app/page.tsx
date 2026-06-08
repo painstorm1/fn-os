@@ -1182,6 +1182,7 @@ type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
 type WarehouseAttribute = "general" | "fulfillment";
 type ProductBulkField = "product_attribute" | "product_name" | "cost_price" | "standard_price";
+type InventoryBulkField = "qty" | "transfer" | "risk";
 type FixedCostBulkField = "category_large" | "category_middle" | "fixed_cost_name" | "expected_amount" | "base_day" | "payment_type" | "payment_source" | "loan_name" | "principal_amount" | "expected_payment_amount" | "payment_day" | "bank_name" | "account_holder" | "account_number" | "loan_start_date" | "loan_end_date" | "memo";
 type CustomerBulkField = "customer_type" | "customer_name" | "business_no" | "contact_name" | "phone" | "memo";
 type WarehouseBulkField = "warehouse_type" | "warehouse_name" | "warehouse_address" | "warehouse_phone" | "manager_name" | "manager_phone" | "manager_memo" | "memo";
@@ -8514,6 +8515,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     expiresAt: addMonthsToDate(entryDateToday(), 3),
     memo: "",
   });
+  const [inventoryBulkOpen, setInventoryBulkOpen] = useState(false);
+  const [inventoryBulkFields, setInventoryBulkFields] = useState<InventoryBulkField[]>(["qty"]);
+  const [inventoryBulkFieldPickerOpen, setInventoryBulkFieldPickerOpen] = useState(false);
+  const [inventoryBulkCommonField, setInventoryBulkCommonField] = useState<InventoryBulkField>("qty");
+  const [inventoryBulkCommonDraft, setInventoryBulkCommonDraft] = useState({
+    qty: "",
+    moveQty: "",
+    targetWarehouseCode: "",
+    riskMode: "auto" as "auto" | "manual",
+    manualRisk: "안전" as InventoryRisk,
+  });
+  const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, { qty?: string; moveQty?: string; targetWarehouseCode?: string; riskMode?: "auto" | "manual"; manualRisk?: InventoryRisk }>>({});
   const [inventorySaving, setInventorySaving] = useState(false);
   const [activeSheet, setActiveSheet] = useState<SalesSheetName>("발주 진행 단계");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -9984,7 +9997,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!event.shiftKey || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
       if (event.ctrlKey || event.altKey || event.metaKey) return;
-      if (inventoryPicker || inventoryEditKey || entryModalMode || quickLookupOpen) return;
+      if (inventoryPicker || inventoryEditKey || inventoryBulkOpen || entryModalMode || quickLookupOpen) return;
       const activeElement = document.activeElement as HTMLElement | null;
       const activeTag = activeElement?.tagName?.toLowerCase();
       if (activeTag === "input" || activeTag === "select" || activeTag === "textarea" || activeElement?.isContentEditable) return;
@@ -10113,15 +10126,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
-  function openInventoryEdit() {
-    const row = selectedInventoryRows[0];
-    if (!row) {
-      window.alert("수정할 재고 행을 먼저 선택해 주세요.");
-      return;
-    }
-    if (!window.confirm(`${selectedInventoryRows.length.toLocaleString("ko-KR")}건의 재고 설정을 수정하시겠습니까?`)) return;
-    setInventoryEditKey(row.key);
-    setInventoryEditDraft({
+  function inventoryDraftFromRow(row: InventoryListRow) {
+    return {
       qty: String(row.qty),
       moveQty: "",
       targetWarehouseCode: "",
@@ -10129,7 +10135,38 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       manualRisk: row.setting?.risk || (row.status === "안전" || row.status === "주의" || row.status === "위험" ? row.status : "안전"),
       expiresAt: row.setting?.expiresAt || addMonthsToDate(inventoryFilters.date, 3),
       memo: row.setting?.memo || "",
-    });
+    };
+  }
+
+  function openInventoryEdit(row?: InventoryListRow) {
+    if (row) {
+      setInventoryEditKey(row.key);
+      setInventoryEditDraft(inventoryDraftFromRow(row));
+      return;
+    }
+    if (selectedInventoryRows.length > 1) {
+      setInventoryBulkDrafts((prev) => {
+        const next = { ...prev };
+        selectedInventoryRows.forEach((item) => {
+          next[item.key] = {
+            ...(next[item.key] || {}),
+            qty: next[item.key]?.qty ?? String(item.qty),
+            riskMode: next[item.key]?.riskMode ?? item.setting?.mode ?? "auto",
+            manualRisk: next[item.key]?.manualRisk ?? item.setting?.risk ?? (item.status === "안전" || item.status === "주의" || item.status === "위험" ? item.status : "안전"),
+          };
+        });
+        return next;
+      });
+      setInventoryBulkOpen(true);
+      return;
+    }
+    const selectedRow = selectedInventoryRows[0];
+    if (!selectedRow) {
+      window.alert("수정할 재고 행을 먼저 선택해 주세요.");
+      return;
+    }
+    setInventoryEditKey(selectedRow.key);
+    setInventoryEditDraft(inventoryDraftFromRow(selectedRow));
   }
 
   async function saveInventoryEdit() {
@@ -10203,6 +10240,162 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     } finally {
       setInventorySaving(false);
     }
+  }
+
+  function updateInventoryBulkDraft(key: string, values: Partial<{ qty: string; moveQty: string; targetWarehouseCode: string; riskMode: "auto" | "manual"; manualRisk: InventoryRisk }>) {
+    setInventoryBulkDrafts((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), ...values } }));
+  }
+
+  function applyInventoryBulkCommon() {
+    setInventoryBulkDrafts((prev) => {
+      const next = { ...prev };
+      selectedInventoryRows.forEach((row) => {
+        const current = { ...(next[row.key] || {}) };
+        if (inventoryBulkCommonField === "qty") current.qty = inventoryBulkCommonDraft.qty;
+        if (inventoryBulkCommonField === "transfer") {
+          current.moveQty = inventoryBulkCommonDraft.moveQty;
+          current.targetWarehouseCode = inventoryBulkCommonDraft.targetWarehouseCode;
+        }
+        if (inventoryBulkCommonField === "risk") {
+          current.riskMode = inventoryBulkCommonDraft.riskMode;
+          current.manualRisk = inventoryBulkCommonDraft.manualRisk;
+        }
+        next[row.key] = current;
+      });
+      return next;
+    });
+  }
+
+  async function saveInventoryBulkEdit() {
+    if (!selectedInventoryRows.length) return;
+    const selectedFields = new Set(inventoryBulkFields);
+    setInventorySaving(true);
+    try {
+      const rowsByProduct = new Map<string, InventoryListRow[]>();
+      selectedInventoryRows.forEach((row) => {
+        const key = String(row.product.id || row.productCode);
+        rowsByProduct.set(key, [...(rowsByProduct.get(key) || []), row]);
+      });
+      const nextSettings: Record<string, InventorySetting> = {};
+      for (const rowsForProduct of rowsByProduct.values()) {
+        const first = rowsForProduct[0];
+        if (!first) continue;
+        const inventoryMap = new Map<string, ProductInventoryRow>();
+        (first.product.inventory || []).forEach((stock) => {
+          const code = inventoryWarehouseCode(stock);
+          inventoryMap.set(code, { ...stock, warehouse_code: code, warehouse_name: inventoryWarehouseName(stock), qty: inventoryQty(stock) });
+        });
+        rowsForProduct.forEach((row) => {
+          const draft = inventoryBulkDrafts[row.key] || {};
+          const source = inventoryMap.get(row.warehouseCode) || { warehouse_code: row.warehouseCode, warehouse_name: row.warehouseName, qty: row.qty };
+          let sourceQty = Number(source.qty || 0);
+          if (selectedFields.has("qty")) {
+            const parsedQty = Number(String(draft.qty ?? row.qty).replace(/[^\d.-]/g, ""));
+            if (!Number.isFinite(parsedQty) || parsedQty < 0) throw new Error(`${row.productCode} ${row.warehouseCode} 재고수량을 0 이상 숫자로 입력해 주세요.`);
+            sourceQty = parsedQty;
+          }
+          if (selectedFields.has("transfer")) {
+            const moveQty = Number(String(draft.moveQty || "0").replace(/[^\d.-]/g, ""));
+            if (!Number.isFinite(moveQty) || moveQty < 0) throw new Error(`${row.productCode} ${row.warehouseCode} 이동수량을 0 이상 숫자로 입력해 주세요.`);
+            if (moveQty > 0) {
+              const targetCode = String(draft.targetWarehouseCode || "").trim();
+              if (!targetCode) throw new Error(`${row.productCode} ${row.warehouseCode} 이동 대상 창고를 선택해 주세요.`);
+              const targetWarehouse = inventoryWarehouses.find((warehouse) => warehouse.warehouse_code === targetCode);
+              const target = inventoryMap.get(targetCode);
+              sourceQty = Math.max(0, sourceQty - moveQty);
+              inventoryMap.set(targetCode, { ...target, warehouse_code: targetCode, warehouse_name: targetWarehouse?.warehouse_name || target?.warehouse_name || targetCode, qty: Number(target?.qty || 0) + moveQty });
+            }
+          }
+          inventoryMap.set(row.warehouseCode, { ...source, warehouse_code: row.warehouseCode, warehouse_name: row.warehouseName, qty: sourceQty });
+          if (selectedFields.has("risk")) {
+            const riskMode = draft.riskMode || "auto";
+            const autoRisk: InventoryRisk = row.autoStatus === "주의" || row.autoStatus === "위험" ? row.autoStatus : "안전";
+            nextSettings[row.key] = {
+              mode: riskMode,
+              risk: riskMode === "manual" ? (draft.manualRisk || row.setting?.risk || "안전") : autoRisk,
+              expiresAt: row.setting?.expiresAt || addMonthsToDate(inventoryFilters.date, 3),
+              memo: row.setting?.memo || "",
+            };
+          }
+        });
+        const res = await fetch("/api/fnos/products/master", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            product: {
+              id: first.product.id,
+              product_code: first.productCode,
+              product_name: first.productName,
+              cost_price: first.product.cost_price || 0,
+              standard_price: first.product.standard_price || 0,
+              product_attribute: first.product.product_attribute || "plain",
+            },
+            inventory: Array.from(inventoryMap.values()),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || "재고 선택수정에 실패했습니다.");
+      }
+      if (selectedFields.has("risk")) {
+        setInventorySettings((prev) => ({ ...prev, ...nextSettings }));
+      }
+      invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/dashboard/summary");
+      const refreshed = await cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 0, storageTtl: 10 * 60_000, force: true });
+      setInventoryProducts(refreshed.products || []);
+      setInventoryWarehouses(refreshed.warehouses || []);
+      loadSummary(true);
+      setInventoryBulkOpen(false);
+      setSelectedInventoryKeys([]);
+      setInventoryBulkDrafts({});
+      setMessage(`재고 선택수정 완료: ${selectedInventoryRows.length.toLocaleString("ko-KR")}건`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "재고 선택수정에 실패했습니다.");
+    } finally {
+      setInventorySaving(false);
+    }
+  }
+
+  const inventoryBulkFieldOptions: Array<{ key: InventoryBulkField; label: string }> = [
+    { key: "qty", label: "재고수량" },
+    { key: "transfer", label: "창고이동" },
+    { key: "risk", label: "위험도 자동/수동" },
+  ];
+  const inventoryBulkFieldLabel = (field: InventoryBulkField) => inventoryBulkFieldOptions.find((option) => option.key === field)?.label || field;
+  function toggleInventoryBulkField(field: InventoryBulkField, checked: boolean) {
+    setInventoryBulkFields((prev) => {
+      if (checked) return Array.from(new Set([...prev, field]));
+      const next = prev.filter((item) => item !== field);
+      return next.length ? next : [field];
+    });
+  }
+
+  function inventoryBulkRiskControl(key: string, draft: { riskMode?: "auto" | "manual"; manualRisk?: InventoryRisk }, disabled = false) {
+    const mode = draft.riskMode || "auto";
+    return (
+      <div className="grid gap-2">
+        <select className={modalSelectClass} value={mode} disabled={disabled} onChange={(event) => {
+          const riskMode = event.target.value as "auto" | "manual";
+          if (key === "__common__") setInventoryBulkCommonDraft((prev) => ({ ...prev, riskMode }));
+          else updateInventoryBulkDraft(key, { riskMode });
+        }}>
+          <option value="auto">자동판단</option>
+          <option value="manual">수동</option>
+        </select>
+        {mode === "manual" && (
+          <select className={modalSelectClass} value={draft.manualRisk || "안전"} disabled={disabled} onChange={(event) => {
+            const manualRisk = event.target.value as InventoryRisk;
+            if (key === "__common__") setInventoryBulkCommonDraft((prev) => ({ ...prev, manualRisk }));
+            else updateInventoryBulkDraft(key, { manualRisk });
+          }}>
+            <option value="안전">안전</option>
+            <option value="주의">주의</option>
+            <option value="위험">위험</option>
+          </select>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -10544,7 +10737,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {isInventorySection && (
         <Panel>
           <div className="mb-3 flex flex-wrap items-center gap-3">
-            <ActionButton type="button" onClick={openInventoryEdit}>수정</ActionButton>
+            <ActionButton type="button" onClick={() => openInventoryEdit()}>수정</ActionButton>
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
@@ -10590,7 +10783,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     ["status", "상태"],
                     ["setting", "설정"],
                   ].map(([key, label]) => (
-                    <th key={key} className={`cursor-pointer whitespace-pre-line px-2 py-2 font-black leading-4 select-none ${key === "status" || key === "setting" ? "text-center" : "text-left"}`} onDoubleClick={() => toggleInventorySort(key as InventorySortKey)} title="더블클릭하면 오름차순/내림차순으로 정렬됩니다.">
+                    <th key={key} className={`cursor-pointer whitespace-pre-line px-2 py-2 font-black leading-4 select-none ${["qty", "cost", "amount", "avg", "sales30", "sales90", "days", "status", "setting"].includes(key) ? "text-center" : "text-left"}`} onDoubleClick={() => toggleInventorySort(key as InventorySortKey)} title="더블클릭하면 오름차순/내림차순으로 정렬됩니다.">
                       {label}{inventorySort.key === key ? (inventorySort.direction === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   ))}
@@ -10604,11 +10797,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     <tr
                       key={row.key}
                       ref={(element) => { inventoryRowRefs.current[index] = element; }}
-                      className={`border-b border-slate-100 ${selected ? "bg-orange-50/70" : "hover:bg-orange-50/40"}`}
-                      onDoubleClick={() => { setSelectedInventoryKeys([row.key]); setTimeout(openInventoryEdit, 0); }}
+                      className={`cursor-pointer border-b border-slate-100 ${selected ? "bg-orange-50/70" : "hover:bg-orange-50/40"}`}
+                      onClick={() => openInventoryEdit(row)}
                     >
                       <td
                         className="cursor-pointer px-2 py-2 text-center"
+                        onClick={(event) => event.stopPropagation()}
                         onMouseDown={(event) => handleInventoryRowSelection(index, event)}
                         onMouseEnter={() => handleInventoryRowSelectionDrag(index)}
                         onMouseMove={() => handleInventoryRowSelectionDrag(index)}
@@ -10618,13 +10812,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       <td className="truncate px-2 py-2 font-black text-slate-900" title={row.productCode}>{row.productCode || "-"}</td>
                       <td className="truncate px-2 py-2 font-bold" title={row.productName}>{row.productName || "-"}</td>
                       <td className="truncate px-2 py-2" title={row.warehouseName || row.warehouseCode}>{row.warehouseCode || "-"}</td>
-                      <td className="px-2 py-2 text-right font-black">{row.qty.toLocaleString("ko-KR")}</td>
-                      <td className="px-2 py-2 text-right">{Math.round(row.cost).toLocaleString("ko-KR")}</td>
-                      <td className="px-2 py-2 text-right font-bold">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
-                      <td className="px-2 py-2 text-right">{row.avgDaily ? row.avgDaily.toFixed(2) : "-"}</td>
-                      <td className="px-2 py-2 text-right">{row.sales30.toLocaleString("ko-KR")}</td>
-                      <td className="px-2 py-2 text-right">{row.sales90.toLocaleString("ko-KR")}</td>
-                      <td className="px-2 py-2 text-right">{row.daysToSoldOut === null ? "DB부족" : `${Math.floor(row.daysToSoldOut).toLocaleString("ko-KR")}일`}</td>
+                      <td className="px-2 py-2 text-center font-black">{row.qty.toLocaleString("ko-KR")}</td>
+                      <td className="px-2 py-2 text-center">{Math.round(row.cost).toLocaleString("ko-KR")}</td>
+                      <td className="px-2 py-2 text-center font-bold">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
+                      <td className="px-2 py-2 text-center">{row.avgDaily ? row.avgDaily.toFixed(2) : "-"}</td>
+                      <td className="px-2 py-2 text-center">{row.sales30.toLocaleString("ko-KR")}</td>
+                      <td className="px-2 py-2 text-center">{row.sales90.toLocaleString("ko-KR")}</td>
+                      <td className="px-2 py-2 text-center">{row.daysToSoldOut === null ? "DB부족" : `${Math.floor(row.daysToSoldOut).toLocaleString("ko-KR")}일`}</td>
                       <td className="px-2 py-2 text-center"><StatusBadge tone={inventoryStatusTone(row.status)}>{row.status}</StatusBadge></td>
                       <td className="px-2 py-2 text-center"><StatusBadge tone={row.settingMode === "수동" ? "orange" : "muted"}>{row.settingMode}</StatusBadge></td>
                       <td className="truncate px-2 py-2 text-slate-500" title={row.setting?.memo || ""}>{row.setting?.memo || "-"}</td>
@@ -10867,6 +11061,144 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
           </div>
         </SelectionModal>
+      )}
+
+      {inventoryBulkOpen && (
+        <FormModal
+          title="재고 선택수정"
+          description={`선택 ${selectedInventoryRows.length.toLocaleString("ko-KR")}개 재고 행의 값을 수정합니다.`}
+          onClose={() => setInventoryBulkOpen(false)}
+          size="xl"
+          footer={
+            <div className="flex w-full justify-end gap-2">
+              <ActionButton type="button" variant="secondary" onClick={() => setInventoryBulkOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveInventoryBulkEdit()} disabled={inventorySaving}>F4 저장</ActionButton>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <div className="mb-2 text-sm font-black text-slate-900">변경</div>
+              <ActionButton type="button" variant="secondary" onClick={() => setInventoryBulkFieldPickerOpen(true)}>변경항목선택</ActionButton>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="grid gap-3 md:grid-cols-[220px_1fr_150px]">
+                <select className={modalSelectClass} value={inventoryBulkCommonField} onChange={(event) => setInventoryBulkCommonField(event.target.value as InventoryBulkField)}>
+                  {inventoryBulkFields.map((field) => <option key={field} value={field}>{inventoryBulkFieldLabel(field)}</option>)}
+                </select>
+                <div>
+                  {inventoryBulkCommonField === "qty" && (
+                    <input className={modalInputClass} type="number" value={inventoryBulkCommonDraft.qty} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, qty: event.target.value }))} placeholder="재고수량" />
+                  )}
+                  {inventoryBulkCommonField === "transfer" && (
+                    <div className="grid gap-2 md:grid-cols-[1fr_1.4fr]">
+                      <input className={modalInputClass} type="number" value={inventoryBulkCommonDraft.moveQty} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, moveQty: event.target.value }))} placeholder="이동 수량" />
+                      <select className={modalSelectClass} value={inventoryBulkCommonDraft.targetWarehouseCode} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, targetWarehouseCode: event.target.value }))}>
+                        <option value="">이동 대상 창고</option>
+                        {inventoryWarehouses.map((warehouse) => <option key={warehouse.id || warehouse.warehouse_code} value={warehouse.warehouse_code}>{warehouse.warehouse_code} · {warehouse.warehouse_name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {inventoryBulkCommonField === "risk" && inventoryBulkRiskControl("__common__", inventoryBulkCommonDraft)}
+                </div>
+                <label className="inline-flex items-center justify-center gap-2 text-sm font-black text-slate-600">
+                  <input type="checkbox" className="h-4 w-4 rounded border-blue-300" onChange={(event) => {
+                    if (event.target.checked) {
+                      applyInventoryBulkCommon();
+                      event.currentTarget.checked = false;
+                    }
+                  }} />
+                  공통 적용
+                </label>
+              </div>
+            </div>
+            <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[860px] table-fixed text-xs">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="w-16 px-2 py-2 text-center">
+                      <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={Boolean(selectedInventoryRows.length)} onChange={(event) => { if (!event.target.checked) setSelectedInventoryKeys([]); }} />
+                    </th>
+                    <th className="w-64 px-2 py-2 text-left">수정 선택한 항목</th>
+                    {inventoryBulkFields.includes("qty") && <th className="w-36 px-2 py-2 text-center">재고수량</th>}
+                    {inventoryBulkFields.includes("transfer") && <th className="w-72 px-2 py-2 text-center">창고이동</th>}
+                    {inventoryBulkFields.includes("risk") && <th className="w-52 px-2 py-2 text-center">위험도</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedInventoryRows.map((row, index) => {
+                    const draft = inventoryBulkDrafts[row.key] || {};
+                    return (
+                      <tr key={row.key} className="border-t border-gray-100 bg-sky-50/60">
+                        <td className="px-2 py-2 text-center">
+                          <SelectionNumberButton index={index} selected onMouseDown={() => setSelectedInventoryKeys((prev) => prev.filter((key) => key !== row.key))} onMouseEnter={() => undefined} />
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="truncate font-black text-slate-900" title={row.productName}>{row.productName || "-"}</div>
+                          <div className="truncate text-[11px] font-bold text-slate-400" title={`${row.productCode} · ${row.warehouseCode}`}>{row.productCode} · {row.warehouseCode}</div>
+                        </td>
+                        {inventoryBulkFields.includes("qty") && (
+                          <td className="px-2 py-2">
+                            <input className={modalInputClass} type="number" value={draft.qty ?? String(row.qty)} onChange={(event) => updateInventoryBulkDraft(row.key, { qty: event.target.value })} />
+                          </td>
+                        )}
+                        {inventoryBulkFields.includes("transfer") && (
+                          <td className="px-2 py-2">
+                            <div className="grid gap-2 md:grid-cols-[0.8fr_1.2fr]">
+                              <input className={modalInputClass} type="number" value={draft.moveQty || ""} onChange={(event) => updateInventoryBulkDraft(row.key, { moveQty: event.target.value })} placeholder="이동 수량" />
+                              <select className={modalSelectClass} value={draft.targetWarehouseCode || ""} onChange={(event) => updateInventoryBulkDraft(row.key, { targetWarehouseCode: event.target.value })}>
+                                <option value="">대상 창고</option>
+                                {inventoryWarehouses.filter((warehouse) => warehouse.warehouse_code !== row.warehouseCode).map((warehouse) => <option key={warehouse.id || warehouse.warehouse_code} value={warehouse.warehouse_code}>{warehouse.warehouse_code} · {warehouse.warehouse_name}</option>)}
+                              </select>
+                            </div>
+                          </td>
+                        )}
+                        {inventoryBulkFields.includes("risk") && (
+                          <td className="px-2 py-2">{inventoryBulkRiskControl(row.key, { riskMode: draft.riskMode || row.setting?.mode || "auto", manualRisk: draft.manualRisk || row.setting?.risk || "안전" })}</td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                  {!selectedInventoryRows.length && <tr><td colSpan={2 + inventoryBulkFields.length} className="px-3 py-8 text-center font-bold text-slate-400">선택된 재고 행이 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </FormModal>
+      )}
+
+      {inventoryBulkFieldPickerOpen && (
+        <FormModal
+          title="항목검색"
+          description="재고현황에서 선택수정할 변경항목을 선택합니다."
+          onClose={() => setInventoryBulkFieldPickerOpen(false)}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setInventoryBulkFieldPickerOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => setInventoryBulkFieldPickerOpen(false)}>적용</ActionButton>
+            </>
+          }
+        >
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="grid grid-cols-[48px_1fr] bg-slate-50 text-xs font-black text-slate-600">
+              <label className="flex items-center justify-center border-r border-slate-200 px-2 py-3">
+                <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={inventoryBulkFields.length === inventoryBulkFieldOptions.length} onChange={(event) => setInventoryBulkFields(event.target.checked ? inventoryBulkFieldOptions.map((field) => field.key) : ["qty"])} />
+              </label>
+              <div className="px-3 py-3 text-center">항목명</div>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              {inventoryBulkFieldOptions.map((field) => (
+                <label key={field.key} className="grid cursor-pointer grid-cols-[48px_1fr] border-t border-slate-100 text-sm font-bold hover:bg-orange-50">
+                  <span className="flex items-center justify-center border-r border-slate-100 px-2 py-3">
+                    <input type="checkbox" className="h-4 w-4 rounded border-blue-300" checked={inventoryBulkFields.includes(field.key)} onChange={(event) => toggleInventoryBulkField(field.key, event.target.checked)} />
+                  </span>
+                  <span className="px-3 py-3">{field.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </FormModal>
       )}
 
       {editingInventoryRow && (
@@ -15694,13 +16026,13 @@ function SalesInventoryTable({
         <div className="hidden w-[100px] shrink-0 lg:block" />
         <div className="ml-auto flex shrink-0 items-center justify-end gap-2">{topRight}</div>
       </div>
-      <div className="mb-3 flex items-center gap-2 whitespace-nowrap">
-        <span className="shrink-0 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</span>
+      <div className="mb-1 flex items-center gap-2 whitespace-nowrap">
         <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
         {filterBar}
       </div>
+      <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
       <div className="fn-table-shell overflow-x-auto">
         <table className="w-full min-w-[1180px] table-fixed text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
