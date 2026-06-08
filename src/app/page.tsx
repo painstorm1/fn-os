@@ -18475,6 +18475,33 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setFixedCostBulkOpen(true);
   }
 
+  async function deleteSelectedFixedCosts() {
+    if (!selectedFixedCostRows.length) {
+      setMessage("삭제할 고정비를 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 고정비 ${selectedFixedCostRows.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    let deleted = 0;
+    for (const row of selectedFixedCostRows) {
+      const isLoan = String(row.row_type || "") === "loan";
+      const id = String(isLoan ? row.loan_id || row.id : row.fixed_cost_id || row.id);
+      if (!id) continue;
+      const endpoint = isLoan ? "/api/accounting/ledger/loans" : "/api/accounting/ledger/fixed-costs";
+      const res = await fetch(`${endpoint}?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        window.alert(data.error || "고정비 삭제 실패");
+        continue;
+      }
+      deleted += 1;
+    }
+    setMessage(`고정비 삭제 완료: ${deleted.toLocaleString("ko-KR")}건`);
+    setFixedCostSelectedKeys([]);
+    invalidateAccountingCache();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
+    loadSummary(true);
+  }
+
   function fixedCostBulkValue(row: Record<string, unknown>, field: FixedCostBulkField) {
     if (field === "fixed_cost_name") return fixedCostRowTitle(row);
     if (field === "expected_amount") return String(row.expected_amount || row.amount || "");
@@ -18785,6 +18812,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <ActionButton type="button" variant="secondary" onClick={openFixedCostBulkEdit}>수정</ActionButton>
+                <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedFixedCosts()}>삭제</ActionButton>
                 <span className="text-xs font-bold text-slate-500">선택 {fixedCostSelectedKeys.length.toLocaleString("ko-KR")}개</span>
               </div>
               <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
