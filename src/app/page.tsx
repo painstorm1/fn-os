@@ -624,7 +624,7 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
         </button>
         <span className="text-gray-300">|</span>
         <a
-          href="/?menu=fnSettings&settingsTab=personnel"
+          href="/?menu=fnSettings&settingsTab=info"
           className="hover:text-orange-600"
           title="설정"
         >
