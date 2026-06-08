@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { selectRows } from "@/lib/fnos-db";
 import { FnosDbError } from "@/lib/fnos-db";
-import { deactivateAccountingCategory, upsertAccountingCategory } from "@/lib/accounting-ledger";
+import { accountingCategoryUsage, deactivateAccountingCategory, upsertAccountingCategory } from "@/lib/accounting-ledger";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const id = request.nextUrl.searchParams.get("id") || "";
+    if (id && request.nextUrl.searchParams.get("usage") === "1") {
+      return NextResponse.json({ ok: true, usage: await accountingCategoryUsage(id) });
+    }
     const categories = await selectRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 });
     return NextResponse.json({ ok: true, categories });
   } catch (error) {

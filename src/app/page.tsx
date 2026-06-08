@@ -18322,6 +18322,15 @@ type ExpenseUploadItem = {
 };
 
 const ACCOUNTING_AUTO_SOURCE_TYPE = "auto";
+type AccountingCategoryBulkField = "category_large" | "category_middle" | "affects_profit" | "affects_cashflow" | "affects_card_settlement" | "memo";
+const accountingCategoryBulkFields: Array<{ key: AccountingCategoryBulkField; label: string; type?: "text" | "checkbox" }> = [
+  { key: "category_large", label: "1차 카테고리" },
+  { key: "category_middle", label: "2차 카테고리" },
+  { key: "affects_profit", label: "손익 반영", type: "checkbox" },
+  { key: "affects_cashflow", label: "현금흐름 반영", type: "checkbox" },
+  { key: "affects_card_settlement", label: "카드결제예정 반영", type: "checkbox" },
+  { key: "memo", label: "메모" },
+];
 const jaewookPersonalPaymentItems = [
   ["재욱 교보 무배당베스트라이프종합보험약관", 37369],
   ["재욱 한화 100세 멀티", 62869],
@@ -18483,6 +18492,21 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     affects_cashflow: true,
     affects_card_settlement: false,
     sort_order: "0",
+    memo: "",
+  });
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [categoryLargeInputMode, setCategoryLargeInputMode] = useState<"existing" | "direct">("direct");
+  const [categoryViewMode, setCategoryViewMode] = useState<"compact" | "all">("compact");
+  const [selectedCategoryLarge, setSelectedCategoryLarge] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [categoryBulkOpen, setCategoryBulkOpen] = useState(false);
+  const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
+  const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
+    category_large: "",
+    category_middle: "",
+    affects_profit: true,
+    affects_cashflow: true,
+    affects_card_settlement: false,
     memo: "",
   });
   const [ruleDraft, setRuleDraft] = useState({
@@ -18659,6 +18683,17 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeTab, fixedCostEditorOpen]);
 
+  useEffect(() => {
+    if (!categoryModalOpen) return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "F2" || categoryEditorOpen) return;
+      event.preventDefault();
+      openNewCategoryEditor();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [categoryModalOpen, categoryEditorOpen]);
+
   function expenseFileKey(item: ExpenseUploadItem) {
     return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
   }
@@ -18764,14 +18799,33 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   function resetCategoryDraft() {
     setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    setCategoryLargeInputMode("direct");
   }
 
   function openNewCategoryModal() {
-    resetCategoryDraft();
     setCategoryModalOpen(true);
   }
 
-  function openEditCategoryModal(row: Record<string, unknown>) {
+  function openNewCategoryEditor(large = selectedCategoryLarge) {
+    resetCategoryDraft();
+    if (large) {
+      setCategoryDraft((prev) => ({ ...prev, category_large: large }));
+      setCategoryLargeInputMode("existing");
+    }
+    setCategoryEditorOpen(true);
+  }
+
+  function openEditCategoryModal(row: Record<string, unknown>, scope: "large" | "middle" = "middle") {
+    if (scope === "large") {
+      const large = String(row.category_large || "");
+      const ids = categories.filter((item) => String(item.category_large || "") === large).map((item) => String(item.id || "")).filter(Boolean);
+      setSelectedCategoryIds(ids);
+      setCategoryBulkSelectedFields(["category_large"]);
+      setCategoryBulkDraft((prev) => ({ ...prev, category_large: large }));
+      setCategoryBulkOpen(true);
+      setSelectedCategoryLarge(large);
+      return;
+    }
     setCategoryDraft({
       id: String(row.id || ""),
       category_large: String(row.category_large || ""),
@@ -18784,7 +18838,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       sort_order: String(row.sort_order || 0),
       memo: String(row.memo || ""),
     });
-    setCategoryModalOpen(true);
+    setCategoryLargeInputMode("direct");
+    setCategoryEditorOpen(true);
   }
 
   async function saveManualExpense(event: FormEvent<HTMLFormElement>) {
@@ -18821,12 +18876,22 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(categoryDraft.id ? "카테고리를 수정했습니다." : "카테고리를 추가했습니다.");
     setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    setCategoryEditorOpen(false);
     invalidateAccountingCache();
     loadSummary(true);
   }
 
   async function deleteExpenseCategory(id: string) {
     if (!id) return;
+    const row = categories.find((item) => String(item.id || "") === id);
+    const label = [row?.category_large, row?.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "선택한 카테고리";
+    const usageRes = await fetch(`/api/accounting/ledger/categories?id=${encodeURIComponent(id)}&usage=1`);
+    const usageData = await usageRes.json().catch(() => ({}));
+    const matchCount = Number(usageData?.usage?.total || 0);
+    const message = matchCount > 0
+      ? `${label} 항목 외 총 ${matchCount.toLocaleString("ko-KR")}개 카테고리와 매칭되는 내역이 있습니다. 삭제 하시겠습니까?`
+      : `${label} 카테고리를 삭제하시겠습니까?`;
+    if (!window.confirm(message)) return;
     const res = await fetch(`/api/accounting/ledger/categories?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
@@ -18835,6 +18900,37 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(data.mode === "deactivated" ? "사용 중인 카테고리는 삭제할 수 없습니다." : "카테고리를 삭제했습니다.");
     if (categoryDraft.id === id) setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    setSelectedCategoryIds((prev) => prev.filter((item) => item !== id));
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function saveCategoryBulkEdit() {
+    if (!selectedCategoryIds.length || !categoryBulkSelectedFields.length) return;
+    const selectedRows = categories.filter((row) => selectedCategoryIds.includes(String(row.id || "")));
+    let saved = 0;
+    for (const row of selectedRows) {
+      const payload: Record<string, unknown> = { ...row, id: String(row.id || ""), is_active: true };
+      for (const field of categoryBulkSelectedFields) {
+        payload[field] = categoryBulkDraft[field];
+      }
+      if (String(payload.category_large || "").trim()) {
+        const res = await fetch("/api/accounting/ledger/categories", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || data.ok === false) {
+          setMessage(data.error || "카테고리 다중 수정 실패");
+          return;
+        }
+        saved += 1;
+      }
+    }
+    setMessage(`카테고리 ${saved.toLocaleString("ko-KR")}건을 수정했습니다.`);
+    setCategoryBulkOpen(false);
+    setSelectedCategoryIds([]);
     invalidateAccountingCache();
     loadSummary(true);
   }
@@ -19074,6 +19170,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }
 
   const categories = summary?.categories || [];
+  const sortedCategories = [...categories].sort((left, right) => {
+    const leftKey = `${String(left.category_large || "")}\u0000${String(left.category_middle || "")}`;
+    const rightKey = `${String(right.category_large || "")}\u0000${String(right.category_middle || "")}`;
+    return leftKey.localeCompare(rightKey, "ko-KR", { numeric: true });
+  });
+  const categoryLargeOptions = Array.from(new Set(sortedCategories.map((row) => String(row.category_large || "").trim()).filter(Boolean)));
+  const categoryRowsByLarge = new Map(categoryLargeOptions.map((large) => [large, sortedCategories.filter((row) => String(row.category_large || "").trim() === large)]));
+  const activeCategoryLarge = selectedCategoryLarge || categoryLargeOptions[0] || "";
+  const visibleCategoryRows = categoryViewMode === "all" ? sortedCategories : (categoryRowsByLarge.get(activeCategoryLarge) || []);
   const expenses = summary?.transactions || summary?.expenses || [];
   const ledgerSourceRows = ledgerRows.length ? ledgerRows : expenses;
   const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
@@ -19946,75 +20051,196 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {categoryModalOpen && (
         <FormModal
-          title="비용/입출금 카테고리"
-          description="업로드 파일의 정리 열에서 들어온 분류를 DB 카테고리로 관리합니다."
+          title="비용/입출금 카테고리 설정"
+          description="1차 카테고리와 2차 카테고리를 나눠서 관리합니다."
           onClose={() => setCategoryModalOpen(false)}
-          size="xl"
+          size="full"
           footer={
             <>
               <ActionButton type="button" variant="secondary" onClick={() => setCategoryModalOpen(false)}>닫기</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ActionButton type="button" onClick={() => openNewCategoryEditor()}>F2 추가</ActionButton>
+                <ActionButton type="button" variant="secondary" disabled={!selectedCategoryIds.length} onClick={() => setCategoryBulkOpen((prev) => !prev)}>
+                  다중 수정 {selectedCategoryIds.length ? `${selectedCategoryIds.length}건` : ""}
+                </ActionButton>
+              </div>
+              <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
+                <button type="button" className={`h-9 px-3 ${categoryViewMode === "compact" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("compact")}>간략보기</button>
+                <button type="button" className={`h-9 px-3 ${categoryViewMode === "all" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("all")}>전체보기</button>
+              </div>
+            </div>
+
+            {categoryBulkOpen && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+                  <div className="space-y-2">
+                    <p className="text-xs font-black text-blue-900">변경항목 선택</p>
+                    <div className="grid gap-1">
+                      {accountingCategoryBulkFields.map((field) => (
+                        <label key={field.key} className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                          <input type="checkbox" checked={categoryBulkSelectedFields.includes(field.key)} onChange={(event) => setCategoryBulkSelectedFields((prev) => event.target.checked ? Array.from(new Set([...prev, field.key])) : prev.filter((key) => key !== field.key))} />
+                          {field.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {accountingCategoryBulkFields.filter((field) => categoryBulkSelectedFields.includes(field.key)).map((field) => (
+                      <FormField key={field.key} label={field.label}>
+                        {field.type === "checkbox" ? (
+                          <label className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-bold text-slate-700">
+                            <input type="checkbox" checked={Boolean(categoryBulkDraft[field.key])} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, [field.key]: event.target.checked }))} />
+                            적용
+                          </label>
+                        ) : (
+                          <input className={modalInputClass} value={String(categoryBulkDraft[field.key] || "")} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, [field.key]: event.target.value }))} />
+                        )}
+                      </FormField>
+                    ))}
+                  </div>
+                  <div className="flex items-end">
+                    <ActionButton type="button" disabled={!selectedCategoryIds.length || !categoryBulkSelectedFields.length} onClick={() => void saveCategoryBulkEdit()}>적용</ActionButton>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+              <div className="rounded-xl border border-gray-200">
+                <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
+                  <span className="text-xs font-black text-gray-500">1차 카테고리</span>
+                  <span className="text-xs font-bold text-gray-400">{categoryLargeOptions.length.toLocaleString("ko-KR")}개</span>
+                </div>
+                <div className="max-h-[480px] overflow-y-auto p-2">
+                  {categoryLargeOptions.map((large) => {
+                    const rows = categoryRowsByLarge.get(large) || [];
+                    const selected = activeCategoryLarge === large;
+                    return (
+                      <button key={large} type="button" className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-black ${selected ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200" : "text-slate-700 hover:bg-gray-50"}`} onClick={() => setSelectedCategoryLarge(large)}>
+                        <span className="truncate">{large}</span>
+                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{rows.length}</span>
+                      </button>
+                    );
+                  })}
+                  {!categoryLargeOptions.length && <EmptyState title="카테고리 없음" className="min-h-24 border-0" />}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="w-full min-w-[860px] text-sm">
+                  <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                    <tr>
+                      <th className="w-10 px-3 py-2 text-center">
+                        <input type="checkbox" checked={visibleCategoryRows.length > 0 && visibleCategoryRows.every((row) => selectedCategoryIds.includes(String(row.id || "")))} onChange={(event) => setSelectedCategoryIds((prev) => {
+                          const visibleIds = visibleCategoryRows.map((row) => String(row.id || ""));
+                          return event.target.checked ? Array.from(new Set([...prev, ...visibleIds])) : prev.filter((id) => !visibleIds.includes(id));
+                        })} />
+                      </th>
+                      <th className="px-3 py-2 text-left">1차 카테고리</th>
+                      <th className="px-3 py-2 text-left">2차 카테고리</th>
+                      <th className="px-3 py-2 text-center">반영</th>
+                      <th className="px-3 py-2 text-right">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleCategoryRows.map((row) => {
+                      const id = String(row.id || "");
+                      return (
+                        <tr key={id} className="border-t border-gray-100 hover:bg-orange-50/60">
+                          <td className="px-3 py-2 text-center">
+                            <input type="checkbox" checked={selectedCategoryIds.includes(id)} onChange={(event) => setSelectedCategoryIds((prev) => event.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id))} />
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
+                          <td className="px-3 py-2 text-gray-600">{String(row.category_middle || "-")}</td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex justify-center gap-1">
+                              {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
+                              {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
+                              {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex justify-end gap-2">
+                              <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row, "middle")}>2차 수정</ActionButton>
+                              <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row, "large")}>1차 수정</ActionButton>
+                              <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(id)}>삭제</ActionButton>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!visibleCategoryRows.length && <tr><td colSpan={5} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </FormModal>
+      )}
+
+      {categoryEditorOpen && (
+        <FormModal
+          title={categoryDraft.id ? "카테고리 수정" : "새 카테고리"}
+          description={categoryDraft.id ? "선택한 카테고리 값을 수정합니다." : "기존 1차 카테고리에 추가하거나 직접 입력할 수 있습니다."}
+          onClose={() => setCategoryEditorOpen(false)}
+          size="lg"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setCategoryEditorOpen(false)}>닫기</ActionButton>
               <ActionButton type="submit" form="accounting-category-form">{categoryDraft.id ? "수정" : "추가"}</ActionButton>
             </>
           }
         >
-          <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
-            <div className="overflow-x-auto rounded-xl border border-gray-200">
-              <table className="w-full min-w-[720px] text-sm">
-                <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
-                  <tr><th className="px-3 py-2 text-left">1차 카테고리</th><th className="px-3 py-2 text-left">2차 카테고리</th><th className="px-3 py-2 text-center">반영</th><th className="px-3 py-2 text-right">관리</th></tr>
-                </thead>
-                <tbody>
-                  {categories.map((row) => (
-                    <tr key={String(row.id)} className="border-t border-gray-100 hover:bg-orange-50/60">
-                      <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
-                      <td className="px-3 py-2 text-gray-500">{String(row.category_middle || "-")}</td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="flex justify-center gap-1">
-                          {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
-                          {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
-                          {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-end gap-2">
-                          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row)}>수정</ActionButton>
-                          <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(String(row.id || ""))}>삭제</ActionButton>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!categories.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="카테고리 없음" className="min-h-24" /></td></tr>}
-                </tbody>
-              </table>
-            </div>
-            <form id="accounting-category-form" onSubmit={saveExpenseCategory} className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <SectionHeader title={categoryDraft.id ? "카테고리 수정" : "새 카테고리"} actions={<ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={resetCategoryDraft}>초기화</ActionButton>} />
-              <FormField label="1차 카테고리" required>
-                <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
+          <form id="accounting-category-form" onSubmit={saveExpenseCategory} className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+              <FormField label="1차 입력 방식">
+                <select className={modalSelectClass} value={categoryLargeInputMode} onChange={(event) => setCategoryLargeInputMode(event.target.value as "existing" | "direct")}>
+                  <option value="existing">기존 1차 선택</option>
+                  <option value="direct">직접입력</option>
+                </select>
               </FormField>
+              <FormField label="1차 카테고리" required>
+                {categoryLargeInputMode === "existing" ? (
+                  <select className={modalSelectClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
+                    <option value="">선택</option>
+                    {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+                  </select>
+                ) : (
+                  <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
+                )}
+              </FormField>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
               <FormField label="2차 카테고리">
                 <input className={modalInputClass} value={categoryDraft.category_middle} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
               </FormField>
               <FormField label="정렬 순서">
                 <input className={modalInputClass} type="number" value={categoryDraft.sort_order} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
               </FormField>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            </div>
+            <div className="grid gap-2 md:grid-cols-3">
+              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_profit} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />
                 손익 반영
               </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_cashflow} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />
                 현금흐름 반영
               </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_card_settlement} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />
                 카드결제예정 반영
               </label>
-              <FormField label="메모">
-                <textarea className={modalTextareaClass} value={categoryDraft.memo} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, memo: event.target.value }))} />
-              </FormField>
-            </form>
-          </div>
+            </div>
+            <FormField label="메모">
+              <textarea className={modalTextareaClass} value={categoryDraft.memo} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, memo: event.target.value }))} />
+            </FormField>
+          </form>
         </FormModal>
       )}
 
@@ -20418,6 +20644,7 @@ function ReviewQuickGrid({
             <th className="px-3 py-2 text-right">금액</th>
             <th className="px-3 py-2 text-left">카테고리 1</th>
             <th className="px-3 py-2 text-left">카테고리 2</th>
+            <th className="px-3 py-2 text-center">손익</th>
             <th className="px-3 py-2 text-left">메모</th>
             <th className="px-3 py-2 text-right">관리</th>
           </tr>
@@ -20535,6 +20762,9 @@ function ReviewQuickRow({
           <option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>
           {middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}
         </select>
+      </td>
+      <td className="px-3 py-2 text-center">
+        <input type="checkbox" defaultChecked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} />
       </td>
       <td className="px-3 py-2">
         <input

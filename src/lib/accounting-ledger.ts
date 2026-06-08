@@ -510,8 +510,43 @@ export async function upsertAccountingCategory(row: RawRow) {
   const id = text(row.id);
   const payload = cleanCategoryPayload(row);
   if (!payload.category_large) throw new Error("대분류가 필요합니다.");
-  if (id) return patchRows("accounting_categories", { id: `eq.${id}` }, payload);
+  if (id) {
+    const [previous] = await optionalRows("accounting_categories", { id: `eq.${id}`, limit: 1 });
+    const updated = await patchRows("accounting_categories", { id: `eq.${id}` }, payload);
+    const categoryPatch = {
+      category_large: payload.category_large,
+      category_middle: payload.category_middle,
+      category_small: payload.category_small,
+      updated_at: new Date().toISOString(),
+    };
+    await patchRows("accounting_transactions", { category_id: `eq.${id}` }, categoryPatch).catch(() => []);
+    await patchRows("accounting_category_rules", { category_id: `eq.${id}` }, categoryPatch).catch(() => []);
+    await patchRows("accounting_fixed_costs", { category_large: `eq.${text(previous?.category_large)}`, category_middle: `eq.${text(previous?.category_middle)}` }, categoryPatch).catch(() => []);
+    await patchRows("accounting_loans", { category_large: `eq.${text(previous?.category_large)}`, category_middle: `eq.${text(previous?.category_middle)}` }, categoryPatch).catch(() => []);
+    return updated;
+  }
   return upsertRows("accounting_categories", payload, "category_large,category_middle,category_small");
+}
+
+export async function accountingCategoryUsage(id: string) {
+  if (!id) throw new Error("카테고리 id가 필요합니다.");
+  const [category] = await optionalRows("accounting_categories", { id: `eq.${id}`, limit: 1 });
+  if (!category) return { total: 0, transactions: 0, rules: 0, fixed_costs: 0, loans: 0 };
+  const large = text(category.category_large);
+  const middle = text(category.category_middle);
+  const [transactions, rules, fixedCosts, loans] = await Promise.all([
+    optionalRows("accounting_transactions", { category_id: `eq.${id}`, limit: 5000 }),
+    optionalRows("accounting_category_rules", { category_id: `eq.${id}`, limit: 5000 }),
+    optionalRows("accounting_fixed_costs", { category_large: `eq.${large}`, category_middle: `eq.${middle}`, is_active: "eq.true", limit: 5000 }),
+    optionalRows("accounting_loans", { category_large: `eq.${large}`, category_middle: `eq.${middle}`, is_active: "eq.true", limit: 5000 }),
+  ]);
+  return {
+    total: transactions.length + rules.length + fixedCosts.length + loans.length,
+    transactions: transactions.length,
+    rules: rules.length,
+    fixed_costs: fixedCosts.length,
+    loans: loans.length,
+  };
 }
 
 export async function deactivateAccountingCategory(id: string) {
