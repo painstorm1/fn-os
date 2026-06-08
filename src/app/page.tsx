@@ -2089,6 +2089,27 @@ function fnSettingsAttachmentEndpoint(accountType: FnSettingsAttachmentType, acc
   return `/api/fn-settings/account-files?type=${accountType}&id=${encodeURIComponent(accountId)}`;
 }
 
+function sortFnSettingsAttachments<T extends { file_name?: string }>(items: T[]) {
+  function sortGroup(value: T) {
+    const name = String(value.file_name || "").trim();
+    if (/^[A-Za-z0-9]/.test(name)) return 0;
+    if (/^[가-힣]/u.test(name)) return 1;
+    return 2;
+  }
+  return [...items].sort((left, right) => (
+    sortGroup(left) - sortGroup(right) ||
+    String(left.file_name || "").trim().localeCompare(String(right.file_name || "").trim(), "ko-KR", {
+      numeric: true,
+      sensitivity: "base",
+    })
+  ));
+}
+
+function isFnBusinessRegistrationFile(item?: Pick<AccountAttachment, "file_name"> | null) {
+  const name = String(item?.file_name || "").replace(/\s+/g, "").toLowerCase();
+  return Boolean(name && (/사업자.*등록증/.test(name) || /business.*registration/.test(name)));
+}
+
 async function loadFnSettingsAttachmentCounts(accountType: FnSettingsAttachmentType, ids: string[], onLoaded: (counts: Record<string, number>) => void) {
   const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
   if (!uniqueIds.length) return;
@@ -20996,7 +21017,7 @@ function AccountFileModal({
     try {
       const data = await cachedClientJson<{ ok?: boolean; error?: string; attachments?: AccountAttachment[] }>(endpoint, { ttl: 0, storageTtl: 0, force: true });
       if (data.ok === false) throw new Error(data.error || "첨부파일을 불러오지 못했습니다.");
-      const next = Array.isArray(data.attachments) ? data.attachments : [];
+      const next = sortFnSettingsAttachments(Array.isArray(data.attachments) ? data.attachments : []);
       setAttachments(next);
       onChanged?.(next.length);
     } catch (err) {
@@ -21061,7 +21082,7 @@ function AccountFileModal({
   }
 
   return (
-    <SelectionModal title={`첨부파일 - ${title}`} description={accountType === "personnel" ? "사진, 통장사본, 직원 관련 확인 자료를 보관합니다." : "통장사본, 카드 이미지, 관련 확인 자료를 보관합니다."} onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
+    <SelectionModal title={`첨부파일 - ${title}`} description={accountType === "personnel" ? "사진, 통장사본, 직원 관련 확인 자료를 보관합니다." : accountType === "company" ? "사업자 등록증, 도장 이미지, 본사 확인 자료를 보관합니다." : accountType === "location" ? "사무실, 창고, 임대 관련 확인 자료를 보관합니다." : "통장사본, 카드 이미지, 관련 확인 자료를 보관합니다."} onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
       <div className="max-h-[calc(90vh-150px)] overflow-y-auto">
         <div
           onDragOver={(event) => {
@@ -21858,6 +21879,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const [addressSearchTarget, setAddressSearchTarget] = useState<"company" | "location" | null>(null);
   const [fileTarget, setFileTarget] = useState<{ type: "company" | "location"; id: string; title: string } | null>(null);
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
+  const [companyAttachments, setCompanyAttachments] = useState<AccountAttachment[]>([]);
   const [previewImage, setPreviewImage] = useState<{ title: string; src: string } | null>(null);
   const companyDetailAddressRef = useRef<HTMLInputElement | null>(null);
   const locationDetailAddressRef = useRef<HTMLInputElement | null>(null);
@@ -21906,6 +21928,21 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     localStorage.setItem(locationsStorageKey, JSON.stringify(normalized));
   }
 
+  async function loadCompanyAttachments() {
+    const endpoint = fnSettingsAttachmentEndpoint("company", "head-office");
+    try {
+      const data = await cachedClientJson<{ ok?: boolean; error?: string; attachments?: AccountAttachment[] }>(endpoint, { ttl: 0, storageTtl: 0, force: true });
+      if (data.ok === false) throw new Error(data.error || "");
+      const next = sortFnSettingsAttachments(Array.isArray(data.attachments) ? data.attachments : []);
+      setCompanyAttachments(next);
+      setFileCounts((prev) => ({ ...prev, "head-office": next.length }));
+    } catch {
+      setCompanyAttachments([]);
+    }
+  }
+
+  const businessRegistrationFile = companyAttachments.find(isFnBusinessRegistrationFile);
+
   useEffect(() => {
     try {
       const savedCompany = JSON.parse(localStorage.getItem(companyStorageKey) || "null") as Partial<FnCompanyInfo> | null;
@@ -21921,6 +21958,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   useEffect(() => {
     void loadFnSettingsAttachmentCounts("company", ["head-office"], (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
     void loadFnSettingsAttachmentCounts("location", locations.map((item) => item.id), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
+    void loadCompanyAttachments();
   }, [locations]);
 
   useEffect(() => {
@@ -22065,10 +22103,26 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-center justify-between gap-2">
-              <div><div className="text-sm font-black text-slate-900">도장 이미지</div><div className="mt-1 text-xs font-bold text-slate-500">{company.seal_image_name || "등록된 도장 이미지 없음"}</div></div>
-              <div className="flex items-center gap-2"><ActionButton type="button" variant="secondary" disabled={!company.seal_image_url} onClick={() => setPreviewImage({ title: "도장 이미지", src: company.seal_image_url })}>보기</ActionButton><FolderAttachmentButton count={fileCounts["head-office"]} title="본사 첨부파일" onClick={() => setFileTarget({ type: "company", id: "head-office", title: "본사 정보" })} /></div>
+              <div><div className="text-sm font-black text-slate-900">첨부파일</div><div className="mt-1 text-xs font-bold text-slate-500">사업자 등록증 미리보기</div></div>
+              <div className="flex items-center gap-2"><span className="text-xs font-black text-slate-500">FN파일</span><FolderAttachmentButton count={fileCounts["head-office"]} title="본사 첨부파일" onClick={() => setFileTarget({ type: "company", id: "head-office", title: "본사 정보" })} /></div>
             </div>
-            <div className="mt-4 flex h-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-white">{company.seal_image_url ? <img src={company.seal_image_url} alt="도장 이미지" className="max-h-36 max-w-full object-contain" /> : <span className="text-sm font-bold text-slate-400">도장 이미지 미리보기</span>}</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (businessRegistrationFile) void openAttachment(businessRegistrationFile);
+                else setFileTarget({ type: "company", id: "head-office", title: "본사 정보" });
+              }}
+              className="mt-4 flex h-32 w-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-white px-4 text-center hover:border-orange-300 hover:bg-orange-50"
+            >
+              {businessRegistrationFile ? (
+                <span className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
+                  <FileTypeIcon name={businessRegistrationFile.file_name} />
+                  <span className="min-w-0 truncate">{businessRegistrationFile.file_name || "사업자 등록증"}</span>
+                </span>
+              ) : (
+                <span className="text-sm font-bold text-slate-400">사업자 등록증 파일을 등록해 주세요.</span>
+              )}
+            </button>
           </div>
         </div>
       </Panel>
@@ -22109,7 +22163,6 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="개업연월일"><input className={modalInputClass} inputMode="numeric" value={companyDraft.opened_at} onChange={(event) => updateCompanyDraft("opened_at", event.target.value)} placeholder="20170313" /></FormField>
               <FormField label="전화번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.phone} onChange={(event) => updateCompanyDraft("phone", event.target.value)} placeholder="031-767-5455" /></FormField>
               <FormField label="팩스번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.fax} onChange={(event) => updateCompanyDraft("fax", event.target.value)} placeholder="031-321-1060" /></FormField>
-              <FormField label="도장 이미지" className="md:col-span-2"><div className="flex gap-2"><label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-black text-orange-600 hover:bg-orange-50">이미지 업로드<input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void updateSealImage(file); event.target.value = ""; }} /></label><input className={`${modalInputClass} min-w-0 flex-1`} readOnly value={companyDraft.seal_image_name || ""} placeholder="도장 이미지 파일" /><ActionButton type="button" variant="secondary" disabled={!companyDraft.seal_image_url} onClick={() => setPreviewImage({ title: "도장 이미지", src: companyDraft.seal_image_url })}>보기</ActionButton></div></FormField>
               <FormField label="사업장소재지" className="md:col-span-3"><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("company")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={companyDraft.postal_code || ""} placeholder="우편번호" /><input ref={companyDetailAddressRef} className={modalInputClass} value={companyDraft.detail_address || ""} onChange={(event) => updateCompanyDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(companyDraft)} placeholder="주소" /></div></FormField>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -22135,7 +22188,10 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       )}
 
       {addressSearchTarget && <DaumPostcodeModal onClose={() => setAddressSearchTarget(null)} onSelect={applyPostcode} />}
-      {fileTarget && <AccountFileModal accountType={fileTarget.type} accountId={fileTarget.id} title={fileTarget.title} onClose={() => setFileTarget(null)} onChanged={(count) => setFileCounts((prev) => ({ ...prev, [fileTarget.id]: count }))} />}
+      {fileTarget && <AccountFileModal accountType={fileTarget.type} accountId={fileTarget.id} title={fileTarget.title} onClose={() => setFileTarget(null)} onChanged={(count) => {
+        setFileCounts((prev) => ({ ...prev, [fileTarget.id]: count }));
+        if (fileTarget.type === "company") void loadCompanyAttachments();
+      }} />}
       {previewImage && <FnInfoImagePreviewModal title={previewImage.title} src={previewImage.src} onClose={() => setPreviewImage(null)} />}
     </div>
   );
