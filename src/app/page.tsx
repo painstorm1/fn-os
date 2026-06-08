@@ -9831,43 +9831,44 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
-      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:grid;grid-template-columns:78px 180px 112px minmax(260px,1fr);gap:7px;align-items:center}.filters{display:grid;grid-template-columns:minmax(210px,1fr) minmax(180px,.75fr) minmax(210px,1fr) 318px 70px 42px;gap:7px;align-items:center}
-      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:42px;background:#15803d;color:#fff}.btn.tiny{width:28px;padding:0}.period{display:grid;grid-template-columns:28px 78px 1fr 1fr 28px;gap:5px}
+      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
+      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:34px;background:#15803d;color:#fff;font-size:11px}.btn.tiny{width:30px;padding:0}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
-      .summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.summaryCard{min-height:104px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:10px 12px;display:grid;grid-template-rows:auto 1fr auto;gap:5px}.summaryCard.salesCard{border-left:4px solid #0284c7}.summaryCard.purchaseCard{border-left:4px solid #f97316}.summaryTitle{font-size:17px;font-weight:950}.summaryTitle.salesText{color:#0369a1}.summaryTitle.purchaseText{color:#c2410c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 16px;align-items:center}.metricLabel{font-size:11px;color:#64748b;font-weight:900}.metricValue{margin-left:6px;font-size:15px;font-weight:950}.totalLine{font-size:15px;font-weight:950}.scopeLine{display:flex;gap:14px;align-items:center;color:#334155;font-size:11px;font-weight:900}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:12px;font-weight:950;cursor:pointer;padding:0;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:3px}
-      .tableWrap{max-height:calc(100vh - 235px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}
-      .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(980px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:14px 16px}.pickerTitle{font-size:18px;font-weight:900}.pickerBody{padding:14px 16px;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 72px 72px;gap:8px;margin-bottom:10px}.pickerTabs{display:flex;gap:6px;margin-bottom:10px}.pickerTabs button{height:30px;border:0;border-radius:7px;background:#fff;color:#475569;padding:0 10px;font-size:12px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.picker table{min-width:760px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}
-      @media(max-width:1380px){.topFilters,.filters{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:1fr}.summaryCard{height:auto;min-height:104px}}
+      .summary{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin:18px 2px}.summaryCard{min-height:164px;border:1px solid #d7e3ea;border-radius:10px;padding:22px 28px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center}.summaryCard.salesCard{background:#edfaff}.summaryCard.purchaseCard{background:#ffc7aa;border-color:#f4b08f}.summaryTitle{font-size:38px;line-height:1;font-weight:500;letter-spacing:0}.summaryTitle.salesText{color:#1686ff}.summaryTitle.purchaseText{color:#f97316}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px;align-items:center}.metricLabel{font-size:15px;color:#0f172a;font-weight:500}.metricValue{margin-left:8px;font-size:24px;font-weight:500}.totalLine{grid-column:1/3;font-size:24px;font-weight:500}.scopeLine{grid-column:1/3;display:flex;gap:44px;align-items:center;color:#0f172a;font-size:17px;font-weight:500}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:500;cursor:pointer;padding:0}.rankList{display:grid;gap:9px}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 150px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:8px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:180px;border-radius:8px;background:rgba(255,255,255,.82);padding:20px 14px;text-align:center;color:#111827}.purchaseSideLabel{font-size:18px}.purchaseSideDate{font-size:28px;line-height:1.1;margin:8px 0 24px}.purchaseSideCycle{font-size:18px}.purchaseSideDays{font-size:30px;line-height:1.1}
+      .tableWrap{max-height:calc(100vh - 310px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}
+      .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
+      @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
     </style></head><body><div class="app">
       <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><button class="btn secondary" onclick="window.close()">닫기</button></div>
       <div class="panel">
         <div class="topFilters">
-          <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
+          <select id="type" class="field"><option value="sales">판매</option><option value="purchase">구매</option><option value="all">전체</option></select>
           <select id="basis" class="field"><option value="actual">BOM설정 기준</option><option value="entry">입력 품목 기준</option></select>
           <select id="group" class="field"><option value="detail">상세내역</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
           <div id="selectedBar" class="selectedBar"></div>
         </div>
         <div class="filters" style="margin-top:8px">
-          <input id="product" class="field" placeholder="품목 검색">
-          <input id="warehouse" class="field" placeholder="창고 검색">
-          <input id="customer" class="field" placeholder="거래처 검색">
-          <div class="period"><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><input id="fromMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${today}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${today}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
+          <input id="product" class="field searchInput" placeholder="품목 검색">
+          <input id="warehouse" class="field searchInput" placeholder="창고 검색">
+          <input id="customer" class="field searchInput" placeholder="거래처 검색">
           <button id="search" class="btn">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button>
+          <div class="filterSpacer"></div>
+          <div class="period"><select id="periodMode" class="field"><option value="day">일별</option><option value="month">월별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${thisMonth}" style="display:none"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}" style="display:none"><input id="fromDay" class="field periodInput" type="date" value="${today}"><input id="toDay" class="field periodInput" type="date" value="${today}"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
       </div>
       <div class="summary">
-        <div class="summaryCard salesCard"><div class="summaryTitle salesText">판매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div></div><div id="salesScope" class="scopeLine"></div></div>
-        <div class="summaryCard purchaseCard"><div class="summaryTitle purchaseText">구매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="purchaseQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="purchaseAvg" class="metricValue">0원</span></div><div id="purchaseAmount" class="totalLine">총 금액 0원</div></div><div id="purchaseScope" class="scopeLine"></div></div>
+        <div class="summaryCard salesCard"><div><div class="summaryTitle salesText">판매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div><div id="salesScope" class="scopeLine"></div></div></div><div id="salesRank" class="rankList"></div></div>
+        <div class="summaryCard purchaseCard"><div><div class="summaryTitle purchaseText">구매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="purchaseQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="purchaseAvg" class="metricValue">0원</span></div><div id="purchaseAmount" class="totalLine">총 금액 0원</div><div id="purchaseScope" class="scopeLine"></div></div></div><div id="purchaseSide" class="purchaseSide"></div></div>
       </div>
       <div class="tableWrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
       <div id="pickerBackdrop" class="pickerBackdrop">
         <div class="picker">
           <div class="pickerHead"><div><div id="pickerTitle" class="pickerTitle">선택</div><div class="sub">방향키로 이동, Enter로 선택/적용, 클릭으로 다중 선택합니다.</div></div><button id="pickerClose" class="btn secondary" type="button">닫기</button></div>
           <div class="pickerBody">
-            <div class="pickerSearch"><input id="pickerQuery" class="field" placeholder="검색어"><button id="pickerApply" class="btn" type="button">적용</button><button id="pickerClear" class="btn secondary" type="button">해제</button></div>
-            <div id="pickerTabs" class="pickerTabs"><button type="button" data-attr="all" class="active">전체</button><button type="button" data-attr="plain">일반</button><button type="button" data-attr="set">SET</button><button type="button" data-attr="rg">RG</button></div>
+            <div class="pickerSearch"><input id="pickerQuery" class="field" placeholder="검색어"><button id="pickerSearchButton" class="btn" type="button">찾기</button></div>
             <div class="tableWrap" style="max-height:54vh"><table><thead id="pickerHeadRow"></thead><tbody id="pickerBody"></tbody></table></div>
           </div>
+          <div class="pickerFooter"><div class="pickerTabs"><button id="pickerApply" class="pickerPrimary" type="button">선택 적용</button><span id="pickerAttrButtons"><button type="button" data-attr="plain" class="active">일반</button><button type="button" data-attr="set">SET</button><button type="button" data-attr="rg">RG</button><button type="button" data-attr="import">수입연동</button><button type="button" data-attr="all">전체</button></span></div><button id="pickerCloseFooter" class="pickerCloseFooter" type="button">닫기</button></div>
         </div>
       </div>
     </div><script>
@@ -9883,6 +9884,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let activePicker = "product";
       let pickerIndex = 0;
       let pickerAttr = "all";
+      let pickerSearchedQuery = "";
       let lastRows = [];
       const pad = (n) => String(n).padStart(2, "0");
       const formatDate = (date) => date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
@@ -10003,6 +10005,29 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById(type + "Avg").textContent = krw(avg);
         document.getElementById(type + "Amount").textContent = "총 금액 " + krw(amount);
         document.getElementById(type + "Scope").innerHTML = "<span>거래처 <button class='scopeButton' data-group='customer'>" + fmt.format(customers.length) + "</button></span><span>창고 <button class='scopeButton' data-group='warehouse'>" + esc(warehouses.join(" ") || "-") + "</button></span>";
+        if (type === "sales") renderSalesRank(rows);
+        if (type === "purchase") renderPurchaseSide(rows);
+      }
+      function renderSalesRank(rows){
+        const grouped = aggregate(rows, (row) => row.customer);
+        const top = grouped.slice(0, 5);
+        const max = Math.max(1, ...top.map((item) => item.salesAmount + item.purchaseAmount));
+        const colors = ["#f97316", "#0ea5e9", "#22c55e", "#f43f5e", "#64748b"];
+        document.getElementById("salesRank").innerHTML = top.map((item, index) => {
+          const amount = item.salesAmount + item.purchaseAmount;
+          const width = Math.max(8, Math.round(amount / max * 100));
+          return "<div class='rankRow'><div><span style='color:"+colors[index]+"'>●</span> <span class='rankName'>"+esc(item.key)+"</span><div class='rankBar' style='width:"+width+"%;background:"+colors[index]+"'></div></div><div class='rankAmount'>₩"+fmt.format(Math.round(amount))+"</div></div>";
+        }).join("") || "<div class='muted'>거래처 내역이 없습니다.</div>";
+      }
+      function renderPurchaseSide(rows){
+        const latest = rows.reduce((max,row)=> row.date && row.date > max ? row.date : max, "");
+        const dates = uniqueCodes(rows, "date");
+        let avgCycle = 0;
+        if (dates.length > 1) {
+          const gaps = dates.slice(1).map((date, index) => Math.max(0, Math.round((new Date(date).getTime() - new Date(dates[index]).getTime()) / 86400000)));
+          avgCycle = Math.round(gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length);
+        }
+        document.getElementById("purchaseSide").innerHTML = "<div class='purchaseSideLabel'>최근입고</div><div class='purchaseSideDate'>"+esc(latest || "-")+"</div><div class='purchaseSideCycle'>평균 입고주기</div><div class='purchaseSideDays'>"+fmt.format(avgCycle)+"일</div>";
       }
       function rowsHtml(rows){
         return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
@@ -10040,7 +10065,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return customerOptions;
       }
       function pickerMatches(){
-        const query = text(document.getElementById("pickerQuery").value.trim());
+        const query = text(pickerSearchedQuery);
         return optionsFor(activePicker).filter((item) => {
           if (activePicker === "product" && pickerAttr !== "all" && text(item.attribute) !== pickerAttr) return false;
           return !query || text((item.code || "") + " " + (item.name || "")).includes(query);
@@ -10050,23 +10075,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const rows = pickerMatches();
         const picked = selectedSet(activePicker);
         pickerIndex = Math.max(0, Math.min(pickerIndex, Math.max(0, rows.length - 1)));
-        document.getElementById("pickerTabs").style.display = activePicker === "product" ? "flex" : "none";
-        document.getElementById("pickerHeadRow").innerHTML = activePicker === "product" ? "<tr><th style='width:54px'>선택</th><th>품목코드</th><th>품목명</th><th class='num'>입고단가</th><th class='num'>출고단가</th><th class='num'>BOM</th></tr>" : "<tr><th style='width:54px'>선택</th><th>코드</th><th>이름</th></tr>";
+        document.getElementById("pickerAttrButtons").style.display = activePicker === "product" ? "inline-flex" : "none";
+        document.getElementById("pickerApply").classList.toggle("enabled", Boolean(selected[activePicker].length));
+        const allSelected = rows.length > 0 && rows.every((item) => picked.has(optionKey(item)));
+        document.getElementById("pickerHeadRow").innerHTML = activePicker === "product" ? "<tr><th style='width:44px'><input id='pickerAll' type='checkbox' "+(allSelected ? "checked" : "")+"></th><th style='width:105px'>품목코드</th><th>품목명</th><th class='num' style='width:110px'>입고단가</th><th class='num' style='width:110px'>출고단가</th></tr>" : "<tr><th style='width:44px'><input id='pickerAll' type='checkbox' "+(allSelected ? "checked" : "")+"></th><th style='width:130px'>코드</th><th>이름</th></tr>";
         document.getElementById("pickerBody").innerHTML = rows.map((item, index) => {
           const isPicked = picked.has(optionKey(item));
-          if (activePicker === "product") return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='badge "+(isPicked ? "sales" : "purchase")+"'>"+(isPicked ? "선택" : index+1)+"</span></td><td>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td><td class='num'>"+fmt.format(Math.round(item.cost||0))+"</td><td class='num'>"+fmt.format(Math.round(item.price||0))+"</td><td class='num'>"+fmt.format(item.bomCount||0)+"</td></tr>";
-          return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='badge "+(isPicked ? "sales" : "purchase")+"'>"+(isPicked ? "선택" : index+1)+"</span></td><td>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td></tr>";
-        }).join("") || "<tr><td colspan='6' class='muted'>검색되는 항목이 없습니다.</td></tr>";
+          if (activePicker === "product") return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='selectNumber "+(isPicked ? "selected" : "")+"'>"+(index+1)+"</span></td><td class='code'>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td><td class='num'>₩"+fmt.format(Math.round(item.cost||0))+"</td><td class='num'>₩"+fmt.format(Math.round(item.price||0))+"</td></tr>";
+          return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='selectNumber "+(isPicked ? "selected" : "")+"'>"+(index+1)+"</span></td><td class='code'>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td></tr>";
+        }).join("") || "<tr><td colspan='5' class='muted'>"+(pickerSearchedQuery ? esc(pickerSearchedQuery)+"로 검색되는 항목이 없습니다." : "선택할 항목이 없습니다.")+"</td></tr>";
         document.querySelectorAll("#pickerBody tr[data-index]").forEach((row) => row.addEventListener("click", () => togglePicker(Number(row.dataset.index))));
+        const all = document.getElementById("pickerAll");
+        if (all) all.addEventListener("change", (event) => {
+          selected[activePicker] = event.target.checked ? rows.slice() : [];
+          renderPicker();
+        });
       }
       function openPicker(kind){
         activePicker = kind;
         if (kind === "product") {
           pickerAttr = "all";
-          document.querySelectorAll(".pickerTabs button").forEach((item) => item.classList.toggle("active", item.dataset.attr === "all"));
+          document.querySelectorAll("#pickerAttrButtons button").forEach((item) => item.classList.toggle("active", item.dataset.attr === "all"));
         }
         document.getElementById("pickerTitle").textContent = kind === "product" ? "품목 선택" : kind === "warehouse" ? "창고 선택" : "거래처 선택";
         document.getElementById("pickerQuery").value = selected[kind].length ? "" : document.getElementById(kind).value.trim();
+        pickerSearchedQuery = document.getElementById("pickerQuery").value.trim();
         pickerIndex = 0;
         document.getElementById("pickerBackdrop").classList.add("open");
         renderPicker();
@@ -10091,6 +10124,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById(activePicker).value = "";
         renderPicker();
       }
+      function runPickerSearch(){
+        pickerSearchedQuery = document.getElementById("pickerQuery").value.trim();
+        pickerIndex = 0;
+        selected[activePicker] = [];
+        renderPicker();
+      }
       function clearSelectedForInput(kind){ selected[kind] = []; }
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") { if (event.target.id === "pickerQuery") return; if (event.target.id === "product" || event.target.id === "warehouse" || event.target.id === "customer") { event.preventDefault(); openPicker(event.target.id); } else render(); } }));
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",(event)=>{ if (event.target.id !== "pickerQuery") render(); }));
@@ -10106,19 +10145,26 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       document.getElementById("periodPrev").addEventListener("click", () => shiftPeriod(-1));
       document.getElementById("periodNext").addEventListener("click", () => shiftPeriod(1));
       document.getElementById("pickerClose").addEventListener("click", closePicker);
+      document.getElementById("pickerCloseFooter").addEventListener("click", closePicker);
       document.getElementById("pickerApply").addEventListener("click", applyPicker);
-      document.getElementById("pickerClear").addEventListener("click", clearPicker);
-      document.getElementById("pickerQuery").addEventListener("input", () => { pickerIndex = 0; renderPicker(); });
+      document.getElementById("pickerSearchButton").addEventListener("click", runPickerSearch);
       document.getElementById("pickerQuery").addEventListener("keydown", (event) => {
         if (event.key === "ArrowDown") { event.preventDefault(); pickerIndex += 1; renderPicker(); }
         if (event.key === "ArrowUp") { event.preventDefault(); pickerIndex -= 1; renderPicker(); }
-        if (event.key === "Enter") { event.preventDefault(); const item = pickerMatches()[pickerIndex]; if (item && selectedSet(activePicker).has(optionKey(item))) applyPicker(); else togglePicker(); }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const keyword = document.getElementById("pickerQuery").value.trim();
+          if (keyword !== pickerSearchedQuery) { runPickerSearch(); return; }
+          const item = pickerMatches()[pickerIndex];
+          if (item && selectedSet(activePicker).has(optionKey(item))) applyPicker(); else togglePicker();
+        }
         if (event.key === "Escape") { event.preventDefault(); closePicker(); }
       });
-      document.querySelectorAll(".pickerTabs button").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("#pickerAttrButtons button").forEach((button) => button.addEventListener("click", () => {
         pickerAttr = button.dataset.attr || "all";
-        document.querySelectorAll(".pickerTabs button").forEach((item) => item.classList.toggle("active", item === button));
+        document.querySelectorAll("#pickerAttrButtons button").forEach((item) => item.classList.toggle("active", item === button));
         pickerIndex = 0;
+        selected[activePicker] = [];
         renderPicker();
       }));
       document.getElementById("search").addEventListener("click",render);
@@ -10284,12 +10330,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return `${warehouse.warehouse_code}-${String(warehouse.id || index)}`;
   };
   const inventoryWarehousePickerOptions = inventoryWarehouses.filter((warehouse) => {
-    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.query : inventoryFilters.warehouse).trim();
+    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.searchedQuery : inventoryFilters.warehouse).trim();
     if (!needle) return true;
     return inventoryMatchesTerms(`${warehouse.warehouse_code} ${warehouse.warehouse_name}`, needle);
   }).slice(0, 50);
   const inventoryProductPickerOptions = inventoryProducts.filter((product) => {
-    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.query : inventoryFilters.product).trim();
+    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.searchedQuery : inventoryFilters.product).trim();
     if (!inventoryProductMatchesAttribute(product, inventoryPicker?.attribute || "all")) return false;
     if (!needle) return true;
     return inventoryMatchesTerms(`${inventoryProductCode(product)} ${inventoryProductName(product)}`, needle);
@@ -11447,7 +11493,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                           <td className="py-2 pr-4 text-right font-semibold text-slate-700">{Number(product.standard_price || 0) ? krw(Number(product.standard_price || 0)) : "-"}</td>
                         </tr>
                       );
-                    }) : <tr><td colSpan={5} className="px-4 py-8 text-center text-sm font-bold text-slate-500">{inventoryPicker.query.trim() ? `${inventoryPicker.query.trim()}로 검색되는 품목이 없습니다.` : "선택할 품목이 없습니다."}</td></tr>
+                    }) : <tr><td colSpan={5} className="px-4 py-8 text-center text-sm font-bold text-slate-500">{inventoryPicker.searchedQuery.trim() ? `${inventoryPicker.searchedQuery.trim()}로 검색되는 품목이 없습니다.` : "선택할 품목이 없습니다."}</td></tr>
                   )}
                 </tbody>
               </table>
