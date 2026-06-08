@@ -9765,6 +9765,145 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setHistoryFilters({ ...nextFilters, customer: nextFilters.customer.trim() === historyCustomerSelection.label ? historyCustomerSelection.filter : nextFilters.customer });
   }
 
+  function openTradeAnalysisPopup() {
+    const productMap = new Map(inventoryProducts.map((product) => [inventoryProductCode(product), product]));
+    const productNameMap = new Map(inventoryProducts.map((product) => [inventoryProductName(product), product]));
+    const normalizeAnalysisRow = (row: Record<string, unknown>, type: "sales" | "purchase") => {
+      const entryMode: SalesPurchaseMode = type === "sales" ? "sales" : "purchases";
+      const productCode = entryRowProductCode(row);
+      const productName = entryRowProduct(row);
+      const product = productMap.get(productCode) || productNameMap.get(productName);
+      const qty = entryRowQty(row);
+      const amount = entryRowAmount(row);
+      const rawPrice = Number(row.price ?? row.unit_price ?? row.in_price ?? row.out_price ?? 0);
+      const unitPrice = rawPrice || (qty ? amount / qty : 0);
+      return {
+        type,
+        typeLabel: type === "sales" ? "판매" : "구매",
+        date: entryRowDate(row),
+        month: entryRowDate(row).slice(0, 7),
+        no: entryRowSourceRefBase(row, entryMode),
+        customer: entryRowCustomer(row, entryMode),
+        warehouse: entryRowWarehouse(row),
+        productCode,
+        productName,
+        qty,
+        unitPrice,
+        amount,
+        memo: entryRowMemo(row),
+        sourceProductCode: productCode,
+        sourceProductName: productName,
+        sourceQty: qty,
+        sourceAmount: amount,
+        bom: (product?.bom || []).map((item) => ({
+          componentCode: String(item.component_product_code || item.component_sku || "").trim(),
+          componentName: String(item.component_product_name || item.component_product_code || item.component_sku || "").trim(),
+          qtyPerUnit: Number(item.qty_per_unit || 1) || 1,
+        })).filter((item) => item.componentCode || item.componentName),
+      };
+    };
+    const baseRows = [
+      ...((summary?.recent_sales_lines || summary?.sales_inventory_basis || summary?.recent_sales || []) as Array<Record<string, unknown>>).map((row) => normalizeAnalysisRow(row, "sales")),
+      ...((summary?.recent_purchase_lines || summary?.recent_purchases || []) as Array<Record<string, unknown>>).map((row) => normalizeAnalysisRow(row, "purchase")),
+    ];
+    const safeJson = JSON.stringify(baseRows).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const today = entryDateToday();
+    const thisMonth = today.slice(0, 7);
+    const title = "거래 분석";
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
+      .app{min-height:100vh;padding:24px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:13px;font-weight:700}
+      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.filters{display:grid;grid-template-columns:120px 170px 170px 130px 130px repeat(3,minmax(120px,1fr)) 70px;gap:8px;align-items:center}
+      .field{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 10px;font-weight:700;color:#0f172a}.btn{height:38px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}
+      .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}.metric{border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:12px}.metric .label{font-size:12px;color:#64748b;font-weight:900}.metric .value{margin-top:6px;font-size:20px;font-weight:900}
+      .tableWrap{max-height:calc(100vh - 260px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1320px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.sales{background:#e0f2fe;color:#0369a1}.purchase{background:#fef3c7;color:#b45309}.note{margin-top:10px;color:#64748b;font-size:12px;font-weight:700;line-height:1.5}
+      @media(max-width:1400px){.filters{grid-template-columns:repeat(4,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}}
+    </style></head><body><div class="app">
+      <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><button class="btn secondary" onclick="window.close()">닫기</button></div>
+      <div class="panel">
+        <div class="filters">
+          <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
+          <select id="basis" class="field"><option value="actual">BOM 실제재고품목 기준</option><option value="entry">판매/구매 입력품목 기준</option></select>
+          <select id="group" class="field"><option value="detail">상세내역</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
+          <input id="from" class="field" type="date" value="${thisMonth}-01"><input id="to" class="field" type="date" value="${today}">
+          <input id="product" class="field" placeholder="품목/SKU"><input id="warehouse" class="field" placeholder="창고"><input id="customer" class="field" placeholder="거래처"><button id="search" class="btn">검색</button>
+        </div>
+        <div class="note">BOM 실제재고품목 기준은 SET/RG 등 BOM 구성품이 있으면 구성품 코드/명과 실제 출고·입고 수량으로 풀어 보여줍니다. 금액/단가는 원 전표 라인의 값을 함께 표시합니다.</div>
+      </div>
+      <div class="metrics"><div class="metric"><div class="label">라인수</div><div id="mCount" class="value">0</div></div><div class="metric"><div class="label">수량합계</div><div id="mQty" class="value">0</div></div><div class="metric"><div class="label">금액합계</div><div id="mAmount" class="value">0</div></div><div class="metric"><div class="label">거래처수</div><div id="mCustomers" class="value">0</div></div><div class="metric"><div class="label">창고수</div><div id="mWarehouses" class="value">0</div></div></div>
+      <div class="tableWrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+    </div><script>
+      const baseRows = ${safeJson};
+      const fmt = new Intl.NumberFormat("ko-KR");
+      const krw = (n) => "₩" + fmt.format(Math.round(Number(n)||0));
+      const text = (v) => String(v ?? "").toLowerCase();
+      const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[ch]));
+      function rowsByBasis(){
+        const basis = document.getElementById("basis").value;
+        if (basis === "entry") return baseRows.map((row) => ({...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}));
+        return baseRows.flatMap((row) => row.bom && row.bom.length ? row.bom.map((item) => ({...row, actualProductCode: item.componentCode || row.productCode, actualProductName: item.componentName || item.componentCode || row.productName, actualQty: row.qty * item.qtyPerUnit, isBom: true})) : [{...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}]);
+      }
+      function filtered(){
+        const type = document.getElementById("type").value;
+        const from = document.getElementById("from").value;
+        const to = document.getElementById("to").value;
+        const product = text(document.getElementById("product").value.trim());
+        const warehouse = text(document.getElementById("warehouse").value.trim());
+        const customer = text(document.getElementById("customer").value.trim());
+        return rowsByBasis().filter((row) => {
+          if (type !== "all" && row.type !== type) return false;
+          if (from && row.date < from) return false;
+          if (to && row.date > to) return false;
+          if (product && !text(row.actualProductCode + " " + row.actualProductName + " " + row.sourceProductCode + " " + row.sourceProductName).includes(product)) return false;
+          if (warehouse && !text(row.warehouse).includes(warehouse)) return false;
+          if (customer && !text(row.customer).includes(customer)) return false;
+          return true;
+        });
+      }
+      function aggregate(rows, keyFn){
+        const map = new Map();
+        rows.forEach((row) => {
+          const key = keyFn(row) || "-";
+          const item = map.get(key) || { key, count: 0, qty: 0, amount: 0, customers: new Set(), warehouses: new Set(), latest: "" };
+          item.count += 1; item.qty += Number(row.actualQty || row.qty || 0); item.amount += Number(row.amount || 0);
+          if (row.customer) item.customers.add(row.customer); if (row.warehouse) item.warehouses.add(row.warehouse); if (row.date > item.latest) item.latest = row.date;
+          map.set(key, item);
+        });
+        return Array.from(map.values()).sort((a,b) => b.amount - a.amount);
+      }
+      function render(){
+        const group = document.getElementById("group").value;
+        const rows = filtered();
+        document.getElementById("mCount").textContent = fmt.format(rows.length);
+        document.getElementById("mQty").textContent = fmt.format(rows.reduce((s,r)=>s+Number(r.actualQty||r.qty||0),0));
+        document.getElementById("mAmount").textContent = krw(rows.reduce((s,r)=>s+Number(r.amount||0),0));
+        document.getElementById("mCustomers").textContent = fmt.format(new Set(rows.map(r=>r.customer).filter(Boolean)).size);
+        document.getElementById("mWarehouses").textContent = fmt.format(new Set(rows.map(r=>r.warehouse).filter(Boolean)).size);
+        if (group === "detail") {
+          thead.innerHTML = "<tr><th>일자</th><th>구분</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량</th><th class='num'>단가</th><th class='num'>금액</th><th>원 입력품목</th><th>메모</th></tr>";
+          tbody.innerHTML = rows.sort((a,b)=>String(b.date).localeCompare(String(a.date))).map((r)=>"<tr><td>"+esc(r.date)+"</td><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(r.unitPrice||0))+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("");
+          return;
+        }
+        const keyFns = { product:r=>(r.actualProductCode||"-")+" / "+(r.actualProductName||"-"), warehouse:r=>r.warehouse, customer:r=>r.customer, date:r=>r.date, month:r=>r.month };
+        const grouped = aggregate(rows, keyFns[group]);
+        thead.innerHTML = "<tr><th>기준</th><th class='num'>라인수</th><th class='num'>수량합계</th><th class='num'>금액합계</th><th class='num'>거래처수</th><th class='num'>창고수</th><th>최근거래일</th></tr>";
+        tbody.innerHTML = grouped.map((r)=>"<tr><td>"+esc(r.key)+"</td><td class='num'>"+fmt.format(r.count)+"</td><td class='num'>"+fmt.format(r.qty)+"</td><td class='num'>"+krw(r.amount)+"</td><td class='num'>"+fmt.format(r.customers.size)+"</td><td class='num'>"+fmt.format(r.warehouses.size)+"</td><td>"+esc(r.latest||"-")+"</td></tr>").join("");
+      }
+      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") render(); }));
+      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",render));
+      document.getElementById("search").addEventListener("click",render);
+      render();
+    </script></body></html>`;
+    const popup = window.open("", "fnosTradeAnalysis", "width=1500,height=900");
+    if (!popup) {
+      window.alert("거래 분석 팝업을 열 수 없습니다. 브라우저 팝업 차단을 확인해 주세요.");
+      return;
+    }
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+  }
+
   function openEntryEditModal(row: Record<string, unknown>) {
     const groupKey = entryRowKey(row, historyMode);
     const sourceRefBase = entryRowSourceRefBase(row, historyMode);
@@ -10404,9 +10543,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         title={sectionTitle}
         description={sectionDescription}
         actions={
-          <ActionButton type="button" variant="primary" onClick={() => setQuickLookupOpen(true)}>
-            상품 간편 조회
-          </ActionButton>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="primary" onClick={() => setQuickLookupOpen(true)}>
+              상품 간편 조회
+            </ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={openTradeAnalysisPopup}>
+              거래 분석
+            </ActionButton>
+          </div>
         }
       />
       {quickLookupOpen && (
