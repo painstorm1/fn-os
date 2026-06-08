@@ -17984,7 +17984,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return String(row.payment_type || "") === "card" ? "카드" : "통장";
   }
   function fixedCostPaid(row: Record<string, unknown>) {
-    return Boolean(row.matched_transaction_id || row.last_actual_date) || (String(row.status || "") === "overdue_or_paid" && String(row.due_date || "") < new Date().toISOString().slice(0, 10));
+    return row.paid === true || Boolean(row.matched_transaction_id || row.last_actual_date);
   }
   const combinedFixedRows = combinedFixedSourceRows
     .filter((row: Record<string, unknown>) => {

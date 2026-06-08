@@ -227,13 +227,21 @@ function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], du
   return candidates[0] || null;
 }
 
+function actualDateInDueWindow(actualDate: string, dueDate: string, today: string) {
+  if (!actualDate || !dueDate || actualDate > today) return false;
+  return actualDate >= addDays(dueDate, -3) && actualDate <= addDays(dueDate, 2);
+}
+
 function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = []) {
   const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
   const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
-  const actualAmount = actualRow ? transactionAmount(actualRow) : numberValue(row.last_actual_amount);
+  const savedActualDate = isoDate(row.last_actual_date);
+  const savedActualInWindow = actualDateInDueWindow(savedActualDate, dueDate, today);
+  const actualAmount = actualRow ? transactionAmount(actualRow) : savedActualInWindow ? numberValue(row.last_actual_amount) : 0;
   const displayAmount = actualAmount || expectedAmount;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
+  const paid = Boolean(actualRow || savedActualInWindow);
   return {
     id: row.id,
     fixed_cost_id: row.id,
@@ -243,15 +251,16 @@ function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawR
     category_middle: row.category_middle,
     expected_amount: expectedAmount,
     last_actual_amount: actualAmount || null,
-    last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : row.last_actual_date || null,
+    last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : savedActualInWindow ? savedActualDate : null,
     matched_transaction_id: actualRow?.id || null,
+    paid,
     amount: displayAmount,
     due_date: dueDate,
     base_day: row.base_day ?? row.payment_day ?? row.due_day,
     days_until: daysUntil,
     payment_type: row.payment_type,
     payment_source: row.payment_source,
-    status: daysUntil < 0 ? "overdue_or_paid" : daysUntil <= 3 ? "upcoming" : "scheduled",
+    status: paid ? "paid" : daysUntil < 0 ? "overdue" : daysUntil <= 3 ? "upcoming" : "scheduled",
     memo: row.memo,
   };
 }
@@ -624,11 +633,36 @@ export async function deactivateAccountingLoan(id: string) {
   return patchRows("accounting_loans", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
 }
 
-function loanOccurrence(row: RawRow, today = kstToday()) {
+function matchingLoanPaymentTransaction(loan: RawRow, transactions: RawRow[], dueDate: string, today: string, expectedAmount: number) {
+  if (!expectedAmount) return null;
+  const from = addDays(dueDate, -3);
+  const to = addDays(dueDate, 2);
+  const bankHint = text(loan.bank_name);
+  const loanName = text(loan.loan_name);
+  const candidates = transactions
+    .filter((row) => {
+      const txDate = isoDate(row.transaction_date);
+      if (!txDate || txDate < from || txDate > to || txDate > today) return false;
+      if (text(row.source_type) !== "bank") return false;
+      if (numberValue(row.debit_amount) <= 0) return false;
+      if (Math.abs(transactionAmount(row) - expectedAmount) > 1) return false;
+      const sourceText = `${text(row.source_name)} ${text(row.account_name)} ${text(row.card_name)}`;
+      const descriptionText = `${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`;
+      if (bankHint && !sourceText.includes(bankHint) && !descriptionText.includes(bankHint)) return false;
+      if (loanName && descriptionText.includes(loanName)) return true;
+      return true;
+    })
+    .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
+  return candidates[0] || null;
+}
+
+function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = []) {
   const dueDate = monthDueDate(row.payment_day ?? row.base_day, today);
   const amount = numberValue(row.expected_payment_amount)
     || numberValue(row.expected_principal_amount) + numberValue(row.expected_interest_amount);
+  const actualRow = matchingLoanPaymentTransaction(row, transactions, dueDate, today, amount);
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
+  const paid = Boolean(actualRow);
   return {
     id: `loan-${text(row.id)}`,
     loan_id: row.id,
@@ -638,13 +672,17 @@ function loanOccurrence(row: RawRow, today = kstToday()) {
     category_large: "금융비용",
     category_middle: "대출 원리금",
     expected_amount: amount,
-    amount,
+    last_actual_amount: actualRow ? transactionAmount(actualRow) : null,
+    last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : null,
+    matched_transaction_id: actualRow?.id || null,
+    paid,
+    amount: actualRow ? transactionAmount(actualRow) : amount,
     due_date: dueDate,
     base_day: row.payment_day,
     days_until: daysUntil,
     payment_type: "bank",
     payment_source: row.bank_name,
-    status: daysUntil < 0 ? "overdue_or_paid" : daysUntil <= 3 ? "upcoming" : "scheduled",
+    status: paid ? "paid" : daysUntil < 0 ? "overdue" : daysUntil <= 3 ? "upcoming" : "scheduled",
     memo: row.memo,
     row_type: "loan",
     loan_type: row.loan_type,
@@ -924,7 +962,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
   const fixedCostOccurrences = activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
-  const loanOccurrences = activeLoans.map((row) => loanOccurrence(row, today));
+  const loanOccurrences = activeLoans.map((row) => loanOccurrence(row, today, rows));
   const loanMaturityOccurrences = activeLoans.map((row) => loanMaturityOccurrence(row)).filter(Boolean) as RawRow[];
   const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences, ...loanMaturityOccurrences];
   const upcomingFixedCosts = [...fixedCostOccurrences, ...loanOccurrences]
