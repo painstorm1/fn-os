@@ -9807,16 +9807,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ...((summary?.recent_purchase_lines || summary?.recent_purchases || []) as Array<Record<string, unknown>>).map((row) => normalizeAnalysisRow(row, "purchase")),
     ];
     const safeJson = JSON.stringify(baseRows).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const productsJson = JSON.stringify(inventoryProducts.map((product) => ({
+      code: inventoryProductCode(product),
+      name: inventoryProductName(product),
+      attribute: String(product.product_attribute || product.product_kind || "plain"),
+      cost: Number(product.cost_price || 0),
+      price: Number(product.standard_price || 0),
+      bomCount: (product.bom || []).length,
+    }))).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const today = entryDateToday();
     const thisMonth = today.slice(0, 7);
     const title = "거래 분석";
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:24px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:13px;font-weight:700}
-      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.filters{display:grid;grid-template-columns:120px 170px 170px 130px 130px repeat(3,minmax(120px,1fr)) 70px;gap:8px;align-items:center}
-      .field{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 10px;font-weight:700;color:#0f172a}.btn{height:38px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}
-      .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}.metric{border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:12px}.metric .label{font-size:12px;color:#64748b;font-weight:900}.metric .value{margin-top:6px;font-size:20px;font-weight:900}
-      .tableWrap{max-height:calc(100vh - 260px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1320px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.sales{background:#e0f2fe;color:#0369a1}.purchase{background:#fef3c7;color:#b45309}.note{margin-top:10px;color:#64748b;font-size:12px;font-weight:700;line-height:1.5}
+      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.filters{display:grid;grid-template-columns:100px 158px 128px 126px 126px minmax(210px,1fr) 66px minmax(100px,130px) minmax(110px,150px) 58px;gap:7px;align-items:center}
+      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}
+      .productPick{display:grid;grid-template-columns:1fr 62px;gap:6px}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}.metric{border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:12px}.metric .label{font-size:12px;color:#64748b;font-weight:900}.metric .value{margin-top:6px;font-size:20px;font-weight:900}
+      .tableWrap{max-height:calc(100vh - 260px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.sales{background:#e0f2fe;color:#0369a1}.purchase{background:#fef3c7;color:#b45309}.rowSales{background:#f8fcff}.rowPurchase{background:#fffaf0}.note{margin-top:10px;color:#64748b;font-size:12px;font-weight:700;line-height:1.5}
+      .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(980px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:14px 16px}.pickerTitle{font-size:18px;font-weight:900}.pickerBody{padding:14px 16px;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 72px;gap:8px;margin-bottom:10px}.pickerTabs{display:flex;gap:6px;margin-bottom:10px}.pickerTabs button{height:30px;border:0;border-radius:7px;background:#fff;color:#475569;padding:0 10px;font-size:12px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.picker table{min-width:760px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}
       @media(max-width:1400px){.filters{grid-template-columns:repeat(4,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}}
     </style></head><body><div class="app">
       <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><button class="btn secondary" onclick="window.close()">닫기</button></div>
@@ -9826,18 +9835,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <select id="basis" class="field"><option value="actual">BOM 실제재고품목 기준</option><option value="entry">판매/구매 입력품목 기준</option></select>
           <select id="group" class="field"><option value="detail">상세내역</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
           <input id="from" class="field" type="date" value="${thisMonth}-01"><input id="to" class="field" type="date" value="${today}">
-          <input id="product" class="field" placeholder="품목/SKU"><input id="warehouse" class="field" placeholder="창고"><input id="customer" class="field" placeholder="거래처"><button id="search" class="btn">검색</button>
+          <div class="productPick"><input id="product" class="field" placeholder="품목/SKU 선택"><button id="productFind" class="btn secondary" type="button">찾기</button></div><input id="warehouse" class="field" placeholder="창고"><input id="customer" class="field" placeholder="거래처"><button id="search" class="btn">검색</button>
         </div>
         <div class="note">BOM 실제재고품목 기준은 SET/RG 등 BOM 구성품이 있으면 구성품 코드/명과 실제 출고·입고 수량으로 풀어 보여줍니다. 금액/단가는 원 전표 라인의 값을 함께 표시합니다.</div>
       </div>
-      <div class="metrics"><div class="metric"><div class="label">라인수</div><div id="mCount" class="value">0</div></div><div class="metric"><div class="label">수량합계</div><div id="mQty" class="value">0</div></div><div class="metric"><div class="label">금액합계</div><div id="mAmount" class="value">0</div></div><div class="metric"><div class="label">거래처수</div><div id="mCustomers" class="value">0</div></div><div class="metric"><div class="label">창고수</div><div id="mWarehouses" class="value">0</div></div></div>
+      <div class="metrics"><div class="metric"><div class="label">판매수량 / 금액</div><div id="mSales" class="value">0 / ₩0</div></div><div class="metric"><div class="label">구매수량 / 금액</div><div id="mPurchases" class="value">0 / ₩0</div></div><div class="metric"><div class="label">평균 판매단가</div><div id="mSalesAvg" class="value">0</div></div><div class="metric"><div class="label">평균 구매단가</div><div id="mPurchaseAvg" class="value">0</div></div><div class="metric"><div class="label">거래처 / 창고</div><div id="mScope" class="value">0 / 0</div></div></div>
       <div class="tableWrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+      <div id="pickerBackdrop" class="pickerBackdrop">
+        <div class="picker">
+          <div class="pickerHead"><div><div class="pickerTitle">품목선택</div><div class="sub">품목코드 / 품목명으로 검색하고 Enter로 선택합니다.</div></div><button id="pickerClose" class="btn secondary" type="button">닫기</button></div>
+          <div class="pickerBody">
+            <div class="pickerSearch"><input id="pickerQuery" class="field" placeholder="품목코드 / 품목명 검색"><button id="pickerSearchButton" class="btn" type="button">찾기</button></div>
+            <div class="pickerTabs"><button type="button" data-attr="all" class="active">전체</button><button type="button" data-attr="plain">일반</button><button type="button" data-attr="set">SET</button><button type="button" data-attr="rg">RG</button></div>
+            <div class="tableWrap" style="max-height:54vh"><table><thead><tr><th style="width:54px">선택</th><th>품목코드</th><th>품목명</th><th class="num">입고단가</th><th class="num">출고단가</th><th class="num">BOM</th></tr></thead><tbody id="pickerBody"></tbody></table></div>
+          </div>
+        </div>
+      </div>
     </div><script>
       const baseRows = ${safeJson};
+      const products = ${productsJson};
       const fmt = new Intl.NumberFormat("ko-KR");
       const krw = (n) => "₩" + fmt.format(Math.round(Number(n)||0));
       const text = (v) => String(v ?? "").toLowerCase();
       const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[ch]));
+      let selectedProduct = null;
+      let pickerIndex = 0;
+      let pickerAttr = "all";
       function rowsByBasis(){
         const basis = document.getElementById("basis").value;
         if (basis === "entry") return baseRows.map((row) => ({...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}));
@@ -9854,7 +9877,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (type !== "all" && row.type !== type) return false;
           if (from && row.date < from) return false;
           if (to && row.date > to) return false;
-          if (product && !text(row.actualProductCode + " " + row.actualProductName + " " + row.sourceProductCode + " " + row.sourceProductName).includes(product)) return false;
+          if (selectedProduct) {
+            const selectedCode = selectedProduct.code;
+            const selectedName = selectedProduct.name;
+            if (row.actualProductCode !== selectedCode && row.sourceProductCode !== selectedCode && row.actualProductName !== selectedName && row.sourceProductName !== selectedName) return false;
+          } else if (product && !text(row.actualProductCode + " " + row.actualProductName + " " + row.sourceProductCode + " " + row.sourceProductName).includes(product)) return false;
           if (warehouse && !text(row.warehouse).includes(warehouse)) return false;
           if (customer && !text(row.customer).includes(customer)) return false;
           return true;
@@ -9864,33 +9891,88 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const map = new Map();
         rows.forEach((row) => {
           const key = keyFn(row) || "-";
-          const item = map.get(key) || { key, count: 0, qty: 0, amount: 0, customers: new Set(), warehouses: new Set(), latest: "" };
-          item.count += 1; item.qty += Number(row.actualQty || row.qty || 0); item.amount += Number(row.amount || 0);
+          const item = map.get(key) || { key, salesQty: 0, salesAmount: 0, purchaseQty: 0, purchaseAmount: 0, customers: new Set(), warehouses: new Set(), latest: "" };
+          const qty = Number(row.actualQty || row.qty || 0);
+          const amount = Number(row.amount || 0);
+          if (row.type === "sales") { item.salesQty += qty; item.salesAmount += amount; }
+          else { item.purchaseQty += qty; item.purchaseAmount += amount; }
           if (row.customer) item.customers.add(row.customer); if (row.warehouse) item.warehouses.add(row.warehouse); if (row.date > item.latest) item.latest = row.date;
           map.set(key, item);
         });
-        return Array.from(map.values()).sort((a,b) => b.amount - a.amount);
+        return Array.from(map.values()).sort((a,b) => (b.salesAmount + b.purchaseAmount) - (a.salesAmount + a.purchaseAmount));
       }
       function render(){
         const group = document.getElementById("group").value;
         const rows = filtered();
-        document.getElementById("mCount").textContent = fmt.format(rows.length);
-        document.getElementById("mQty").textContent = fmt.format(rows.reduce((s,r)=>s+Number(r.actualQty||r.qty||0),0));
-        document.getElementById("mAmount").textContent = krw(rows.reduce((s,r)=>s+Number(r.amount||0),0));
-        document.getElementById("mCustomers").textContent = fmt.format(new Set(rows.map(r=>r.customer).filter(Boolean)).size);
-        document.getElementById("mWarehouses").textContent = fmt.format(new Set(rows.map(r=>r.warehouse).filter(Boolean)).size);
+        const salesRows = rows.filter((row) => row.type === "sales");
+        const purchaseRows = rows.filter((row) => row.type === "purchase");
+        const salesQty = salesRows.reduce((s,r)=>s+Number(r.actualQty||r.qty||0),0);
+        const purchaseQty = purchaseRows.reduce((s,r)=>s+Number(r.actualQty||r.qty||0),0);
+        const salesAmount = salesRows.reduce((s,r)=>s+Number(r.amount||0),0);
+        const purchaseAmount = purchaseRows.reduce((s,r)=>s+Number(r.amount||0),0);
+        document.getElementById("mSales").textContent = fmt.format(salesQty) + " / " + krw(salesAmount);
+        document.getElementById("mPurchases").textContent = fmt.format(purchaseQty) + " / " + krw(purchaseAmount);
+        document.getElementById("mSalesAvg").textContent = salesQty ? fmt.format(Math.round(salesAmount / salesQty)) : "0";
+        document.getElementById("mPurchaseAvg").textContent = purchaseQty ? fmt.format(Math.round(purchaseAmount / purchaseQty)) : "0";
+        document.getElementById("mScope").textContent = fmt.format(new Set(rows.map(r=>r.customer).filter(Boolean)).size) + " / " + fmt.format(new Set(rows.map(r=>r.warehouse).filter(Boolean)).size);
         if (group === "detail") {
-          thead.innerHTML = "<tr><th>일자</th><th>구분</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량</th><th class='num'>단가</th><th class='num'>금액</th><th>원 입력품목</th><th>메모</th></tr>";
-          tbody.innerHTML = rows.sort((a,b)=>String(b.date).localeCompare(String(a.date))).map((r)=>"<tr><td>"+esc(r.date)+"</td><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(r.unitPrice||0))+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("");
+          thead.innerHTML = "<tr><th>구분</th><th>일자</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량</th><th class='num'>단가</th><th class='num'>금액</th><th>원 입력품목</th><th>메모</th></tr>";
+          tbody.innerHTML = rows.sort((a,b)=>String(b.date).localeCompare(String(a.date))).map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(r.unitPrice||0))+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("");
           return;
         }
         const keyFns = { product:r=>(r.actualProductCode||"-")+" / "+(r.actualProductName||"-"), warehouse:r=>r.warehouse, customer:r=>r.customer, date:r=>r.date, month:r=>r.month };
         const grouped = aggregate(rows, keyFns[group]);
-        thead.innerHTML = "<tr><th>기준</th><th class='num'>라인수</th><th class='num'>수량합계</th><th class='num'>금액합계</th><th class='num'>거래처수</th><th class='num'>창고수</th><th>최근거래일</th></tr>";
-        tbody.innerHTML = grouped.map((r)=>"<tr><td>"+esc(r.key)+"</td><td class='num'>"+fmt.format(r.count)+"</td><td class='num'>"+fmt.format(r.qty)+"</td><td class='num'>"+krw(r.amount)+"</td><td class='num'>"+fmt.format(r.customers.size)+"</td><td class='num'>"+fmt.format(r.warehouses.size)+"</td><td>"+esc(r.latest||"-")+"</td></tr>").join("");
+        thead.innerHTML = "<tr><th>기준</th><th class='num'>판매수량</th><th class='num'>판매금액</th><th class='num'>평균판매단가</th><th class='num'>구매수량</th><th class='num'>구매금액</th><th class='num'>평균구매단가</th><th class='num'>거래처수</th><th class='num'>창고수</th><th>최근거래일</th></tr>";
+        tbody.innerHTML = grouped.map((r)=>"<tr><td>"+esc(r.key)+"</td><td class='num'>"+fmt.format(r.salesQty)+"</td><td class='num'>"+krw(r.salesAmount)+"</td><td class='num'>"+(r.salesQty ? fmt.format(Math.round(r.salesAmount / r.salesQty)) : "-")+"</td><td class='num'>"+fmt.format(r.purchaseQty)+"</td><td class='num'>"+krw(r.purchaseAmount)+"</td><td class='num'>"+(r.purchaseQty ? fmt.format(Math.round(r.purchaseAmount / r.purchaseQty)) : "-")+"</td><td class='num'>"+fmt.format(r.customers.size)+"</td><td class='num'>"+fmt.format(r.warehouses.size)+"</td><td>"+esc(r.latest||"-")+"</td></tr>").join("");
       }
-      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") render(); }));
+      function pickerMatches(){
+        const query = text(document.getElementById("pickerQuery").value.trim());
+        return products.filter((product) => {
+          if (pickerAttr !== "all" && text(product.attribute) !== pickerAttr) return false;
+          return !query || text(product.code + " " + product.name).includes(query);
+        }).slice(0, 200);
+      }
+      function renderPicker(){
+        const rows = pickerMatches();
+        pickerIndex = Math.max(0, Math.min(pickerIndex, Math.max(0, rows.length - 1)));
+        document.getElementById("pickerBody").innerHTML = rows.map((product, index) => "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(selectedProduct && selectedProduct.code === product.code ? "selected" : "")+"' data-index='"+index+"'><td><span class='badge "+(selectedProduct && selectedProduct.code === product.code ? "sales" : "purchase")+"'>"+(index+1)+"</span></td><td>"+esc(product.code||"-")+"</td><td>"+esc(product.name||"-")+"</td><td class='num'>"+fmt.format(Math.round(product.cost||0))+"</td><td class='num'>"+fmt.format(Math.round(product.price||0))+"</td><td class='num'>"+fmt.format(product.bomCount||0)+"</td></tr>").join("") || "<tr><td colspan='6' class='muted'>검색되는 품목이 없습니다.</td></tr>";
+        document.querySelectorAll("#pickerBody tr[data-index]").forEach((row) => row.addEventListener("click", () => selectPicker(Number(row.dataset.index))));
+      }
+      function openPicker(){
+        document.getElementById("pickerQuery").value = document.getElementById("product").value.trim();
+        pickerIndex = 0;
+        document.getElementById("pickerBackdrop").classList.add("open");
+        renderPicker();
+        setTimeout(() => document.getElementById("pickerQuery").focus(), 0);
+      }
+      function closePicker(){ document.getElementById("pickerBackdrop").classList.remove("open"); }
+      function selectPicker(index = pickerIndex){
+        const product = pickerMatches()[index];
+        if (!product) return;
+        selectedProduct = product;
+        document.getElementById("product").value = (product.code || "") + " / " + (product.name || "");
+        closePicker();
+        render();
+      }
+      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") { if (event.target.id === "product") { event.preventDefault(); openPicker(); } else render(); } }));
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",render));
+      document.getElementById("product").addEventListener("input", () => { selectedProduct = null; });
+      document.getElementById("productFind").addEventListener("click", openPicker);
+      document.getElementById("pickerClose").addEventListener("click", closePicker);
+      document.getElementById("pickerSearchButton").addEventListener("click", () => { pickerIndex = 0; renderPicker(); });
+      document.getElementById("pickerQuery").addEventListener("input", () => { pickerIndex = 0; renderPicker(); });
+      document.getElementById("pickerQuery").addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") { event.preventDefault(); pickerIndex += 1; renderPicker(); }
+        if (event.key === "ArrowUp") { event.preventDefault(); pickerIndex -= 1; renderPicker(); }
+        if (event.key === "Enter") { event.preventDefault(); selectPicker(); }
+        if (event.key === "Escape") { event.preventDefault(); closePicker(); }
+      });
+      document.querySelectorAll(".pickerTabs button").forEach((button) => button.addEventListener("click", () => {
+        pickerAttr = button.dataset.attr || "all";
+        document.querySelectorAll(".pickerTabs button").forEach((item) => item.classList.toggle("active", item === button));
+        pickerIndex = 0;
+        renderPicker();
+      }));
       document.getElementById("search").addEventListener("click",render);
       render();
     </script></body></html>`;
