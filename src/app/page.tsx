@@ -9827,14 +9827,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }))).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const today = entryDateToday();
     const thisMonth = today.slice(0, 7);
+    const analysisDefaultFromMonth = addMonthsToDate(`${thisMonth}-01`, -2).slice(0, 7);
     const title = "거래 분석";
+    (window as unknown as { __fnosDownloadTradeAnalysisXlsx?: (rows: Array<Record<string, unknown>>) => void }).__fnosDownloadTradeAnalysisXlsx = (rows) => {
+      const exportRows = rows.map((row) => [
+        String(row.typeLabel || ""),
+        String(row.date || ""),
+        String(row.customer || ""),
+        String(row.warehouse || ""),
+        String(row.actualProductCode || ""),
+        String(row.actualProductName || ""),
+        String(row.actualQty || ""),
+        String(Math.round(Number(row.unitPrice || 0))),
+        String(Math.round(Number(row.amount || 0))),
+        row.isBom ? `${String(row.sourceProductCode || "")} / ${String(row.sourceProductName || "")}` : "",
+        String(row.memo || ""),
+      ]);
+      void downloadTableXlsx(`거래분석_${entryDateToday()}.xlsx`, "거래분석", ["구분", "일자", "거래처", "창고", "실제 품목코드", "실제 품목명", "수량", "단가", "금액", "원 입력품목", "메모"], exportRows);
+    };
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
       .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:34px;background:#15803d;color:#fff;font-size:11px}.btn.tiny{width:30px;padding:0}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
-      .summary{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin:18px 2px}.summaryCard{min-height:164px;border:1px solid #d7e3ea;border-radius:10px;padding:22px 28px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center}.summaryCard.salesCard{background:#edfaff}.summaryCard.purchaseCard{background:#ffc7aa;border-color:#f4b08f}.summaryTitle{font-size:38px;line-height:1;font-weight:500;letter-spacing:0}.summaryTitle.salesText{color:#1686ff}.summaryTitle.purchaseText{color:#f97316}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px;align-items:center}.metricLabel{font-size:15px;color:#0f172a;font-weight:500}.metricValue{margin-left:8px;font-size:24px;font-weight:500}.totalLine{grid-column:1/3;font-size:24px;font-weight:500}.scopeLine{grid-column:1/3;display:flex;gap:44px;align-items:center;color:#0f172a;font-size:17px;font-weight:500}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:500;cursor:pointer;padding:0}.rankList{display:grid;gap:9px}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 150px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:8px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:180px;border-radius:8px;background:rgba(255,255,255,.82);padding:20px 14px;text-align:center;color:#111827}.purchaseSideLabel{font-size:18px}.purchaseSideDate{font-size:28px;line-height:1.1;margin:8px 0 24px}.purchaseSideCycle{font-size:18px}.purchaseSideDays{font-size:30px;line-height:1.1}
+      .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 16px}.summaryCard{min-height:164px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 24px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}.summaryCard.salesCard{background:linear-gradient(135deg,#eefcff 0%,#f8fdff 58%,#e8f6ff 100%)}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff1e8 0%,#ffd1b8 100%);border-color:#f7b390}.summaryTitle{transform:translateY(-6px);font-size:38px;line-height:1;font-weight:900;letter-spacing:0}.summaryTitle.salesText{color:#147df5}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px}.metricLabel{font-size:15px;color:#334155;font-weight:800}.metricValue{font-size:22px;font-weight:800;color:#0f172a}.totalLine{grid-column:1/3;font-size:22px;font-weight:800;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:36px;align-items:center;color:#334155;font-size:15px;font-weight:800}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:800;cursor:pointer;padding:0}.rankList{display:grid;gap:8px}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 132px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:7px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:176px;border-radius:10px;background:rgba(255,255,255,.78);padding:18px 14px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.purchaseSideLabel{font-size:17px;font-weight:800}.purchaseSideDate{font-size:25px;line-height:1.12;margin:8px 0 22px}.purchaseSideCycle{font-size:17px;font-weight:800}.purchaseSideDays{font-size:28px;line-height:1.1;font-weight:800}
       .tableWrap{max-height:calc(100vh - 310px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
       @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
@@ -9853,12 +9870,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="customer" class="field searchInput" placeholder="거래처 검색">
           <button id="search" class="btn">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button>
           <div class="filterSpacer"></div>
-          <div class="period"><select id="periodMode" class="field"><option value="day">일별</option><option value="month">월별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${thisMonth}" style="display:none"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}" style="display:none"><input id="fromDay" class="field periodInput" type="date" value="${today}"><input id="toDay" class="field periodInput" type="date" value="${today}"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
+          <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${today}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${today}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
       </div>
       <div class="summary">
-        <div class="summaryCard salesCard"><div><div class="summaryTitle salesText">판매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div><div id="salesScope" class="scopeLine"></div></div></div><div id="salesRank" class="rankList"></div></div>
-        <div class="summaryCard purchaseCard"><div><div class="summaryTitle purchaseText">구매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="purchaseQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="purchaseAvg" class="metricValue">0원</span></div><div id="purchaseAmount" class="totalLine">총 금액 0원</div><div id="purchaseScope" class="scopeLine"></div></div></div><div id="purchaseSide" class="purchaseSide"></div></div>
+        <div class="summaryCard salesCard"><div><div class="summaryTitle salesText">판매</div><div class="summaryGrid"><div class="metricLine"><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div class="metricLine"><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div><div id="salesScope" class="scopeLine"></div></div></div><div id="salesRank" class="rankList"></div></div>
+        <div class="summaryCard purchaseCard"><div><div class="summaryTitle purchaseText">구매</div><div class="summaryGrid"><div class="metricLine"><span class="metricLabel">수량</span><span id="purchaseQty" class="metricValue">0개</span></div><div class="metricLine"><span class="metricLabel">단가</span><span id="purchaseAvg" class="metricValue">0원</span></div><div id="purchaseAmount" class="totalLine">총 금액 0원</div><div id="purchaseScope" class="scopeLine"></div></div></div><div id="purchaseSide" class="purchaseSide"></div></div>
       </div>
       <div class="tableWrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
       <div id="pickerBackdrop" class="pickerBackdrop">
@@ -10010,7 +10027,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       function renderSalesRank(rows){
         const grouped = aggregate(rows, (row) => row.customer);
-        const top = grouped.slice(0, 5);
+        let top = grouped.slice(0, 5);
+        if (grouped.length >= 6) {
+          const etc = grouped.slice(4).reduce((acc, item) => {
+            acc.salesQty += item.salesQty;
+            acc.salesAmount += item.salesAmount;
+            acc.purchaseQty += item.purchaseQty;
+            acc.purchaseAmount += item.purchaseAmount;
+            item.customers.forEach((customer) => acc.customers.add(customer));
+            item.warehouses.forEach((warehouse) => acc.warehouses.add(warehouse));
+            if (item.latest > acc.latest) acc.latest = item.latest;
+            return acc;
+          }, { key: "기타 거래처", salesQty: 0, salesAmount: 0, purchaseQty: 0, purchaseAmount: 0, customers: new Set(), warehouses: new Set(), latest: "" });
+          top = [...grouped.slice(0, 4), etc];
+        }
         const max = Math.max(1, ...top.map((item) => item.salesAmount + item.purchaseAmount));
         const colors = ["#f97316", "#0ea5e9", "#22c55e", "#f43f5e", "#64748b"];
         document.getElementById("salesRank").innerHTML = top.map((item, index) => {
@@ -10114,6 +10144,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         selected[activePicker] = exists ? selected[activePicker].filter((picked) => optionKey(picked) !== key) : [...selected[activePicker], item];
         renderPicker();
       }
+      function setPickerItemSelected(item, shouldSelect){
+        const key = optionKey(item);
+        const exists = selected[activePicker].some((picked) => optionKey(picked) === key);
+        if (shouldSelect && !exists) selected[activePicker] = [...selected[activePicker], item];
+        if (!shouldSelect && exists) selected[activePicker] = selected[activePicker].filter((picked) => optionKey(picked) !== key);
+      }
+      function movePickerSelection(direction, extend){
+        const rows = pickerMatches();
+        if (!rows.length) return;
+        const current = Math.max(0, Math.min(pickerIndex, rows.length - 1));
+        const next = Math.max(0, Math.min(rows.length - 1, current + direction));
+        if (extend && next !== current) {
+          if (direction > 0) {
+            setPickerItemSelected(rows[current], true);
+            setPickerItemSelected(rows[next], true);
+          } else {
+            setPickerItemSelected(rows[current], false);
+          }
+        }
+        pickerIndex = next;
+        renderPicker();
+      }
       function applyPicker(){
         updateFilterInputs();
         closePicker();
@@ -10149,8 +10201,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       document.getElementById("pickerApply").addEventListener("click", applyPicker);
       document.getElementById("pickerSearchButton").addEventListener("click", runPickerSearch);
       document.getElementById("pickerQuery").addEventListener("keydown", (event) => {
-        if (event.key === "ArrowDown") { event.preventDefault(); pickerIndex += 1; renderPicker(); }
-        if (event.key === "ArrowUp") { event.preventDefault(); pickerIndex -= 1; renderPicker(); }
+        if (event.key === "ArrowDown") { event.preventDefault(); movePickerSelection(1, event.shiftKey); }
+        if (event.key === "ArrowUp") { event.preventDefault(); movePickerSelection(-1, event.shiftKey); }
         if (event.key === "Enter") {
           event.preventDefault();
           const keyword = document.getElementById("pickerQuery").value.trim();
@@ -10169,16 +10221,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }));
       document.getElementById("search").addEventListener("click",render);
       document.getElementById("downloadExcel").addEventListener("click", () => {
-        const header = ["구분","일자","거래처","창고","실제 품목코드","실제 품목명","수량","단가","금액","원 입력품목","메모"];
-        const lines = [header].concat(lastRows.map((r) => [r.typeLabel,r.date,r.customer,r.warehouse,r.actualProductCode,r.actualProductName,r.actualQty,Math.round(r.unitPrice||0),Math.round(r.amount||0),r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "",r.memo]));
-        const csv = "\\ufeff" + lines.map((line) => line.map((cell) => '"' + String(cell ?? "").replace(/"/g, '""') + '"').join(",")).join("\\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "거래분석_" + new Date().toISOString().slice(0,10) + ".csv";
-        a.click();
-        URL.revokeObjectURL(url);
+        if (window.opener && window.opener.__fnosDownloadTradeAnalysisXlsx) window.opener.__fnosDownloadTradeAnalysisXlsx(lastRows);
+        else window.alert("엑셀 다운로드를 실행할 수 없습니다. 거래 분석 창을 다시 열어주세요.");
       });
       document.addEventListener("click", (event) => {
         const target = event.target;
