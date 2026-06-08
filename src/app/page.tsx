@@ -16174,7 +16174,7 @@ function SalesInventoryTable({
         <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
-        {filterBar}
+        <div className="ml-auto flex shrink-0 justify-end">{filterBar}</div>
       </div>
       <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
       <div className="fn-table-shell overflow-x-auto">
