@@ -9820,7 +9820,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const productsJson = JSON.stringify(inventoryProducts.map((product) => ({
       code: inventoryProductCode(product),
       name: inventoryProductName(product),
-      attribute: String(product.product_attribute || product.product_kind || "plain"),
+      attribute: normalizeProductAttribute(product.product_attribute || product.product_kind || productAttributeFromName(inventoryProductName(product))),
       cost: Number(product.cost_price || 0),
       price: Number(product.standard_price || 0),
       bomCount: (product.bom || []).length,
@@ -9831,28 +9831,29 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
-      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.filters{display:grid;grid-template-columns:78px 180px 112px minmax(180px,1fr) minmax(180px,1fr) minmax(180px,1fr) 318px 70px 42px;gap:7px;align-items:center}
+      .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:grid;grid-template-columns:78px 180px 112px minmax(260px,1fr);gap:7px;align-items:center}.filters{display:grid;grid-template-columns:minmax(210px,1fr) minmax(180px,.75fr) minmax(210px,1fr) 318px 70px 42px;gap:7px;align-items:center}
       .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:42px;background:#15803d;color:#fff}.btn.tiny{width:28px;padding:0}.period{display:grid;grid-template-columns:28px 78px 1fr 1fr 28px;gap:5px}
-      .selectedBar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}
-      .summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}.summaryCard{height:150px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:14px 16px;display:grid;grid-template-rows:auto 1fr auto;gap:8px}.summaryCard.salesCard{border-left:6px solid #0284c7}.summaryCard.purchaseCard{border-left:6px solid #f97316}.summaryTitle{font-size:20px;font-weight:950}.summaryTitle.salesText{color:#0369a1}.summaryTitle.purchaseText{color:#c2410c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;align-items:center}.metricLabel{font-size:12px;color:#64748b;font-weight:900}.metricValue{margin-left:8px;font-size:18px;font-weight:950}.totalLine{grid-column:1/3;font-size:19px;font-weight:950}.scopeLine{display:flex;gap:18px;align-items:center;color:#334155;font-size:12px;font-weight:900}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:13px;font-weight:950;cursor:pointer;padding:0;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:3px}
-      .tableWrap{max-height:calc(100vh - 285px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.note{margin-top:10px;color:#64748b;font-size:12px;font-weight:700;line-height:1.5}
+      .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
+      .summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.summaryCard{min-height:104px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:10px 12px;display:grid;grid-template-rows:auto 1fr auto;gap:5px}.summaryCard.salesCard{border-left:4px solid #0284c7}.summaryCard.purchaseCard{border-left:4px solid #f97316}.summaryTitle{font-size:17px;font-weight:950}.summaryTitle.salesText{color:#0369a1}.summaryTitle.purchaseText{color:#c2410c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 16px;align-items:center}.metricLabel{font-size:11px;color:#64748b;font-weight:900}.metricValue{margin-left:6px;font-size:15px;font-weight:950}.totalLine{font-size:15px;font-weight:950}.scopeLine{display:flex;gap:14px;align-items:center;color:#334155;font-size:11px;font-weight:900}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:12px;font-weight:950;cursor:pointer;padding:0;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:3px}
+      .tableWrap{max-height:calc(100vh - 235px);overflow:auto;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(980px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:14px 16px}.pickerTitle{font-size:18px;font-weight:900}.pickerBody{padding:14px 16px;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 72px 72px;gap:8px;margin-bottom:10px}.pickerTabs{display:flex;gap:6px;margin-bottom:10px}.pickerTabs button{height:30px;border:0;border-radius:7px;background:#fff;color:#475569;padding:0 10px;font-size:12px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.picker table{min-width:760px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}
-      @media(max-width:1380px){.filters{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:1fr}.summaryCard{height:auto;min-height:150px}}
+      @media(max-width:1380px){.topFilters,.filters{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:1fr}.summaryCard{height:auto;min-height:104px}}
     </style></head><body><div class="app">
       <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><button class="btn secondary" onclick="window.close()">닫기</button></div>
       <div class="panel">
-        <div class="filters">
+        <div class="topFilters">
           <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
           <select id="basis" class="field"><option value="actual">BOM설정 기준</option><option value="entry">입력 품목 기준</option></select>
           <select id="group" class="field"><option value="detail">상세내역</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
+          <div id="selectedBar" class="selectedBar"></div>
+        </div>
+        <div class="filters" style="margin-top:8px">
           <input id="product" class="field" placeholder="품목 검색">
           <input id="warehouse" class="field" placeholder="창고 검색">
           <input id="customer" class="field" placeholder="거래처 검색">
           <div class="period"><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><input id="fromMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${today}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${today}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
           <button id="search" class="btn">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button>
         </div>
-        <div id="selectedBar" class="selectedBar"></div>
-        <div class="note">BOM 실제재고품목 기준은 SET/RG 등 BOM 구성품이 있으면 구성품 코드/명과 실제 출고·입고 수량으로 풀어 보여줍니다. 금액/단가는 원 전표 라인의 값을 함께 표시합니다.</div>
       </div>
       <div class="summary">
         <div class="summaryCard salesCard"><div class="summaryTitle salesText">판매</div><div class="summaryGrid"><div><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div></div><div id="salesScope" class="scopeLine"></div></div>
@@ -9903,7 +9904,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         selected.product.forEach((item) => chips.push("<span class='chip product'>품목 " + esc(optionLabel(item)) + "</span>"));
         selected.warehouse.forEach((item) => chips.push("<span class='chip warehouse'>창고 " + esc(optionLabel(item)) + "</span>"));
         selected.customer.forEach((item) => chips.push("<span class='chip customer'>거래처 " + esc(optionLabel(item)) + "</span>"));
-        bar.innerHTML = chips.join("");
+        bar.innerHTML = chips.join("") || "<span class='emptySelection'>선택 없음</span>";
       }
       function rowsByBasis(){
         const basis = document.getElementById("basis").value;
@@ -10060,6 +10061,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       function openPicker(kind){
         activePicker = kind;
+        if (kind === "product") {
+          pickerAttr = "all";
+          document.querySelectorAll(".pickerTabs button").forEach((item) => item.classList.toggle("active", item.dataset.attr === "all"));
+        }
         document.getElementById("pickerTitle").textContent = kind === "product" ? "품목 선택" : kind === "warehouse" ? "창고 선택" : "거래처 선택";
         document.getElementById("pickerQuery").value = selected[kind].length ? "" : document.getElementById(kind).value.trim();
         pickerIndex = 0;
