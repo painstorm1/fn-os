@@ -20142,8 +20142,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-gray-200">
-                <table className="w-full min-w-[860px] text-sm">
+              <div className="overflow-hidden rounded-xl border border-gray-200">
+                <table className="w-full table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-10" />
+                    <col className="w-[22%]" />
+                    <col className="w-[24%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[260px]" />
+                  </colgroup>
                   <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
                     <tr>
                       <th className="w-10 px-3 py-2 text-center">
@@ -20155,7 +20162,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                       <th className="px-3 py-2 text-left">1차 카테고리</th>
                       <th className="px-3 py-2 text-left">2차 카테고리</th>
                       <th className="px-3 py-2 text-center">반영</th>
-                      <th className="px-3 py-2 text-right">관리</th>
+                      <th className="px-3 py-2 text-center">관리</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -20166,8 +20173,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                           <td className="px-3 py-2 text-center">
                             <input type="checkbox" checked={selectedCategoryIds.includes(id)} onChange={(event) => setSelectedCategoryIds((prev) => event.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id))} />
                           </td>
-                          <td className="px-3 py-2 font-semibold text-gray-900">{String(row.category_large || "-")}</td>
-                          <td className="px-3 py-2 text-gray-600">{String(row.category_middle || "-")}</td>
+                          <td className="truncate px-3 py-2 font-semibold text-gray-900" title={String(row.category_large || "-")}>{String(row.category_large || "-")}</td>
+                          <td className="truncate px-3 py-2 text-gray-600" title={String(row.category_middle || "-")}>{String(row.category_middle || "-")}</td>
                           <td className="px-3 py-2 text-center">
                             <div className="flex justify-center gap-1">
                               {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
@@ -20175,11 +20182,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                               {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
                             </div>
                           </td>
-                          <td className="px-3 py-2">
-                            <div className="flex justify-end gap-2">
-                              <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row, "middle")}>2차 수정</ActionButton>
-                              <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => openEditCategoryModal(row, "large")}>1차 수정</ActionButton>
-                              <ActionButton type="button" variant="danger" className="h-8 px-3 text-xs" onClick={() => void deleteExpenseCategory(id)}>삭제</ActionButton>
+                          <td className="px-2 py-2">
+                            <div className="flex justify-center gap-1.5">
+                              <ActionButton type="button" variant="secondary" className="h-8 px-2 text-[11px]" onClick={() => openEditCategoryModal(row, "middle")}>2차수정</ActionButton>
+                              <ActionButton type="button" variant="secondary" className="h-8 px-2 text-[11px]" onClick={() => openEditCategoryModal(row, "large")}>1차수정</ActionButton>
+                              <ActionButton type="button" variant="danger" className="h-8 px-2 text-[11px]" onClick={() => void deleteExpenseCategory(id)}>삭제</ActionButton>
                             </div>
                           </td>
                         </tr>
