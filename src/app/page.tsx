@@ -11327,15 +11327,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   )}
                   {inventoryBulkCommonField === "risk" && inventoryBulkRiskControl("__common__", inventoryBulkCommonDraft)}
                 </div>
-                <label className="inline-flex items-center justify-center gap-2 text-sm font-black text-slate-600">
-                  <input type="checkbox" className="h-4 w-4 rounded border-blue-300" onChange={(event) => {
-                    if (event.target.checked) {
-                      applyInventoryBulkCommon();
-                      event.currentTarget.checked = false;
-                    }
-                  }} />
+                <ActionButton type="button" variant="secondary" onClick={applyInventoryBulkCommon}>
                   공통 적용
-                </label>
+                </ActionButton>
               </div>
             </div>
             <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
@@ -12704,15 +12698,9 @@ function BulkMultiEditModal<Field extends string, Row>({
                 {visibleFields.map((field) => <option key={field} value={field}>{fieldLabel(fields, field)}</option>)}
               </select>
               {inputFor(activeCommonConfig, commonValue, setCommonValue, selectedRowKeys.length === 0)}
-              <label className="inline-flex items-center justify-center gap-2 text-sm font-black text-slate-600">
-                <input type="checkbox" className="h-4 w-4 rounded border-blue-300" disabled={!selectedRowKeys.length} onChange={(event) => {
-                  if (event.target.checked) {
-                    applyCommonValue();
-                    event.currentTarget.checked = false;
-                  }
-                }} />
+              <ActionButton type="button" variant="secondary" onClick={applyCommonValue} disabled={!selectedRowKeys.length}>
                 공통 적용
-              </label>
+              </ActionButton>
             </div>
           </div>
           <div className="max-h-[52vh] overflow-auto rounded-lg border border-gray-200">
