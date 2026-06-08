@@ -19967,14 +19967,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {activeTab === "db" && (
         <section className="space-y-4">
-          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_280px]">
-            <Card className="p-5">
-              <SectionHeader
-                title="회계 업로드"
-                actions={<StatusBadge tone={pendingUploadCount ? "orange" : "muted"}>{pendingUploadCount.toLocaleString("ko-KR")}개 대기</StatusBadge>}
-              />
+          <Card className="p-4">
+            <div className="grid gap-3 xl:grid-cols-[300px_repeat(3,minmax(180px,1fr))] 2xl:grid-cols-[300px_repeat(3,300px)]">
               <div
-                className={`mt-4 rounded-xl border border-dashed px-4 py-6 text-center transition ${expenseUploadDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
+                className={`flex min-h-[168px] flex-col justify-between rounded-xl border border-dashed p-4 transition ${expenseUploadDragOver ? "border-[#ff6a00] bg-orange-50" : "border-gray-300 bg-gray-50"}`}
                 onDragOver={(event) => { event.preventDefault(); setExpenseUploadDragOver(true); }}
                 onDragLeave={() => setExpenseUploadDragOver(false)}
                 onDrop={(event) => {
@@ -19982,52 +19978,63 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   onExpenseDrop(event);
                 }}
               >
-                <p className="text-sm font-black text-gray-900">통장/카드 엑셀·CSV 업로드</p>
-                <p className="mt-1 text-xs font-semibold text-gray-500">여러 파일을 한 번에 올린 뒤 미리보기 또는 DB 저장을 실행합니다.</p>
-                <label className="mt-4 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-orange-200 bg-white px-4 text-xs font-bold text-[#ff6a00] hover:bg-orange-50">
-                  파일 선택
-                  <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
-                </label>
-              </div>
-              {!!uploadedExpenseFiles.length && (
-                <div className="mt-4 grid gap-2">
-                  {uploadedExpenseFiles.map((item) => (
-                    <div key={expenseFileKey(item)} className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs">
-                      <span className="truncate font-bold text-gray-700">{item.file.name}</span>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <StatusBadge>{item.sourceType}</StatusBadge>
-                        <button type="button" className="font-black text-rose-500 hover:underline" onClick={() => removeExpenseFile(item)}>제외</button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-gray-900">회계 업로드</p>
+                    <p className="mt-1 text-xs font-semibold text-gray-500">통장/카드 엑셀·CSV</p>
+                  </div>
+                  <StatusBadge tone={pendingUploadCount ? "orange" : "muted"}>{pendingUploadCount.toLocaleString("ko-KR")}개 대기</StatusBadge>
                 </div>
-              )}
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <ActionButton type="button" variant="secondary" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length}>미리보기</ActionButton>
-                <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
+                {!!uploadedExpenseFiles.length && (
+                  <div className="mt-3 max-h-14 space-y-1 overflow-y-auto">
+                    {uploadedExpenseFiles.map((item) => (
+                      <div key={expenseFileKey(item)} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px]">
+                        <span className="truncate font-bold text-gray-700">{item.file.name}</span>
+                        <button type="button" className="shrink-0 font-black text-rose-500 hover:underline" onClick={() => removeExpenseFile(item)}>제외</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-orange-200 bg-white px-3 text-xs font-bold text-[#ff6a00] hover:bg-orange-50">
+                    파일 선택
+                    <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
+                  </label>
+                  <div className="flex gap-2">
+                    <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length}>미리보기</ActionButton>
+                    <ActionButton type="button" className="h-9 px-3 text-xs" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
+                  </div>
+                </div>
               </div>
-            </Card>
 
-            <Card className="p-5">
-              <SectionHeader
-                title="DB 관리"
-                actions={
-                  <button
-                    type="button"
-                    className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]"
-                    onClick={openNewCategoryModal}
-                  >
-                    카테고리 관리
-                  </button>
-                }
-              />
-              <div className="mt-4 grid gap-3">
-                <AccountingMetric label="카테고리" value={`${categories.length.toLocaleString("ko-KR")}개`} note="입출금/비용 분류 기준" />
-                <AccountingMetric label="검토필요" value={`${pendingReviewRows.length.toLocaleString("ko-KR")}건`} note="분류 확정 대기" tone="rose" />
-                <AccountingMetric label="최근 업로드" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
+              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-black text-gray-500">카테고리</p>
+                    <p className="mt-2 text-2xl font-black text-gray-900">{categories.length.toLocaleString("ko-KR")}개</p>
+                  </div>
+                  <ActionButton type="button" className="h-9 px-3 text-xs" onClick={openNewCategoryModal}>관리</ActionButton>
+                </div>
+                <p className="text-xs font-semibold text-gray-500">입출금/비용 분류 기준</p>
               </div>
-            </Card>
-          </div>
+
+              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+                <div>
+                  <p className="text-xs font-black text-gray-500">검토필요</p>
+                  <p className="mt-2 text-2xl font-black text-red-600">{pendingReviewRows.length.toLocaleString("ko-KR")}건</p>
+                </div>
+                <p className="text-xs font-semibold text-gray-500">분류 확정 대기</p>
+              </div>
+
+              <div className="flex min-h-[168px] flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+                <div>
+                  <p className="text-xs font-black text-gray-500">최근 업로드</p>
+                  <p className="mt-2 text-2xl font-black text-[#ff6a00]">{recentBatches.length.toLocaleString("ko-KR")}회</p>
+                </div>
+                <p className="truncate text-xs font-semibold text-gray-500">{String(recentBatches[0]?.status || "업로드 없음")}</p>
+              </div>
+            </div>
+          </Card>
 
           <Card className="p-5">
             <SectionHeader
