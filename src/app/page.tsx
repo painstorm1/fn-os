@@ -2117,9 +2117,17 @@ function sortFnSettingsAttachments<T extends { file_name?: string }>(items: T[])
   ));
 }
 
-function isFnBusinessRegistrationFile(item?: Pick<AccountAttachment, "file_name"> | null) {
-  const name = String(item?.file_name || "").trim().toLowerCase();
-  return name === "fn_사업자등록증(new).jpg";
+const fnCompanyFileNames = [
+  "FN_사업자등록증(NEW).jpg",
+  "FN_사업자등록증(영문).png",
+  "FN_사무실계약서.jpg",
+  "FN_통신판매업신고증.jpg",
+  "김재욱_도장.jpg",
+];
+
+function findFnCompanyFile(items: AccountAttachment[], fileName: string) {
+  const target = fileName.trim().toLowerCase();
+  return items.find((item) => String(item.file_name || "").trim().toLowerCase() === target);
 }
 
 async function loadFnSettingsAttachmentCounts(accountType: FnSettingsAttachmentType, ids: string[], onLoaded: (counts: Record<string, number>) => void) {
@@ -22222,7 +22230,9 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
   }
 
-  const businessRegistrationFile = companyAttachments.find(isFnBusinessRegistrationFile);
+  function openCompanyFileList() {
+    setFileTarget({ type: "company", id: "head-office", title: "본사 정보" });
+  }
 
   useEffect(() => {
     try {
@@ -22445,26 +22455,34 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-center justify-between gap-2">
-              <div><div className="text-sm font-black text-slate-900">첨부파일</div><div className="mt-1 text-xs font-bold text-slate-500">사업자 등록증 미리보기</div></div>
-              <div className="flex items-center gap-2"><span className="text-xs font-black text-slate-500">FN파일</span><FolderAttachmentButton count={fileCounts["head-office"]} title="본사 첨부파일" onClick={() => setFileTarget({ type: "company", id: "head-office", title: "본사 정보" })} /></div>
+              <div><div className="text-sm font-black text-slate-900">첨부파일</div></div>
+              <div className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white">
+                <button type="button" className="text-sm font-black text-slate-700 hover:text-orange-600" onClick={openCompanyFileList}>
+                  FN파일 전체 보기
+                </button>
+                <FolderAttachmentButton count={fileCounts["head-office"]} title="본사 첨부파일" onClick={openCompanyFileList} />
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (businessRegistrationFile) void openAttachment(businessRegistrationFile);
-                else setFileTarget({ type: "company", id: "head-office", title: "본사 정보" });
-              }}
-              className="mt-4 flex h-32 w-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-white px-4 text-center hover:border-orange-300 hover:bg-orange-50"
-            >
-              {businessRegistrationFile ? (
-                <span className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
-                  <FileTypeIcon name={businessRegistrationFile.file_name} />
-                  <span className="min-w-0 truncate">{businessRegistrationFile.file_name || "사업자 등록증"}</span>
-                </span>
-              ) : (
-                <span className="text-sm font-bold text-slate-400">사업자 등록증 파일을 등록해 주세요.</span>
-              )}
-            </button>
+            <div className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
+              {fnCompanyFileNames.map((fileName) => {
+                const attachment = findFnCompanyFile(companyAttachments, fileName);
+                return (
+                  <button
+                    key={fileName}
+                    type="button"
+                    onClick={() => {
+                      if (attachment) void openAttachment(attachment);
+                      else openCompanyFileList();
+                    }}
+                    className="flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left text-sm font-black text-slate-800 last:border-b-0 hover:bg-orange-50"
+                  >
+                    <FileTypeIcon name={fileName} />
+                    <span className="min-w-0 flex-1 truncate">{fileName}</span>
+                    {!attachment && <span className="shrink-0 text-xs font-bold text-slate-400">미등록</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </Panel>
