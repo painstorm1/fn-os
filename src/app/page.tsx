@@ -18272,7 +18272,7 @@ type ExpenseUploadItem = {
   sourceType: string;
 };
 
-const expenseSourceTypes = ["가온글로벌카드", "국민기업카드", "국민은행", "기업은행"];
+const ACCOUNTING_AUTO_SOURCE_TYPE = "auto";
 const jaewookPersonalPaymentItems = [
   ["재욱 교보 무배당베스트라이프종합보험약관", 37369],
   ["재욱 한화 100세 멀티", 62869],
@@ -18392,10 +18392,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const ledgerMonthInitializedRef = useRef(false);
   const ledgerSessionRestoredRef = useRef(false);
   const [loading, setLoading] = useState(!initialSummary);
-  const [sourceType, setSourceType] = useState("자동 분류");
-  const uploadDefaultRange = adRangeForPreset("30d");
-  const [uploadDateFrom, setUploadDateFrom] = useState(uploadDefaultRange.from);
-  const [uploadDateTo, setUploadDateTo] = useState(uploadDefaultRange.to);
   const [expenseUploadDragOver, setExpenseUploadDragOver] = useState(false);
   const [uploadedExpenseFiles, setUploadedExpenseFiles] = useState<ExpenseUploadItem[]>([]);
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
@@ -18618,16 +18614,16 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return `${item.sourceType}:${item.file.name}:${item.file.size}:${item.file.lastModified}`;
   }
 
-  function inferExpenseSourceType(fileName: string, fallback = sourceType) {
+  function inferExpenseSourceType(fileName: string, fallback = ACCOUNTING_AUTO_SOURCE_TYPE) {
     const name = fileName.toLowerCase();
     if (/가온|gaon|global/.test(name)) return "가온글로벌카드";
     if (/국민.*카드|kb.*card|kbcard|국민카드|기업카드/.test(name)) return "국민기업카드";
     if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
     if (/기업.*은행|ibk|기업은행/.test(name)) return "기업은행";
-    return fallback === "자동 분류" ? "자동 분류" : fallback;
+    return fallback || ACCOUNTING_AUTO_SOURCE_TYPE;
   }
 
-  function addExpenseFiles(files: FileList | File[] | null, nextSourceType = sourceType) {
+  function addExpenseFiles(files: FileList | File[] | null, nextSourceType = ACCOUNTING_AUTO_SOURCE_TYPE) {
     const nextFiles = Array.from(files || []).filter((file) => /\.(xlsx|xls|csv)$/i.test(file.name));
     if (!nextFiles.length) {
       setMessage("엑셀 또는 CSV 비용 파일을 선택해 주세요.");
@@ -18654,7 +18650,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   function onExpenseDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    addExpenseFiles(event.dataTransfer.files, sourceType);
+    addExpenseFiles(event.dataTransfer.files);
   }
 
   function removeExpenseFile(target: ExpenseUploadItem) {
@@ -18672,9 +18668,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setParsing(true);
     setMessage(`${uploadedExpenseFiles.length}개 파일을 읽어 비용 데이터를 생성하는 중입니다.`);
     const form = new FormData();
-    form.append("source_type", sourceType);
-    form.append("date_from", uploadDateFrom);
-    form.append("date_to", uploadDateTo);
+    form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
     uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
     const res = await fetch("/api/accounting/ledger/parse", { method: "POST", body: form });
@@ -18698,7 +18692,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setUploading(true);
     setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
     const form = new FormData();
-    form.append("source_type", sourceType);
+    form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
     uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
     const res = await fetch("/api/accounting/ledger/upload", {
@@ -19841,26 +19835,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   <input className="hidden" type="file" accept=".xlsx,.xls,.csv" multiple onChange={onFileChange} />
                 </label>
               </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-[180px_1fr_1fr]">
-                <FormField label="분류 방식">
-                  <select className={modalSelectClass} value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-                    <option>자동 분류</option>
-                    {expenseSourceTypes.map((type) => <option key={type}>{type}</option>)}
-                  </select>
-                </FormField>
-                <FormField label="저장 기준 시작일">
-                  <input className={modalInputClass} type="date" value={uploadDateFrom} onChange={(event) => setUploadDateFrom(event.target.value)} />
-                </FormField>
-                <FormField label="저장 기준 종료일">
-                  <input className={modalInputClass} type="date" value={uploadDateTo} onChange={(event) => setUploadDateTo(event.target.value)} />
-                </FormField>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
-                <button type="button" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-[#ff6a00]" onClick={() => { const range = adRangeForPreset("yesterday"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>어제</button>
-                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("7d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 7일</button>
-                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("14d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 2주</button>
-                <button type="button" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600" onClick={() => { const range = adRangeForPreset("30d"); setUploadDateFrom(range.from); setUploadDateTo(range.to); }}>최근 30일</button>
-              </div>
               {!!uploadedExpenseFiles.length && (
                 <div className="mt-4 grid gap-2">
                   {uploadedExpenseFiles.map((item) => (
@@ -20278,6 +20252,22 @@ function accountingShortDate(value?: unknown) {
   return `${match[2].padStart(2, "0")}/${match[3].padStart(2, "0")}`;
 }
 
+function accountingReviewDate(value?: unknown) {
+  const raw = String(value || "");
+  const match = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (!match) return raw || "-";
+  return `${match[1].slice(2)}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+}
+
+function accountingShortSource(row: Record<string, unknown>) {
+  const source = String(row.source_name || row.source_type || row.card_name || row.account_name || "");
+  if (/국민.*카드|KB.*card|kbcard/i.test(source)) return "국민카드";
+  if (/가온|gaon|global/i.test(source)) return "가온카드";
+  if (/기업|IBK/i.test(source)) return "기업은행";
+  if (/국민|KB/i.test(source)) return "국민은행";
+  return source || "-";
+}
+
 function accountingCategoryBadgeClass(category: string) {
   const palette = [
     "bg-orange-50 text-orange-700 ring-orange-100",
@@ -20366,108 +20356,153 @@ function ReviewQuickGrid({
   onJaewook?: (row: Record<string, unknown>) => void;
 }) {
   const sortedRows = [...rows].sort((a, b) => accountingRowTime(b) - accountingRowTime(a));
+  const categoryLargeOptions = Array.from(new Set(categories.map((category) => String(category.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
   if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className="w-full min-w-[1120px] text-xs">
+      <table className="w-full min-w-[1080px] text-xs">
         <thead className="bg-gray-50 font-semibold text-gray-500">
           <tr>
             <th className="px-3 py-2 text-left">일자</th>
             <th className="px-3 py-2 text-left">출처</th>
             <th className="px-3 py-2 text-left">거래처/내용</th>
             <th className="px-3 py-2 text-right">금액</th>
-            <th className="px-3 py-2 text-left">카테고리</th>
-            <th className="px-3 py-2 text-left">입출금</th>
-            <th className="px-3 py-2 text-center">반영</th>
+            <th className="px-3 py-2 text-left">카테고리 1</th>
+            <th className="px-3 py-2 text-left">카테고리 2</th>
             <th className="px-3 py-2 text-left">메모</th>
             <th className="px-3 py-2 text-right">관리</th>
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row, index) => {
-            const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
-            const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
-            const suggestion = suggestions?.[String(row.id || "")];
-            const suggestionCategory = suggestion
-              ? categoryById.get(String(suggestion.category_id || "")) || [suggestion.category_large, suggestion.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")
-              : "";
-            return (
-              <tr key={String(row.id || index)} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
-                <td className="px-3 py-2 font-semibold text-gray-800">{String(row.transaction_date || row.expense_date || "-")}</td>
-                <td className="px-3 py-2"><StatusBadge>{String(row.source_name || row.source_type || "-")}</StatusBadge></td>
-                <td className="max-w-[260px] px-3 py-2">
-                  <p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p>
-                  <p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p>
-                </td>
-                <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
-                <td className="px-3 py-2">
-                  <select
-                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400"
-                    defaultValue={String(row.category_id || "")}
-                    onChange={(event) => onSave(row, { category_id: event.target.value })}
-                  >
-                    <option value="">미지정</option>
-                    {categories.map((category) => <option key={String(category.id)} value={String(category.id)}>{categoryById.get(String(category.id))}</option>)}
-                  </select>
-                  {suggestion && (
-                    <button
-                      type="button"
-                      className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100"
-                      title={`추천 적용: ${suggestionCategory || "분류 없음"}`}
-                      onClick={() => onSave(row, {
-                        category_id: suggestion.category_id || row.category_id,
-                        category_large: suggestion.category_large || row.category_large,
-                        category_middle: suggestion.category_middle || row.category_middle,
-                        direction: suggestion.direction || row.direction,
-                        affects_profit: suggestion.affects_profit ?? row.affects_profit,
-                        affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow,
-                        affects_card_settlement: suggestion.affects_card_settlement ?? row.affects_card_settlement,
-                      })}
-                    >
-                      {String(suggestion.label || "추천")} · {suggestionCategory || "분류 확인"}
-                    </button>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <select
-                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400"
-                    defaultValue={String(row.direction || "pending_review")}
-                    onChange={(event) => onSave(row, { direction: event.target.value })}
-                  >
-                    <option value="income">입금/정산</option>
-                    <option value="expense">비용/출금</option>
-                    <option value="card_payment">카드대금</option>
-                    <option value="transfer">자금이동</option>
-                    <option value="pending_review">검토필요</option>
-                  </select>
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-center gap-2">
-                    <label className="flex items-center gap-1 font-semibold text-gray-600"><input type="checkbox" defaultChecked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} />손익</label>
-                    <label className="flex items-center gap-1 font-semibold text-gray-600"><input type="checkbox" defaultChecked={row.affects_cashflow !== false} onChange={(event) => onSave(row, { affects_cashflow: event.target.checked })} />현금</label>
-                  </div>
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
-                    defaultValue={String(row.memo || "")}
-                    placeholder={String(row.review_reason || "메모")}
-                    onBlur={(event) => onSave(row, { memo: event.target.value })}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end gap-2">
-                    <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>
-                    {jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}
-                    <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, {}, true)}>확정</ActionButton>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
+          {sortedRows.map((row, index) => (
+            <ReviewQuickRow
+              key={String(row.id || index)}
+              row={row}
+              categories={categories}
+              categoryLargeOptions={categoryLargeOptions}
+              categoryById={categoryById}
+              suggestion={suggestions?.[String(row.id || "")]}
+              onOpen={onOpen}
+              onSave={onSave}
+              onJaewook={onJaewook}
+            />
+          ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ReviewQuickRow({
+  row,
+  categories,
+  categoryLargeOptions,
+  categoryById,
+  suggestion,
+  onOpen,
+  onSave,
+  onJaewook,
+}: {
+  row: Record<string, unknown>;
+  categories: Array<Record<string, unknown>>;
+  categoryLargeOptions: string[];
+  categoryById: Map<string, string>;
+  suggestion?: Record<string, unknown>;
+  onOpen: (row: Record<string, unknown>) => void;
+  onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void;
+  onJaewook?: (row: Record<string, unknown>) => void;
+}) {
+  const currentCategory = categories.find((category) => String(category.id || "") === String(row.category_id || ""));
+  const initialLarge = String(currentCategory?.category_large || row.category_large || "");
+  const initialMiddle = String(currentCategory?.category_middle || row.category_middle || "");
+  const [selectedLarge, setSelectedLarge] = useState(initialLarge);
+  const [selectedMiddle, setSelectedMiddle] = useState(initialMiddle);
+  const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+  const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
+  const middleOptions = categories
+    .filter((category) => String(category.category_large || "").trim() === selectedLarge)
+    .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
+  const suggestionCategory = suggestion
+    ? categoryById.get(String(suggestion.category_id || "")) || [suggestion.category_large, suggestion.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")
+    : "";
+
+  function applyLarge(nextLarge: string) {
+    setSelectedLarge(nextLarge);
+    setSelectedMiddle("");
+  }
+
+  function applyMiddle(categoryId: string) {
+    const category = categories.find((item) => String(item.id || "") === categoryId);
+    setSelectedMiddle(String(category?.category_middle || ""));
+    onSave(row, { category_id: categoryId });
+  }
+
+  return (
+    <tr className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
+      <td className="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
+      <td className="px-3 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
+      <td className="max-w-[260px] px-3 py-2">
+        <p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p>
+        <p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+      <td className="px-3 py-2">
+        <select
+          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400"
+          value={selectedLarge}
+          onChange={(event) => applyLarge(event.target.value)}
+        >
+          <option value="">미지정</option>
+          {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+        </select>
+        {suggestion && (
+          <button
+            type="button"
+            className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100"
+            title={`추천 적용: ${suggestionCategory || "분류 없음"}`}
+            onClick={() => {
+              setSelectedLarge(String(suggestion.category_large || selectedLarge));
+              setSelectedMiddle(String(suggestion.category_middle || selectedMiddle));
+              onSave(row, {
+                category_id: suggestion.category_id || row.category_id,
+                direction: suggestion.direction || row.direction,
+                affects_profit: suggestion.affects_profit ?? row.affects_profit,
+                affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow,
+                affects_card_settlement: suggestion.affects_card_settlement ?? row.affects_card_settlement,
+              });
+            }}
+          >
+            {String(suggestion.label || "추천")} · {suggestionCategory || "분류 확인"}
+          </button>
+        )}
+      </td>
+      <td className="px-3 py-2">
+        <select
+          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400"
+          value={middleOptions.find((category) => String(category.category_middle || "") === selectedMiddle) ? String(middleOptions.find((category) => String(category.category_middle || "") === selectedMiddle)?.id || "") : ""}
+          onChange={(event) => applyMiddle(event.target.value)}
+          disabled={!selectedLarge}
+        >
+          <option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>
+          {middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}
+        </select>
+      </td>
+      <td className="px-3 py-2">
+        <input
+          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400"
+          defaultValue={String(row.memo || "")}
+          placeholder={String(row.review_reason || "메모")}
+          onBlur={(event) => onSave(row, { memo: event.target.value })}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex justify-end gap-2">
+          <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>
+          {jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}
+          <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, {}, true)}>확정</ActionButton>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -21888,6 +21923,18 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     void loadFnSettingsAttachmentCounts("location", locations.map((item) => item.id), (counts) => setFileCounts((prev) => ({ ...prev, ...counts })));
   }, [locations]);
 
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2" || companyModalOpen || locationModalOpen || addressSearchTarget || fileTarget || previewImage) return;
+      event.preventDefault();
+      setLocationDraft(normalizeLocation(emptyLocation));
+      setLocationIsNew(true);
+      setLocationModalOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [addressSearchTarget, companyModalOpen, fileTarget, locationModalOpen, previewImage]);
+
   function updateCompanyDraft(key: keyof FnCompanyInfo, value: string | string[]) {
     setCompanyDraft((prev) => {
       const next = {
@@ -22001,7 +22048,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 
   return (
     <div className="space-y-4">
-      <Panel title="본사 정보" subtitle={<div className="text-sm font-bold text-slate-500">FN OS 기본 사업자 정보를 관리합니다.</div>} action={<div className="flex flex-wrap gap-2"><ActionButton type="button" variant="secondary" onClick={() => { setCompanyDraft(normalizeCompany(company)); setCompanyModalOpen(true); }}>수정</ActionButton><ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>추가</ActionButton></div>}>
+      <Panel title="본사 정보" subtitle={<div className="text-sm font-bold text-slate-500">FN OS 기본 사업자 정보를 관리합니다.</div>} action={<ActionButton type="button" variant="secondary" onClick={() => { setCompanyDraft(normalizeCompany(company)); setCompanyModalOpen(true); }}>수정</ActionButton>}>
         <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr]">
           <div className="grid gap-3 md:grid-cols-3">
             {keyValue("상호", company.company_name)}
@@ -22026,7 +22073,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
         </div>
       </Panel>
 
-      <Panel title="사무실/창고" subtitle={<div className="text-sm font-bold text-slate-500">추가 사업장, 사무실, 창고 정보를 보관합니다.</div>} action={<ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>추가</ActionButton>}>
+      <Panel title="사무실/창고" subtitle={<div className="text-sm font-bold text-slate-500">추가 사업장, 사무실, 창고 정보를 보관합니다.</div>} action={<ActionButton type="button" onClick={() => { setLocationDraft(normalizeLocation(emptyLocation)); setLocationIsNew(true); setLocationModalOpen(true); }}>F2 추가</ActionButton>}>
         <div className="fn-table-shell overflow-x-auto">
           <table className="w-full min-w-[980px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
