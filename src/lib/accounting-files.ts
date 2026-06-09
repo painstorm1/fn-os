@@ -26,25 +26,25 @@ type ExpenseSourceProfile = {
 
 const SOURCE_PROFILES: ExpenseSourceProfile[] = [
   {
-    match: /가온글로벌카드|카드이용내역/i,
+    match: /가온\s*\(?\s*글로벌\s*카드\s*\)?|가온글로벌카드|카드이용내역/i,
     sourceType: "가온글로벌카드",
     firstDataRow: 7,
     columns: { date: 0, vendor: 4, amount: 5, foreignAmount: 6, paymentMethod: 7, paymentDue: 12, approvalNo: 13, rewardPoints: 14, category: 15, detail: 16, memo: 17 },
   },
   {
-    match: /국민기업카드|승인내역조회/i,
+    match: /국민\s*\(?\s*카드\s*\)?|국민기업카드|승인내역조회/i,
     sourceType: "국민기업카드",
     firstDataRow: 6,
     columns: { date: 0, vendor: 6, amount: 10, vat: 11, paymentMethod: 8, approvalNo: 14, category: 24, detail: 25, memo: 26 },
   },
   {
-    match: /국민\.xls|국민은행|47870101245017/i,
+    match: /국민\s*\(?\s*은행\s*\)?|국민\.xls|국민은행|47870101245017/i,
     sourceType: "국민은행",
     firstDataRow: 7,
     columns: { date: 1, vendor: 2, withdraw: 3, deposit: 4, balance: 5, paymentMethod: 8, category: 12, detail: 13, memo: 14 },
   },
   {
-    match: /기업|입출식/i,
+    match: /기업\s*\(?\s*은행\s*\)?|거래내역조회.*입출식|기업|입출식/i,
     sourceType: "기업은행",
     firstDataRow: 3,
     columns: { date: 1, vendor: 5, withdraw: 2, deposit: 3, balance: 4, paymentMethod: 9, category: 14, detail: 15, memo: 16 },
@@ -86,9 +86,11 @@ function inferSourceType(fileName: string, fallback: string) {
   const profile = SOURCE_PROFILES.find((item) => item.match.test(fileName));
   if (profile) return profile.sourceType;
   const name = fileName.toLowerCase();
-  if (/국민.*카드|kb.*card|kbcard|국민카드/.test(name)) return "국민카드";
-  if (/국민.*은행|kb.*bank|kbbank|국민은행/.test(name)) return "국민은행";
-  if (/기업.*은행|ibk|기업은행/.test(name)) return "기업은행";
+  const compact = name.replace(/\s+/g, "").replace(/[()[\]{}_-]/g, "");
+  if (/카드이용내역.*가온|가온.*글로벌.*카드|가온글로벌카드/.test(compact)) return "가온글로벌카드";
+  if (/승인내역조회.*국민|국민.*카드|kb.*card|kbcard|국민카드/.test(compact)) return "국민기업카드";
+  if (/47870101245017|국민.*은행|kb.*bank|kbbank|국민은행/.test(compact)) return "국민은행";
+  if (/거래내역조회.*입출식.*기업|기업.*은행|ibk|기업은행/.test(compact)) return "기업은행";
   if (/세금계산서|전자세금|tax/.test(name)) return "세금계산서";
   if (/광고|ad|ads|naver|meta|google/.test(name)) return "광고비";
   if (/택배|배송|운임|물류|cj|대한통운/.test(name)) return "택배비";
@@ -99,9 +101,28 @@ function colName(index: number) {
   return XLSX.utils.encode_col(index);
 }
 
-function isDateLike(value: unknown) {
+function fileDateBounds(fileName: string) {
+  const matches = Array.from(fileName.matchAll(/(20\d{2})(\d{2})(\d{2})/g))
+    .map((match) => formatDate(Number(match[1]), Number(match[2]), Number(match[3])))
+    .filter((date) => !Number.isNaN(new Date(`${date}T00:00:00Z`).getTime()));
+  return { start: matches[0] || "", end: matches[matches.length - 1] || matches[0] || "" };
+}
+
+function normalizeProfileDate(value: unknown, fileName: string) {
   const raw = clean(value);
-  return /^\d{4}[./-]\d{1,2}[./-]\d{1,2}/.test(raw);
+  if (/^\d{4}[./-]\d{1,2}[./-]\d{1,2}/.test(raw)) return isoDate(raw);
+  const monthDay = /^(\d{1,2})[./-](\d{1,2})/.exec(raw);
+  if (!monthDay) return "";
+  const { start, end } = fileDateBounds(fileName);
+  const startYear = Number(start.slice(0, 4)) || new Date().getFullYear();
+  const endYear = Number(end.slice(0, 4)) || startYear;
+  const month = Number(monthDay[1]);
+  const day = Number(monthDay[2]);
+  for (let year = startYear; year <= endYear; year += 1) {
+    const candidate = formatDate(year, month, day);
+    if ((!start || candidate >= start) && (!end || candidate <= end)) return candidate;
+  }
+  return formatDate(startYear, month, day);
 }
 
 function numberValue(value: unknown) {
@@ -144,12 +165,13 @@ function cardPaymentDue(sourceType: string, value: unknown) {
   return "";
 }
 
-function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceProfile) {
+function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceProfile, fileName: string) {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
   const rows: RawRow[] = [];
   for (let index = profile.firstDataRow; index < matrix.length; index += 1) {
     const row = matrix[index] || [];
-    if (!isDateLike(row[profile.columns.date])) continue;
+    const expenseDate = normalizeProfileDate(row[profile.columns.date], fileName);
+    if (!expenseDate) continue;
     const withdraw = profile.columns.withdraw !== undefined ? row[profile.columns.withdraw] : "";
     const deposit = profile.columns.deposit !== undefined ? row[profile.columns.deposit] : "";
     const hasDeposit = clean(deposit) && clean(deposit) !== "0";
@@ -167,14 +189,14 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
     });
     rows.push({
       ...rawByColumn,
-      expense_date: row[profile.columns.date],
+      expense_date: expenseDate,
       vendor_name: row[profile.columns.vendor],
       description: [row[profile.columns.vendor], detail, memo].map(clean).filter(Boolean).join(" / "),
       amount,
       total_amount: amount,
       vat_amount: profile.columns.vat !== undefined ? row[profile.columns.vat] : "",
       payment_method: profile.columns.paymentMethod !== undefined ? row[profile.columns.paymentMethod] : "",
-      payment_due_date: profile.columns.paymentDue !== undefined ? row[profile.columns.paymentDue] : cardPaymentDue(profile.sourceType, row[profile.columns.date]),
+      payment_due_date: profile.columns.paymentDue !== undefined ? row[profile.columns.paymentDue] : cardPaymentDue(profile.sourceType, expenseDate),
       approval_no: profile.columns.approvalNo !== undefined ? row[profile.columns.approvalNo] : "",
       reward_points: profile.columns.rewardPoints !== undefined ? row[profile.columns.rewardPoints] : "",
       foreign_amount: foreignAmount,
@@ -192,7 +214,7 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
 
 function rowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) {
   const profile = SOURCE_PROFILES.find((item) => item.match.test(fileName));
-  if (profile) return profileRowsFromWorksheet(sheet, profile);
+  if (profile) return profileRowsFromWorksheet(sheet, profile, fileName);
   return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "", raw: false }).filter((row) =>
     Object.values(row).some((value) => clean(value)),
   );
