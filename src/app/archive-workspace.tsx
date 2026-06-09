@@ -849,7 +849,7 @@ export default function ArchiveWorkspace() {
               </div>
             </div>
           </div>
-          <FilterBar className="grid w-full grid-cols-[minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
+          <FilterBar className="grid w-full grid-cols-[minmax(220px,1fr)_130px_130px_130px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
               <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
               <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.categoryGroup} onChange={(event) => {
                 const group = event.target.value;
@@ -872,7 +872,6 @@ export default function ArchiveWorkspace() {
                 <option value="">소스 전체</option>
                 {sources.map((source) => <option key={source} value={source}>{source}</option>)}
               </select>
-              <span className="whitespace-nowrap text-xs font-black text-slate-500">기간선택</span>
               <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateFrom)} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} aria-label="시작일" />
               <span className="text-center text-sm font-black text-slate-400">~</span>
               <input className="field-input h-10 rounded-md border border-slate-200 px-2 text-sm font-bold" placeholder="2026.05.27" value={displayDateInput(filters.dateTo)} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} aria-label="종료일" />
