@@ -182,8 +182,8 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
   const valueClass = tone === "green" ? "text-emerald-600" : tone === "rose" ? "text-red-600" : tone === "orange" ? "text-[#ff6a00]" : "text-gray-900";
   return (
     <div className="min-w-0">
-      <p className="truncate text-xs font-semibold leading-4 text-gray-500">{label}</p>
-      <p className={`mt-1 truncate text-[17px] font-bold leading-5 ${valueClass}`} title={value}>{value}</p>
+      <p className="truncate text-[13px] font-semibold leading-4 text-gray-500">{label}</p>
+      <p className={`mt-1 truncate text-[19px] font-bold leading-5 ${valueClass}`} title={value}>{value}</p>
       {note && <p className="mt-0.5 truncate text-xs font-medium leading-4 text-gray-500" title={note}>{note}</p>}
     </div>
   );
@@ -192,8 +192,8 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
 function CollectionDate({ label, value }: { label: string; value?: string }) {
   return (
     <div className="min-w-[116px] text-left">
-      <p className="text-xs font-black text-slate-500">{label}</p>
-      <p className="mt-1 text-[15px] font-black text-slate-900">{dateText(value)}</p>
+      <p className="text-[13px] font-black text-slate-500">{label}</p>
+      <p className="mt-1 text-base font-black text-slate-900">{dateText(value)}</p>
     </div>
   );
 }
@@ -202,8 +202,8 @@ function Panel({ title, subtitle, children, className = "", compact = false }: {
   return (
     <Card className={`${compact ? "p-4" : "p-5"} ${className}`}>
       <div className={compact ? "mb-3" : "mb-4"}>
-        <h2 className="text-lg font-semibold leading-snug text-gray-900">{title}</h2>
-        {subtitle && <div className={`${compact ? "mt-0.5 text-[13px]" : "mt-1 text-sm"} text-gray-500`}>{subtitle}</div>}
+        <h2 className={`${compact ? "text-[19px]" : "text-lg"} font-semibold leading-snug text-gray-900`}>{title}</h2>
+        {subtitle && <div className={`${compact ? "mt-0.5 text-sm" : "mt-1 text-sm"} text-gray-500`}>{subtitle}</div>}
       </div>
       {children}
     </Card>
@@ -353,7 +353,7 @@ export default function MainDashboard() {
             <Stat label="이번달" value={krw(summary?.month_sales)} />
           </div>
           <div className="mt-3 rounded-xl bg-gray-50 p-2.5">
-            <div className="mb-1.5 flex items-center justify-between text-[13px] font-semibold text-gray-500">
+            <div className="mb-1.5 flex items-center justify-between text-sm font-semibold text-gray-500">
               <span>14일 매출</span>
               <span>{krwLong(summary?.seven_day_sales)}</span>
             </div>
