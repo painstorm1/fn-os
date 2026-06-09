@@ -19724,6 +19724,12 @@ function accountingMonthValue(offset = 0) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function accountingDateValue(offset = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return formatDateKey(date);
+}
+
 function accountingMonthRange(month: string) {
   const [yearText, monthText] = month.split("-");
   const year = Number(yearText);
@@ -19763,6 +19769,13 @@ function accountingShiftMonth(month: string, offset: number) {
   if (!year || monthIndex < 0) return accountingMonthValue(0);
   const date = new Date(year, monthIndex + offset, 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function accountingShiftDate(dateValue: string, offset: number) {
+  const [year, month, day] = (dateValue || accountingDateValue(0)).split("-").map(Number);
+  const date = year && month && day ? new Date(year, month - 1, day) : new Date();
+  date.setDate(date.getDate() + offset);
+  return formatDateKey(date);
 }
 
 function readAccountingSessionState<T>(key: string, fallback: T): T {
@@ -19909,7 +19922,18 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     save_rule: true,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
-  const defaultLedgerFilters = { q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0), rangeEnabled: false, fromMonth: "2026-01", toMonth: accountingMonthValue(0) };
+  const defaultLedgerFilters = {
+    q: "",
+    source: "",
+    categoryLarge: "",
+    categoryMiddle: "",
+    month: accountingMonthValue(0),
+    periodMode: "month",
+    fromMonth: accountingMonthValue(-2),
+    toMonth: accountingMonthValue(0),
+    fromDay: accountingDateValue(0),
+    toDay: accountingDateValue(0),
+  };
   const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(() => {
     const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: "" }).mode;
     if (tab === "card" || tab === "bank") return tab;
@@ -20967,12 +20991,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       }).filter((option) => option.value) },
       { key: "memo", label: "메모" },
     ];
-  const ledgerMonthRange = ledgerFilters.rangeEnabled
-    ? {
+  const ledgerMonthRange = ledgerFilters.periodMode === "day"
+    ? { from: ledgerFilters.fromDay || accountingDateValue(0), to: ledgerFilters.toDay || accountingDateValue(0) }
+    : {
       from: accountingMonthRange(ledgerFilters.fromMonth || ledgerFilters.month).from,
       to: accountingMonthRange(ledgerFilters.toMonth || ledgerFilters.month).to,
-    }
-    : accountingMonthRange(ledgerFilters.month);
+    };
   const currentLedgerRows = ledgerSourceRows
     .filter((row) => String(row.source_type || "") === ledgerMode)
     .filter((row) => {
@@ -21064,6 +21088,29 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [uploading]);
+
+  function shiftLedgerPeriod(direction: -1 | 1) {
+    setLedgerFilters((prev) => {
+      if (prev.periodMode === "day") {
+        const fromDate = new Date(prev.fromDay || accountingDateValue(0));
+        const toDate = new Date(prev.toDay || prev.fromDay || accountingDateValue(0));
+        const span = Math.max(1, Math.round((toDate.getTime() - fromDate.getTime()) / 86_400_000) + 1);
+        return {
+          ...prev,
+          fromDay: accountingShiftDate(prev.fromDay, direction * span),
+          toDay: accountingShiftDate(prev.toDay || prev.fromDay, direction * span),
+        };
+      }
+      const fromParts = (prev.fromMonth || prev.month || accountingMonthValue(0)).split("-").map(Number);
+      const toParts = (prev.toMonth || prev.fromMonth || prev.month || accountingMonthValue(0)).split("-").map(Number);
+      const span = Math.max(1, (toParts[0] - fromParts[0]) * 12 + (toParts[1] - fromParts[1]) + 1);
+      return {
+        ...prev,
+        fromMonth: accountingShiftMonth(prev.fromMonth || prev.month, direction * span),
+        toMonth: accountingShiftMonth(prev.toMonth || prev.month, direction * span),
+      };
+    });
+  }
 
   function setFixedCostSelected(key: string, selected: boolean) {
     setFixedCostSelectedKeys((prev) => {
@@ -21625,49 +21672,47 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onChange={(event) => setLedgerFilters((prev) => ({ ...prev, q: event.target.value }))}
               placeholder="거래내용 / 금액 / 메모 검색"
             />
-            <ActionButton type="button" variant={ledgerFilters.month === accountingMonthValue(0) ? "primary" : "secondary"} className="h-9 shrink-0 px-3 text-xs" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingMonthValue(0) }))}>이번달</ActionButton>
-            <div className="flex h-9 w-[172px] shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
-              <button type="button" className="h-full px-2.5 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, -1) }))}>◀</button>
-              <input
-                className="h-full min-w-0 flex-1 border-x border-gray-200 bg-white px-1 text-center text-sm font-bold outline-orange-400"
-                type="month"
-                value={ledgerFilters.month}
-                onChange={(event) => {
-                  setLedgerFilters((prev) => ({ ...prev, month: event.target.value || accountingMonthValue(0) }));
-                }}
-              />
-              <button type="button" className="h-full px-2.5 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, 1) }))}>▶</button>
-            </div>
-            <label className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-black text-slate-600">
-              <input
-                type="checkbox"
-                checked={Boolean(ledgerFilters.rangeEnabled)}
-                onChange={(event) => setLedgerFilters((prev) => ({
-                  ...prev,
-                  rangeEnabled: event.target.checked,
-                  fromMonth: prev.fromMonth || "2026-01",
-                  toMonth: prev.toMonth || prev.month || accountingMonthValue(0),
-                }))}
-              />
-              월 기간
-            </label>
-            {ledgerFilters.rangeEnabled && (
-              <div className="flex h-9 shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+            <select
+              className="h-9 w-[78px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+              value={ledgerFilters.periodMode || "month"}
+              onChange={(event) => setLedgerFilters((prev) => ({ ...prev, periodMode: event.target.value }))}
+            >
+              <option value="month">월별</option>
+              <option value="day">일별</option>
+            </select>
+            <button type="button" className="h-9 w-8 shrink-0 rounded-md border border-gray-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 기간" onClick={() => shiftLedgerPeriod(-1)}>◀</button>
+            {ledgerFilters.periodMode === "day" ? (
+              <>
                 <input
-                  className="h-full w-[118px] border-0 px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  type="date"
+                  value={ledgerFilters.fromDay}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromDay: event.target.value || accountingDateValue(0) }))}
+                />
+                <input
+                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  type="date"
+                  value={ledgerFilters.toDay}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toDay: event.target.value || prev.fromDay || accountingDateValue(0) }))}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="month"
                   value={ledgerFilters.fromMonth}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromMonth: event.target.value || "2026-01" }))}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromMonth: event.target.value || accountingMonthValue(-2) }))}
                 />
-                <span className="px-1 text-xs font-black text-slate-400">~</span>
                 <input
-                  className="h-full w-[118px] border-0 px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="month"
                   value={ledgerFilters.toMonth}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toMonth: event.target.value || prev.month || accountingMonthValue(0) }))}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toMonth: event.target.value || prev.fromMonth || accountingMonthValue(0) }))}
                 />
-              </div>
+              </>
             )}
+            <button type="button" className="h-9 w-8 shrink-0 rounded-md border border-gray-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 기간" onClick={() => shiftLedgerPeriod(1)}>▶</button>
             <button
               type="button"
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"
