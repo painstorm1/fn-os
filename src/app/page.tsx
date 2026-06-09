@@ -18194,7 +18194,7 @@ type DashboardSummary = {
 };
 
 function asNumber(value: unknown) {
-  const parsed = Number(value || 0);
+  const parsed = typeof value === "string" ? Number(value.replace(/[^0-9.-]/g, "")) : Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -18567,7 +18567,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     memo: "",
   });
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
-  const [categoryLargeInputMode, setCategoryLargeInputMode] = useState<"existing" | "direct">("direct");
+  const [categoryDirectLarge, setCategoryDirectLarge] = useState("");
   const [categoryViewMode, setCategoryViewMode] = useState<"compact" | "all">("compact");
   const [selectedCategoryLarge, setSelectedCategoryLarge] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
@@ -18871,7 +18871,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   function resetCategoryDraft() {
     setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
-    setCategoryLargeInputMode("direct");
+    setCategoryDirectLarge("");
   }
 
   function openNewCategoryModal() {
@@ -18882,22 +18882,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     resetCategoryDraft();
     if (large) {
       setCategoryDraft((prev) => ({ ...prev, category_large: large }));
-      setCategoryLargeInputMode("existing");
     }
     setCategoryEditorOpen(true);
   }
 
-  function openEditCategoryModal(row: Record<string, unknown>, scope: "large" | "middle" = "middle") {
-    if (scope === "large") {
-      const large = String(row.category_large || "");
-      const ids = categories.filter((item) => String(item.category_large || "") === large).map((item) => String(item.id || "")).filter(Boolean);
-      setSelectedCategoryIds(ids);
-      setCategoryBulkSelectedFields(["category_large"]);
-      setCategoryBulkDraft((prev) => ({ ...prev, category_large: large }));
-      setCategoryBulkOpen(true);
-      setSelectedCategoryLarge(large);
-      return;
-    }
+  function openEditCategoryModal(row: Record<string, unknown>) {
     setCategoryDraft({
       id: String(row.id || ""),
       category_large: String(row.category_large || ""),
@@ -18910,7 +18899,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       sort_order: String(row.sort_order || 0),
       memo: String(row.memo || ""),
     });
-    setCategoryLargeInputMode("direct");
+    setCategoryDirectLarge("");
     setCategoryEditorOpen(true);
   }
 
@@ -18936,10 +18925,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   async function saveExpenseCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = categoryDraft.id ? "PATCH" : "POST";
+    const categoryLarge = categoryDraft.category_large === "__direct__" ? categoryDirectLarge : categoryDraft.category_large;
     const res = await fetch("/api/accounting/ledger/categories", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...categoryDraft, is_active: true }),
+      body: JSON.stringify({ ...categoryDraft, category_large: categoryLarge, sort_order: 0, is_active: true }),
     });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
@@ -18994,7 +18984,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         });
         const data = await res.json();
         if (!res.ok || data.ok === false) {
-          setMessage(data.error || "카테고리 다중 수정 실패");
+          setMessage(data.error || "카테고리 수정 실패");
           return;
         }
         saved += 1;
@@ -19189,18 +19179,20 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   async function saveReviewQuick(row: Record<string, unknown>, patch: Record<string, unknown>, confirm = false) {
     const id = String(row.id || "");
     if (!id) return;
-    const category = categories.find((item) => String(item.id || "") === String(patch.category_id || row.category_id || ""));
+    const nextCategoryId = String(patch.category_id ?? row.category_id ?? "");
+    const category = categories.find((item) => String(item.id || "") === nextCategoryId);
+    const categoryChanged = patch.category_id !== undefined;
     const res = await fetch("/api/accounting/ledger/transactions", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id,
-        category_id: patch.category_id ?? row.category_id,
+        category_id: nextCategoryId,
         direction: patch.direction ?? row.direction,
         review_reason: patch.review_reason ?? row.review_reason,
-        affects_profit: patch.affects_profit ?? row.affects_profit,
-        affects_cashflow: patch.affects_cashflow ?? row.affects_cashflow,
-        affects_card_settlement: patch.affects_card_settlement ?? row.affects_card_settlement,
+        affects_profit: patch.affects_profit ?? (categoryChanged && category ? category.affects_profit !== false : row.affects_profit),
+        affects_cashflow: patch.affects_cashflow ?? (categoryChanged && category ? category.affects_cashflow !== false : row.affects_cashflow),
+        affects_card_settlement: patch.affects_card_settlement ?? (categoryChanged && category ? category.affects_card_settlement === true : row.affects_card_settlement),
         memo: patch.memo ?? row.memo,
         category_large: category?.category_large,
         category_middle: category?.category_middle,
@@ -19215,6 +19207,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(confirm ? "검토필요 거래를 확정했습니다." : "검토필요 거래를 수정했습니다.");
     invalidateAccountingCache();
+    loadLedgerRows(true);
     loadSummary(true);
   }
 
@@ -20141,7 +20134,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <div className="flex items-center gap-2">
                 <ActionButton type="button" onClick={() => openNewCategoryEditor()}>F2 추가</ActionButton>
                 <ActionButton type="button" variant="secondary" disabled={!selectedCategoryIds.length} onClick={() => setCategoryBulkOpen((prev) => !prev)}>
-                  다중 수정 {selectedCategoryIds.length ? `${selectedCategoryIds.length}건` : ""}
+                  수정 {selectedCategoryIds.length ? `${selectedCategoryIds.length}건` : ""}
                 </ActionButton>
               </div>
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
@@ -20248,8 +20241,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                           </td>
                           <td className="px-2 py-2">
                             <div className="flex justify-center gap-1.5">
-                              <ActionButton type="button" variant="secondary" className="h-8 px-2 text-[11px]" onClick={() => openEditCategoryModal(row, "middle")}>2차수정</ActionButton>
-                              <ActionButton type="button" variant="secondary" className="h-8 px-2 text-[11px]" onClick={() => openEditCategoryModal(row, "large")}>1차수정</ActionButton>
+                              <ActionButton type="button" variant="secondary" className="h-8 px-3 text-[11px]" onClick={() => openEditCategoryModal(row)}>수정</ActionButton>
                               <ActionButton type="button" variant="danger" className="h-8 px-2 text-[11px]" onClick={() => void deleteExpenseCategory(id)}>삭제</ActionButton>
                             </div>
                           </td>
@@ -20279,44 +20271,32 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           }
         >
           <form id="accounting-category-form" onSubmit={saveExpenseCategory} className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
-              <FormField label="1차 입력 방식">
-                <select className={modalSelectClass} value={categoryLargeInputMode} onChange={(event) => setCategoryLargeInputMode(event.target.value as "existing" | "direct")}>
-                  <option value="existing">기존 1차 선택</option>
-                  <option value="direct">직접입력</option>
-                </select>
-              </FormField>
+            <div className="grid gap-3 md:grid-cols-2">
               <FormField label="1차 카테고리" required>
-                {categoryLargeInputMode === "existing" ? (
-                  <select className={modalSelectClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
-                    <option value="">선택</option>
-                    {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
-                  </select>
-                ) : (
-                  <input className={modalInputClass} value={categoryDraft.category_large} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))} />
+                <select className={modalSelectClass} value={categoryDraft.category_large || "__direct__"} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
+                  <option value="__direct__">*직접입력</option>
+                  {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+                </select>
+                {categoryDraft.category_large === "__direct__" && (
+                  <input className={`${modalInputClass} mt-2`} value={categoryDirectLarge} onChange={(event) => setCategoryDirectLarge(event.target.value)} placeholder="새 1차 카테고리" />
                 )}
               </FormField>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
               <FormField label="2차 카테고리">
                 <input className={modalInputClass} value={categoryDraft.category_middle} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_middle: event.target.value }))} />
               </FormField>
-              <FormField label="정렬 순서">
-                <input className={modalInputClass} type="number" value={categoryDraft.sort_order} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, sort_order: event.target.value }))} />
-              </FormField>
             </div>
-            <div className="grid gap-2 md:grid-cols-3">
-              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
+            <div className="flex flex-wrap items-center gap-5">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_profit} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />
-                손익 반영
+                손익반영
               </label>
-              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_cashflow} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />
-                현금흐름 반영
+                현금흐름반영
               </label>
-              <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_card_settlement} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />
-                카드결제예정 반영
+                카드결제예정반영
               </label>
             </div>
             <FormField label="메모">
@@ -20625,6 +20605,39 @@ function accountingShortSource(row: Record<string, unknown>) {
   return source || "-";
 }
 
+function accountingSignedDisplayAmount(row: Record<string, unknown>) {
+  const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+  const isCardCancel = String(row.source_type || "") === "card" && /취소|cancel/i.test(`${String(row.description || "")} ${String(row.merchant_name || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`);
+  return isCardCancel ? -Math.abs(amount) : amount;
+}
+
+function accountingRawPayload(row: Record<string, unknown>) {
+  return row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+}
+
+function accountingLegacyCategoryParts(row: Record<string, unknown>) {
+  const raw = accountingRawPayload(row);
+  const large = String(row.category_large || raw.category_detail || raw.P || raw.N || row.category || "").trim();
+  const middle = String(row.category_middle || raw.category_memo || raw.Q || raw.O || "").trim();
+  return { large, middle };
+}
+
+function accountingBankDebitAmount(row: Record<string, unknown>) {
+  const raw = accountingRawPayload(row);
+  const explicit = asNumber(row.debit_amount);
+  if (explicit) return explicit;
+  if (String(raw.cash_direction || row.direction || "").includes("출금")) return asNumber(row.amount_krw ?? row.total_amount ?? row.amount ?? raw.amount);
+  return asNumber(raw.D);
+}
+
+function accountingBankCreditAmount(row: Record<string, unknown>) {
+  const raw = accountingRawPayload(row);
+  const explicit = asNumber(row.credit_amount);
+  if (explicit) return explicit;
+  if (String(raw.cash_direction || row.direction || "").includes("입금")) return asNumber(row.amount_krw ?? row.total_amount ?? row.amount ?? raw.amount);
+  return asNumber(raw.E);
+}
+
 function accountingCategoryBadgeClass(category: string) {
   const palette = [
     "bg-orange-50 text-orange-700 ring-orange-100",
@@ -20775,6 +20788,8 @@ function ReviewQuickRow({
   const initialMiddle = String(currentCategory?.category_middle || row.category_middle || "");
   const [selectedLarge, setSelectedLarge] = useState(initialLarge);
   const [selectedMiddle, setSelectedMiddle] = useState(initialMiddle);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(String(currentCategory?.id || row.category_id || ""));
+  const [profitChecked, setProfitChecked] = useState(row.affects_profit !== false);
   const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
   const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
   const middleOptions = categories
@@ -20787,12 +20802,21 @@ function ReviewQuickRow({
   function applyLarge(nextLarge: string) {
     setSelectedLarge(nextLarge);
     setSelectedMiddle("");
+    setSelectedCategoryId("");
   }
 
   function applyMiddle(categoryId: string) {
     const category = categories.find((item) => String(item.id || "") === categoryId);
     setSelectedMiddle(String(category?.category_middle || ""));
+    setSelectedCategoryId(categoryId);
     onSave(row, { category_id: categoryId });
+  }
+
+  function confirmRow() {
+    onSave(row, {
+      category_id: selectedCategoryId || row.category_id,
+      affects_profit: profitChecked,
+    }, true);
   }
 
   return (
@@ -20821,6 +20845,7 @@ function ReviewQuickRow({
             onClick={() => {
               setSelectedLarge(String(suggestion.category_large || selectedLarge));
               setSelectedMiddle(String(suggestion.category_middle || selectedMiddle));
+              setSelectedCategoryId(String(suggestion.category_id || row.category_id || ""));
               onSave(row, {
                 category_id: suggestion.category_id || row.category_id,
                 direction: suggestion.direction || row.direction,
@@ -20846,7 +20871,7 @@ function ReviewQuickRow({
         </select>
       </td>
       <td className="px-3 py-2 text-center">
-        <input type="checkbox" defaultChecked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} />
+        <input type="checkbox" checked={profitChecked} onChange={(event) => { setProfitChecked(event.target.checked); onSave(row, { affects_profit: event.target.checked }); }} />
       </td>
       <td className="px-3 py-2">
         <input
@@ -20860,7 +20885,7 @@ function ReviewQuickRow({
         <div className="flex justify-end gap-2">
           <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>
           {jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}
-          <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, {}, true)}>확정</ActionButton>
+          <ActionButton type="button" className="h-8 px-3 text-xs" onClick={confirmRow}>확정</ActionButton>
         </div>
       </td>
     </tr>
@@ -20919,9 +20944,9 @@ function ExpenseTable({
   const visibleRows = compact ? sortedRows : sortedRows.slice((currentPage - 1) * effectivePageSize, currentPage * effectivePageSize);
   const pageGroupStart = Math.floor((currentPage - 1) / 5) * 5 + 1;
   const visiblePageNumbers = Array.from({ length: Math.min(5, totalPages - pageGroupStart + 1) }, (_, index) => pageGroupStart + index);
-  const filteredDebitTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.debit_amount), 0);
-  const filteredCreditTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.credit_amount), 0);
-  const filteredCardTotal = sortedRows.reduce((sum, row) => sum + asNumber(row.amount_krw ?? row.total_amount ?? row.amount), 0);
+  const filteredDebitTotal = sortedRows.reduce((sum, row) => sum + accountingBankDebitAmount(row), 0);
+  const filteredCreditTotal = sortedRows.reduce((sum, row) => sum + accountingBankCreditAmount(row), 0);
+  const filteredCardTotal = sortedRows.reduce((sum, row) => sum + accountingSignedDisplayAmount(row), 0);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -20937,7 +20962,16 @@ function ExpenseTable({
     const fallback = categoryById.get(String(row.category_id || ""));
     if (fallback) {
       const [large, middle] = fallback.split(" > ");
+      if (String(middle || row.category_middle || row.description || "").includes("내부이체") || String(row.direction || "").includes("transfer")) {
+        return { large: accountingBankCreditAmount(row) > 0 ? "기타 입금" : "기타 출금", middle: middle || "내부이체" };
+      }
       return { large: large || "-", middle: middle || "-" };
+    }
+    const legacy = accountingLegacyCategoryParts(row);
+    if (legacy.large || legacy.middle) {
+      const isTransfer = String(legacy.middle || row.category_middle || row.description || "").includes("내부이체") || String(row.direction || "").includes("transfer");
+      if (isTransfer) return { large: accountingBankCreditAmount(row) > 0 ? "기타 입금" : "기타 출금", middle: legacy.middle || "내부이체" };
+      return { large: legacy.large || "-", middle: legacy.middle || "-" };
     }
     return {
       large: String(row.category_large || row.category || "미분류"),
@@ -21017,7 +21051,7 @@ function ExpenseTable({
               )}
               {visibleRows.map((row, index) => {
                 const parts = categoryParts(row);
-                const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+                const amount = accountingSignedDisplayAmount(row);
                 const isCancel = /취소|cancel/i.test(`${String(row.description || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`);
                 const selected = selectedId && String(row.id || "") === selectedId;
                 const rowClass = `border-t border-gray-100 ${selected ? "bg-orange-100/80" : accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onSelect || onOpen ? "cursor-pointer" : ""}`;
@@ -21026,8 +21060,8 @@ function ExpenseTable({
                     <td className="px-3 py-2"><StatusBadge>{accountingSourceDisplayName(row, "bank")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.debit_amount) ? krw(asNumber(row.debit_amount)) : "-"}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{asNumber(row.credit_amount) ? krw(asNumber(row.credit_amount)) : "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingBankDebitAmount(row) ? krw(accountingBankDebitAmount(row)) : "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingBankCreditAmount(row) ? krw(accountingBankCreditAmount(row)) : "-"}</td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>

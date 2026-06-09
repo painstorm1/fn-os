@@ -40,6 +40,15 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isCardCancel(row: RawRow) {
+  return text(row.source_type) === "card" && /취소|cancel/i.test(`${text(row.description)} ${text(row.merchant_name)} ${text(row.status)} ${text(row.raw_status)} ${text(row.memo)}`);
+}
+
+function signedAccountingAmount(row: RawRow) {
+  const amount = numberValue(row.amount_krw ?? row.amount);
+  return isCardCancel(row) ? -Math.abs(amount) : amount;
+}
+
 function isoDate(value: unknown) {
   const raw = text(value);
   if (!raw) return "";
@@ -404,7 +413,8 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const manualCategory = manualPath ? categoryByPath.get(`${manualPath.large}|${manualPath.middle}|`) : null;
     const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
-    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? "기타 출금" : text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const transferLarge = numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금";
+    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? transferLarge : text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
     const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : text(manualCategory?.category_middle) || reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
     const categorySmall = "";
     const category = manualCategory || categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
@@ -446,6 +456,7 @@ async function rebuildCardSettlements() {
   const cardRows = await optionalRows("accounting_transactions", { source_type: "eq.card", is_active: "eq.true", limit: 5000 });
   const grouped = new Map<string, RawRow>();
   for (const row of cardRows) {
+    if (row.affects_card_settlement === false) continue;
     const cardName = text(row.card_name || row.source_name);
     const txDate = isoDate(row.transaction_date);
     const settlement = settlementFor(cardName, txDate);
@@ -460,9 +471,10 @@ async function rebuildCardSettlements() {
       currency: "USD",
       paid: false,
     };
-    prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? numberValue(row.amount_krw ?? row.amount) : 0);
-    prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : numberValue(row.foreign_amount || row.amount));
-    prev.amount_krw = numberValue(prev.amount_krw) + numberValue(row.amount_krw);
+    const sign = isCardCancel(row) ? -1 : 1;
+    prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? sign * Math.abs(numberValue(row.amount_krw ?? row.amount)) : 0);
+    prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : sign * Math.abs(numberValue(row.foreign_amount || row.amount)));
+    prev.amount_krw = numberValue(prev.amount_krw) + sign * Math.abs(numberValue(row.amount_krw));
     prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.domestic_amount) / numberValue(prev.card_limit) : null;
     grouped.set(key, prev);
   }
@@ -982,6 +994,13 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     if (from && date < from) return false;
     if (to && date > to) return false;
     return row.is_active !== false;
+  }).map((row) => {
+    const isInternalTransfer = text(row.direction) === "transfer" && text(row.category_middle) === "내부이체";
+    if (!isInternalTransfer) return row;
+    return {
+      ...row,
+      category_large: numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금",
+    };
   });
   const categories = await optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 });
   const rules = await optionalRows("accounting_category_rules", { order: "priority.asc", limit: 500 });
@@ -1006,11 +1025,11 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     .slice(0, 30);
   const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);
   const income = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
-  const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
-  const cashIn = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.credit_amount), 0);
-  const cashOut = filtered.filter((row) => row.source_type === "bank").reduce((total, row) => total + numberValue(row.debit_amount), 0);
+  const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + signedAccountingAmount(row), 0);
+  const cashIn = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.credit_amount), 0);
+  const cashOut = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.debit_amount), 0);
   const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.domestic_amount), 0);
-  const group = (pick: (row: RawRow) => string, sourceRows = filtered, amountPick: (row: RawRow) => number = (row) => numberValue(row.amount_krw ?? row.amount)) => {
+  const group = (pick: (row: RawRow) => string, sourceRows = filtered, amountPick: (row: RawRow) => number = (row) => row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount)) => {
     const map = new Map<string, { label: string; amount: number; count: number }>();
     for (const row of sourceRows) {
       const label = pick(row) || "기타";
@@ -1024,7 +1043,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const byMonth = Array.from(filtered.reduce((map, row) => {
     const label = isoDate(row.transaction_date).slice(0, 7) || "미지정";
     const prev = map.get(label) || { label, income: 0, expense: 0, amount: 0, count: 0 };
-    const amount = numberValue(row.amount_krw ?? row.amount);
+    const amount = row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount);
     if (row.direction === "income" && row.affects_profit !== false) prev.income += amount;
     if (row.direction === "expense" && row.affects_profit !== false) prev.expense += amount;
     prev.amount = prev.income - prev.expense;
