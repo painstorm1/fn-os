@@ -295,7 +295,7 @@ export default function ArchiveWorkspace() {
   const [localProjects, setLocalProjects] = useState<string[]>([]);
   const [projectCreateTarget, setProjectCreateTarget] = useState<"toolbar" | "manualLink" | "manualFile" | number | null>(null);
   const [projectCreateName, setProjectCreateName] = useState("");
-  const [selectMode, setSelectMode] = useState(false);
+  const [selectMode] = useState(true);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
   const [data, setData] = useState<ArchiveData>(() => readArchiveCache() || EMPTY_ARCHIVE_DATA);
   const [loading, setLoading] = useState(() => !readArchiveCache());
@@ -849,15 +849,7 @@ export default function ArchiveWorkspace() {
               </div>
             </div>
           </div>
-          <FilterBar className="grid w-full grid-cols-[80px_minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
-              <ActionButton
-                type="button"
-                onClick={() => setSelectMode((prev) => !prev)}
-                className="whitespace-nowrap px-4 text-white hover:opacity-90"
-                style={{ backgroundColor: selectMode ? "#FF6A00" : "#020617", borderColor: selectMode ? "#FF6A00" : "#020617", color: "#FFFFFF" }}
-              >
-                선택
-              </ActionButton>
+          <FilterBar className="grid w-full grid-cols-[minmax(220px,1fr)_130px_130px_130px_64px_118px_12px_118px] items-center gap-2 border-0 !p-4 shadow-none">
               <input className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-3 text-sm" placeholder="검색" value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} />
               <select className="field-input h-10 min-w-0 rounded-md border border-slate-200 px-2 text-sm" value={filters.categoryGroup} onChange={(event) => {
                 const group = event.target.value;
