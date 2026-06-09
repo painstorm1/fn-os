@@ -19888,6 +19888,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [parsedFiles, setParsedFiles] = useState<Array<Record<string, unknown>>>([]);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState("");
   const [message, setMessage] = useState("");
   const [manualExpenseModalOpen, setManualExpenseModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -20214,6 +20215,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return;
     }
     setUploading(true);
+    setUploadProgressText(`파일 ${uploadedExpenseFiles.length.toLocaleString("ko-KR")}개를 DB에 저장하는 중입니다.`);
     setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
     try {
       const form = new FormData();
@@ -20226,18 +20228,24 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       });
       const data = await res.json();
       if (!res.ok || data.ok === false) {
-        setMessage(data.error || "비용 업로드 실패");
+        const errorMessage = data.error || "비용 업로드 실패";
+        setMessage(errorMessage);
+        window.alert(`DB 저장에 실패했습니다.\n\n${errorMessage}\n\n화면을 새로고침하지 말고 파일/메시지를 확인한 뒤 다시 시도해 주세요.`);
         return;
       }
       setMessage(`데이터 생성 완료: 파일 ${Number(data.files?.length || uploadedExpenseFiles.length).toLocaleString("ko-KR")}개 / 비용 ${Number(data.success_count || 0).toLocaleString("ko-KR")}건 저장`);
+      window.alert(`DB 저장이 완료되었습니다.\n\n저장 ${Number(data.success_count || 0).toLocaleString("ko-KR")}건 / 중복 ${Number(data.duplicate_count || 0).toLocaleString("ko-KR")}건`);
       setUploadedExpenseFiles([]);
       setPreviewRows([]);
       setParsedFiles(Array.isArray(data.files) ? data.files : []);
       invalidateAccountingCache();
       loadSummary(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "비용 업로드 실패");
+      const errorMessage = error instanceof Error ? error.message : "비용 업로드 실패";
+      setMessage(errorMessage);
+      window.alert(`DB 저장 중 문제가 발생했습니다.\n\n${errorMessage}\n\n인터넷 연결과 파일 형식을 확인한 뒤 다시 시도해 주세요.`);
     } finally {
+      setUploadProgressText("");
       setUploading(false);
     }
   }
@@ -21037,6 +21045,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     if (restored.filters) setLedgerFilters((prev) => ({ ...prev, ...restored.filters }));
     ledgerSessionRestoredRef.current = true;
   }, [activeTab]);
+  useEffect(() => {
+    if (!uploading) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [uploading]);
 
   function setFixedCostSelected(key: string, selected: boolean) {
     setFixedCostSelectedKeys((prev) => {
@@ -22404,6 +22421,26 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         >
           <ExpenseTable rows={previewRows} categoryById={categoryById} />
         </SelectionModal>
+      )}
+
+      {uploading && (
+        <FormModal
+          title="DB 저장 중"
+          description="파일을 분석하고 거래/검토/카드정산 데이터를 저장하고 있습니다."
+          onClose={() => undefined}
+          size="sm"
+          footer={<ActionButton type="button" variant="secondary" disabled>처리 중</ActionButton>}
+        >
+          <div className="space-y-3">
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-orange-500" />
+            </div>
+            <p className="text-sm font-bold text-slate-700">{uploadProgressText || "DB 저장을 진행하고 있습니다."}</p>
+            <p className="text-xs font-semibold leading-5 text-slate-500">
+              완료 또는 실패 알림이 뜰 때까지 이 화면을 유지해 주세요. 문제가 생기면 안내 팝업으로 알려드립니다.
+            </p>
+          </div>
+        </FormModal>
       )}
 
       {editingTransaction && (
