@@ -1158,6 +1158,8 @@ type FnCustomer = {
   ceo_name?: string;
   contact_name?: string;
   phone?: string;
+  fax?: string;
+  email?: string;
   address?: string;
   payment_terms?: string;
   memo?: string;
@@ -1657,7 +1659,7 @@ type AccountAttachment = Omit<OrderAttachment, "id" | "order_id"> & {
   account_id?: string;
 };
 
-type FnSettingsAttachmentType = "bank" | "card" | "personnel" | "company" | "location";
+type FnSettingsAttachmentType = "bank" | "card" | "personnel" | "company" | "location" | "customer";
 
 type FnBankAccount = {
   id?: string;
@@ -14794,6 +14796,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const [customerBulkCommonField, setCustomerBulkCommonField] = useState<CustomerBulkField>("customer_type");
   const [customerBulkCommonValue, setCustomerBulkCommonValue] = useState("");
   const [customerBulkDrafts, setCustomerBulkDrafts] = useState<Record<string, Partial<Record<CustomerBulkField, string>>>>({});
+  const [customerFile, setCustomerFile] = useState<FnCustomer | null>(null);
+  const [customerFileCounts, setCustomerFileCounts] = useState<Record<string, number>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const customerSelectModeRef = useRef<"select" | "deselect">("select");
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -14802,7 +14806,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const customerSelection = useCheckboxColumnSelection({ keys: customerKeys, selectedKeys: selectedCustomerKeys, setSelectedKeys: setSelectedCustomerKeys, enabled: !modalOpen && !customerBulkOpen });
 
   function blankCustomerDraft() {
-    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", contact_name: "", phone: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", memo: "" };
+    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", fax: "", contact_name: "", phone: "", email: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", memo: "" };
   }
 
   async function loadCustomers(nextPage = page, nextQuery = query, nextRelation = relationFilter) {
@@ -14840,6 +14844,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }, [page, query, relationFilter]);
 
   useEffect(() => {
+    void loadFnSettingsAttachmentCounts("customer", customers.map(customerRowKey), (counts) => setCustomerFileCounts((prev) => ({ ...prev, ...counts })));
+  }, [customers]);
+
+  useEffect(() => {
     function stopSelecting() {
       setCustomerSelecting(false);
     }
@@ -14874,8 +14882,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       customer_name: customer.customer_name || customer.cust_name || "",
       customer_type: normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label),
       business_no: formatBusinessNoInput(customer.business_no || ""),
+      fax: customer.fax || "",
       contact_name: customer.contact_name || "",
       phone: customer.phone || "",
+      email: customer.email || "",
       postal_code: "",
       road_address: customer.address || "",
       jibun_address: "",
@@ -14897,6 +14907,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setDraft((prev) => {
       if (key === "customer_type") return { ...prev, customer_type: normalizeCustomerAttribute(value) };
       if (key === "business_no") return { ...prev, business_no: formatBusinessNoInput(value) };
+      if (key === "phone") return { ...prev, phone: formatKoreanPhone(value) };
+      if (key === "fax") return { ...prev, fax: formatKoreanLandline(value) };
       if (key === "customer_code") {
         const previousCodeBusinessNo = formatBusinessNoInput(prev.customer_code || "");
         const shouldSyncBusinessNo = Boolean(prev.business_no && prev.business_no === previousCodeBusinessNo);
@@ -15008,8 +15020,9 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   async function saveCustomerDraft() {
     const code = String(draft.customer_code || "").trim();
     const name = String(draft.customer_name || "").trim();
-    if (!code || !name) {
-      window.alert("거래처코드와 거래처명은 필수입니다.");
+    const type = normalizeCustomerAttribute(draft.customer_type);
+    if (!type || !code || !name) {
+      window.alert("속성, 거래처코드, 거래처명은 필수입니다.");
       return;
     }
     const res = await fetch("/api/fnos/customers", {
@@ -15120,6 +15133,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         business_no: customer.business_no || "",
         contact_name: customer.contact_name || "",
         phone: customer.phone || "",
+        fax: customer.fax || "",
+        email: customer.email || "",
         address: customer.address || "",
         payment_terms: customer.payment_terms || "",
         memo: customer.memo || "",
@@ -15163,6 +15178,8 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         business_no: formatBusinessNoInput(String(row["사업자번호"] || row["사업자등록번호"] || "").trim()),
         contact_name: String(row["담당자"] || row["연락담당자"] || "").trim(),
         phone: String(row["전화번호"] || row["전화"] || row["연락처"] || row["휴대폰"] || "").trim(),
+        fax: String(row["팩스번호"] || row["팩스"] || row["FAX"] || "").trim(),
+        email: String(row["이메일"] || row["Email"] || row["E-mail"] || row["EMAIL"] || "").trim(),
         address: String(row["주소"] || row["거래처주소"] || "").trim(),
         memo: String(row["주소/Email/기타메모"] || row["거래처정보"] || row["기타메모"] || row["메모"] || row["비고"] || "").trim(),
       }))
@@ -15291,7 +15308,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
+          <table className="w-full min-w-[1080px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
               <tr>
                 <th className="w-16 py-2 text-center">
@@ -15306,6 +15323,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                 <th className="w-36 py-2 pl-3 text-left">거래처코드</th>
                 <th className="w-48 py-2 text-left">거래처명</th>
                 <th className="w-24 py-2 text-left">속성</th>
+                <th className="w-24 py-2 text-left">파일업로드 폴더</th>
                 <th className="w-36 py-2 text-left">사업자번호</th>
                 <th className="w-28 py-2 text-left">담당자</th>
                 <th className="w-36 py-2 text-left">전화번호</th>
@@ -15324,6 +15342,9 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                   <td className="truncate py-2 pl-3 font-black">{customer.customer_code || customer.cust_code || "-"}</td>
                   <td className="truncate py-2 font-bold">{customer.customer_name || customer.cust_name || "-"}</td>
                   <td className="truncate py-2 text-slate-500">{customerAttributeLabel(customer.customer_type || customer.customer_type_label)}</td>
+                  <td className="py-2" onClick={(event) => event.stopPropagation()}>
+                    <FolderAttachmentButton count={customerFileCounts[key]} title="거래처 첨부파일" onClick={() => setCustomerFile(customer)} />
+                  </td>
                   <td className="truncate py-2 text-slate-500">{customer.business_no || "-"}</td>
                   <td className="truncate py-2 text-slate-500">{customer.contact_name || "-"}</td>
                   <td className="truncate py-2 text-slate-500">{customer.phone || "-"}</td>
@@ -15340,6 +15361,15 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           ))}
         </div>
       </Panel>
+      {customerFile && (
+        <AccountFileModal
+          accountType="customer"
+          accountId={customerRowKey(customerFile)}
+          title={customerFile.customer_name || customerFile.cust_name || customerFile.customer_code || "거래처"}
+          onClose={() => setCustomerFile(null)}
+          onChanged={(count) => setCustomerFileCounts((prev) => ({ ...prev, [customerRowKey(customerFile)]: count }))}
+        />
+      )}
       {customerBulkOpen && (
         <BulkMultiEditModal<CustomerBulkField, FnCustomer>
           title="거래처 선택수정"
@@ -16556,7 +16586,7 @@ function CustomerEditModal({
     <FormModal
       title={draft.id ? "거래처 수정" : "새 거래처 등록"}
       onClose={onClose}
-      size="lg"
+      size="xl"
       footer={
         <div className="flex w-full justify-between gap-2">
           <div>{draft.id && <ActionButton type="button" variant="danger" onClick={onDelete}>삭제</ActionButton>}</div>
@@ -16586,19 +16616,27 @@ function CustomerEditModal({
               ))}
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <FormField label="거래처코드" required><input className={modalInputClass} value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></FormField>
-            <FormField label="거래처명" required><input className={modalInputClass} value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></FormField>
-            <FormField label="사업자번호" className="md:col-span-2">
-              <input className={modalInputClass} value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
-              <span className="mt-2 flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
-                거래처코드와 동일
-              </span>
-            </FormField>
-            <FormField label="담당자"><input className={modalInputClass} value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></FormField>
-            <FormField label="전화번호"><input className={modalInputClass} value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
-            <FormField label="주소" className="md:col-span-2">
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="거래처코드" required><input className={modalInputClass} value={draft.customer_code || ""} onChange={(event) => onChange("customer_code", event.target.value)} /></FormField>
+              <FormField label="거래처명" required><input className={modalInputClass} value={draft.customer_name || ""} onChange={(event) => onChange("customer_name", event.target.value)} /></FormField>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="사업자등록번호">
+                <input className={modalInputClass} inputMode="numeric" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
+                <span className="mt-2 flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                  <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
+                  거래처 코드와 동일
+                </span>
+              </FormField>
+              <FormField label="팩스번호"><input className={modalInputClass} inputMode="numeric" value={draft.fax || ""} onChange={(event) => onChange("fax", event.target.value)} placeholder="031-000-0000" /></FormField>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <FormField label="담당자명"><input className={modalInputClass} value={draft.contact_name || ""} onChange={(event) => onChange("contact_name", event.target.value)} placeholder="담당자명" /></FormField>
+              <FormField label="전화번호"><input className={modalInputClass} inputMode="numeric" value={draft.phone || ""} onChange={(event) => onChange("phone", event.target.value)} placeholder="010-0000-0000" /></FormField>
+              <FormField label="이메일"><input className={modalInputClass} type="email" value={draft.email || ""} onChange={(event) => onChange("email", event.target.value)} placeholder="name@example.com" /></FormField>
+            </div>
+            <FormField label="주소">
               <div className="grid gap-2">
                 <div className="grid gap-2 md:grid-cols-[120px_180px_1fr]">
                   <ActionButton type="button" variant="secondary" onClick={() => setAddressSearchOpen(true)}>주소검색</ActionButton>
@@ -16608,7 +16646,7 @@ function CustomerEditModal({
                 <input className={modalInputClass} value={composeCustomerAddress(draft)} readOnly placeholder="주소" />
               </div>
             </FormField>
-            <FormField label="거래처정보 · 기타 메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} placeholder={"담당자/전화번호/주소/Email 등 정보기재\n예) 담당자: 홍길동 / 주소: 서울... / Email: fn@example.com"} /></FormField>
+            <FormField label="메모"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => onChange("memo", event.target.value)} /></FormField>
           </div>
           {customerType === "shopping" && (
             <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4">
@@ -22287,8 +22325,19 @@ function AccountFileModal({
     void openAttachment(item);
   }
 
+  const description =
+    accountType === "personnel"
+      ? "사진, 통장사본, 직원 관련 확인 자료를 보관합니다."
+      : accountType === "company"
+        ? "사업자등록증, 도장 이미지, 본사 확인 자료를 보관합니다."
+        : accountType === "location"
+          ? "사무실, 창고, 임대 관련 확인 자료를 보관합니다."
+          : accountType === "customer"
+            ? "사업자등록증, 거래처 계약서, 거래처 확인 자료를 보관합니다."
+            : "통장사본, 카드 이미지, 관련 확인 자료를 보관합니다.";
+
   return (
-    <SelectionModal title={`첨부파일 - ${title}`} description={accountType === "personnel" ? "사진, 통장사본, 직원 관련 확인 자료를 보관합니다." : accountType === "company" ? "사업자 등록증, 도장 이미지, 본사 확인 자료를 보관합니다." : accountType === "location" ? "사무실, 창고, 임대 관련 확인 자료를 보관합니다." : "통장사본, 카드 이미지, 관련 확인 자료를 보관합니다."} onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
+    <SelectionModal title={`첨부파일 - ${title}`} description={description} onClose={onClose} size="xl" className="max-h-[90vh] overflow-hidden">
       <div className="max-h-[calc(90vh-150px)] overflow-y-auto">
         <div
           onDragOver={(event) => {

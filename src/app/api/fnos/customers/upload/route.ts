@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
           ceo_name: first(row, ["대표자", "대표자명"]),
           contact_name: first(row, ["담당자", "연락담당자"]),
           phone: first(row, ["전화", "전화번호", "연락처", "휴대폰", "TEL"]),
+          fax: first(row, ["팩스", "팩스번호", "FAX"]),
+          email: first(row, ["이메일", "Email", "E-mail", "EMAIL"]),
           memo: first(row, ["비고", "메모", "적요", "REMARKS"]),
           search_text: first(row, ["검색창내용", "검색내용"]),
           is_active: boolActive(first(row, ["사용구분", "사용", "상태"])),

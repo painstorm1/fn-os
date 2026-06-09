@@ -69,6 +69,8 @@ export async function GET(request: NextRequest) {
         ceo_name: text(row.ceo_name),
         contact_name: text(row.contact_name),
         phone: text(row.phone),
+        fax: text(row.fax),
+        email: text(row.email),
         address: text(row.address),
         payment_terms: text(row.payment_terms),
         memo: text(row.memo || row.remarks),
@@ -101,18 +103,21 @@ export async function POST(request: NextRequest) {
     const customer = (body.customer || body) as AnyRecord;
     const code = text(customer.customer_code || customer.cust_code);
     const name = text(customer.customer_name || customer.cust_name);
-    if (!code || !name) return NextResponse.json({ ok: false, error: "거래처코드와 거래처명은 필수입니다." }, { status: 400 });
+    const customerType = normalizeCustomerType(customer.customer_type || customer.cust_type);
+    if (!customerType || !code || !name) return NextResponse.json({ ok: false, error: "속성, 거래처코드, 거래처명은 필수입니다." }, { status: 400 });
     const now = new Date().toISOString();
     const values = {
       customer_code: code,
       cust_code: code,
       customer_name: name,
       cust_name: name,
-      customer_type: normalizeCustomerType(customer.customer_type || customer.cust_type),
+      customer_type: customerType,
       business_no: text(customer.business_no || customer.business_number || customer.biz_no || customer.registration_no || customer.company_registration_no),
       ceo_name: text(customer.ceo_name),
       contact_name: text(customer.contact_name),
       phone: text(customer.phone),
+      fax: text(customer.fax),
+      email: text(customer.email),
       address: text(customer.address),
       payment_terms: text(customer.payment_terms),
       memo: text(customer.memo || customer.remarks),

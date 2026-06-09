@@ -56,6 +56,7 @@ create table if not exists customers (
   business_no text,
   contact_name text,
   phone text,
+  fax text,
   email text,
   address text,
   memo text,
@@ -113,6 +114,7 @@ alter table customers add column if not exists customer_type text;
 alter table customers add column if not exists business_no text;
 alter table customers add column if not exists contact_name text;
 alter table customers add column if not exists phone text;
+alter table customers add column if not exists fax text;
 alter table customers add column if not exists email text;
 alter table customers add column if not exists address text;
 alter table customers add column if not exists memo text;
