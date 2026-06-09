@@ -223,7 +223,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
   if (!rows.length) return <p className="rounded-xl bg-gray-50 px-3 py-6 text-center text-sm font-medium text-gray-400">수입 발주 데이터가 없습니다.</p>;
   return (
     <div className="fn-table-shell">
-      <div className="grid h-10 grid-cols-[102px_minmax(0,1.35fr)_minmax(0,0.9fr)_78px_120px_80px] items-center gap-2.5 bg-gray-50 px-3 text-sm font-semibold text-gray-600">
+      <div className="grid h-10 grid-cols-[102px_minmax(0,1.35fr)_minmax(0,0.9fr)_78px_120px_80px] items-center gap-2.5 bg-gray-50 px-3 text-[13px] font-semibold text-gray-600">
         <span>주문날짜</span>
         <span>대표 제품</span>
         <span>공장</span>
@@ -235,18 +235,18 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <a
           key={`${row.id || index}`}
           href={importOrderHref(row)}
-          className="grid min-h-11 grid-cols-[102px_minmax(0,1.35fr)_minmax(0,0.9fr)_78px_120px_80px] items-center gap-2.5 border-t border-gray-100 px-3 py-1.5 text-sm transition hover:bg-orange-50/70"
+          className="grid min-h-14 grid-cols-[108px_minmax(0,1.45fr)_minmax(0,0.85fr)_84px_132px_86px] items-center gap-3 border-t border-gray-100 px-3 py-2 text-base transition hover:bg-orange-50/70"
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
-          <span className="grid min-w-0 grid-cols-[40px_1fr] items-center gap-2.5">
-            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="h-10 w-10 rounded-md bg-slate-100" />}
+          <span className="grid min-w-0 grid-cols-[44px_1fr] items-center gap-3">
+            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-11 w-11 rounded-md object-cover" /> : <span className="h-11 w-11 rounded-md bg-slate-100" />}
             <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
           </span>
           <span className="truncate font-bold text-slate-600">{String(row.factory_name || "-")}</span>
           <span className="text-right font-bold text-slate-700">{n(row.total_qty).toLocaleString("ko-KR")}</span>
           <span className="text-right font-black text-slate-950">{krwLong(orderAmount(row))}</span>
           <span className="text-right">
-            <StatusBadge className={importStatusClass(row.status)}>{String(row.status || "-")}</StatusBadge>
+            <StatusBadge className={`h-7 px-2.5 text-sm ${importStatusClass(row.status)}`}>{String(row.status || "-")}</StatusBadge>
           </span>
         </a>
       ))}
