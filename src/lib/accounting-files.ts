@@ -17,6 +17,7 @@ type ExpenseSourceProfile = {
     paymentMethod?: number;
     paymentDue?: number;
     approvalNo?: number;
+    rewardPoints?: number;
     category: number;
     detail?: number;
     memo?: number;
@@ -28,7 +29,7 @@ const SOURCE_PROFILES: ExpenseSourceProfile[] = [
     match: /가온글로벌카드|카드이용내역/i,
     sourceType: "가온글로벌카드",
     firstDataRow: 7,
-    columns: { date: 0, vendor: 4, amount: 5, foreignAmount: 6, paymentMethod: 7, paymentDue: 12, approvalNo: 13, category: 15, detail: 16, memo: 17 },
+    columns: { date: 0, vendor: 4, amount: 5, foreignAmount: 6, paymentMethod: 7, paymentDue: 12, approvalNo: 13, rewardPoints: 14, category: 15, detail: 16, memo: 17 },
   },
   {
     match: /국민기업카드|승인내역조회/i,
@@ -175,6 +176,7 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
       payment_method: profile.columns.paymentMethod !== undefined ? row[profile.columns.paymentMethod] : "",
       payment_due_date: profile.columns.paymentDue !== undefined ? row[profile.columns.paymentDue] : cardPaymentDue(profile.sourceType, row[profile.columns.date]),
       approval_no: profile.columns.approvalNo !== undefined ? row[profile.columns.approvalNo] : "",
+      reward_points: profile.columns.rewardPoints !== undefined ? row[profile.columns.rewardPoints] : "",
       foreign_amount: foreignAmount,
       currency_hint: profile.columns.foreignAmount !== undefined && numberValue(primaryAmount) === 0 && numberValue(foreignAmount) > 0 ? "foreign" : "KRW",
       category,

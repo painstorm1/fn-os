@@ -2,6 +2,7 @@ import { deleteRows, insertRows, patchRows, selectRows, upsertRows } from "./fno
 
 type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
+const CARD_POINT_SETTING_PREFIX = "accounting_card_points";
 
 const SOURCE_ALIASES: Record<string, { sourceType: "card" | "bank"; sourceName: string; cardName?: string; accountName?: string }> = {
   "가온글로벌카드": { sourceType: "card", sourceName: "가온글로벌카드", cardName: "가온글로벌카드" },
@@ -211,6 +212,7 @@ function ruleMatches(rule: RawRow, tx: RawRow) {
 
 function ambiguousReviewReason(row: RawRow) {
   const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)} ${text(row.memo)}`;
+  if (text(row.currency) !== "KRW" && numberValue(row.foreign_amount) > 0 && !numberValue(row.amount_krw)) return "외화환율 확인";
   if (/KCP|케이씨피|인터넷상거래_?4|자동결제_?1/i.test(haystack)) return "KCP확인";
   if (/네이버파이낸셜|비즈월렛|NAVER\s*FINANCIAL/i.test(haystack)) return "네이버확인";
   return "";
@@ -218,6 +220,57 @@ function ambiguousReviewReason(row: RawRow) {
 
 async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<RawRow>(table, query).catch(() => []);
+}
+
+async function fxRatesMap() {
+  const rows = await optionalRows("import_erp_fx_rates", { order: "currency.asc", limit: 50 });
+  return Object.fromEntries(rows.map((row) => [text(row.currency).toUpperCase(), numberValue(row.rate)]));
+}
+
+export async function accountingFxRates() {
+  return fxRatesMap();
+}
+
+function cardPointSettingKey(cardName: string) {
+  return `${CARD_POINT_SETTING_PREFIX}:${cardName}`;
+}
+
+async function readAccountingCardPoint(cardName: string) {
+  const [row] = await optionalRows("fnos_settings", { setting_key: `eq.${cardPointSettingKey(cardName)}`, limit: 1 });
+  try {
+    const parsed = JSON.parse(text(row?.setting_value) || "{}");
+    return { card_name: cardName, balance: numberValue(parsed.balance), updated_at: parsed.updated_at || row?.updated_at || null };
+  } catch {
+    return { card_name: cardName, balance: 0, updated_at: row?.updated_at || null };
+  }
+}
+
+async function writeAccountingCardPoint(cardName: string, balance: number) {
+  const now = new Date().toISOString();
+  const payload = {
+    setting_key: cardPointSettingKey(cardName),
+    setting_value: JSON.stringify({ balance: Math.max(0, Math.round(balance)), updated_at: now }),
+    memo: "Accounting card point balance",
+    updated_at: now,
+  };
+  try {
+    await upsertRows("fnos_settings", payload, "setting_key");
+  } catch {
+    await patchRows("fnos_settings", { setting_key: `eq.${payload.setting_key}` }, { setting_value: payload.setting_value, updated_at: now });
+  }
+  return readAccountingCardPoint(cardName);
+}
+
+async function addAccountingCardPoints(cardName: string, points: number) {
+  if (!cardName || !points) return readAccountingCardPoint(cardName);
+  const current = await readAccountingCardPoint(cardName);
+  return writeAccountingCardPoint(cardName, numberValue(current.balance) + points);
+}
+
+export async function adjustAccountingCardPoints(cardName: string, mode: "use" | "set", amount: number) {
+  const current = await readAccountingCardPoint(cardName);
+  const next = mode === "set" ? amount : numberValue(current.balance) - amount;
+  return writeAccountingCardPoint(cardName, next);
 }
 
 function transactionAmount(row: RawRow) {
@@ -356,7 +409,7 @@ function manualCategoryPath(row: RawRow) {
   return null;
 }
 
-export function normalizeAccountingTransaction(row: RawRow) {
+export function normalizeAccountingTransaction(row: RawRow, fxRates: Record<string, number> = {}) {
   const meta = sourceMeta(row);
   const transactionDate = isoDate(first(row, ["transaction_date", "expense_date", "거래일", "일자", "날짜", "이용일자", "승인일자"]));
   const merchant = text(first(row, ["merchant_name", "vendor_name", "거래처", "가맹점명", "적요", "받는분", "사용처"]));
@@ -368,9 +421,9 @@ export function normalizeAccountingTransaction(row: RawRow) {
   const cashDirection = text(row.cash_direction || row.category || row["분류"]);
   const debit = meta.sourceType === "card" ? amount : /입금/.test(cashDirection) ? 0 : withdrawal || (/출금/.test(cashDirection) ? amount : 0);
   const credit = meta.sourceType === "bank" ? /출금/.test(cashDirection) ? 0 : deposit || (/입금/.test(cashDirection) ? amount : 0) : 0;
-  const foreignAmount = numberValue(first(row, ["foreign_amount", "해외금액", "USD", "외화금액"]));
-  const currency = text(first(row, ["currency", "통화"])) || (foreignAmount > 0 && amount === 0 ? "USD" : "KRW");
-  const fxRate = numberValue(first(row, ["fx_rate", "환율"]));
+  const foreignAmount = numberValue(first(row, ["foreign_amount", "해외금액", "해외이용금액", "해외이용금액($)", "USD", "외화금액"]));
+  const currency = text(first(row, ["currency", "통화"])) || (foreignAmount > 0 ? "USD" : "KRW");
+  const fxRate = numberValue(first(row, ["fx_rate", "환율"])) || (currency === "KRW" ? 1 : numberValue(fxRates[currency]));
   const amountKrw = currency === "KRW" ? amount : fxRate ? foreignAmount * fxRate : null;
   const existing = existingCategory(row);
   const direction = directionFor(meta.sourceType, row, merchant, debit, credit);
@@ -494,7 +547,7 @@ async function rebuildCardSettlements() {
     prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? sign * Math.abs(numberValue(row.amount_krw ?? row.amount)) : 0);
     prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : sign * Math.abs(numberValue(row.foreign_amount || row.amount)));
     prev.amount_krw = numberValue(prev.amount_krw) + sign * Math.abs(numberValue(row.amount_krw));
-    prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.domestic_amount) / numberValue(prev.card_limit) : null;
+    prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.amount_krw || prev.domestic_amount) / numberValue(prev.card_limit) : null;
     grouped.set(key, prev);
   }
   const rows = Array.from(grouped.values());
@@ -936,9 +989,10 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
   for (const key of ["direction", "review_reason"]) {
     if (row[key] !== undefined) payload[key] = text(row[key]);
   }
-  for (const key of ["debit_amount", "credit_amount", "amount", "amount_krw"]) {
+  for (const key of ["debit_amount", "credit_amount", "amount", "amount_krw", "foreign_amount", "fx_rate"]) {
     if (row[key] !== undefined) payload[key] = numberValue(row[key]);
   }
+  if (row.currency !== undefined) payload.currency = text(row.currency) || "KRW";
   for (const key of ["affects_profit", "affects_cashflow", "affects_card_settlement"]) {
     if (row[key] !== undefined) payload[key] = row[key];
   }
@@ -986,7 +1040,8 @@ export async function resolveAccountingReview(row: RawRow) {
 }
 
 export async function importAccountingLedgerRows(rows: RawRow[], options: { sourceType?: string; sourceFileName?: string; uploadedBy?: string; memo?: string } = {}) {
-  const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }));
+  const fxRates = await fxRatesMap();
+  const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }, fxRates));
   const classified = await classifyAccountingTransactions(normalized);
   const [batch] = await insertRows<{ id: string }>("accounting_import_batches", {
     source_name: options.sourceType || "자동 분류",
@@ -1004,6 +1059,10 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
   const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
   const fresh = rowsWithBatch.filter((row) => !existingKeys.has(text(row.dedupe_key)));
   const saved = fresh.length ? await upsertRows<RawRow>("accounting_transactions", fresh, "dedupe_key") : [];
+  const gaonPointTotal = saved
+    .filter((row) => text(row.card_name || row.source_name) === "가온글로벌카드")
+    .reduce((sum, row) => sum + numberValue((row.raw_json as RawRow | undefined)?.reward_points ?? row.reward_points), 0);
+  if (gaonPointTotal) await addAccountingCardPoints("가온글로벌카드", gaonPointTotal);
   await upsertReviewRows(saved);
   await rebuildCardSettlements();
   const reviewCount = saved.filter((row) => text(row.review_status) === "pending").length;
@@ -1044,6 +1103,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     loans,
     bankAccounts,
     cardAccounts,
+    fxRates,
+    gaonCardPoints,
   ] = await Promise.all([
     optionalRows("accounting_transactions", {
       ...(dateFilter ? { transaction_date: dateFilter } : {}),
@@ -1059,6 +1120,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     optionalRows("accounting_loans", { order: "payment_day.asc", limit: 300 }),
     dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_bank_accounts", { order: "sort_order.asc", limit: 100 }),
     dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 }),
+    fxRatesMap(),
+    readAccountingCardPoint("가온글로벌카드"),
   ]);
   const filtered = rows.filter((row) => {
     const date = isoDate(row.transaction_date);
@@ -1114,7 +1177,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + profitExpenseAmount(row), 0);
   const cashIn = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.credit_amount), 0);
   const cashOut = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.debit_amount), 0);
-  const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.domestic_amount), 0);
+  const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.amount_krw || row.domestic_amount), 0);
   const group = (pick: (row: RawRow) => string, sourceRows = filtered, amountPick: (row: RawRow) => number = (row) => row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount)) => {
     const map = new Map<string, { label: string; amount: number; count: number }>();
     for (const row of sourceRows) {
@@ -1153,6 +1216,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       scope: "dashboard",
       batches,
       card_settlements: settlements,
+      card_points: { "가온글로벌카드": gaonCardPoints },
+      fx_rates: fxRates,
       upcoming_fixed_costs: upcomingFixedCosts,
       totals: {
         income_amount: income,
@@ -1183,6 +1248,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     batches,
     review_queue: reviewQueue,
     card_settlements: settlements,
+    card_points: { "가온글로벌카드": gaonCardPoints },
+    fx_rates: fxRates,
     fixed_costs: activeFixedCosts,
     fixed_cost_occurrences: calendarFixedCostOccurrences,
     loan_occurrences: loanOccurrences,

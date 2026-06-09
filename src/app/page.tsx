@@ -10874,7 +10874,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       render();
       resetViewHistory();
       refreshEmptyBaseRows();
-      window.__fnosTradeAnalysisReady = true;
     </script></body></html>`;
     const popupUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
@@ -10883,17 +10882,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("거래 분석 팝업을 열 수 없습니다. 브라우저 팝업 차단을 확인해 주세요.");
       return;
     }
-    window.setTimeout(() => {
-      try {
-        const target = popup as Window & { __fnosTradeAnalysisReady?: boolean };
-        if (target.closed || target.__fnosTradeAnalysisReady) return;
-        target.document.open();
-        target.document.write(html);
-        target.document.close();
-      } catch {
-        // Some browsers make blob popups temporarily inaccessible; the blob path remains the primary path.
-      }
-    }, 600);
     popup.focus();
   }
 
@@ -18854,6 +18842,8 @@ type AccountingSummary = {
   ok?: boolean;
   scope?: string;
   error?: string;
+  fx_rates?: Record<string, number>;
+  card_points?: Record<string, Record<string, unknown>>;
   categories?: Array<Record<string, unknown>>;
   rules?: Array<Record<string, unknown>>;
   expenses?: Array<Record<string, unknown>>;
@@ -18913,7 +18903,7 @@ const accountingTabLabel: Record<string, string> = {
   fixed: "고정비",
 };
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-09-ledger-repair-v2";
+const ACCOUNTING_CACHE_VERSION = "2026-06-09-card-fx-points";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full";
@@ -19992,6 +19982,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   useEffect(() => {
     if (activeTab !== "ledger") return;
     if (ledgerSessionRestoredRef.current) return;
+    if (tab === "card" || tab === "bank") {
+      setLedgerMode(tab);
+      ledgerSessionRestoredRef.current = true;
+      return;
+    }
     const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: ledgerMode, filters: ledgerFilters });
     if (restored.mode === "bank" || restored.mode === "card") setLedgerMode(restored.mode);
     if (restored.filters) setLedgerFilters((prev) => ({ ...prev, ...restored.filters }));
@@ -20469,6 +20464,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onOpen={openTransaction}
               onMemoSave={saveExpenseMemo}
               storageKey={`fnos.accounting.ledger.table.${ledgerMode}.v1`}
+              fxRates={summary?.fx_rates}
             />
           </div>
         </Card>
@@ -21251,6 +21247,34 @@ function accountingSignedDisplayAmount(row: Record<string, unknown>) {
   return isCardCancel ? -Math.abs(amount) : amount;
 }
 
+function accountingCardSign(row: Record<string, unknown>) {
+  return /취소|cancel/i.test(`${String(row.description || "")} ${String(row.merchant_name || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`) ? -1 : 1;
+}
+
+function accountingCurrency(row: Record<string, unknown>) {
+  return String(row.currency || "KRW").toUpperCase();
+}
+
+function usdText(value: number) {
+  return `$${Number(value || 0).toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function accountingCardForeignAmount(row: Record<string, unknown>) {
+  return accountingCardSign(row) * Math.abs(asNumber(row.foreign_amount || row.amount));
+}
+
+function accountingCardConvertedAmount(row: Record<string, unknown>, usdRate = 0) {
+  if (accountingCurrency(row) === "KRW") return accountingSignedDisplayAmount(row);
+  const saved = accountingSignedDisplayAmount(row);
+  if (saved) return saved;
+  return accountingCardForeignAmount(row) * usdRate;
+}
+
+function accountingCardAmountText(row: Record<string, unknown>) {
+  if (accountingCurrency(row) === "KRW") return krw(accountingSignedDisplayAmount(row));
+  return usdText(accountingCardForeignAmount(row));
+}
+
 function accountingRawPayload(row: Record<string, unknown>) {
   return row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
 }
@@ -21542,6 +21566,7 @@ function ExpenseTable({
   onOpen,
   onMemoSave,
   storageKey,
+  fxRates,
 }: {
   rows: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
@@ -21552,6 +21577,7 @@ function ExpenseTable({
   onOpen?: (row: Record<string, unknown>) => void;
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
   storageKey?: string;
+  fxRates?: Record<string, number>;
 }) {
   const restoredTableState = readAccountingSessionState(storageKey || "", { page: 1, pageSize: 30, sortState: null as { key: string; dir: "asc" | "desc" } | null });
   const [page, setPage] = useState(Number(restoredTableState.page) || 1);
@@ -21586,7 +21612,14 @@ function ExpenseTable({
   const visiblePageNumbers = Array.from({ length: Math.min(5, totalPages - pageGroupStart + 1) }, (_, index) => pageGroupStart + index);
   const filteredDebitTotal = sortedRows.reduce((sum, row) => sum + accountingBankDebitAmount(row), 0);
   const filteredCreditTotal = sortedRows.reduce((sum, row) => sum + accountingBankCreditAmount(row), 0);
-  const filteredCardTotal = sortedRows.reduce((sum, row) => sum + accountingSignedDisplayAmount(row), 0);
+  const usdRate = asNumber(fxRates?.USD);
+  const filteredCardDomesticTotal = sortedRows
+    .filter((row) => accountingCurrency(row) === "KRW")
+    .reduce((sum, row) => sum + accountingSignedDisplayAmount(row), 0);
+  const filteredCardForeignTotal = sortedRows
+    .filter((row) => accountingCurrency(row) !== "KRW")
+    .reduce((sum, row) => sum + accountingCardForeignAmount(row), 0);
+  const filteredCardConvertedTotal = sortedRows.reduce((sum, row) => sum + accountingCardConvertedAmount(row, usdRate), 0);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -21639,7 +21672,17 @@ function ExpenseTable({
                 <span>출금: <strong className="text-base text-rose-600">{krw(filteredDebitTotal)}</strong></span>
               </>
             ) : (
-              <span>사용금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardTotal)}</strong></span>
+              <span>
+                총 사용금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardDomesticTotal)}</strong>
+                {Math.abs(filteredCardForeignTotal) > 0 && (
+                  <>
+                    <span className="mx-1 text-slate-400">+</span>
+                    <strong className="text-base text-sky-700">{usdText(filteredCardForeignTotal)}</strong>
+                    <span className="mx-1 text-slate-400">/</span>
+                    <strong className="text-base text-slate-950">{krw(filteredCardConvertedTotal)}</strong>
+                  </>
+                )}
+              </span>
             )}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -21711,7 +21754,7 @@ function ExpenseTable({
                     <td className="px-3 py-2"><StatusBadge tone="orange">{accountingSourceDisplayName(row, "card")}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingCardAmountText(row)}</td>
                     <td className="px-3 py-2"><span className={isCancel ? "font-bold text-red-600" : "text-gray-400"}>{isCancel ? "취소" : "-"}</span></td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
@@ -21829,6 +21872,9 @@ function AccountingRightPanel() {
   const endpointCacheKey = `${endpoint}:${ACCOUNTING_CACHE_VERSION}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
+  const [pointModalOpen, setPointModalOpen] = useState(false);
+  const [pointInput, setPointInput] = useState("");
+  const [pointUseAll, setPointUseAll] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -21867,6 +21913,27 @@ function AccountingRightPanel() {
   const kbSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "국민기업카드");
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
+  const gaonPoint = asNumber(summary?.card_points?.["가온글로벌카드"]?.balance);
+
+  async function saveCardPoint(mode: "use" | "set") {
+    const amount = pointUseAll && mode === "use" ? gaonPoint : asNumber(pointInput);
+    const res = await fetch("/api/accounting/ledger/card-points", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_name: "가온글로벌카드", mode, amount }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) return;
+    const nextPoint = data.point || {};
+    setSummary((prev) => ({
+      ...(prev || {}),
+      card_points: { ...(prev?.card_points || {}), "가온글로벌카드": nextPoint },
+    }));
+    invalidateClientCache(ACCOUNTING_SUMMARY_ENDPOINT);
+    setPointInput("");
+    setPointUseAll(false);
+    setPointModalOpen(false);
+  }
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
@@ -21875,10 +21942,63 @@ function AccountingRightPanel() {
         <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
         <AccountingMetric label="검토필요" value={`${asNumber(totals.review_count).toLocaleString("ko-KR")}건`} note="KCP/네이버/미분류 확인" tone="rose" />
         <AccountingMetric label="3일 내 고정비" value={krw(asNumber(totals.fixed_cost_due_amount))} note={`${upcomingFixedCosts.length.toLocaleString("ko-KR")}개 예정`} tone={upcomingFixedCosts.length ? "rose" : "green"} />
-        <AccountingMetric label="가온글로벌카드" value="20,000,000원" note={`사용률 ${gaonUsage}`} tone="green" />
+        <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold text-gray-500">가온글로벌카드</p>
+              <p className="mt-1 text-lg font-black text-gray-950">20,000,000원</p>
+              <p className="mt-1 text-xs font-bold text-gray-500">사용률 {gaonUsage}</p>
+              <p className="mt-1 text-xs font-black text-emerald-700">포인트리: {gaonPoint.toLocaleString("ko-KR")}</p>
+            </div>
+            <button
+              type="button"
+              className="h-7 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-black text-emerald-700 hover:bg-emerald-100"
+              onClick={() => {
+                setPointInput("");
+                setPointUseAll(false);
+                setPointModalOpen(true);
+              }}
+            >
+              조정
+            </button>
+          </div>
+        </div>
         <AccountingMetric label="국민기업카드" value="10,000,000원" note={`사용률 ${kbUsage}`} tone="orange" />
         <AccountingMetric label="카드대금 처리" value="현금흐름" note="손익 비용으로 중복 반영하지 않음" />
       </div>
+      {pointModalOpen && (
+        <FormModal
+          title="가온글로벌카드 포인트리"
+          description={`현재 ${gaonPoint.toLocaleString("ko-KR")}P`}
+          onClose={() => setPointModalOpen(false)}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setPointModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" variant="secondary" onClick={() => void saveCardPoint("set")}>수정</ActionButton>
+              <ActionButton type="button" onClick={() => void saveCardPoint("use")}>사용</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <FormField label="입력창 포인트리">
+              <input
+                className={`${modalInputClass} text-right`}
+                inputMode="numeric"
+                value={pointUseAll ? formatCommaNumber(gaonPoint) : formatCommaNumber(pointInput)}
+                onChange={(event) => {
+                  setPointUseAll(false);
+                  setPointInput(String(asNumber(event.target.value)));
+                }}
+              />
+            </FormField>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={pointUseAll} onChange={(event) => setPointUseAll(event.target.checked)} />
+              전부 사용
+            </label>
+          </div>
+        </FormModal>
+      )}
       <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
         <h3 className="text-xs font-semibold text-gray-500">기간 KPI</h3>
         <div className="mt-2 space-y-2">
@@ -23699,6 +23819,7 @@ function HomeContent() {
       ? "db"
       : requestedAccountingTab;
   const accountingTab = accountingSubMenus.some((sub) => sub.tab === normalizedAccountingTab) ? normalizedAccountingTab : "dashboard";
+  const accountingWorkspaceTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card" ? requestedAccountingTab : accountingTab;
 
   useEffect(() => {
     markClientCacheReady();
@@ -23731,7 +23852,7 @@ function HomeContent() {
           ) : activeSlug === "sales" ? (
             <SalesInventoryWorkspace section={salesSection} />
           ) : activeSlug === "accounting" ? (
-            <AccountingWorkspace tab={accountingTab} />
+            <AccountingWorkspace tab={accountingWorkspaceTab} />
           ) : activeSlug === "ads" ? (
             <AdsAnalysisWorkspace />
           ) : activeSlug === "archive" ? (
