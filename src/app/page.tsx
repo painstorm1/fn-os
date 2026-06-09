@@ -8974,11 +8974,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     localStorage.removeItem(IMPORT_PURCHASE_PREFILL_STORAGE_KEY);
     try {
       const prefill = JSON.parse(raw) as SalesPurchaseEntryPrefill;
-      setHistoryMode("purchases");
+      setSalesHistoryMode("purchases");
       setEntryPrefill(prefill);
       setEntryModalMode("purchases");
     } catch {
-      setHistoryMode("purchases");
+      setSalesHistoryMode("purchases");
       setEntryPrefill(null);
       setEntryModalMode("purchases");
     }
@@ -12134,7 +12134,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setHistoryMode(mode as "sales" | "purchases")}
+                  onClick={() => setSalesHistoryMode(mode as "sales" | "purchases")}
                   className={`rounded-md px-5 py-2 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
                 >
                   {label}
@@ -12197,7 +12197,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setHistoryMode(mode as SalesHistoryMode)}
+                    onClick={() => setSalesHistoryMode(mode as SalesHistoryMode)}
                     className={`h-9 rounded-md px-5 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
                   >
                     {label}
@@ -12205,7 +12205,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setHistoryMode("returns")}
+                  onClick={() => setSalesHistoryMode("returns")}
                   className={`h-9 rounded-md px-5 text-sm font-black transition ${historyMode === "returns" ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
                 >
                   반품/교환
