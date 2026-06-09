@@ -18880,7 +18880,7 @@ function AccountingLineChart({
   );
 }
 
-function AccountingDualLineChart({ rows, title = "월별 입금/비용 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
+function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
   const chartRows = rows.slice(-8);
   const max = Math.max(1, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
   const linePoints = (key: "income" | "expense") => chartRows.map((row, index) => {
@@ -18893,38 +18893,39 @@ function AccountingDualLineChart({ rows, title = "월별 입금/비용 추이" }
     y: 92 - (asNumber(row[key]) / max) * 76,
   });
   return (
-    <Card className="p-5">
+    <Card className="p-4">
       <SectionHeader
         title={title}
+        className="mb-2"
         actions={
-          <div className="flex items-center gap-3 text-xs font-black">
+          <div className="flex items-center gap-3 text-[11px] font-semibold">
             <span className="inline-flex items-center gap-1 text-emerald-600"><i className="h-2 w-2 rounded-full bg-emerald-500" />입금</span>
-            <span className="inline-flex items-center gap-1 text-orange-600"><i className="h-2 w-2 rounded-full bg-orange-500" />비용</span>
+            <span className="inline-flex items-center gap-1 text-rose-600"><i className="h-2 w-2 rounded-full bg-rose-500" />비용</span>
           </div>
         }
       />
-      <div className="mt-4 rounded-xl bg-slate-50 p-4">
-        <svg viewBox="0 0 100 100" className="h-56 w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
+      <div className="rounded-xl bg-slate-50 px-3 py-3">
+        <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
           <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
           {chartRows.length > 0 && <polyline points={linePoints("income")} fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-          {chartRows.length > 0 && <polyline points={linePoints("expense")} fill="none" stroke="#f97316" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+          {chartRows.length > 0 && <polyline points={linePoints("expense")} fill="none" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
           {chartRows.map((row, index) => {
             const income = dot(row, index, "income");
             const expense = dot(row, index, "expense");
             return (
               <g key={`${String(row.label)}-${index}`}>
                 <circle cx={income.x} cy={income.y} r="2.8" fill="#10b981" />
-                <circle cx={expense.x} cy={expense.y} r="2.8" fill="#f97316" />
+                <circle cx={expense.x} cy={expense.y} r="2.8" fill="#f43f5e" />
               </g>
             );
           })}
         </svg>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
           {chartRows.slice(-4).map((row, index) => (
-            <div key={`${String(row.label)}-${index}`} className="rounded bg-white px-3 py-2 text-xs">
-              <p className="font-black text-slate-500">{String(row.label || "-")}</p>
-              <p className="mt-1 font-black text-emerald-600">{krw(asNumber(row.income))}</p>
-              <p className="mt-0.5 font-black text-orange-600">{krw(asNumber(row.expense))}</p>
+            <div key={`${String(row.label)}-${index}`} className="min-w-0">
+              <p className="truncate font-semibold text-slate-500">{String(row.label || "-")}</p>
+              <p className="truncate font-bold text-emerald-600">{krw(asNumber(row.income))}</p>
+              <p className="truncate font-bold text-rose-600">{krw(asNumber(row.expense))}</p>
             </div>
           ))}
           {!chartRows.length && <div className="col-span-full"><EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" /></div>}
@@ -18938,64 +18939,58 @@ function accountingTopRowsWithOther(rows: Array<Record<string, unknown>>) {
   const sorted: Array<Record<string, unknown> & { amount: number }> = rows
     .map((row) => ({ ...row, amount: asNumber(row.amount) }))
     .filter((row) => asNumber(row.amount) > 0);
-  const top = sorted.slice(0, 3);
-  const otherAmount = sorted.slice(3).reduce((sum, row) => sum + asNumber(row.amount), 0);
-  const otherCount = sorted.slice(3).reduce((sum, row) => sum + asNumber(row.count), 0);
+  const top = sorted.slice(0, 5);
+  const otherAmount = sorted.slice(5).reduce((sum, row) => sum + asNumber(row.amount), 0);
+  const otherCount = sorted.slice(5).reduce((sum, row) => sum + asNumber(row.count), 0);
   return otherAmount > 0 ? [...top, { label: "기타", amount: otherAmount, count: otherCount }] : top;
 }
 
+function accountingRankLabel(value: unknown) {
+  return String(value || "-")
+    .replace(/\s+/g, " ")
+    .replace(/정$/, "")
+    .replace(/주식회사|주식회|㈜|\(주\)/g, "")
+    .replace(/상품대$/g, "")
+    .trim() || "-";
+}
+
 function AccountingCategoryRankChart({
-  incomeRows,
-  expenseRows,
+  rows,
+  mode,
+  title,
 }: {
-  incomeRows: Array<Record<string, unknown>>;
-  expenseRows: Array<Record<string, unknown>>;
+  rows: Array<Record<string, unknown>>;
+  mode: "income" | "expense";
+  title: string;
 }) {
-  const [mode, setMode] = useState<"income" | "expense">("income");
-  const chartRows = accountingTopRowsWithOther(mode === "income" ? incomeRows : expenseRows);
+  const chartRows = accountingTopRowsWithOther(rows);
   const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
   const max = Math.max(1, ...chartRows.map((row) => asNumber(row.amount)));
-  const color = mode === "income" ? "#10b981" : "#f97316";
+  const colors = mode === "income"
+    ? ["#10b981", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#94a3b8"]
+    : ["#f97316", "#f43f5e", "#eab308", "#ef4444", "#a855f7", "#94a3b8"];
   return (
-    <Card className="p-5">
-      <SectionHeader
-        title="입금-비용 비중"
-        actions={
-          <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-            {[
-              ["income", "입금"],
-              ["expense", "비용"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`h-8 rounded-md px-3 text-xs font-black ${mode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
-                onClick={() => setMode(value as "income" | "expense")}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        }
-      />
-      <div className="mt-4 space-y-3 rounded-xl bg-slate-50 p-4">
+    <Card className="p-4">
+      <SectionHeader title={title} className="mb-2" />
+      <div className="space-y-2 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
             const amount = asNumber(row.amount);
             const percent = (amount / total) * 100;
+            const color = colors[index] || colors[colors.length - 1];
             return (
               <div
                 key={`${String(row.label)}-${index}`}
-                className="rounded-lg bg-white px-3 py-3"
+                className="min-w-0"
               >
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate font-black text-slate-800">{index + 1}. {String(row.label || "-")}</span>
-                  <span className="shrink-0 font-black text-slate-950">{krw(amount)}</span>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate font-semibold text-slate-700">{accountingRankLabel(row.label)}</span>
+                  <span className="shrink-0 font-bold text-slate-800">{krw(amount)}</span>
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="h-2.5 flex-1 rounded-full bg-slate-100">
-                    <div className="h-2.5 rounded-full" style={{ width: `${Math.max(4, (amount / max) * 100)}%`, backgroundColor: color }} />
+                <div className="mt-1.5 flex items-center gap-2">
+                  <div className="h-2 flex-1 rounded-full bg-white">
+                    <div className="h-2 rounded-full" style={{ width: `${Math.max(4, (amount / max) * 100)}%`, backgroundColor: color }} />
                   </div>
-                  <span className="w-12 text-right text-xs font-black text-slate-500">{percent.toFixed(1)}%</span>
+                  <span className="w-10 text-right text-[11px] font-semibold text-slate-500">{percent.toFixed(1)}%</span>
                 </div>
               </div>
             );
@@ -19271,6 +19266,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     is_active: true,
     memo: "",
   });
+  const [salaryExceptionModalOpen, setSalaryExceptionModalOpen] = useState(false);
+  const [salaryExceptionDraft, setSalaryExceptionDraft] = useState({ id: "", amount: "", memo: "" });
   const emptyFixedCostDraft = {
     id: "",
     fixed_cost_name: "",
@@ -19703,7 +19700,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     loadSummary(true);
   }
 
-  async function saveSalaryExceptionRules() {
+  async function ensurePrivateWithdrawalCategory() {
     let category = categories.find((row) => String(row.category_large || "") === "기타 출금" && String(row.category_middle || "") === "사비출금");
     if (!category) {
       const categoryRes = await fetch("/api/accounting/ledger/categories", {
@@ -19729,19 +19726,88 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     const categoryId = String(category?.id || "");
     if (!categoryId) {
       setMessage("사비출금 카테고리 확인 실패");
+      return "";
+    }
+    return categoryId;
+  }
+
+  function openSalaryExceptionModal(rule?: Record<string, unknown>) {
+    const condition = String(rule?.amount_condition || "");
+    const numbers = (condition.match(/\d+/g) || []).map((value) => Number(value)).filter((value) => value > 0);
+    const amount = numbers.length >= 2 ? Math.round((Math.min(...numbers) + Math.max(...numbers)) / 2) : numbers[0] || "";
+    setSalaryExceptionDraft({
+      id: String(rule?.id || ""),
+      amount: amount ? String(amount) : "",
+      memo: String(rule?.memo || ""),
+    });
+    setSalaryExceptionModalOpen(true);
+  }
+
+  function salaryExceptionConditionLabel(rule: Record<string, unknown> | undefined, fallbackAmount: number) {
+    const condition = String(rule?.amount_condition || "");
+    const numbers = (condition.match(/\d+/g) || []).map((value) => Number(value)).filter((value) => value > 0);
+    const amount = numbers.length >= 2 ? Math.round((Math.min(...numbers) + Math.max(...numbers)) / 2) : numbers[0] || fallbackAmount;
+    return `${krw(amount)} ±1,000`;
+  }
+
+  async function saveSalaryExceptionRule() {
+    const amount = asNumber(salaryExceptionDraft.amount);
+    const memo = salaryExceptionDraft.memo.trim();
+    if (!amount || !memo) {
+      setMessage("예외설정 금액과 메모를 입력해주세요.");
       return;
     }
+    const categoryId = await ensurePrivateWithdrawalCategory();
+    if (!categoryId) return;
+    const res = await fetch("/api/accounting/ledger/rules", {
+      method: salaryExceptionDraft.id ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: salaryExceptionDraft.id,
+        priority: 20,
+        source_type: "bank",
+        condition_field: "merchant_amount",
+        condition_operator: "contains",
+        keyword: "급여",
+        amount_condition: `${amount - 1000}..${amount + 1000}`,
+        direction_condition: "expense",
+        category_id: categoryId,
+        category_large: "기타 출금",
+        category_middle: "사비출금",
+        auto_confirm: true,
+        review_required: false,
+        review_reason: "salary_private_withdrawal",
+        memo,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "예외설정 저장 실패");
+      return;
+    }
+    setMessage(salaryExceptionDraft.id ? "예외설정을 수정했습니다." : "예외설정을 추가했습니다.");
+    setSalaryExceptionModalOpen(false);
+    setSalaryExceptionDraft({ id: "", amount: "", memo: "" });
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function saveSalaryExceptionRules() {
+    const categoryId = await ensurePrivateWithdrawalCategory();
+    if (!categoryId) return;
     for (const preset of salaryExceptionPresets) {
+      const existingRule = salaryExceptionRules.find((row) => String(row.memo || "") === preset.memo);
       const res = await fetch("/api/accounting/ledger/rules", {
-        method: "POST",
+        method: existingRule?.id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          id: String(existingRule?.id || ""),
           priority: 20,
           source_type: "bank",
           condition_field: "merchant_amount",
           condition_operator: "contains",
           keyword: "급여",
-          amount_condition: `${preset.amount - 1000},${preset.amount},${preset.amount + 1000}`,
+          amount_condition: `${preset.amount - 1000}..${preset.amount + 1000}`,
           direction_condition: "expense",
           category_id: categoryId,
           category_large: "기타 출금",
@@ -20611,9 +20677,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {activeTab === "dashboard" && (
         <>
-          <section className="grid gap-4 xl:grid-cols-2">
+          <section className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr_0.95fr]">
             <AccountingDualLineChart rows={monthRows} />
-            <AccountingCategoryRankChart incomeRows={incomeVendorRows} expenseRows={expenseCategoryRows} />
+            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" />
+            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" />
           </section>
 
           <section>
@@ -20958,7 +21025,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   </label>
                   <div className="flex min-w-0 gap-2">
                     <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={previewExpenseFiles} disabled={parsing || !uploadedExpenseFiles.length}>미리보기</ActionButton>
-                    <ActionButton type="button" className="h-9 px-3 text-xs" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
+                    <ActionButton type="button" data-f4-save="false" className="h-9 px-3 text-xs" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
                   </div>
                 </div>
                 <div className="mt-3 border-t border-gray-100 pt-2 text-[11px] font-semibold text-gray-500">
@@ -20980,7 +21047,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                     <p className="text-xs font-black text-gray-500">예외설정</p>
                     <p className="mt-2 text-lg font-black text-gray-900">급여 사비출금</p>
                   </div>
-                  <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => void saveSalaryExceptionRules()}>저장</ActionButton>
+                  <div className="flex gap-1">
+                    <ActionButton type="button" variant="secondary" className="h-8 px-2 text-xs" onClick={() => openSalaryExceptionModal()}>추가</ActionButton>
+                    <ActionButton type="button" className="h-8 px-2 text-xs" onClick={() => void saveSalaryExceptionRules()}>기본</ActionButton>
+                  </div>
                 </div>
                 <div className="space-y-1 text-[11px] font-bold text-gray-500">
                   {salaryExceptionPresets.map((preset) => {
@@ -20988,11 +21058,29 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                     const ruleId = String(rule?.id || "");
                     return (
                       <div key={preset.memo} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{preset.memo} · {krw(preset.amount)} ±1,000</span>
-                        {ruleId ? <button type="button" className="font-black text-red-500 hover:underline" onClick={() => void deleteAccountingRule(ruleId)}>삭제</button> : null}
+                        <span className="truncate">{preset.memo} · {salaryExceptionConditionLabel(rule, preset.amount)}</span>
+                        <span className="flex shrink-0 gap-2">
+                          {ruleId ? <button type="button" className="font-black text-slate-500 hover:underline" onClick={() => openSalaryExceptionModal(rule)}>수정</button> : null}
+                          {ruleId ? <button type="button" className="font-black text-red-500 hover:underline" onClick={() => void deleteAccountingRule(ruleId)}>삭제</button> : null}
+                        </span>
                       </div>
                     );
                   })}
+                  {salaryExceptionRules
+                    .filter((rule) => !salaryExceptionPresets.some((preset) => String(rule.memo || "") === preset.memo))
+                    .map((rule) => {
+                      const ruleId = String(rule.id || "");
+                      const condition = salaryExceptionConditionLabel(rule, 0);
+                      return (
+                        <div key={ruleId || String(rule.memo)} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{String(rule.memo || "예외")} · {condition}</span>
+                          <span className="flex shrink-0 gap-2">
+                            <button type="button" className="font-black text-slate-500 hover:underline" onClick={() => openSalaryExceptionModal(rule)}>수정</button>
+                            {ruleId ? <button type="button" className="font-black text-red-500 hover:underline" onClick={() => void deleteAccountingRule(ruleId)}>삭제</button> : null}
+                          </span>
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
 
@@ -21238,6 +21326,41 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         </FormModal>
       )}
 
+      {salaryExceptionModalOpen && (
+        <FormModal
+          title={salaryExceptionDraft.id ? "예외설정 수정" : "예외설정 추가"}
+          description="입력 금액 기준 ±1,000원까지 기타 출금 > 사비출금으로 자동 분류합니다."
+          onClose={() => setSalaryExceptionModalOpen(false)}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setSalaryExceptionModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="button" onClick={() => void saveSalaryExceptionRule()}>{salaryExceptionDraft.id ? "수정" : "추가"}</ActionButton>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <FormField label="기준 금액" required>
+              <input
+                className={`${modalInputClass} text-right`}
+                inputMode="numeric"
+                value={formatCommaNumber(salaryExceptionDraft.amount)}
+                onChange={(event) => setSalaryExceptionDraft((prev) => ({ ...prev, amount: event.target.value.replace(/[^\d]/g, "") }))}
+                placeholder="1,667,010"
+              />
+            </FormField>
+            <FormField label="메모" required>
+              <input
+                className={modalInputClass}
+                value={salaryExceptionDraft.memo}
+                onChange={(event) => setSalaryExceptionDraft((prev) => ({ ...prev, memo: event.target.value }))}
+                placeholder="급여 김수진"
+              />
+            </FormField>
+          </div>
+        </FormModal>
+      )}
+
       {fixedCostBulkOpen && (
         <BulkMultiEditModal<FixedCostBulkField, Record<string, unknown>>
           title="고정비 선택수정"
@@ -21449,7 +21572,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           footer={
             <>
               <ActionButton type="button" variant="secondary" onClick={() => setPreviewModalOpen(false)}>닫기</ActionButton>
-              <ActionButton type="button" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>
+              <ActionButton type="button" data-f4-save="false" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>
                 {"DB 저장"}
               </ActionButton>
             </>
@@ -22322,19 +22445,19 @@ function AccountingRightPanel() {
     const period = `${accountingShortMonthDay(settlement?.settlement_start)}-${accountingShortMonthDay(settlement?.settlement_end)}`;
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-black text-slate-700">{title}</h3>
-        <p className="mt-3 text-xs font-bold text-slate-500">사용중 금액 {start}-{end}</p>
+        <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+        <p className="mt-3 text-[11px] font-semibold text-slate-500">사용중 금액 {start}-{end}</p>
         <p className="mt-1 flex items-end gap-1">
-          <span className="text-2xl font-black text-slate-950">{krw(used)}</span>
-          <span className="pb-0.5 text-xs font-black text-slate-500">/ {limit ? `${Math.round(limit / 10000).toLocaleString("ko-KR")}만원` : "-"} ({usageRate}%)</span>
+          <span className="text-xl font-bold tracking-normal text-slate-950">{krw(used)}</span>
+          <span className="pb-0.5 text-[11px] font-semibold text-slate-500">/ {limit ? `${Math.round(limit / 10000).toLocaleString("ko-KR")}만원` : "-"} ({usageRate}%)</span>
         </p>
-        <p className="mt-4 text-xs font-bold text-slate-500">결제예정 {due} ({period} 사용분)</p>
-        <p className="mt-1 text-2xl font-black text-slate-950">{krw(used)}</p>
+        <p className="mt-3 text-[11px] font-semibold text-slate-500">결제예정 {due} ({period} 사용분)</p>
+        <p className="mt-1 text-xl font-bold tracking-normal text-slate-950">{krw(used)}</p>
         {point !== undefined && (
           <div className="mt-4 flex items-center gap-2">
             <button
               type="button"
-              className="h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-700 hover:bg-emerald-100"
+              className="h-8 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
               onClick={() => {
                 setPointInput("");
                 setPointUseAll(false);
@@ -22343,7 +22466,7 @@ function AccountingRightPanel() {
             >
               Point
             </button>
-            <span className="text-sm font-black text-emerald-700">포인트리: {point.toLocaleString("ko-KR")}</span>
+            <span className="text-sm font-bold text-emerald-700">포인트리: {point.toLocaleString("ko-KR")}</span>
           </div>
         )}
       </div>
@@ -22371,14 +22494,14 @@ function AccountingRightPanel() {
   }
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-[#f8fafc] px-4 py-6 xl:block">
       <div className="space-y-4">
-        <div className="rounded-none border border-blue-200 bg-white p-4">
-          <h3 className="text-lg font-black text-slate-700">7일간 예정 고정비 지출</h3>
-          <div className="mt-3 space-y-3">
+        <div className="border border-blue-200 bg-white p-4">
+          <h3 className="text-base font-bold text-slate-800">7일간 예정 고정비 지출</h3>
+          <div className="mt-3 space-y-2.5">
             {Array.from(fixedCostGroups.entries()).map(([date, rows]) => (
               <div key={date}>
-                <p className="text-base font-black text-red-500">{accountingMonthDayWeekText(date)}</p>
+                <p className="text-sm font-bold text-red-500">{accountingMonthDayWeekText(date)}</p>
                 <div className="mt-1 space-y-1">
                   {rows.map((row, index) => (
                     (() => {
@@ -22386,12 +22509,12 @@ function AccountingRightPanel() {
                       const title = String(row.title || row.display_title || "-");
                       const label = category && !title.includes(`[${category}]`) && !title.includes(category) ? `[${category}] ${title}` : title;
                       return (
-                        <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+                        <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 text-[13px]">
                           <div className="min-w-0">
-                            <p className="truncate font-black text-slate-700">{label}</p>
-                            <p className="mt-0.5 truncate text-xs font-bold text-slate-400">{String(row.due_date || "-")} / {String(row.payment_source || row.bank_name || row.payment_type || "bank")}</p>
+                            <p className="truncate font-bold text-slate-700">{label}</p>
+                            <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">{String(row.due_date || "-")} / {String(row.payment_source || row.bank_name || row.payment_type || "bank")}</p>
                           </div>
-                          <p className="text-right font-black text-orange-500">{krw(asNumber(row.amount))}</p>
+                          <p className="text-right font-bold text-orange-500">{krw(asNumber(row.amount))}</p>
                         </div>
                       );
                     })()

@@ -222,7 +222,17 @@ function ruleMatches(rule: RawRow, tx: RawRow) {
   if (text(rule.source_type) && text(rule.source_type) !== text(tx.source_type)) return false;
   if (text(rule.source_name) && text(rule.source_name) !== text(tx.source_name)) return false;
   if (text(rule.direction_condition) && text(rule.direction_condition) !== text(tx.direction)) return false;
-  if (amountCondition && amountCondition !== "무관" && !amountCondition.split(/[,/또는\s]+/).filter(Boolean).some((item) => numberValue(item) === numberValue(tx.amount))) return false;
+  if (amountCondition && amountCondition !== "무관") {
+    const txAmount = numberValue(tx.amount);
+    const amountMatched = amountCondition.split(/[,/또는\s]+/).filter(Boolean).some((item) => {
+      if (item.includes("..")) {
+        const [min, max] = item.split("..").map((part) => numberValue(part));
+        return txAmount >= Math.min(min, max) && txAmount <= Math.max(min, max);
+      }
+      return numberValue(item) === txAmount;
+    });
+    if (!amountMatched) return false;
+  }
   if (!keyword) return true;
   if (operator === "equals" || operator === "일치") return target === keyword;
   if (operator === "starts_with" || operator === "시작") return target.startsWith(keyword);
@@ -559,7 +569,7 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const needsReview = !salaryException && !manualCategory && !isCardPayment && !isTransfer && (historyMatch ? !historyMatch.autoConfirm : (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(resolvedCategory?.default_review_required)));
     return {
       ...row,
-      memo: salaryException?.memo || row.memo,
+      memo: salaryException?.memo || text(rule?.memo) || row.memo,
       category_large: text(resolvedCategory?.category_large) || categoryLarge,
       category_middle: text(resolvedCategory?.category_middle) || categoryMiddle,
       category_small: categorySmall,

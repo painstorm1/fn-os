@@ -27,6 +27,7 @@ function isVisibleElement(element: HTMLElement) {
 
 function isSaveButton(element: Element): element is HTMLButtonElement | HTMLInputElement {
   if (!(element instanceof HTMLButtonElement || element instanceof HTMLInputElement)) return false;
+  if (element.dataset.f4Save === "false") return false;
   if (element.disabled) return false;
   if (element instanceof HTMLInputElement && !["button", "submit"].includes(element.type)) return false;
   const label = element instanceof HTMLInputElement ? element.value : element.textContent || "";
@@ -178,12 +179,13 @@ export function ActionButton({
     ghost: "bg-transparent text-gray-600 hover:bg-gray-100",
     danger: "bg-red-600 text-white hover:bg-red-700",
   };
-  const saveLabel = typeof children === "string" && isF4SaveLabel(children);
+  const explicitF4Save = (props as Record<string, unknown>)["data-f4-save"];
+  const saveLabel = explicitF4Save !== "false" && typeof children === "string" && isF4SaveLabel(children);
 
   return (
     <button
       {...props}
-      data-f4-save={saveLabel ? "true" : undefined}
+      data-f4-save={explicitF4Save ?? (saveLabel ? "true" : undefined)}
       title={saveLabel ? title || "F4 저장" : title}
       className={cn("inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", variants[variant], className)}
     >
