@@ -171,7 +171,7 @@ function directionFor(sourceType: string, row: RawRow, merchant: string, debit: 
   const haystack = `${merchant} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)}`;
   if (/KB카드출금/.test(haystack)) return "card_payment";
   if (/카드대금|카드결제|결제대금/.test(haystack)) return "card_payment";
-  if (/계좌|이체|대표자|자금|대출원금|상환/.test(haystack)) return "transfer";
+  if (/계좌|이체|대표자|자금/.test(haystack)) return "transfer";
   if (sourceType === "bank" && /입금/.test(text(row.cash_direction || row.category || row["분류"]))) return "income";
   if (sourceType === "bank" && /출금/.test(text(row.cash_direction || row.category || row["분류"]))) return "expense";
   if (sourceType === "bank" && credit > 0) return "income";
@@ -181,7 +181,7 @@ function directionFor(sourceType: string, row: RawRow, merchant: string, debit: 
 }
 
 function existingCategory(row: RawRow) {
-  const large = text(first(row, ["existing_category_large", "기존대분류", "category", "카테고리", "분류"]));
+  const large = text(first(row, ["existing_category_large", "기존대분류", "cash_direction", "category", "카테고리", "분류"]));
   const middle = text(first(row, ["existing_category_middle", "기존중분류", "category_detail", "세부분류", "중분류", "상세분류"]));
   const small = text(first(row, ["existing_category_small", "기존소분류", "category_memo", "소분류", "보조메모", "분류메모"]));
   return { large, middle, small };

@@ -18706,7 +18706,7 @@ const accountingTabLabel: Record<string, string> = {
   fixed: "고정비",
 };
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-09-ledger-repair";
+const ACCOUNTING_CACHE_VERSION = "2026-06-09-ledger-repair-v2";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
