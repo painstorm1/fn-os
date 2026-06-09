@@ -31,6 +31,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function inventoryHistoryMemo(entry: AnyRecord) {
+  return `FN_INV_HISTORY ${JSON.stringify(entry)}`;
+}
+
 function productCode(row: AnyRecord) {
   return text(row.product_code || row.prod_cd || row.sku);
 }
@@ -343,6 +347,7 @@ export async function POST(request: NextRequest) {
     const warehouseById = new Map(warehouses.map((row) => [text(row.id), row]));
     const warehouseByCode = new Map(warehouses.map((row) => [warehouseCode(row), row]));
     const inventory = Array.isArray(body.inventory) ? body.inventory as AnyRecord[] : [];
+    const inventoryHistory = Array.isArray(body.inventory_history) ? body.inventory_history as AnyRecord[] : [];
     const bom = Array.isArray(body.bom) ? body.bom as AnyRecord[] : [];
 
     for (const item of inventory) {
@@ -375,7 +380,7 @@ export async function POST(request: NextRequest) {
         await insertRows("inventory_current", inventoryValues);
       }
       const delta = nextQty - prevQty;
-      if (delta !== 0) {
+      if (delta !== 0 && !inventoryHistory.length) {
         await insertRows("inventory_movements", {
           movement_date: now,
           movement_type: delta > 0 ? "adjustment_plus" : "adjustment_minus",
@@ -391,6 +396,36 @@ export async function POST(request: NextRequest) {
           created_at: now,
         }).catch(() => null);
       }
+    }
+
+    if (inventoryHistory.length) {
+      const movementRows = inventoryHistory
+        .map((entry, index) => {
+          const kind = text(entry.kind || entry.type);
+          const sourceRefId = text(entry.source_ref_id) || `inventory-${kind || "change"}-${code}-${Date.now()}-${index}`;
+          const qty = numberValue(entry.kind === "manual_adjustment" || entry.type === "manual_adjustment" ? entry.changeQty : entry.qty);
+          const whCode = text(entry.fromWarehouseCode || entry.warehouseCode);
+          const warehouse = warehouseByCode.get(whCode);
+          return {
+            movement_date: now,
+            movement_type: kind === "warehouse_transfer" ? "warehouse_transfer" : "manual_adjustment",
+            warehouse_id: text(warehouse?.id) || null,
+            product_id: productId || null,
+            sku: code,
+            qty,
+            source_type: kind === "warehouse_transfer" ? "inventory_transfer" : "inventory_manual",
+            source_ref_id: sourceRefId,
+            memo: inventoryHistoryMemo({
+              ...entry,
+              kind: kind === "warehouse_transfer" ? "warehouse_transfer" : "manual_adjustment",
+              productCode: text(entry.productCode) || code,
+              productName: text(entry.productName) || name,
+            }),
+            created_at: now,
+          };
+        })
+        .filter((entry) => text(entry.movement_type) && (text(entry.sku) || text(entry.product_id)));
+      if (movementRows.length) await insertRows("inventory_movements", movementRows).catch(() => null);
     }
 
     if (Array.isArray(body.bom)) {

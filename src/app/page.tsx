@@ -8592,6 +8592,27 @@ type InventoryListRow = {
   settingMode: "자동" | "수동";
   setting?: InventorySetting;
 };
+type InventoryHistoryReason = "all" | "return" | "exchange" | "transfer" | "manual";
+type InventoryHistoryRow = {
+  id: string;
+  reason: InventoryHistoryReason;
+  date: string;
+  product_code: string;
+  product_name: string;
+  warehouse_code: string;
+  warehouse_name: string;
+  from_warehouse_code: string;
+  from_warehouse_name: string;
+  to_warehouse_code: string;
+  to_warehouse_name: string;
+  before_qty: number;
+  change_qty: number;
+  after_qty: number;
+  qty: number;
+  unit_cost: number;
+  amount: number;
+  memo: string;
+};
 
 const INVENTORY_SETTINGS_STORAGE_KEY = "fnos.salesInventory.inventorySettings.v1";
 
@@ -8699,6 +8720,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [inventorySort, setInventorySort] = useState<{ key: InventorySortKey; direction: "asc" | "desc" }>({ key: "warehouse", direction: "asc" });
   const [inventoryPage, setInventoryPage] = useState(1);
   const [inventoryPicker, setInventoryPicker] = useState<InventoryPicker | null>(null);
+  const [inventoryHistoryOpen, setInventoryHistoryOpen] = useState(false);
+  const [inventoryHistoryRows, setInventoryHistoryRows] = useState<InventoryHistoryRow[]>([]);
+  const [inventoryHistoryLoading, setInventoryHistoryLoading] = useState(false);
+  const [inventoryHistoryFilters, setInventoryHistoryFilters] = useState({ reason: "all" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [inventoryHistoryDraftFilters, setInventoryHistoryDraftFilters] = useState({ reason: "all" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [inventoryHistoryMemoDrafts, setInventoryHistoryMemoDrafts] = useState<Record<string, string>>({});
   const inventoryPickerDragModeRef = useRef<"select" | "deselect" | null>(null);
   const lastInventoryPickerSelectionIndexRef = useRef<number | null>(null);
   const inventoryPickerRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
@@ -8758,6 +8785,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
   useEscapeToClose(Boolean(inventoryPicker), () => setInventoryPicker(null));
+  useEscapeToClose(inventoryHistoryOpen, () => setInventoryHistoryOpen(false));
 
   useEffect(() => {
     if (!inventoryPicker) return;
@@ -8867,6 +8895,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (saved) setInventorySettings(JSON.parse(saved));
     } catch {
       setInventorySettings({});
+    }
+    try {
+      const savedHistoryMemos = window.localStorage.getItem("fnos.inventoryHistory.memoDrafts.v1");
+      if (savedHistoryMemos) setInventoryHistoryMemoDrafts(JSON.parse(savedHistoryMemos));
+    } catch {
+      setInventoryHistoryMemoDrafts({});
     }
   }, []);
 
@@ -11082,6 +11116,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const inventoryPageRows = inventoryListRows.slice((inventoryCurrentPage - 1) * inventoryPageSize, inventoryCurrentPage * inventoryPageSize);
   const inventoryPageKeys = inventoryPageRows.map((row) => row.key);
   const inventoryPageAllSelected = Boolean(inventoryPageRows.length) && inventoryPageRows.every((row) => selectedInventoryKeys.includes(row.key));
+  const visibleInventoryAmountTotal = inventoryListRows.reduce((sum, row) => sum + row.amount, 0);
   const inventoryPageNumbers = Array.from({ length: Math.min(5, inventoryTotalPages) }, (_, index) => {
     const start = Math.min(Math.max(1, inventoryCurrentPage - 2), Math.max(1, inventoryTotalPages - 4));
     return start + index;
@@ -11123,6 +11158,108 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const inventoryPickerCount = inventoryPicker?.type === "warehouse" ? inventoryWarehousePickerOptions.length : inventoryProductPickerOptions.length;
   const selectedInventoryRows = inventoryListRows.filter((row) => selectedInventoryKeys.includes(row.key));
   const editingInventoryRow = inventoryListRows.find((row) => row.key === inventoryEditKey);
+  const filteredInventoryHistoryRows = inventoryHistoryRows.filter((row) => {
+    if (inventoryHistoryFilters.reason !== "all" && row.reason !== inventoryHistoryFilters.reason) return false;
+    if (inventoryHistoryFilters.from && row.date < inventoryHistoryFilters.from) return false;
+    if (inventoryHistoryFilters.to && row.date > inventoryHistoryFilters.to) return false;
+    const query = inventoryHistoryFilters.query.trim().toLowerCase();
+    if (query && !`${row.product_code} ${row.product_name} ${row.warehouse_code} ${row.warehouse_name} ${row.from_warehouse_code} ${row.from_warehouse_name} ${row.to_warehouse_code} ${row.to_warehouse_name} ${row.memo}`.toLowerCase().includes(query)) return false;
+    return true;
+  });
+  const inventoryHistoryReasonOptions: Array<{ value: InventoryHistoryReason; label: string }> = [
+    { value: "all", label: "전체" },
+    { value: "return", label: "반품(반품입고됨)" },
+    { value: "exchange", label: "교환(교환출고됨)" },
+    { value: "transfer", label: "창고이동" },
+    { value: "manual", label: "수동변경" },
+  ];
+  const inventoryHistoryReasonLabel = (reason: InventoryHistoryReason) => inventoryHistoryReasonOptions.find((option) => option.value === reason)?.label || reason;
+
+  function inventoryHistoryMemoValue(row: InventoryHistoryRow) {
+    if (Object.prototype.hasOwnProperty.call(inventoryHistoryMemoDrafts, row.id)) return inventoryHistoryMemoDrafts[row.id] || "";
+    return row.memo || "";
+  }
+
+  function updateInventoryHistoryMemo(row: InventoryHistoryRow, value: string) {
+    setInventoryHistoryMemoDrafts((prev) => {
+      const next = { ...prev, [row.id]: value };
+      try {
+        window.localStorage.setItem("fnos.inventoryHistory.memoDrafts.v1", JSON.stringify(next));
+      } catch {
+        // Keep the draft in memory when browser storage is unavailable.
+      }
+      return next;
+    });
+  }
+
+  async function loadInventoryHistory(force = false) {
+    setInventoryHistoryLoading(true);
+    try {
+      const url = "/api/fnos/inventory/history?limit=3000";
+      const data = await cachedClientJson<{ rows?: InventoryHistoryRow[] }>(url, { ttl: force ? 0 : 30_000, storageTtl: 60_000, force });
+      setInventoryHistoryRows(data.rows || []);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "재고이력 조회 실패");
+      setInventoryHistoryRows([]);
+    } finally {
+      setInventoryHistoryLoading(false);
+    }
+  }
+
+  function openInventoryHistory() {
+    setInventoryHistoryOpen(true);
+    void loadInventoryHistory();
+  }
+
+  function applyInventoryHistorySearch() {
+    setInventoryHistoryFilters(inventoryHistoryDraftFilters);
+  }
+
+  function inventoryHistorySearchKeyDown(event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    applyInventoryHistorySearch();
+  }
+
+  function inventoryChangeSourceRef(kind: string, row: InventoryListRow, suffix = "") {
+    return `inventory-${kind}-${Date.now()}-${row.productCode}-${row.warehouseCode}${suffix ? `-${suffix}` : ""}`;
+  }
+
+  function manualInventoryHistory(row: InventoryListRow, beforeQty: number, afterQty: number, memo: string) {
+    return {
+      kind: "manual_adjustment",
+      source_ref_id: inventoryChangeSourceRef("manual", row),
+      productCode: row.productCode,
+      productName: row.productName,
+      warehouseCode: row.warehouseCode,
+      warehouseName: row.warehouseName,
+      beforeQty,
+      changeQty: afterQty - beforeQty,
+      afterQty,
+      qty: Math.abs(afterQty - beforeQty),
+      unitCost: row.cost,
+      amount: Math.abs(afterQty - beforeQty) * row.cost,
+      userMemo: memo,
+    };
+  }
+
+  function transferInventoryHistory(row: InventoryListRow, moveQty: number, targetWarehouseCode: string, memo: string) {
+    const targetWarehouse = inventoryWarehouses.find((warehouse) => warehouse.warehouse_code === targetWarehouseCode);
+    return {
+      kind: "warehouse_transfer",
+      source_ref_id: inventoryChangeSourceRef("transfer", row, targetWarehouseCode),
+      productCode: row.productCode,
+      productName: row.productName,
+      fromWarehouseCode: row.warehouseCode,
+      fromWarehouseName: row.warehouseName,
+      toWarehouseCode: targetWarehouseCode,
+      toWarehouseName: targetWarehouse?.warehouse_name || targetWarehouseCode,
+      qty: moveQty,
+      unitCost: row.cost,
+      amount: moveQty * row.cost,
+      userMemo: memo,
+    };
+  }
 
   function toggleInventorySort(key: InventorySortKey) {
     setInventorySort((prev) => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
@@ -11393,6 +11530,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         window.alert("재고수량은 0 이상 숫자로 입력해 주세요.");
         return;
       }
+      const inventoryHistory: Array<Record<string, unknown>> = [];
+      if (nextQty !== editingInventoryRow.qty) {
+        inventoryHistory.push(manualInventoryHistory(editingInventoryRow, editingInventoryRow.qty, nextQty, inventoryEditDraft.memo));
+      }
       const inventoryMap = new Map<string, ProductInventoryRow>();
       (editingInventoryRow.product.inventory || []).forEach((stock) => {
         const code = inventoryWarehouseCode(stock);
@@ -11411,6 +11552,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const target = inventoryMap.get(targetCode);
         inventoryMap.set(editingInventoryRow.warehouseCode, { ...source, warehouse_code: editingInventoryRow.warehouseCode, warehouse_name: editingInventoryRow.warehouseName, qty: Math.max(0, Number(source?.qty || 0) - moveQty) });
         inventoryMap.set(targetCode, { ...target, warehouse_code: targetCode, warehouse_name: targetWarehouse?.warehouse_name || target?.warehouse_name || targetCode, qty: Number(target?.qty || 0) + moveQty });
+        inventoryHistory.push(transferInventoryHistory(editingInventoryRow, moveQty, targetCode, inventoryEditDraft.memo));
       }
       const res = await fetch("/api/fnos/products/master", {
         method: "POST",
@@ -11426,6 +11568,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             product_attribute: editingInventoryRow.product.product_attribute || "plain",
           },
           inventory: Array.from(inventoryMap.values()),
+          inventory_history: inventoryHistory,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -11443,6 +11586,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         },
       }));
       invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/inventory/history");
       invalidateClientCache("/api/dashboard/summary");
       const refreshed = await cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 0, storageTtl: 10 * 60_000, force: true });
       setInventoryProducts(refreshed.products || []);
@@ -11494,6 +11638,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       for (const rowsForProduct of rowsByProduct.values()) {
         const first = rowsForProduct[0];
         if (!first) continue;
+        const inventoryHistory: Array<Record<string, unknown>> = [];
         const inventoryMap = new Map<string, ProductInventoryRow>();
         (first.product.inventory || []).forEach((stock) => {
           const code = inventoryWarehouseCode(stock);
@@ -11506,6 +11651,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (selectedFields.has("qty")) {
             const parsedQty = Number(String(draft.qty ?? row.qty).replace(/[^\d.-]/g, ""));
             if (!Number.isFinite(parsedQty) || parsedQty < 0) throw new Error(`${row.productCode} ${row.warehouseCode} 재고수량을 0 이상 숫자로 입력해 주세요.`);
+            if (parsedQty !== row.qty) inventoryHistory.push(manualInventoryHistory(row, row.qty, parsedQty, ""));
             sourceQty = parsedQty;
           }
           if (selectedFields.has("transfer")) {
@@ -11518,6 +11664,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               const target = inventoryMap.get(targetCode);
               sourceQty = Math.max(0, sourceQty - moveQty);
               inventoryMap.set(targetCode, { ...target, warehouse_code: targetCode, warehouse_name: targetWarehouse?.warehouse_name || target?.warehouse_name || targetCode, qty: Number(target?.qty || 0) + moveQty });
+              inventoryHistory.push(transferInventoryHistory(row, moveQty, targetCode, ""));
             }
           }
           inventoryMap.set(row.warehouseCode, { ...source, warehouse_code: row.warehouseCode, warehouse_name: row.warehouseName, qty: sourceQty });
@@ -11546,6 +11693,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               product_attribute: first.product.product_attribute || "plain",
             },
             inventory: Array.from(inventoryMap.values()),
+            inventory_history: inventoryHistory,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -11555,6 +11703,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setInventorySettings((prev) => ({ ...prev, ...nextSettings }));
       }
       invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/inventory/history");
       invalidateClientCache("/api/dashboard/summary");
       const refreshed = await cachedClientJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 0, storageTtl: 10 * 60_000, force: true });
       setInventoryProducts(refreshed.products || []);
@@ -11968,6 +12117,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <Panel>
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <ActionButton type="button" onClick={() => openInventoryEdit()}>수정</ActionButton>
+            <ActionButton type="button" variant="secondary" onClick={openInventoryHistory}>재고이력</ActionButton>
+            <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">
+              총 재고금액: {Math.round(visibleInventoryAmountTotal).toLocaleString("ko-KR")}원
+            </span>
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
@@ -12073,6 +12226,99 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           )}
           {!inventoryListRows.length && <EmptyState title="표시할 재고가 없습니다." description="창고 또는 품목 검색 조건을 확인해 주세요." />}
         </Panel>
+      )}
+
+      {inventoryHistoryOpen && (
+        <FormModal
+          title="재고이력"
+          description="입고/출고 전표를 제외한 반품, 교환, 창고이동, 수동변경 재고 흐름을 확인합니다."
+          onClose={() => setInventoryHistoryOpen(false)}
+          size="full"
+          footer={
+            <div className="flex w-full justify-end gap-2">
+              <ActionButton type="button" variant="secondary" onClick={() => void loadInventoryHistory(true)} disabled={inventoryHistoryLoading}>새로고침</ActionButton>
+              <ActionButton type="button" onClick={() => setInventoryHistoryOpen(false)}>닫기</ActionButton>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <select className="field-input h-9 w-[190px] rounded-md border border-slate-200 px-2 text-sm font-bold" value={inventoryHistoryDraftFilters.reason} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, reason: event.target.value as InventoryHistoryReason }))} onKeyDown={inventoryHistorySearchKeyDown}>
+                {inventoryHistoryReasonOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <input className="field-input h-9 w-[240px] rounded-md border border-slate-200 px-3 text-sm" value={inventoryHistoryDraftFilters.query} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} placeholder="품목/창고/메모 검색" />
+              <input className="field-input h-9 w-[150px] rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.from} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, from: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <input className="field-input h-9 w-[150px] rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.to} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, to: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <button type="button" className="h-9 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyInventoryHistorySearch}>찾기</button>
+              <span className="text-xs font-bold text-slate-500">총 {filteredInventoryHistoryRows.length.toLocaleString("ko-KR")}건</span>
+            </div>
+            <div className="max-h-[68vh] overflow-auto rounded-xl border border-slate-200 bg-white">
+              {inventoryHistoryFilters.reason === "transfer" ? (
+                <table className="w-full min-w-[1120px] table-fixed text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
+                    <tr>
+                      <th className="w-28 px-2 py-2 text-left">날짜</th>
+                      <th className="w-36 px-2 py-2 text-left">품목코드</th>
+                      <th className="px-2 py-2 text-left">품목명</th>
+                      <th className="w-36 px-2 py-2 text-left">출고창고명</th>
+                      <th className="w-36 px-2 py-2 text-left">입고창고명</th>
+                      <th className="w-24 px-2 py-2 text-right">수량</th>
+                      <th className="w-32 px-2 py-2 text-right">금액</th>
+                      <th className="w-64 px-2 py-2 text-left">메모</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInventoryHistoryRows.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="px-2 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="truncate px-2 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
+                        <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
+                        <td className="truncate px-2 py-2" title={row.from_warehouse_name || row.from_warehouse_code}>{row.from_warehouse_name || row.from_warehouse_code || "-"}</td>
+                        <td className="truncate px-2 py-2" title={row.to_warehouse_name || row.to_warehouse_code}>{row.to_warehouse_name || row.to_warehouse_code || "-"}</td>
+                        <td className="px-2 py-2 text-right font-black">{row.qty.toLocaleString("ko-KR")}</td>
+                        <td className="px-2 py-2 text-right font-black">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
+                        <td className="px-2 py-1"><input className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs" value={inventoryHistoryMemoValue(row)} onChange={(event) => updateInventoryHistoryMemo(row, event.target.value)} /></td>
+                      </tr>
+                    ))}
+                    {!filteredInventoryHistoryRows.length && <tr><td colSpan={8} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td></tr>}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full min-w-[1180px] table-fixed text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
+                    <tr>
+                      <th className="w-36 px-2 py-2 text-left">변경사유</th>
+                      <th className="w-28 px-2 py-2 text-left">날짜</th>
+                      <th className="w-36 px-2 py-2 text-left">품목코드</th>
+                      <th className="px-2 py-2 text-left">품목명</th>
+                      <th className="w-36 px-2 py-2 text-left">창고명</th>
+                      <th className="w-28 px-2 py-2 text-right">변경 전 수량</th>
+                      <th className="w-28 px-2 py-2 text-right">변경 수량</th>
+                      <th className="w-28 px-2 py-2 text-right">변경 후 수량</th>
+                      <th className="w-64 px-2 py-2 text-left">메모</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInventoryHistoryRows.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="px-2 py-2 font-black">{inventoryHistoryReasonLabel(row.reason)}</td>
+                        <td className="px-2 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="truncate px-2 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
+                        <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
+                        <td className="truncate px-2 py-2" title={row.warehouse_name || row.warehouse_code}>{row.warehouse_name || row.warehouse_code || "-"}</td>
+                        <td className="px-2 py-2 text-right">{row.before_qty ? row.before_qty.toLocaleString("ko-KR") : "-"}</td>
+                        <td className="px-2 py-2 text-right font-black">{row.change_qty ? row.change_qty.toLocaleString("ko-KR") : row.qty.toLocaleString("ko-KR")}</td>
+                        <td className="px-2 py-2 text-right">{row.after_qty ? row.after_qty.toLocaleString("ko-KR") : "-"}</td>
+                        <td className="px-2 py-1"><input className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs" value={inventoryHistoryMemoValue(row)} onChange={(event) => updateInventoryHistoryMemo(row, event.target.value)} /></td>
+                      </tr>
+                    ))}
+                    {!filteredInventoryHistoryRows.length && <tr><td colSpan={9} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td></tr>}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </FormModal>
       )}
 
       {false && isInventorySection && (
