@@ -88,11 +88,15 @@ async function saveTags(itemId: string, tags: string[] | string | undefined) {
 
 export async function listArchiveData() {
   const [items, categories, tags, itemTags, links] = await Promise.all([
-    selectRows<AnyRecord>("archive_items", { order: "created_at.desc", limit: 500 }),
-    selectRows<AnyRecord>("archive_categories", { order: "sort_order.asc,category_name.asc", limit: 300 }).catch(() => []),
-    selectRows<AnyRecord>("archive_tags", { order: "tag_name.asc", limit: 500 }).catch(() => []),
-    selectRows<AnyRecord>("archive_item_tags", { order: "created_at.desc", limit: 2000 }).catch(() => []),
-    selectRows<AnyRecord>("archive_links", { order: "created_at.desc", limit: 2000 }).catch(() => []),
+    selectRows<AnyRecord>("archive_items", {
+      select: "id,title,url,source_type,content_type,summary,description,memo,preview_image_url,preview_status,preview_error,preview_generated_at,thumbnail_url,file_url,status,category_id,created_at",
+      order: "created_at.desc",
+      limit: 500,
+    }),
+    selectRows<AnyRecord>("archive_categories", { select: "id,category_name,sort_order", order: "sort_order.asc,category_name.asc", limit: 300 }).catch(() => []),
+    selectRows<AnyRecord>("archive_tags", { select: "id,tag_name", order: "tag_name.asc", limit: 500 }).catch(() => []),
+    selectRows<AnyRecord>("archive_item_tags", { select: "archive_item_id,tag_id,created_at", order: "created_at.desc", limit: 2000 }).catch(() => []),
+    selectRows<AnyRecord>("archive_links", { select: "id,archive_item_id,linked_type,linked_id,created_at", order: "created_at.desc", limit: 2000 }).catch(() => []),
   ]);
   return { items, categories, tags, itemTags, links };
 }

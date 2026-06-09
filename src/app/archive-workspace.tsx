@@ -60,8 +60,12 @@ type ActiveMenu = "save" | "all" | "project" | CategoryGroup;
 type ArchiveViewMode = "preview" | "list";
 const PROJECT_LINK_TYPE = "archive_project";
 const ARCHIVE_CACHE_URL = "/api/fnos/archive";
+const ARCHIVE_CACHE_KEY = "/api/fnos/archive?v=20260609";
 const ARCHIVE_MEMORY_TTL = 10 * 60_000;
 const ARCHIVE_STORAGE_TTL = 30 * 60_000;
+const ARCHIVE_PREVIEW_INITIAL_RENDER = 80;
+const ARCHIVE_LIST_INITIAL_RENDER = 180;
+const ARCHIVE_RENDER_BATCH = 120;
 const EMPTY_ARCHIVE_DATA: ArchiveData = { items: [], categories: [], tags: [], itemTags: [], links: [] };
 let lastArchiveData: ArchiveData | null = null;
 
@@ -77,7 +81,7 @@ function normalizeArchiveData(value: Partial<ArchiveData> | null | undefined): A
 
 function readArchiveCache() {
   if (lastArchiveData) return lastArchiveData;
-  const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { storageTtl: ARCHIVE_STORAGE_TTL });
+  const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { key: ARCHIVE_CACHE_KEY, storageTtl: ARCHIVE_STORAGE_TTL });
   if (!cached) return null;
   lastArchiveData = normalizeArchiveData(cached);
   return lastArchiveData;
@@ -285,7 +289,12 @@ function cleanProjectName(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function archiveInitialRenderCount(viewMode: ArchiveViewMode) {
+  return viewMode === "list" ? ARCHIVE_LIST_INITIAL_RENDER : ARCHIVE_PREVIEW_INITIAL_RENDER;
+}
+
 export default function ArchiveWorkspace() {
+  const initialArchiveData = readArchiveCache();
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>("all");
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"auto" | "manual">("auto");
@@ -297,8 +306,8 @@ export default function ArchiveWorkspace() {
   const [projectCreateName, setProjectCreateName] = useState("");
   const [selectMode] = useState(true);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
-  const [data, setData] = useState<ArchiveData>(() => readArchiveCache() || EMPTY_ARCHIVE_DATA);
-  const [loading, setLoading] = useState(() => !readArchiveCache());
+  const [data, setData] = useState<ArchiveData>(() => initialArchiveData || EMPTY_ARCHIVE_DATA);
+  const [loading, setLoading] = useState(() => !initialArchiveData);
   const [message, setMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
@@ -318,6 +327,36 @@ export default function ArchiveWorkspace() {
   const projectLinks = useMemo(() => data.links.filter((link) => link.linked_type === PROJECT_LINK_TYPE && link.archive_item_id && link.linked_id), [data.links]);
   const projects = useMemo(() => Array.from(new Set([...projectLinks.map((link) => String(link.linked_id)), ...localProjects].map(cleanProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko")), [localProjects, projectLinks]);
   const activeProjectItemIds = useMemo(() => new Set(projectLinks.filter((link) => link.linked_id === activeProject).map((link) => String(link.archive_item_id))), [activeProject, projectLinks]);
+  const projectTextByItemId = useMemo(() => {
+    const map = new Map<string, string>();
+    projectLinks.forEach((link) => {
+      const itemId = String(link.archive_item_id || "");
+      const project = String(link.linked_id || "");
+      if (!itemId || !project) return;
+      map.set(itemId, `${map.get(itemId) || ""} ${project}`);
+    });
+    return map;
+  }, [projectLinks]);
+  const projectCountByName = useMemo(() => {
+    const map = new Map<string, number>();
+    projectLinks.forEach((link) => {
+      const project = String(link.linked_id || "");
+      if (project) map.set(project, (map.get(project) || 0) + 1);
+    });
+    return map;
+  }, [projectLinks]);
+  const archiveCounts = useMemo(() => {
+    const categoryCounts = new Map<string, number>();
+    const groupCounts: Record<CategoryGroup, number> = { 교육: 0, 업무: 0, 개인: 0 };
+    data.items.forEach((item) => {
+      const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
+      if (!categoryName) return;
+      categoryCounts.set(categoryName, (categoryCounts.get(categoryName) || 0) + 1);
+      const group = categoryGroupOf(categoryName);
+      if (group) groupCounts[group] += 1;
+    });
+    return { categoryCounts, groupCounts };
+  }, [categoryById, data.items]);
   const emptyFilters: ArchiveFilters = { q: "", categoryGroup: "", category: "", source: "", dateFrom: "", dateTo: "" };
 
   const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
@@ -331,7 +370,7 @@ export default function ArchiveWorkspace() {
 
   const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
-    const itemProjects = projectLinks.filter((link) => link.archive_item_id === item.id).map((link) => link.linked_id).join(" ");
+    const itemProjects = projectTextByItemId.get(item.id) || "";
     const haystack = `${item.title || ""} ${item.url || ""} ${item.memo || ""} ${item.summary || ""} ${categoryName} ${itemProjects}`.toLowerCase();
     if (filters.q && !haystack.includes(filters.q.toLowerCase())) return false;
     if (activeMenu === "project") return true;
@@ -344,7 +383,7 @@ export default function ArchiveWorkspace() {
     if (dateFrom && createdDate < dateFrom) return false;
     if (dateTo && createdDate > dateTo) return false;
     return true;
-  }), [categoryById, categoryFilteredItems, filters, projectLinks]);
+  }), [activeMenu, categoryById, categoryFilteredItems, filters, projectTextByItemId]);
 
   function applyArchiveData(value: Partial<ArchiveData> | null | undefined) {
     const normalized = normalizeArchiveData(value);
@@ -354,21 +393,36 @@ export default function ArchiveWorkspace() {
 
   async function refresh() {
     const cached = readArchiveCache();
+    let showedCachedData = false;
     if (cached) {
       applyArchiveData(cached);
       setLoading(false);
+      showedCachedData = true;
     } else {
       setLoading(true);
     }
     try {
-      const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { storageTtl: ARCHIVE_STORAGE_TTL });
+      const cached = readCachedJson<ArchiveData>(ARCHIVE_CACHE_URL, { key: ARCHIVE_CACHE_KEY, storageTtl: ARCHIVE_STORAGE_TTL });
       if (cached) {
         applyArchiveData(cached);
         setLoading(false);
+        showedCachedData = true;
       }
-      const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>(ARCHIVE_CACHE_URL, { ttl: ARCHIVE_MEMORY_TTL, storageTtl: ARCHIVE_STORAGE_TTL });
-      if (next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
-      applyArchiveData(next);
+      const loadFreshData = async () => {
+        const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>(ARCHIVE_CACHE_URL, {
+          ttl: ARCHIVE_MEMORY_TTL,
+          key: ARCHIVE_CACHE_KEY,
+          storageTtl: ARCHIVE_STORAGE_TTL,
+          force: showedCachedData,
+        });
+        if (next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
+        applyArchiveData(next);
+      };
+      if (showedCachedData) {
+        void loadFreshData().catch((error) => setMessage(error instanceof Error ? error.message : "아카이브 조회 실패"));
+      } else {
+        await loadFreshData();
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "아카이브 조회 실패");
     } finally {
@@ -778,12 +832,11 @@ export default function ArchiveWorkspace() {
   ];
 
   function categoryCount(categoryName: string) {
-    return data.items.filter((item) => categoryById.get(String(item.category_id || ""))?.category_name === categoryName).length;
+    return archiveCounts.categoryCounts.get(categoryName) || 0;
   }
 
   function groupCount(group: CategoryGroup) {
-    const names = categoryTree[group];
-    return data.items.filter((item) => names.includes(categoryById.get(String(item.category_id || ""))?.category_name || "")).length;
+    return archiveCounts.groupCounts[group];
   }
 
   function menuCount(menu: ActiveMenu) {
@@ -818,7 +871,7 @@ export default function ArchiveWorkspace() {
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
                 <option value="">프로젝트 바로가기</option>
-                {projects.map((project) => <option key={project} value={project}>{project} {projectLinks.filter((link) => link.linked_id === project).length}</option>)}
+                {projects.map((project) => <option key={project} value={project}>{project} {projectCountByName.get(project) || 0}</option>)}
               </select>
               <ActionButton type="button" variant="secondary" className="h-10 whitespace-nowrap border-orange-200 bg-white px-4 text-sm text-orange-700" onClick={() => openProjectCreateModal("toolbar")}>
                 프로젝트 생성
@@ -1028,7 +1081,7 @@ export default function ArchiveWorkspace() {
         </FormModal>
       )}
 
-      {(activeMenu === "all" || activeMenu === "project" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (
+      {(activeMenu === "all" || activeMenu === "project" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (!loading || data.items.length > 0) && (
         <ArchiveList
           items={filteredItems}
           categoryById={categoryById}
@@ -1122,8 +1175,10 @@ function ArchiveList({
   const dragSelectModeRef = useRef<boolean | null>(null);
   const dragLastIdRef = useRef("");
   const keyboardIndexRef = useRef<number | null>(null);
-  const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const [visibleCount, setVisibleCount] = useState(() => archiveInitialRenderCount(viewMode));
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedItems = items.filter((item) => selectedIdSet.has(item.id));
+  const visibleItems = items.length > visibleCount ? items.slice(0, visibleCount) : items;
   const allSelected = Boolean(items.length) && selectedIds.length === items.length;
   const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
 
@@ -1191,6 +1246,18 @@ function ArchiveList({
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
   }, [selectMode]);
+
+  useEffect(() => {
+    setVisibleCount(archiveInitialRenderCount(viewMode));
+  }, [items, viewMode]);
+
+  useEffect(() => {
+    if (visibleCount >= items.length) return;
+    const timer = window.setTimeout(() => {
+      setVisibleCount((current) => Math.min(items.length, current + ARCHIVE_RENDER_BATCH));
+    }, 32);
+    return () => window.clearTimeout(timer);
+  }, [items.length, visibleCount]);
 
   useEffect(() => {
     function stopListDragSelect() {
@@ -1277,7 +1344,7 @@ function ArchiveList({
 
       {viewMode === "list" ? (
         <section className="grid grid-cols-3 gap-2">
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const category = categoryById.get(String(item.category_id || ""));
             const href = item.url || item.file_url || "";
             return (
@@ -1311,7 +1378,7 @@ function ArchiveList({
         </section>
       ) : (
       <section className="grid grid-cols-5 gap-3 2xl:grid-cols-10">
-        {items.map((item) => {
+        {visibleItems.map((item) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
@@ -1324,7 +1391,7 @@ function ArchiveList({
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex aspect-[4/5] w-full items-center justify-center bg-slate-100">
-                  {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
+                  {previewUrl ? <img src={previewUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
               <div className="p-2">
