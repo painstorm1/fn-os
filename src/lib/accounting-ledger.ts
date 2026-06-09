@@ -203,6 +203,13 @@ function ruleMatches(rule: RawRow, tx: RawRow) {
   return target.includes(keyword);
 }
 
+function ambiguousReviewReason(row: RawRow) {
+  const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)} ${text(row.memo)}`;
+  if (/KCP|케이씨피|인터넷상거래_?4|자동결제_?1/i.test(haystack)) return "KCP확인";
+  if (/네이버파이낸셜|비즈월렛|NAVER\s*FINANCIAL/i.test(haystack)) return "네이버확인";
+  return "";
+}
+
 async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<RawRow>(table, query).catch(() => []);
 }
@@ -406,12 +413,13 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
   const defaultReview = categoryByPath.get("기타 출금|검토필요|");
 
   return rows.map((row) => {
-    const rule = rules.find((item) => ruleMatches(item, row));
     const isCardPayment = row.direction === "card_payment";
     const isTransfer = row.direction === "transfer";
-    const manualPath = manualCategoryPath(row);
+    const forcedReviewReason = !isCardPayment && !isTransfer ? ambiguousReviewReason(row) : "";
+    const rule = forcedReviewReason ? undefined : rules.find((item) => ruleMatches(item, row));
+    const manualPath = forcedReviewReason ? null : manualCategoryPath(row);
     const manualCategory = manualPath ? categoryByPath.get(`${manualPath.large}|${manualPath.middle}|`) : null;
-    const reviewReason = text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
+    const reviewReason = forcedReviewReason || text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
     const transferLarge = numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금";
     const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? transferLarge : text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
