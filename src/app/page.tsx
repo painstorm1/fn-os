@@ -9912,6 +9912,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const analysisDefaultFromMonth = addMonthsToDate(`${thisMonth}-01`, -2).slice(0, 7);
     const title = "거래 분석";
     (window as unknown as { __fnosDownloadTradeAnalysisXlsx?: (rows: Array<Record<string, unknown>>) => void }).__fnosDownloadTradeAnalysisXlsx = (rows) => {
+      if (String(rows[0]?.__exportType || "") === "voucher") {
+        const exportRows = rows.map((row) => [
+          String(row.typeLabel || ""),
+          String(row.no || ""),
+          String(row.date || ""),
+          String(row.customer || ""),
+          String(row.warehouse || ""),
+          String(row.itemCount || ""),
+          String(row.qty || ""),
+          String(Math.round(Number(row.avg || 0))),
+          String(Math.round(Number(row.amount || 0))),
+          String(row.memo || ""),
+          String(row.detailSummary || ""),
+        ]);
+        void downloadTableXlsx(`거래명세서별_${entryDateToday()}.xlsx`, "거래명세서별", ["구분", "일자-NO", "일자", "거래처", "창고", "품목수", "수량합계", "평균단가", "금액합계", "메모", "세부 품목"], exportRows);
+        return;
+      }
       const exportRows = rows.map((row) => [
         String(row.typeLabel || ""),
         String(row.date || ""),
@@ -9935,7 +9952,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
       .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:164px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 24px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}.summaryCard.salesCard{background:linear-gradient(135deg,#eefcff 0%,#f8fdff 58%,#e8f6ff 100%)}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff1e8 0%,#ffd1b8 100%);border-color:#f7b390}.summaryTitle{transform:translateY(-6px);font-size:38px;line-height:1;font-weight:900;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#147df5}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px}.metricLabel{font-size:15px;color:#334155;font-weight:800}.metricValue{font-size:22px;font-weight:800;color:#0f172a}.totalLine{grid-column:1/3;font-size:22px;font-weight:800;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:36px;align-items:center;color:#334155;font-size:15px;font-weight:800}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:800;cursor:pointer;padding:0}.rankList{display:grid;gap:8px}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 2px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 132px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:7px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:176px;border-radius:10px;background:rgba(255,255,255,.78);padding:18px 14px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.purchaseSideLabel{font-size:17px;font-weight:800}.purchaseSideDate{font-size:25px;line-height:1.12;margin:8px 0 22px}.purchaseSideCycle{font-size:17px;font-weight:800}.purchaseSideDays{font-size:28px;line-height:1.1;font-weight:800}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
-      .tableWrap{overflow:visible;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.groupSummaryName{font-size:14px}.groupSummaryMetric{font-size:14px;font-weight:950}
+      .tableWrap{overflow:visible;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.groupSummaryName{font-size:14px}.groupSummaryMetric{font-size:14px;font-weight:950}.voucherRow{cursor:pointer}.voucherRow td{font-weight:900}.voucherDetail td{background:#fbfdff;color:#334155}.voucherDetail .detailIndent{padding-left:28px;color:#64748b;font-weight:800}
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
       @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
     </style></head><body><div class="app">
@@ -9944,7 +9961,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         <div class="topFilters">
           <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
           <select id="basis" class="field"><option value="actual">BOM설정 기준</option><option value="entry">입력 품목 기준</option></select>
-          <select id="group" class="field"><option value="detail">상세내역</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
+          <select id="group" class="field"><option value="detail">상세내역</option><option value="voucher">거래명세서별</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
           <div id="selectedBar" class="selectedBar"></div>
         </div>
         <div class="filters" style="margin-top:8px">
@@ -9987,6 +10004,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let pickerAttr = "all";
       let pickerSearchedQuery = "";
       let lastRows = [];
+      let lastExportRows = [];
+      let expandedVoucherKey = "";
       let viewHistory = [];
       let viewHistoryIndex = 0;
       const pad = (n) => String(n).padStart(2, "0");
@@ -10095,6 +10114,29 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         });
         return Array.from(map.values()).sort((a,b) => (b.salesAmount + b.purchaseAmount) - (a.salesAmount + a.purchaseAmount));
       }
+      function buildVoucherRows(rows){
+        const map = new Map();
+        rows.forEach((row) => {
+          const key = [row.type, row.date, row.no || "-", row.customer || "-", row.warehouse || "-"].join("||");
+          const item = map.get(key) || { __exportType: "voucher", key, type: row.type, typeLabel: row.typeLabel, date: row.date, no: row.no || "-", customer: row.customer || "-", warehouse: row.warehouse || "-", qty: 0, amount: 0, avg: 0, itemCount: 0, memo: "", detailSummary: "", lines: [], productKeys: new Set(), memos: new Set() };
+          const qty = Number(row.actualQty || row.qty || 0);
+          const amount = Number(row.amount || 0);
+          item.qty += qty;
+          item.amount += amount;
+          const productKey = String(row.actualProductCode || row.actualProductName || row.sourceProductCode || row.sourceProductName || "-");
+          item.productKeys.add(productKey);
+          if (row.memo) item.memos.add(row.memo);
+          item.lines.push(row);
+          map.set(key, item);
+        });
+        return Array.from(map.values()).map((item) => {
+          item.itemCount = item.productKeys.size;
+          item.avg = item.qty ? item.amount / item.qty : 0;
+          item.memo = Array.from(item.memos).slice(0, 3).join(" / ") || "-";
+          item.detailSummary = item.lines.map((line) => (line.actualProductCode || "-") + " " + (line.actualProductName || "-") + " " + fmt.format(Number(line.actualQty || line.qty || 0)) + "개 " + krw(line.amount || 0)).join(" | ");
+          return item;
+        }).sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(b.no).localeCompare(String(a.no)));
+      }
       function uniqueCodes(rows, key){
         return Array.from(new Set(rows.map((row) => String(row[key] || "").trim()).filter(Boolean))).sort();
       }
@@ -10107,7 +10149,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return value === "entry" ? "입력 품목 기준" : "BOM설정 기준";
       }
       function groupViewLabel(value){
-        const labels = { detail: "상세내역", product: "품목별", warehouse: "창고별", customer: "거래처별", date: "날짜별", month: "월별" };
+        const labels = { detail: "상세내역", voucher: "거래명세서별", product: "품목별", warehouse: "창고별", customer: "거래처별", date: "날짜별", month: "월별" };
         return labels[value] || "상세내역";
       }
       function currentView(){
@@ -10195,10 +10237,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function rowsHtml(rows){
         return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
       }
+      function voucherRowsHtml(vouchers){
+        if (!vouchers.length) return "<tr><td colspan='10' class='muted'>조회되는 거래명세서가 없습니다.</td></tr>";
+        return vouchers.map((voucher) => {
+          const detailOpen = voucher.key === expandedVoucherKey;
+          const detail = detailOpen ? voucher.lines.map((r)=>"<tr class='voucherDetail "+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td></td><td class='detailIndent'>품목</td><td colspan='2'>"+esc(r.actualProductCode||"-")+" / "+esc(r.actualProductName||"-")+"</td><td class='num'>1</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td>"+esc(r.memo||"-")+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td></tr>").join("") : "";
+          return "<tr class='voucherRow "+(voucher.type === "sales" ? "rowSales" : "rowPurchase")+"' data-voucher-key='"+esc(voucher.key)+"'><td><span class='badge "+esc(voucher.type)+"'>"+esc(voucher.typeLabel)+"</span></td><td>"+esc(voucher.no||"-")+"</td><td>"+esc(voucher.customer||"-")+"</td><td>"+esc(voucher.warehouse||"-")+"</td><td class='num'>"+fmt.format(voucher.itemCount||0)+"</td><td class='num'>"+fmt.format(voucher.qty||0)+"</td><td class='num'>"+krw(voucher.avg||0)+"</td><td class='num'>"+krw(voucher.amount||0)+"</td><td>"+esc(voucher.memo||"-")+"</td><td class='muted'>"+(detailOpen ? "접기" : "펼치기")+"</td></tr>" + detail;
+        }).join("");
+      }
       function render(){
         const group = document.getElementById("group").value;
         const rows = filtered();
         lastRows = rows;
+        lastExportRows = rows;
         const salesRows = rows.filter((row) => row.type === "sales");
         const purchaseRows = rows.filter((row) => row.type === "purchase");
         renderSummary("sales", salesRows);
@@ -10218,6 +10269,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           } else {
             tbody.innerHTML = rowsHtml(sorted);
           }
+          updateNav();
+          return;
+        }
+        if (group === "voucher") {
+          const vouchers = buildVoucherRows(rows);
+          lastExportRows = vouchers;
+          thead.innerHTML = "<tr><th>구분</th><th>일자-NO</th><th>거래처</th><th>창고</th><th class='num'>품목수</th><th class='num'>수량합계</th><th class='num'>평균단가</th><th class='num'>금액합계</th><th>메모</th><th>세부</th></tr>";
+          tbody.innerHTML = voucherRowsHtml(vouchers);
+          document.querySelectorAll(".voucherRow[data-voucher-key]").forEach((row) => row.addEventListener("click", () => {
+            const key = row.dataset.voucherKey || "";
+            expandedVoucherKey = expandedVoucherKey === key ? "" : key;
+            render();
+          }));
           updateNav();
           return;
         }
@@ -10361,7 +10425,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }));
       document.getElementById("search").addEventListener("click",renderAndReset);
       document.getElementById("downloadExcel").addEventListener("click", () => {
-        if (window.opener && window.opener.__fnosDownloadTradeAnalysisXlsx) window.opener.__fnosDownloadTradeAnalysisXlsx(lastRows);
+        if (window.opener && window.opener.__fnosDownloadTradeAnalysisXlsx) window.opener.__fnosDownloadTradeAnalysisXlsx(lastExportRows.length ? lastExportRows : lastRows);
         else window.alert("엑셀 다운로드를 실행할 수 없습니다. 거래 분석 창을 다시 열어주세요.");
       });
       document.addEventListener("click", (event) => {
