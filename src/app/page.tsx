@@ -19070,6 +19070,10 @@ const accountingTabLabel: Record<string, string> = {
   ledger: "통장/카드 내역",
   fixed: "고정비",
 };
+function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
+  return ["판매 정산금", "기타 입금"].includes(String(categoryLarge || "").trim()) ? "income" : "expense";
+}
+
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_VERSION = "2026-06-09-card-fx-points";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
@@ -19203,6 +19207,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
+    category_large: "",
+    category_middle: "",
     direction: "",
     review_reason: "",
     affects_profit: true,
@@ -19237,6 +19243,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
   const [categoryDirectLarge, setCategoryDirectLarge] = useState("");
   const [categoryViewMode, setCategoryViewMode] = useState<"compact" | "all">("compact");
+  const [categoryKindView, setCategoryKindView] = useState<"income" | "expense">("expense");
   const [selectedCategoryLarge, setSelectedCategoryLarge] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [categoryBulkOpen, setCategoryBulkOpen] = useState(false);
@@ -19696,6 +19703,80 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     loadSummary(true);
   }
 
+  async function saveSalaryExceptionRules() {
+    let category = categories.find((row) => String(row.category_large || "") === "기타 출금" && String(row.category_middle || "") === "사비출금");
+    if (!category) {
+      const categoryRes = await fetch("/api/accounting/ledger/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_large: "기타 출금",
+          category_middle: "사비출금",
+          affects_profit: false,
+          affects_cashflow: true,
+          affects_card_settlement: false,
+          default_review_required: false,
+          memo: "급여 사비출금 예외용 카테고리",
+        }),
+      });
+      const categoryData = await categoryRes.json().catch(() => ({}));
+      if (!categoryRes.ok || categoryData.ok === false) {
+        setMessage(categoryData.error || "사비출금 카테고리 생성 실패");
+        return;
+      }
+      category = Array.isArray(categoryData.categories) ? categoryData.categories[0] : categoryData.categories;
+    }
+    const categoryId = String(category?.id || "");
+    if (!categoryId) {
+      setMessage("사비출금 카테고리 확인 실패");
+      return;
+    }
+    for (const preset of salaryExceptionPresets) {
+      const res = await fetch("/api/accounting/ledger/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          priority: 20,
+          source_type: "bank",
+          condition_field: "merchant_amount",
+          condition_operator: "contains",
+          keyword: "급여",
+          amount_condition: `${preset.amount - 1000},${preset.amount},${preset.amount + 1000}`,
+          direction_condition: "expense",
+          category_id: categoryId,
+          category_large: "기타 출금",
+          category_middle: "사비출금",
+          auto_confirm: true,
+          review_required: false,
+          review_reason: "salary_private_withdrawal",
+          memo: preset.memo,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "급여 예외 저장 실패");
+        return;
+      }
+    }
+    setMessage("급여 사비출금 예외설정을 저장했습니다.");
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
+  async function deleteAccountingRule(id: unknown) {
+    const ruleId = String(id || "");
+    if (!ruleId) return;
+    const res = await fetch(`/api/accounting/ledger/rules?id=${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      setMessage(data.error || "예외설정 삭제 실패");
+      return;
+    }
+    setMessage("예외설정을 삭제했습니다.");
+    invalidateAccountingCache();
+    loadSummary(true);
+  }
+
   async function saveFixedCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = fixedCostDraft.id ? "PATCH" : "POST";
@@ -19789,9 +19870,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }
 
   function openTransaction(row: Record<string, unknown>) {
+    const category = categories.find((item) => String(item.id || "") === String(row.category_id || ""));
     setEditingTransaction(row);
     setTransactionDraft({
       category_id: String(row.category_id || ""),
+      category_large: String(category?.category_large || row.category_large || ""),
+      category_middle: String(category?.category_middle || row.category_middle || ""),
       direction: String(row.direction || ""),
       review_reason: String(row.review_reason || ""),
       affects_profit: row.affects_profit !== false,
@@ -19923,9 +20007,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return leftKey.localeCompare(rightKey, "ko-KR", { numeric: true });
   });
   const categoryLargeOptions = Array.from(new Set(sortedCategories.map((row) => String(row.category_large || "").trim()).filter(Boolean)));
-  const categoryRowsByLarge = new Map(categoryLargeOptions.map((large) => [large, sortedCategories.filter((row) => String(row.category_large || "").trim() === large)]));
-  const activeCategoryLarge = selectedCategoryLarge || categoryLargeOptions[0] || "";
-  const visibleCategoryRows = categoryViewMode === "all" ? sortedCategories : (categoryRowsByLarge.get(activeCategoryLarge) || []);
+  const visibleKindCategories = sortedCategories.filter((row) => accountingCategoryKind(row.category_large) === categoryKindView);
+  const managedCategoryLargeOptions = Array.from(new Set(visibleKindCategories.map((row) => String(row.category_large || "").trim()).filter(Boolean)));
+  const categoryRowsByLarge = new Map(managedCategoryLargeOptions.map((large) => [large, visibleKindCategories.filter((row) => String(row.category_large || "").trim() === large)]));
+  const activeCategoryLarge = selectedCategoryLarge || managedCategoryLargeOptions[0] || "";
+  const visibleCategoryRows = categoryViewMode === "all" ? visibleKindCategories : (categoryRowsByLarge.get(activeCategoryLarge) || []);
   const expenses = summary?.transactions || summary?.expenses || [];
   const ledgerSourceRows = ledgerRows.length ? ledgerRows : expenses;
   const categoryById = new Map(categories.map((row) => [String(row.id || ""), [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")]));
@@ -19944,6 +20030,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
   const rules = summary?.rules || [];
+  const salaryExceptionRules = rules.filter((row) => /salary_private_withdrawal|급여 김수진|급여 이상민/.test(`${String(row.memo || "")} ${String(row.review_reason || "")} ${String(row.keyword || "")}`));
+  const salaryExceptionPresets = [
+    { amount: 1667010, memo: "급여 김수진" },
+    { amount: 2070030, memo: "급여 이상민" },
+  ];
   const fixedCosts = summary?.fixed_costs || [];
   const fixedCostOccurrences = summary?.fixed_cost_occurrences || [];
   const loans = summary?.loans || [];
@@ -19956,7 +20047,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const fixedCostRowTitle = (row: Record<string, unknown>) => String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-");
   const fixedCostRowAmount = (row: Record<string, unknown>) => asNumber(row.amount || row.last_actual_amount || row.expected_amount || row.expected_payment_amount);
   const normalizeLoanType = (value: unknown) => /interest_only|이자/.test(String(value || "")) ? "interest_only" : "principal_interest";
-  const fixedCostCategoryLargeOptions = Array.from(new Set(categories.map((row) => String(row.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
+  const fixedCostCategoryLargeOptions = Array.from(new Set(categories
+    .filter((row) => accountingCategoryKind(row.category_large) === "expense")
+    .map((row) => String(row.category_large || "").trim())
+    .filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
   const fixedCostCategoryMiddleOptions = (large: string) => Array.from(new Set(categories
     .filter((row) => !large || String(row.category_large || "").trim() === large)
     .map((row) => String(row.category_middle || "").trim())
@@ -20883,6 +20977,28 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
+                    <p className="text-xs font-black text-gray-500">예외설정</p>
+                    <p className="mt-2 text-lg font-black text-gray-900">급여 사비출금</p>
+                  </div>
+                  <ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => void saveSalaryExceptionRules()}>저장</ActionButton>
+                </div>
+                <div className="space-y-1 text-[11px] font-bold text-gray-500">
+                  {salaryExceptionPresets.map((preset) => {
+                    const rule = salaryExceptionRules.find((row) => String(row.memo || "") === preset.memo);
+                    const ruleId = String(rule?.id || "");
+                    return (
+                      <div key={preset.memo} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{preset.memo} · {krw(preset.amount)} ±1,000</span>
+                        {ruleId ? <button type="button" className="font-black text-red-500 hover:underline" onClick={() => void deleteAccountingRule(ruleId)}>삭제</button> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
                     <p className="text-xs font-black text-gray-500">카테고리</p>
                     <p className="mt-2 text-2xl font-black text-gray-900">{categories.length.toLocaleString("ko-KR")}개</p>
                   </div>
@@ -20949,6 +21065,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
                 <button type="button" className={`h-9 px-3 ${categoryViewMode === "compact" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("compact")}>간략보기</button>
                 <button type="button" className={`h-9 px-3 ${categoryViewMode === "all" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("all")}>전체보기</button>
+                <button type="button" className={`h-9 px-3 ${categoryKindView === "income" ? "bg-emerald-500 text-white" : "text-gray-600 hover:bg-emerald-50"}`} onClick={() => { setCategoryKindView("income"); setSelectedCategoryLarge(""); }}>수입</button>
+                <button type="button" className={`h-9 px-3 ${categoryKindView === "expense" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => { setCategoryKindView("expense"); setSelectedCategoryLarge(""); }}>사용</button>
               </div>
             </div>
 
@@ -20977,7 +21095,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                         ) : field.key === "category_large" ? (
                           <select className={modalSelectClass} value={String(categoryBulkDraft.category_large || "")} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
                             <option value="">이동할 1차 선택</option>
-                            {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+                            {managedCategoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
                           </select>
                         ) : (
                           <input className={modalInputClass} value={String(categoryBulkDraft[field.key] || "")} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, [field.key]: event.target.value }))} />
@@ -20996,10 +21114,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <div className="rounded-xl border border-gray-200">
                 <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
                   <span className="text-xs font-black text-gray-500">1차 카테고리</span>
-                  <span className="text-xs font-bold text-gray-400">{categoryLargeOptions.length.toLocaleString("ko-KR")}개</span>
+                  <span className="text-xs font-bold text-gray-400">{managedCategoryLargeOptions.length.toLocaleString("ko-KR")}개</span>
                 </div>
                 <div className="max-h-[480px] overflow-y-auto p-2">
-                  {categoryLargeOptions.map((large) => {
+                  {managedCategoryLargeOptions.map((large) => {
                     const rows = categoryRowsByLarge.get(large) || [];
                     const selected = activeCategoryLarge === large;
                     return (
@@ -21009,7 +21127,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                       </button>
                     );
                   })}
-                  {!categoryLargeOptions.length && <EmptyState title="카테고리 없음" className="min-h-24 border-0" />}
+                  {!managedCategoryLargeOptions.length && <EmptyState title="카테고리 없음" className="min-h-24 border-0" />}
                 </div>
               </div>
 
@@ -21089,7 +21207,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <FormField label="1차 카테고리" required>
                 <select className={modalSelectClass} value={categoryDraft.category_large || "__direct__"} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
                   <option value="__direct__">*직접입력</option>
-                  {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+                  {managedCategoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
                 </select>
                 {categoryDraft.category_large === "__direct__" && (
                   <input className={`${modalInputClass} mt-2`} value={categoryDirectLarge} onChange={(event) => setCategoryDirectLarge(event.target.value)} placeholder="새 1차 카테고리" />
@@ -21361,15 +21479,44 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <p className="md:col-span-2">내용: <b className="text-gray-900">{String(editingTransaction.description || "-")}</b></p>
               <p className="md:col-span-2">원본: <span className="break-all text-gray-500">{JSON.stringify(editingTransaction.raw_json || {}, null, 0).slice(0, 500) || "원본 없음"}</span></p>
             </div>
-            <FormField label="카테고리">
-              <select className={modalSelectClass} value={transactionDraft.category_id} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, category_id: event.target.value }))}>
-                <option value="">미지정</option>
-                {categories.map((row) => <option key={String(row.id)} value={String(row.id)}>{categoryById.get(String(row.id))}</option>)}
-              </select>
-            </FormField>
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField label="카테고리1">
+                <select
+                  className={modalSelectClass}
+                  value={transactionDraft.category_large}
+                  onChange={(event) => setTransactionDraft((prev) => ({ ...prev, category_large: event.target.value, category_middle: "", category_id: "" }))}
+                >
+                  <option value="">미지정</option>
+                  {Array.from(new Set(categories
+                    .filter((row) => accountingCategoryKind(row.category_large) === (String(transactionDraft.direction) === "income" ? "income" : "expense"))
+                    .map((row) => String(row.category_large || "").trim())
+                    .filter(Boolean))).map((large) => <option key={large} value={large}>{large}</option>)}
+                </select>
+              </FormField>
+              <FormField label="카테고리2">
+                <select
+                  className={modalSelectClass}
+                  value={transactionDraft.category_id}
+                  disabled={!transactionDraft.category_large}
+                  onChange={(event) => {
+                    const category = categories.find((item) => String(item.id || "") === event.target.value);
+                    setTransactionDraft((prev) => ({
+                      ...prev,
+                      category_id: event.target.value,
+                      category_middle: String(category?.category_middle || ""),
+                    }));
+                  }}
+                >
+                  <option value="">{transactionDraft.category_large ? "카테고리2 선택" : "카테고리1 먼저 선택"}</option>
+                  {categories
+                    .filter((row) => String(row.category_large || "") === transactionDraft.category_large)
+                    .map((row) => <option key={String(row.id)} value={String(row.id)}>{String(row.category_middle || "-")}</option>)}
+                </select>
+              </FormField>
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <FormField label="거래 방향">
-                <select className={modalSelectClass} value={transactionDraft.direction} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, direction: event.target.value }))}>
+                <select className={modalSelectClass} value={transactionDraft.direction} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, direction: event.target.value, category_large: "", category_middle: "", category_id: "" }))}>
                   <option value="">유지</option>
                   <option value="income">입금/정산</option>
                   <option value="expense">비용/출금</option>
@@ -21677,6 +21824,8 @@ function ReviewQuickRow({
   const [profitChecked, setProfitChecked] = useState(row.affects_profit !== false);
   const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
   const jaewookCandidate = /김재욱|재욱/.test(`${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`);
+  const reviewCategoryKind = String(row.direction || "") === "income" ? "income" : "expense";
+  const reviewCategoryLargeOptions = categoryLargeOptions.filter((large) => categories.some((category) => String(category.category_large || "") === large && accountingCategoryKind(large) === reviewCategoryKind));
   const middleOptions = categories
     .filter((category) => String(category.category_large || "").trim() === selectedLarge)
     .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
@@ -21720,7 +21869,7 @@ function ReviewQuickRow({
           onChange={(event) => applyLarge(event.target.value)}
         >
           <option value="">미지정</option>
-          {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+          {reviewCategoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
         </select>
         {suggestion && (
           <button
