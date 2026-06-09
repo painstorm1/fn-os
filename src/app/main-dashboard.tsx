@@ -182,9 +182,9 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
   const valueClass = tone === "green" ? "text-emerald-600" : tone === "rose" ? "text-red-600" : tone === "orange" ? "text-[#ff6a00]" : "text-gray-900";
   return (
     <div className="min-w-0">
-      <p className="truncate text-[11px] font-semibold leading-4 text-gray-500">{label}</p>
-      <p className={`mt-1 truncate text-[16px] font-bold leading-5 ${valueClass}`} title={value}>{value}</p>
-      {note && <p className="mt-0.5 truncate text-[11px] font-medium leading-4 text-gray-500" title={note}>{note}</p>}
+      <p className="truncate text-xs font-semibold leading-4 text-gray-500">{label}</p>
+      <p className={`mt-1 truncate text-[17px] font-bold leading-5 ${valueClass}`} title={value}>{value}</p>
+      {note && <p className="mt-0.5 truncate text-xs font-medium leading-4 text-gray-500" title={note}>{note}</p>}
     </div>
   );
 }
@@ -192,8 +192,8 @@ function Stat({ label, value, note, tone = "slate" }: { label: string; value: st
 function CollectionDate({ label, value }: { label: string; value?: string }) {
   return (
     <div className="min-w-[116px] text-left">
-      <p className="text-[11px] font-black text-slate-500">{label}</p>
-      <p className="mt-1 text-sm font-black text-slate-900">{dateText(value)}</p>
+      <p className="text-xs font-black text-slate-500">{label}</p>
+      <p className="mt-1 text-[15px] font-black text-slate-900">{dateText(value)}</p>
     </div>
   );
 }
@@ -202,8 +202,8 @@ function Panel({ title, subtitle, children, className = "", compact = false }: {
   return (
     <Card className={`${compact ? "p-4" : "p-5"} ${className}`}>
       <div className={compact ? "mb-3" : "mb-4"}>
-        <h2 className={`${compact ? "text-base" : "text-lg"} font-semibold leading-snug text-gray-900`}>{title}</h2>
-        {subtitle && <div className={`${compact ? "mt-0.5 text-xs" : "mt-1 text-sm"} text-gray-500`}>{subtitle}</div>}
+        <h2 className="text-lg font-semibold leading-snug text-gray-900">{title}</h2>
+        {subtitle && <div className={`${compact ? "mt-0.5 text-[13px]" : "mt-1 text-sm"} text-gray-500`}>{subtitle}</div>}
       </div>
       {children}
     </Card>
@@ -223,7 +223,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
   if (!rows.length) return <p className="rounded-xl bg-gray-50 px-3 py-6 text-center text-sm font-medium text-gray-400">수입 발주 데이터가 없습니다.</p>;
   return (
     <div className="fn-table-shell">
-      <div className="grid h-9 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 bg-gray-50 px-3 text-xs font-semibold text-gray-600">
+      <div className="grid h-9 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 bg-gray-50 px-3 text-[13px] font-semibold text-gray-600">
         <span>주문날짜</span>
         <span>대표 제품</span>
         <span>공장</span>
@@ -235,7 +235,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <a
           key={`${row.id || index}`}
           href={importOrderHref(row)}
-          className="grid min-h-10 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 border-t border-gray-100 px-3 py-1.5 text-xs transition hover:bg-orange-50/70"
+          className="grid min-h-10 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 border-t border-gray-100 px-3 py-1.5 text-[13px] transition hover:bg-orange-50/70"
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
           <span className="grid min-w-0 grid-cols-[36px_1fr] items-center gap-2.5">
@@ -263,9 +263,9 @@ function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
         <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-sm transition hover:bg-orange-50/70 hover:text-orange-600">
           <span className="flex items-baseline gap-2">
             <span className="min-w-8 font-black text-slate-950">{monthTitle(group)}</span>
-            <span className="text-xs font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
+            <span className="text-[13px] font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
           </span>
-          <span className="text-right text-base font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
+          <span className="text-right text-[17px] font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
         </a>
       ))}
     </div>
@@ -277,7 +277,7 @@ function FixedCostList({ rows }: { rows: Row[] }) {
   return (
     <div className="space-y-2">
       {rows.slice(0, 3).map((row, index) => (
-        <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
+        <div key={index} className="grid grid-cols-[1fr_auto] gap-2 rounded-lg bg-gray-50 px-3 py-2 text-[13px]">
           <span className="truncate font-bold text-slate-700">{titleFrom(row)}</span>
           <span className="font-black text-slate-950">{krw(amountFrom(row))}</span>
         </div>
@@ -353,7 +353,7 @@ export default function MainDashboard() {
             <Stat label="이번달" value={krw(summary?.month_sales)} />
           </div>
           <div className="mt-3 rounded-xl bg-gray-50 p-2.5">
-            <div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-gray-500">
+            <div className="mb-1.5 flex items-center justify-between text-[13px] font-semibold text-gray-500">
               <span>14일 매출</span>
               <span>{krwLong(summary?.seven_day_sales)}</span>
             </div>
@@ -396,15 +396,15 @@ export default function MainDashboard() {
           <div className="grid gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(260px,3fr)]">
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-xs font-black text-slate-500">최근 발주목록</p>
-                <p className="text-xs font-bold text-slate-400">{importOrders.length.toLocaleString("ko-KR")}건</p>
+                <p className="text-[13px] font-black text-slate-500">최근 발주목록</p>
+                <p className="text-[13px] font-bold text-slate-400">{importOrders.length.toLocaleString("ko-KR")}건</p>
               </div>
               <ImportOrderRows rows={importOrders} />
             </div>
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-xs font-black text-slate-500">월별 수입 금액</p>
-                <p className="text-xs font-bold text-slate-400">최근 6개월</p>
+                <p className="text-[13px] font-black text-slate-500">월별 수입 금액</p>
+                <p className="text-[13px] font-bold text-slate-400">최근 6개월</p>
               </div>
               <ImportMonthlyAmounts months={summary?.import_monthly} />
             </div>
