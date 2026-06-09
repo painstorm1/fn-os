@@ -28,6 +28,25 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function matchText(value: unknown) {
+  return text(value).toLowerCase().replace(/\s+/g, "").replace(/[()[\]{}<>.,'"`|\\/_-]/g, "");
+}
+
+function transactionMatchName(row: RawRow) {
+  return matchText(row.merchant_name || row.description);
+}
+
+function transactionMatchMemo(row: RawRow) {
+  return matchText(`${text(row.merchant_name || row.description)} ${text(row.description)} ${text(row.memo)}`);
+}
+
+function sameSourceAndDirection(left: RawRow, right: RawRow) {
+  if (text(left.source_type) && text(right.source_type) && text(left.source_type) !== text(right.source_type)) return false;
+  if (text(left.source_name) && text(right.source_name) && text(left.source_name) !== text(right.source_name)) return false;
+  if (text(left.direction) && text(right.direction) && text(left.direction) !== text(right.direction)) return false;
+  return true;
+}
+
 function first(row: RawRow, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -349,6 +368,29 @@ function categoryKey(row: RawRow) {
   return `${text(row.category_large)}|${text(row.category_middle)}|`;
 }
 
+function findHistoricalCategoryMatch(row: RawRow, confirmedRows: RawRow[]) {
+  const name = transactionMatchName(row);
+  const memo = transactionMatchMemo(row);
+  if (!name || name.length < 2) return null;
+  let best: { row: RawRow; confidence: number; autoConfirm: boolean } | null = null;
+  for (const previous of confirmedRows) {
+    if (!text(previous.category_id) && !text(previous.category_large)) continue;
+    if (!sameSourceAndDirection(row, previous)) continue;
+    const previousName = transactionMatchName(previous);
+    if (!previousName || previousName.length < 2) continue;
+    const previousMemo = transactionMatchMemo(previous);
+    const exactName = previousName === name;
+    const containsName = previousName.includes(name) || name.includes(previousName);
+    const memoOverlap = previousMemo && memo && (previousMemo.includes(name) || memo.includes(previousName));
+    if (!exactName && !containsName && !memoOverlap) continue;
+    const amountMatches = Math.abs(numberValue(previous.amount_krw ?? previous.amount) - numberValue(row.amount_krw ?? row.amount)) <= 1;
+    const confidence = exactName && amountMatches ? 0.92 : exactName ? 0.86 : containsName ? 0.72 : 0.62;
+    const autoConfirm = confidence >= 0.85;
+    if (!best || confidence > best.confidence) best = { row: previous, confidence, autoConfirm };
+  }
+  return best;
+}
+
 function manualCategoryPath(row: RawRow) {
   const existingLarge = text(row.existing_category_large);
   const existingMiddle = text(row.existing_category_middle);
@@ -469,9 +511,10 @@ export function normalizeAccountingTransaction(row: RawRow, fxRates: Record<stri
 }
 
 export async function classifyAccountingTransactions(rows: RawRow[]): Promise<RawRow[]> {
-  const [categories, rules] = await Promise.all([
+  const [categories, rules, confirmedRows] = await Promise.all([
     optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 }),
     optionalRows("accounting_category_rules", { is_active: "eq.true", order: "priority.asc", limit: 500 }),
+    optionalRows("accounting_transactions", { review_status: "eq.confirmed", is_active: "eq.true", order: "transaction_date.desc", limit: 3000 }),
   ]);
   const categoryByPath = new Map(categories.map((category) => [categoryKey(category), category]));
   const defaultReview = categoryByPath.get("기타 출금|검토필요|");
@@ -483,6 +526,7 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const rule = forcedReviewReason ? undefined : rules.find((item) => ruleMatches(item, row));
     const manualPath = forcedReviewReason ? null : manualCategoryPath(row);
     const manualCategory = manualPath ? categoryByPath.get(`${manualPath.large}|${manualPath.middle}|`) : null;
+    const historyMatch = !forcedReviewReason && !rule && !manualCategory ? findHistoricalCategoryMatch(row, confirmedRows) : null;
     const reviewReason = forcedReviewReason || text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
     const transferLarge = numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금";
@@ -490,20 +534,22 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : text(manualCategory?.category_middle) || reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
     const categorySmall = "";
     const category = manualCategory || categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
-    const needsReview = !manualCategory && !isCardPayment && !isTransfer && (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(category?.default_review_required));
+    const historyCategory = historyMatch ? categoryByPath.get(`${text(historyMatch.row.category_large)}|${text(historyMatch.row.category_middle)}|`) : null;
+    const resolvedCategory = historyMatch && !reviewPath ? historyCategory || historyMatch.row : category;
+    const needsReview = !manualCategory && !isCardPayment && !isTransfer && (historyMatch ? !historyMatch.autoConfirm : (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(resolvedCategory?.default_review_required)));
     return {
       ...row,
-      category_large: categoryLarge,
-      category_middle: categoryMiddle,
+      category_large: text(resolvedCategory?.category_large) || categoryLarge,
+      category_middle: text(resolvedCategory?.category_middle) || categoryMiddle,
       category_small: categorySmall,
-      category_id: category?.id || null,
-      rule_id: rule?.id || null,
-      confidence: rule ? (needsReview ? 0.55 : 0.9) : 0.3,
+      category_id: historyCategory?.id || historyMatch?.row.category_id || category?.id || null,
+      rule_id: rule?.id || historyMatch?.row.rule_id || null,
+      confidence: rule ? (needsReview ? 0.55 : 0.9) : historyMatch?.confidence || 0.3,
       review_status: needsReview ? "pending" : "confirmed",
       review_reason: reviewReason || (needsReview ? "미분류" : ""),
-      affects_profit: isCardPayment || isTransfer ? false : category?.affects_profit ?? row.direction === "expense",
-      affects_cashflow: isCardPayment || isTransfer ? true : row.source_type === "bank" && category?.affects_cashflow !== false,
-      affects_card_settlement: !isCardPayment && row.source_type === "card" ? true : category?.affects_card_settlement ?? false,
+      affects_profit: isCardPayment || isTransfer ? false : resolvedCategory?.affects_profit ?? historyMatch?.row.affects_profit ?? row.direction === "expense",
+      affects_cashflow: isCardPayment || isTransfer ? true : row.source_type === "bank" && resolvedCategory?.affects_cashflow !== false,
+      affects_card_settlement: !isCardPayment && row.source_type === "card" ? true : resolvedCategory?.affects_card_settlement ?? historyMatch?.row.affects_card_settlement ?? false,
     } as RawRow;
   });
 }
@@ -666,6 +712,47 @@ export async function upsertAccountingRule(row: RawRow) {
   };
   if (id) return patchRows("accounting_category_rules", { id: `eq.${id}` }, payload);
   return insertRows("accounting_category_rules", payload);
+}
+
+async function rememberAccountingRuleFromTransaction(transaction: RawRow, row: RawRow = {}) {
+  if (!text(transaction.id)) return;
+  if (["transfer", "card_payment"].includes(text(transaction.direction))) return;
+  const keyword = text(row.keyword) || text(transaction.merchant_name || transaction.description);
+  if (matchText(keyword).length < 2) return;
+  const category = await categoryFor({
+    category_id: transaction.category_id || row.category_id,
+    category_large: transaction.category_large || row.category_large,
+    category_middle: transaction.category_middle || row.category_middle,
+  });
+  if (!category) return;
+  const payload = {
+    priority: row.priority || 60,
+    source_type: transaction.source_type,
+    source_name: transaction.source_name,
+    condition_field: "merchant_name",
+    condition_operator: "contains",
+    keyword,
+    amount_condition: row.amount_condition || row.amountCondition || null,
+    direction_condition: transaction.direction,
+    category_id: category.id,
+    category_large: category.category_large,
+    category_middle: category.category_middle,
+    category_small: "",
+    auto_confirm: true,
+    review_required: false,
+    review_reason: null,
+    memo: row.rule_memo || row.ruleMemo || "Learned from confirmed accounting transaction",
+  };
+  const existing = await optionalRows("accounting_category_rules", {
+    source_type: `eq.${text(payload.source_type)}`,
+    source_name: `eq.${text(payload.source_name)}`,
+    condition_field: "eq.merchant_name",
+    condition_operator: "eq.contains",
+    keyword: `eq.${keyword}`,
+    direction_condition: `eq.${text(payload.direction_condition)}`,
+    limit: 1,
+  });
+  await upsertAccountingRule({ ...payload, id: existing[0]?.id }).catch(() => []);
 }
 
 export async function deactivateAccountingRule(id: string) {
@@ -971,6 +1058,7 @@ export async function deactivateAccountingCardAccount(id: string) {
 
 export async function updateAccountingTransaction(id: string, row: RawRow) {
   if (!id) throw new Error("거래 id가 필요합니다.");
+  const [previous] = await optionalRows("accounting_transactions", { id: `eq.${id}`, limit: 1 });
   const category = await categoryFor(row);
   const payload: RawRow = {
     memo: text(row.memo) || null,
@@ -998,6 +1086,7 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
   }
   const saved = await patchRows<RawRow>("accounting_transactions", { id: `eq.${id}` }, payload);
   if (payload.review_status === "confirmed") {
+    await rememberAccountingRuleFromTransaction({ ...(previous || {}), ...payload, id }, row);
     await patchRows("accounting_review_queue", { transaction_id: `eq.${id}` }, {
       status: "resolved",
       resolved_category_id: category?.id || null,
@@ -1034,7 +1123,7 @@ export async function resolveAccountingReview(row: RawRow) {
       review_required: row.review_required ?? row.reviewRequired ?? false,
       review_reason: row.review_reason || row.reviewReason || null,
       memo: row.rule_memo || row.ruleMemo || "검토필요 탭에서 저장한 자동분류 규칙",
-    });
+    }).catch(() => []);
   }
   return updated;
 }
