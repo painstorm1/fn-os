@@ -9913,20 +9913,39 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const title = "거래 분석";
     (window as unknown as { __fnosDownloadTradeAnalysisXlsx?: (rows: Array<Record<string, unknown>>) => void }).__fnosDownloadTradeAnalysisXlsx = (rows) => {
       if (String(rows[0]?.__exportType || "") === "voucher") {
-        const exportRows = rows.map((row) => [
-          String(row.typeLabel || ""),
-          String(row.no || ""),
-          String(row.date || ""),
-          String(row.customer || ""),
-          String(row.warehouse || ""),
-          String(row.itemCount || ""),
-          String(row.qty || ""),
-          String(Math.round(Number(row.avg || 0))),
-          String(Math.round(Number(row.amount || 0))),
-          String(row.memo || ""),
-          String(row.detailSummary || ""),
-        ]);
-        void downloadTableXlsx(`거래명세서별_${entryDateToday()}.xlsx`, "거래명세서별", ["구분", "일자-NO", "일자", "거래처", "창고", "품목수", "수량합계", "평균단가", "금액합계", "메모", "세부 품목"], exportRows);
+        const exportRows = rows.flatMap((row) => {
+          const lines = Array.isArray(row.lines) ? row.lines as Array<Record<string, unknown>> : [];
+          const header = [
+            String(row.typeLabel || ""),
+            String(row.displayNo || row.no || ""),
+            String(row.date || ""),
+            String(row.customer || ""),
+            String(row.warehouse || ""),
+            "전표합계",
+            String(row.itemCount || ""),
+            String(row.qty || ""),
+            String(Math.round(Number(row.avg || 0))),
+            String(Math.round(Number(row.amount || 0))),
+            String(row.memo || ""),
+            "",
+          ];
+          const detail = lines.map((line) => [
+            String(row.typeLabel || ""),
+            String(row.displayNo || row.no || ""),
+            String(row.date || ""),
+            String(row.customer || ""),
+            String(row.warehouse || ""),
+            String(line.actualProductCode || ""),
+            String(line.actualProductName || ""),
+            String(line.actualQty || ""),
+            String(Math.round(Number(line.unitPrice || 0))),
+            String(Math.round(Number(line.amount || 0))),
+            String(line.memo || ""),
+            line.isBom ? `${String(line.sourceProductCode || "")} / ${String(line.sourceProductName || "")}` : "",
+          ]);
+          return [header, ...detail, ["", "", "", "", "", "", "", "", "", "", "", ""]];
+        });
+        void downloadTableXlsx(`거래명세서별_${entryDateToday()}.xlsx`, "거래명세서별", ["구분", "일자 NO", "일자", "거래처", "창고", "품목코드", "품목명", "수량", "단가", "금액", "메모", "원 입력품목"], exportRows);
         return;
       }
       const exportRows = rows.map((row) => [
@@ -9948,7 +9967,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
-      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:34px;background:#15803d;color:#fff;font-size:11px}.btn.tiny{width:30px;padding:0}
+      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.excel{width:34px;background:#15803d;color:#fff;font-size:11px}.btn.pdf,.btn.mail{width:58px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
       .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:164px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 24px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}.summaryCard.salesCard{background:linear-gradient(135deg,#eefcff 0%,#f8fdff 58%,#e8f6ff 100%)}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff1e8 0%,#ffd1b8 100%);border-color:#f7b390}.summaryTitle{transform:translateY(-6px);font-size:38px;line-height:1;font-weight:900;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#147df5}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px}.metricLabel{font-size:15px;color:#334155;font-weight:800}.metricValue{font-size:22px;font-weight:800;color:#0f172a}.totalLine{grid-column:1/3;font-size:22px;font-weight:800;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:36px;align-items:center;color:#334155;font-size:15px;font-weight:800}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:800;cursor:pointer;padding:0}.rankList{display:grid;gap:8px}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 2px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 132px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:7px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:176px;border-radius:10px;background:rgba(255,255,255,.78);padding:18px 14px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.purchaseSideLabel{font-size:17px;font-weight:800}.purchaseSideDate{font-size:25px;line-height:1.12;margin:8px 0 22px}.purchaseSideCycle{font-size:17px;font-weight:800}.purchaseSideDays{font-size:28px;line-height:1.1;font-weight:800}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
@@ -9968,7 +9987,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="product" class="field searchInput" placeholder="품목 검색">
           <input id="warehouse" class="field searchInput" placeholder="창고 검색">
           <input id="customer" class="field searchInput" placeholder="거래처 검색">
-          <button id="search" class="btn">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button>
+          <button id="search" class="btn">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button><button id="downloadPdf" class="btn pdf" title="PDF 저장" type="button">PDF</button><button id="emailPdf" class="btn mail" title="E-mail" type="button">E-mail</button>
           <div class="filterSpacer"></div>
           <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${today}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${today}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
@@ -9998,6 +10017,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const krw = (n) => fmt.format(Math.round(Number(n)||0)) + "원";
       const text = (v) => String(v ?? "").toLowerCase();
       const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[ch]));
+      const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i;
       const selected = { product: [], warehouse: [], customer: [] };
       let activePicker = "product";
       let pickerIndex = 0;
@@ -10006,6 +10026,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let lastRows = [];
       let lastExportRows = [];
       let expandedVoucherKey = "";
+      let customerDirectory = [];
       let viewHistory = [];
       let viewHistoryIndex = 0;
       const pad = (n) => String(n).padStart(2, "0");
@@ -10014,6 +10035,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function optionKey(item){ return String(item.code || item.name || ""); }
       function optionLabel(item){ return item.code && item.name && item.code !== item.name ? item.code + " / " + item.name : (item.name || item.code || "-"); }
       function selectedSet(kind){ return new Set(selected[kind].map(optionKey)); }
+      fetch("/api/fnos/customers?page=1&pageSize=5000").then((res) => res.json()).then((data) => { customerDirectory = data.customers || []; }).catch(() => { customerDirectory = []; });
+      function customerEmail(name){
+        const normalized = String(name || "").trim();
+        const customer = customerDirectory.find((item) => [item.customer_name, item.cust_name, item.customer_code, item.cust_code].map((value) => String(value || "").trim()).includes(normalized));
+        const source = [customer?.email, customer?.memo, customer?.note, customer?.customer_memo].map((value) => String(value || "")).join(" ");
+        return source.match(emailRegex)?.[0] || "";
+      }
+      function activeVouchers(){
+        if (String(lastExportRows[0]?.__exportType || "") !== "voucher") return [];
+        if (expandedVoucherKey) return lastExportRows.filter((row) => row.key === expandedVoucherKey);
+        return lastExportRows;
+      }
       function updateFilterInputs(){
         [["product","품목"],["warehouse","창고"],["customer","거래처"]].forEach(([kind]) => {
           const input = document.getElementById(kind);
@@ -10129,13 +10162,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           item.lines.push(row);
           map.set(key, item);
         });
-        return Array.from(map.values()).map((item) => {
+        const sorted = Array.from(map.values()).map((item) => {
           item.itemCount = item.productKeys.size;
           item.avg = item.qty ? item.amount / item.qty : 0;
           item.memo = Array.from(item.memos).slice(0, 3).join(" / ") || "-";
           item.detailSummary = item.lines.map((line) => (line.actualProductCode || "-") + " " + (line.actualProductName || "-") + " " + fmt.format(Number(line.actualQty || line.qty || 0)) + "개 " + krw(line.amount || 0)).join(" | ");
           return item;
         }).sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(b.no).localeCompare(String(a.no)));
+        const dateCounts = new Map();
+        sorted.slice().reverse().forEach((item) => {
+          const compactDate = String(item.date || "").replace(/\\D/g, "").slice(2, 8);
+          const next = (dateCounts.get(compactDate) || 0) + 1;
+          dateCounts.set(compactDate, next);
+          item.displayNo = /^\\d{6}-\\d+$/.test(String(item.no || "")) ? item.no : compactDate + "-" + next;
+        });
+        return sorted;
       }
       function uniqueCodes(rows, key){
         return Array.from(new Set(rows.map((row) => String(row[key] || "").trim()).filter(Boolean))).sort();
@@ -10234,6 +10275,35 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         document.getElementById("purchaseSide").innerHTML = "<div class='purchaseSideLabel'>최근입고</div><div class='purchaseSideDate'>"+esc(latest || "-")+"</div><div class='purchaseSideCycle'>평균 입고주기</div><div class='purchaseSideDays'>"+fmt.format(avgCycle)+"일</div>";
       }
+      function statementHtml(vouchers){
+        const pages = vouchers.map((voucher, index) => {
+          const lines = Array.isArray(voucher.lines) ? voucher.lines : [];
+          const lineRows = lines.map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty||0)+"</td><td class='num'>"+krw(line.unitPrice||0)+"</td><td class='num'>"+krw(line.amount||0)+"</td><td>"+esc(line.memo||"")+"</td></tr>").join("");
+          return "<section class='page "+(index === 0 ? "active" : "")+"'><h1>거래명세서</h1><div class='top'><div class='customerBox'>"+esc(voucher.customer||"-")+" 귀중</div><table><tbody><tr><th>일자 NO</th><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><th>TEL</th><td></td></tr><tr><th>상호</th><td colspan='3'>에프엔</td></tr><tr><th>주소</th><td colspan='3'></td></tr></tbody></table></div><div class='amount'><span>금액</span><span>"+krw(voucher.amount||0)+"</span></div><table><thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가</th><th>합계</th><th>메모</th></tr></thead><tbody>"+lineRows+"<tr><th colspan='2'>종합계</th><th class='num'>"+fmt.format(voucher.qty||0)+"</th><th></th><th class='num'>"+krw(voucher.amount||0)+"</th><th></th></tr></tbody></table><div class='pageCount'>["+(index+1)+"/"+vouchers.length+"]</div></section>";
+        }).join("");
+        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래명세서</title><style>body{font-family:Arial,'Malgun Gothic',sans-serif;margin:24px;color:#111}.page{width:760px;margin:0 auto;display:none}.page.active{display:block}h1{text-align:center;font-size:30px;margin:18px 0}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border:1px solid #111;padding:6px;text-align:center}.left{text-align:left}.num{text-align:right}.top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.customerBox{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}.amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}.toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}.pager{min-width:64px;text-align:center;font-weight:800}.pageCount{margin-top:10px;text-align:right;font-size:12px;font-weight:700}@media print{.toolbar{display:none}body{margin:0}.page{display:block;break-after:page;width:auto;margin:18mm}.page:last-of-type{break-after:auto}}</style></head><body>"+pages+"<div class='toolbar'><button id='prevPage' type='button'>◀</button><span id='pager' class='pager'>1/"+vouchers.length+"</span><button id='nextPage' type='button'>▶</button><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>const pages=Array.from(document.querySelectorAll('.page'));let current=0;function render(){pages.forEach((page,index)=>page.classList.toggle('active',index===current));document.getElementById('pager').textContent=(current+1)+'/'+pages.length;document.getElementById('prevPage').disabled=current===0;document.getElementById('nextPage').disabled=current>=pages.length-1;}document.getElementById('prevPage').onclick=()=>{current=Math.max(0,current-1);render();};document.getElementById('nextPage').onclick=()=>{current=Math.min(pages.length-1,current+1);render();};render();<\\/script></body></html>";
+      }
+      function openStatementPdf(){
+        const vouchers = activeVouchers();
+        if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
+        const popup = window.open("", "_blank", "width=980,height=900");
+        if (!popup) { window.alert("팝업이 차단되었습니다."); return; }
+        popup.document.write(statementHtml(vouchers));
+        popup.document.close();
+      }
+      function emailStatementPdf(){
+        const vouchers = activeVouchers();
+        if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
+        const customers = Array.from(new Set(vouchers.map((voucher) => String(voucher.customer || "").trim()).filter(Boolean)));
+        if (customers.length !== 1) { window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다. 거래처를 검색하거나 전표 하나를 펼친 뒤 눌러주세요."); return; }
+        const email = customerEmail(customers[0]) || window.prompt("거래처 이메일 주소를 입력해 주세요.", "");
+        if (!email) return;
+        const subjectDate = String(vouchers[0].displayNo || vouchers[0].date || "").replace(/\\D/g, "").slice(0, 6) || "${today.replace(/\D/g, "").slice(2)}";
+        const kind = vouchers.every((voucher) => voucher.type === "purchase") ? "구매" : "판매";
+        const subject = subjectDate + " - " + kind + " 거래명세서 - 에프엔";
+        const body = "안녕하세요.\\n\\n" + subject + " PDF 거래명세서를 전달드립니다.\\n거래명세서 PDF는 FN OS의 PDF 버튼에서 저장한 파일을 첨부해 주세요.\\n\\n감사합니다.\\n에프엔";
+        window.location.href = "mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+      }
       function rowsHtml(rows){
         return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
       }
@@ -10242,7 +10312,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return vouchers.map((voucher) => {
           const detailOpen = voucher.key === expandedVoucherKey;
           const detail = detailOpen ? voucher.lines.map((r)=>"<tr class='voucherDetail "+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td></td><td class='detailIndent'>품목</td><td colspan='2'>"+esc(r.actualProductCode||"-")+" / "+esc(r.actualProductName||"-")+"</td><td class='num'>1</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td>"+esc(r.memo||"-")+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td></tr>").join("") : "";
-          return "<tr class='voucherRow "+(voucher.type === "sales" ? "rowSales" : "rowPurchase")+"' data-voucher-key='"+esc(voucher.key)+"'><td><span class='badge "+esc(voucher.type)+"'>"+esc(voucher.typeLabel)+"</span></td><td>"+esc(voucher.no||"-")+"</td><td>"+esc(voucher.customer||"-")+"</td><td>"+esc(voucher.warehouse||"-")+"</td><td class='num'>"+fmt.format(voucher.itemCount||0)+"</td><td class='num'>"+fmt.format(voucher.qty||0)+"</td><td class='num'>"+krw(voucher.avg||0)+"</td><td class='num'>"+krw(voucher.amount||0)+"</td><td>"+esc(voucher.memo||"-")+"</td><td class='muted'>"+(detailOpen ? "접기" : "펼치기")+"</td></tr>" + detail;
+          return "<tr class='voucherRow "+(voucher.type === "sales" ? "rowSales" : "rowPurchase")+"' data-voucher-key='"+esc(voucher.key)+"'><td><span class='badge "+esc(voucher.type)+"'>"+esc(voucher.typeLabel)+"</span></td><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><td>"+esc(voucher.customer||"-")+"</td><td>"+esc(voucher.warehouse||"-")+"</td><td class='num'>"+fmt.format(voucher.itemCount||0)+"</td><td class='num'>"+fmt.format(voucher.qty||0)+"</td><td class='num'>"+krw(voucher.avg||0)+"</td><td class='num'>"+krw(voucher.amount||0)+"</td><td>"+esc(voucher.memo||"-")+"</td><td class='muted'>"+(detailOpen ? "접기" : "펼치기")+"</td></tr>" + detail;
         }).join("");
       }
       function render(){
@@ -10275,7 +10345,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (group === "voucher") {
           const vouchers = buildVoucherRows(rows);
           lastExportRows = vouchers;
-          thead.innerHTML = "<tr><th>구분</th><th>일자-NO</th><th>거래처</th><th>창고</th><th class='num'>품목수</th><th class='num'>수량합계</th><th class='num'>평균단가</th><th class='num'>금액합계</th><th>메모</th><th>세부</th></tr>";
+          thead.innerHTML = "<tr><th>구분</th><th>일자 NO</th><th>거래처</th><th>창고</th><th class='num'>품목수</th><th class='num'>수량합계</th><th class='num'>평균단가</th><th class='num'>금액합계</th><th>메모</th><th>세부</th></tr>";
           tbody.innerHTML = voucherRowsHtml(vouchers);
           document.querySelectorAll(".voucherRow[data-voucher-key]").forEach((row) => row.addEventListener("click", () => {
             const key = row.dataset.voucherKey || "";
@@ -10428,6 +10498,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (window.opener && window.opener.__fnosDownloadTradeAnalysisXlsx) window.opener.__fnosDownloadTradeAnalysisXlsx(lastExportRows.length ? lastExportRows : lastRows);
         else window.alert("엑셀 다운로드를 실행할 수 없습니다. 거래 분석 창을 다시 열어주세요.");
       });
+      document.getElementById("downloadPdf").addEventListener("click", openStatementPdf);
+      document.getElementById("emailPdf").addEventListener("click", emailStatementPdf);
       document.addEventListener("click", (event) => {
         const target = event.target.closest("[data-view-action]");
         if (target && target.dataset) {
