@@ -223,7 +223,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
   if (!rows.length) return <p className="rounded-xl bg-gray-50 px-3 py-6 text-center text-sm font-medium text-gray-400">수입 발주 데이터가 없습니다.</p>;
   return (
     <div className="fn-table-shell">
-      <div className="grid h-9 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 bg-gray-50 px-3 text-[13px] font-semibold text-gray-600">
+      <div className="grid h-10 grid-cols-[102px_minmax(0,1.35fr)_minmax(0,0.9fr)_78px_120px_80px] items-center gap-2.5 bg-gray-50 px-3 text-sm font-semibold text-gray-600">
         <span>주문날짜</span>
         <span>대표 제품</span>
         <span>공장</span>
@@ -235,11 +235,11 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <a
           key={`${row.id || index}`}
           href={importOrderHref(row)}
-          className="grid min-h-10 grid-cols-[96px_minmax(0,1.35fr)_minmax(0,0.9fr)_76px_116px_76px] items-center gap-2.5 border-t border-gray-100 px-3 py-1.5 text-[13px] transition hover:bg-orange-50/70"
+          className="grid min-h-11 grid-cols-[102px_minmax(0,1.35fr)_minmax(0,0.9fr)_78px_120px_80px] items-center gap-2.5 border-t border-gray-100 px-3 py-1.5 text-sm transition hover:bg-orange-50/70"
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
-          <span className="grid min-w-0 grid-cols-[36px_1fr] items-center gap-2.5">
-            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-9 w-9 rounded-md object-cover" /> : <span className="h-9 w-9 rounded-md bg-slate-100" />}
+          <span className="grid min-w-0 grid-cols-[40px_1fr] items-center gap-2.5">
+            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="h-10 w-10 rounded-md bg-slate-100" />}
             <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
           </span>
           <span className="truncate font-bold text-slate-600">{String(row.factory_name || "-")}</span>
@@ -260,12 +260,12 @@ function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
   return (
     <div className="divide-y divide-gray-100">
       {groups.map((group) => (
-        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-sm transition hover:bg-orange-50/70 hover:text-orange-600">
+        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-[15px] transition hover:bg-orange-50/70 hover:text-orange-600">
           <span className="flex items-baseline gap-2">
             <span className="min-w-8 font-black text-slate-950">{monthTitle(group)}</span>
-            <span className="text-[13px] font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
+            <span className="text-sm font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
           </span>
-          <span className="text-right text-[17px] font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
+          <span className="text-right text-[19px] font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
         </a>
       ))}
     </div>
