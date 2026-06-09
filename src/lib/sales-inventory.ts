@@ -491,8 +491,8 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
-  const returnRows = saved.filter((row) => text(row.io_type) !== "exchange_out");
-  const exchangeRows = saved.filter((row) => text(row.io_type) === "exchange_out");
+  const returnRows = saved.filter((row) => returnExchangeKindFromRow(row) !== "exchange_out");
+  const exchangeRows = saved.filter((row) => returnExchangeKindFromRow(row) === "exchange_out");
   const movementCount =
     await writeInventoryMovements(returnRows, "return_in").catch(() => 0) +
     await writeInventoryMovements(exchangeRows, "exchange_out").catch(() => 0);
@@ -543,8 +543,14 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   };
 }
 
+function returnExchangeKindFromRow(row: RawRow) {
+  const value = text(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || row.source_ref_id).toLowerCase();
+  return value.includes("exchange") || value.includes("교환") ? "exchange_out" : "return_in";
+}
+
 function isReturnExchangeRow(row: RawRow) {
-  return /RETURN_EXCHANGE|RETURN|EXCHANGE/i.test(text(row.source_file_name)) || ["return_in", "exchange_out"].includes(text(row.io_type));
+  const value = text(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || row.source_ref_id);
+  return /RETURN_EXCHANGE|RETURN|EXCHANGE|return_in|exchange_out|manual-return|manual-exchange|반품|교환/i.test(value);
 }
 
 export async function dashboardSummary() {

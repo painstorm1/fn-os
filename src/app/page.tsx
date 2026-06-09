@@ -12871,7 +12871,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {entryModalMode && (
         <SalesPurchaseEntryModal
           mode={entryModalMode}
-          recentRows={entryModalMode === "returns" ? summary?.recent_returns || [] : entryModalMode === "sales" ? summary?.recent_sales_lines || summary?.recent_sales || [] : summary?.recent_purchase_lines || summary?.recent_purchases || []}
+          recentRows={entryModalMode === "returns" ? [...(summary?.recent_sales_lines || []), ...(summary?.recent_sales || []), ...(summary?.recent_returns || [])] : entryModalMode === "sales" ? summary?.recent_sales_lines || summary?.recent_sales || [] : summary?.recent_purchase_lines || summary?.recent_purchases || []}
           initialDraft={entryPrefill || undefined}
           onClose={() => {
             setEntryPrefill(null);
