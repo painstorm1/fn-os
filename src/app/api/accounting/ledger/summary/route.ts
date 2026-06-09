@@ -6,7 +6,8 @@ export async function GET(request: NextRequest) {
   try {
     const from = request.nextUrl.searchParams.get("from") || "";
     const to = request.nextUrl.searchParams.get("to") || "";
-    return NextResponse.json({ ok: true, ...(await accountingLedgerSummary({ from, to })) });
+    const scope = request.nextUrl.searchParams.get("scope") || "";
+    return NextResponse.json({ ok: true, ...(await accountingLedgerSummary({ from, to, scope })) });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json(
@@ -15,4 +16,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

@@ -1026,16 +1026,40 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
   };
 }
 
-export async function accountingLedgerSummary(range?: { from?: string; to?: string }) {
+export async function accountingLedgerSummary(range?: { from?: string; to?: string; scope?: string }) {
   const from = text(range?.from);
   const to = text(range?.to);
+  const scope = text(range?.scope);
+  const dashboardOnly = scope === "dashboard";
   const queryFrom = from && to ? addDays(from, -3) : from;
   const dateFilter = queryFrom ? `gte.${queryFrom}` : undefined;
-  const rows = await optionalRows("accounting_transactions", {
-    ...(dateFilter ? { transaction_date: dateFilter } : {}),
-    order: "transaction_date.desc",
-    limit: 2000,
-  });
+  const [
+    rows,
+    categories,
+    rules,
+    batches,
+    reviewQueue,
+    settlements,
+    fixedCosts,
+    loans,
+    bankAccounts,
+    cardAccounts,
+  ] = await Promise.all([
+    optionalRows("accounting_transactions", {
+      ...(dateFilter ? { transaction_date: dateFilter } : {}),
+      order: "transaction_date.desc",
+      limit: 2000,
+    }),
+    dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 }),
+    dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_category_rules", { order: "priority.asc", limit: 500 }),
+    optionalRows("accounting_import_batches", { order: "created_at.desc", limit: dashboardOnly ? 5 : 20 }),
+    optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 }),
+    optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 }),
+    optionalRows("accounting_fixed_costs", { order: "sort_order.asc", limit: 300 }),
+    optionalRows("accounting_loans", { order: "payment_day.asc", limit: 300 }),
+    dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_bank_accounts", { order: "sort_order.asc", limit: 100 }),
+    dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 }),
+  ]);
   const filtered = rows.filter((row) => {
     const date = isoDate(row.transaction_date);
     if (from && date < from) return false;
@@ -1049,17 +1073,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       category_large: numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금",
     };
   });
-  const categories = await optionalRows("accounting_categories", { is_active: "eq.true", order: "sort_order.asc", limit: 500 });
-  const rules = await optionalRows("accounting_category_rules", { order: "priority.asc", limit: 500 });
-  const batches = await optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 20 });
-  const reviewQueue = await optionalRows("accounting_review_queue", { status: "eq.pending", order: "created_at.desc", limit: 100 });
-  const settlements = await optionalRows("accounting_card_settlements", { order: "payment_due_date.asc", limit: 30 });
-  const fixedCosts = await optionalRows("accounting_fixed_costs", { order: "sort_order.asc", limit: 300 });
   const activeFixedCosts = fixedCosts.filter((row) => row.is_active !== false);
-  const loans = await optionalRows("accounting_loans", { order: "payment_day.asc", limit: 300 });
   const activeLoans = loans.filter((row) => row.is_active !== false);
-  const bankAccounts = await optionalRows("accounting_bank_accounts", { order: "sort_order.asc", limit: 100 });
-  const cardAccounts = await optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 });
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
   const occurrenceAnchors = from && to ? monthAnchorsForRange(from, to) : [today];
@@ -1126,13 +1141,41 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const incomeRows = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false);
   const expenseRows = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false);
   const categoryLarge = group((row) => text(row.category_large));
-  const reviewSuggestions = Object.fromEntries(
+  const confirmedRows = dashboardOnly ? [] : filtered.filter((item) => text(item.review_status) === "confirmed");
+  const reviewSuggestions = dashboardOnly ? {} : Object.fromEntries(
     filtered
       .filter((row) => text(row.review_status) === "pending")
-      .map((row) => [text(row.id), suggestReview(row, rules, filtered.filter((item) => text(item.review_status) === "confirmed"))])
+      .map((row) => [text(row.id), suggestReview(row, rules, confirmedRows)])
       .filter(([id, suggestion]) => id && suggestion),
   );
+  if (dashboardOnly) {
+    return {
+      scope: "dashboard",
+      batches,
+      card_settlements: settlements,
+      upcoming_fixed_costs: upcomingFixedCosts,
+      totals: {
+        income_amount: income,
+        expense_amount: expense,
+        net_profit: income - expense,
+        cashflow_amount: cashIn - cashOut,
+        card_settlement_due: pendingCard,
+        fixed_cost_due_amount: fixedCostDueAmount,
+        review_count: reviewQueue.length,
+        transaction_count: filtered.length,
+      },
+      by_category_large: categoryLarge,
+      by_category: categoryLarge,
+      by_vendor: group((row) => text(row.merchant_name)),
+      by_income_vendor: group((row) => text(row.merchant_name || row.source_name), incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
+      by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
+      by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
+      by_card: group((row) => text(row.card_name || row.source_name)),
+      by_month: byMonth,
+    };
+  }
   return {
+    scope: "full",
     transactions: filtered.slice(0, 300),
     expenses: filtered.slice(0, 300),
     categories,
