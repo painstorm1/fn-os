@@ -10898,31 +10898,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       refreshEmptyBaseRows();
       window.__fnosTradeAnalysisReady = true;
     </script></body></html>`;
-    const popupKey = `trade-analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    let storedPopupHtml = false;
-    try {
-      sessionStorage.setItem(`fnos:${popupKey}`, html);
-      storedPopupHtml = true;
-    } catch {
-      // Some browser modes restrict sessionStorage; localStorage below is the F5 fallback.
-    }
-    try {
-      localStorage.setItem("fnos:lastTradeAnalysisHtml", html);
-      localStorage.setItem("fnos:lastTradeAnalysisKey", popupKey);
-      storedPopupHtml = true;
-    } catch {
-      // Keep the explicit alert below instead of opening an empty popup.
-    }
-    if (!storedPopupHtml) {
-      window.alert("\uac70\ub798 \ubd84\uc11d \ub370\uc774\ud130\ub97c \ube0c\ub77c\uc6b0\uc800\uc5d0 \uc800\uc7a5\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \uc800\uc7a5\uc18c \uad8c\ud55c\uc744 \ud655\uc778\ud55c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.");
-      return;
-    }
-    const popupUrl = `/trade-analysis-popup?key=${encodeURIComponent(popupKey)}`;
-    const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
+    const popup = window.open("", "fnosTradeAnalysis", "width=1500,height=900");
     if (!popup) {
       window.alert("\uac70\ub798 \ubd84\uc11d \ud31d\uc5c5\uc744 \uc5f4 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ube0c\ub77c\uc6b0\uc800 \ud31d\uc5c5 \ucc28\ub2e8\uc744 \ud655\uc778\ud574 \uc8fc\uc138\uc694.");
       return;
     }
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
     popup.focus();
   }
 
