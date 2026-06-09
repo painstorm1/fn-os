@@ -21,6 +21,18 @@ function customerName(row: AnyRecord) {
   return text(row.customer_name || row.cust_name);
 }
 
+function formatBusinessNo(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 10 ? `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}` : value;
+}
+
+function businessNo(row: AnyRecord) {
+  const explicit = text(row.business_no || row.business_number || row.biz_no || row.registration_no || row.company_registration_no);
+  if (explicit) return formatBusinessNo(explicit);
+  const codeDigits = customerCode(row).replace(/\D/g, "");
+  return codeDigits.length === 10 ? formatBusinessNo(codeDigits) : "";
+}
+
 function normalizeCustomerType(value: unknown) {
   const normalized = text(value).toLowerCase();
   if (["shopping", "mall", "shop", "쇼핑몰"].includes(normalized)) return "shopping";
@@ -53,7 +65,7 @@ export async function GET(request: NextRequest) {
         customer_name: customerName(row),
         customer_type: normalizeCustomerType(row.customer_type || row.cust_type),
         customer_type_label: customerTypeLabel(row.customer_type || row.cust_type),
-        business_no: text(row.business_no),
+        business_no: businessNo(row),
         ceo_name: text(row.ceo_name),
         contact_name: text(row.contact_name),
         phone: text(row.phone),
@@ -97,7 +109,7 @@ export async function POST(request: NextRequest) {
       customer_name: name,
       cust_name: name,
       customer_type: normalizeCustomerType(customer.customer_type || customer.cust_type),
-      business_no: text(customer.business_no),
+      business_no: text(customer.business_no || customer.business_number || customer.biz_no || customer.registration_no || customer.company_registration_no),
       ceo_name: text(customer.ceo_name),
       contact_name: text(customer.contact_name),
       phone: text(customer.phone),
