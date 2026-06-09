@@ -10990,7 +10990,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       memo: entryRowMemo(line) === "-" ? "" : entryRowMemo(line),
     }));
     setEntryPrefill({
-      title: historyMode === "sales" ? "판매 수정" : "구매 수정",
+      title: historyMode === "returns" ? "반품/교환 수정" : historyMode === "sales" ? "판매 수정" : "구매 수정",
       entryDate: entryRowDate(row) || entryDateToday(),
       customerCode: String(row.cust_code || row.customer_code || row.supplier_code || ""),
       customerText: entryRowCustomer(row, entryMode),
@@ -11844,14 +11844,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               onClick={() => openEntryModal(historyMode)}
               className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
             >
-              {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
+              {historyMode === "returns" ? "F2 반품/교환입력" : historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
             </button>
             <button
               type="button"
-              onClick={() => { if (historyMode !== "returns") setPartnerBalanceMode(historyMode); }}
+              onClick={() => { if (historyMode === "sales" || historyMode === "purchases") setPartnerBalanceMode(historyMode); }}
               className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600 hover:bg-orange-100"
             >
-              {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
+              {historyMode === "returns" ? "거래처 정산" : historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
             </button>
           </div>
           <div className="hidden">
@@ -11901,23 +11901,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     {label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setHistoryMode("returns")}
+                  className={`h-9 rounded-md px-5 text-sm font-black transition ${historyMode === "returns" ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
+                >
+                  반품/교환
+                </button>
               </div>
             )}
             topRight={(
               <>
-                <button
-                  type="button"
-                  onClick={() => { if (historyMode !== "returns") setPartnerBalanceMode(historyMode); }}
-                  className="h-9 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 hover:bg-orange-100"
-                >
-                  {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
-                </button>
+                {historyMode !== "returns" && (
+                  <button
+                    type="button"
+                    onClick={() => { if (historyMode === "sales" || historyMode === "purchases") setPartnerBalanceMode(historyMode); }}
+                    className="h-9 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 hover:bg-orange-100"
+                  >
+                    {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => openEntryModal(historyMode)}
                   className="h-9 rounded-md bg-orange-500 px-4 text-sm font-black text-white hover:bg-orange-600"
                 >
-                  {historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
+                  {historyMode === "returns" ? "F2 반품/교환입력" : historyMode === "sales" ? "F2 판매입력" : "F2 구매입력"}
                 </button>
               </>
             )}
@@ -11948,7 +11957,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <SalesHistoryCustomerPicker
               query={historyCustomerPickerQuery}
               mode={activeHistoryEntryMode}
-            historyMode={historyMode}
               onClose={() => setHistoryCustomerPickerQuery(null)}
               onApply={applyHistoryCustomerSelection}
             />
@@ -12584,7 +12592,7 @@ function SalesPurchaseEntryModal({
   onClose: () => void;
   onSaved: (savedRows: Array<Record<string, unknown>>) => void;
 }) {
-  const partnerLabel = mode === "sales" ? "거래처" : "구매처";
+  const partnerLabel = mode === "purchases" ? "구매처" : "거래처";
   const isReturnExchangeMode = mode === "returns";
   const defaultLine = (): SalesPurchaseEntryLine => ({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, prod_cd: "", prod_name: "", qty: "1", price: "", memo: "" });
   const prefillLines = initialDraft?.lines?.length
@@ -12920,7 +12928,7 @@ function SalesPurchaseEntryModal({
   }
 
   function entrySheetName() {
-    return mode === "sales" ? "FN판매입력" : "FN구매입력";
+    return mode === "purchases" ? "FN구매입력" : "FN판매입력";
   }
 
   function entrySheetHeaders() {
@@ -12958,7 +12966,7 @@ function SalesPurchaseEntryModal({
     const sample: Record<string, string> = {
       "일자": entryDateToday(),
       "거래처코드": "",
-      "거래처명": mode === "sales" ? "예시거래처" : "예시구매처",
+      "거래처명": mode === "purchases" ? "예시구매처" : "예시거래처",
       [warehouseHeader]: "100",
       "VAT 포함/별도": "포함",
       "품목코드": "ITEM001",
@@ -13184,7 +13192,7 @@ function SalesPurchaseEntryModal({
 
   return (
     <FormModal
-      title={initialDraft?.title || (mode === "sales" ? "판매입력" : "구매입력")}
+      title={initialDraft?.title || (mode === "returns" ? "반품/교환 입력" : mode === "sales" ? "판매입력" : "구매입력")}
       onClose={onClose}
       size="full"
       footer={
@@ -13210,6 +13218,29 @@ function SalesPurchaseEntryModal({
           }} />
         </div>
         <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 md:grid-cols-2">
+          {isReturnExchangeMode && (
+            <FormField label="반품/교환" required>
+              <select
+                ref={returnKindRef}
+                className={modalInputClass}
+                value={returnKind}
+                onChange={(event) => setReturnKind(event.target.value as ReturnExchangeKind)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setReturnKind((prev) => (prev === "return_in" ? "exchange_out" : "return_in"));
+                    return;
+                  }
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  dateInputRef.current?.focus();
+                }}
+              >
+                <option value="return_in">반품입고</option>
+                <option value="exchange_out">교환출고</option>
+              </select>
+            </FormField>
+          )}
           <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); datePickerOpenRef.current = false; window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onBlur={() => { datePickerOpenRef.current = false; }} onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
@@ -17187,7 +17218,7 @@ function SalesInventoryTable({
   rows,
   lineRows = [],
   mode,
-  historyMode: _historyMode,
+  historyMode = mode,
   onChanged,
   onEditEntry,
   topLeft,
@@ -17205,6 +17236,14 @@ function SalesInventoryTable({
   filterBar?: ReactNode;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [memoDrafts, setMemoDrafts] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      return JSON.parse(window.localStorage.getItem("fnos-sales-history-memos-v1") || "{}");
+    } catch {
+      return {};
+    }
+  });
   const rowKeys = rows.map((row, index) => entryRowKey(row, mode, index));
   const selection = useCheckboxColumnSelection({ keys: rowKeys, selectedKeys, setSelectedKeys });
   const entryNumbers = new Map<string, string>();
@@ -17219,6 +17258,26 @@ function SalesInventoryTable({
   function selectedRows() {
     const set = new Set(selectedKeys);
     return rows.filter((row, index) => set.has(entryRowKey(row, mode, index)));
+  }
+
+  function memoValue(row: Record<string, unknown>, index: number) {
+    const key = entryRowKey(row, mode, index);
+    if (Object.prototype.hasOwnProperty.call(memoDrafts, key)) return memoDrafts[key] || "";
+    const savedMemo = entryRowMemo(row);
+    return savedMemo === "-" ? "" : savedMemo;
+  }
+
+  function updateMemoDraft(row: Record<string, unknown>, index: number, value: string) {
+    const key = entryRowKey(row, mode, index);
+    setMemoDrafts((prev) => {
+      const next = { ...prev, [key]: value };
+      try {
+        window.localStorage.setItem("fnos-sales-history-memos-v1", JSON.stringify(next));
+      } catch {
+        // Keep the in-memory draft even if browser storage is full or unavailable.
+      }
+      return next;
+    });
   }
 
   async function deleteSelected() {
@@ -17425,7 +17484,8 @@ function SalesInventoryTable({
     window.location.href = `mailto:${encodeURIComponent(fallback)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
-  const partnerLabel = mode === "sales" ? "거래처" : "구매처";
+  const partnerLabel = mode === "purchases" ? "구매처" : "거래처";
+  const isReturnHistory = historyMode === "returns";
   return (
     <>
       <div className="mb-2 flex items-center gap-3 whitespace-nowrap pb-1">
@@ -17447,6 +17507,7 @@ function SalesInventoryTable({
             <tr>
               <th className="w-14 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selection.allSelected} onChange={(event) => selection.toggleAll(event.target.checked)} /></th>
               <th className="w-32 py-2 text-left">일자-NO.</th>
+              {isReturnHistory && <th className="w-24 py-2 text-left">반품/교환</th>}
               <th className="w-44 py-2 text-left">{partnerLabel}명</th>
               <th className="w-24 py-2 text-left">창고</th>
               <th className="w-32 py-2 text-left">대표품목코드</th>
@@ -17461,24 +17522,33 @@ function SalesInventoryTable({
             {rows.map((row, index) => {
               const key = entryRowKey(row, mode, index);
               const selected = selectedKeys.includes(key);
+              const tone = returnExchangeKind(row) === "return_in" ? "text-red-600" : "text-blue-600";
               return (
                 <tr key={key} onClick={() => onEditEntry(row)} className={`cursor-pointer border-b border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50/50"}`}>
                   <td className="py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => selection.beginSelection(key, index, event)} onMouseEnter={() => selection.continueSelection(key, index)} /></td>
                   <td className="truncate py-2 font-bold text-blue-700">{entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), index + 1)}</td>
+                  {isReturnHistory && <td className={`truncate py-2 font-black ${tone}`}>{returnExchangeLabel(row)}</td>}
                   <td className="truncate py-2">{entryRowCustomer(row, mode)}</td>
                   <td className="truncate py-2">{entryRowWarehouse(row)}</td>
                   <td className="truncate py-2">{entryRowProductCode(row) || "-"}</td>
                   <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
                   <td className="py-2 text-right">{Number(row.line_count || 1).toLocaleString("ko-KR")}</td>
-                  <td className="py-2 text-right">{entryRowQty(row).toLocaleString("ko-KR")}</td>
-                  <td className="py-2 text-right font-black">{krw(entryRowAmount(row))}</td>
-                  <td className="truncate py-2 text-center">{entryRowMemo(row)}</td>
+                  <td className={`py-2 text-right ${isReturnHistory ? tone : ""}`}>{entryRowQty(row).toLocaleString("ko-KR")}</td>
+                  <td className={`py-2 text-right font-black ${isReturnHistory ? tone : ""}`}>{krw(entryRowAmount(row))}</td>
+                  <td className="py-1 text-center">
+                    <input
+                      className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs"
+                      value={memoValue(row, index)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => updateMemoDraft(row, index, event.target.value)}
+                    />
+                  </td>
                 </tr>
               );
             })}
             {!rows.length && (
               <tr>
-                <td colSpan={10} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td>
+                <td colSpan={isReturnHistory ? 11 : 10} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td>
               </tr>
             )}
           </tbody>

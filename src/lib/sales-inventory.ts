@@ -396,14 +396,14 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
   await insertRows("inventory_current", values);
 }
 
-async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in") {
-  const expandedRows = movementType === "sale_out"
+async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in" | "return_in" | "exchange_out") {
+  const expandedRows = movementType === "sale_out" || movementType === "exchange_out"
     ? (await Promise.all(rows.map(expandSaleInventoryRows))).flat()
     : rows.map((row) => ({ row, movementType }));
   const movementPairs = expandedRows
     .filter((item) => numberValue(item.row.qty) !== 0 && (text(item.row.prod_cd) || text(item.row.sku)))
     .map((item) => {
-      const qty = item.movementType === "purchase_in" ? Math.abs(numberValue(item.row.qty)) : -Math.abs(numberValue(item.row.qty));
+      const qty = item.movementType === "purchase_in" || item.movementType === "return_in" ? Math.abs(numberValue(item.row.qty)) : -Math.abs(numberValue(item.row.qty));
       return {
         sourceRow: item.row,
         movement: {
@@ -472,6 +472,48 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
   };
 }
 
+export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
+  if (!hasDbConfig()) return noDbResult(rows);
+
+  const batch = await createUploadBatch("return_exchange", sourceFileName, rows.length);
+  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index)).filter(Boolean);
+  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "sales", index));
+  const normalized = validRows.map((row, index) => {
+    const kind = text(row.return_exchange_type || row.io_type).includes("exchange") || text(row.io_type).includes("교환") ? "exchange_out" : "return_in";
+    return {
+      ...normalizeSale(row, index, batch.id, sourceFileName || "FN_OS_RETURN_EXCHANGE_ENTRY"),
+      io_type: kind,
+      source_file_name: sourceFileName || "FN_OS_RETURN_EXCHANGE_ENTRY",
+      sale_status: kind,
+      remarks: text(row.remarks || row.memo),
+    };
+  });
+  const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
+  const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
+  const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
+  const returnRows = saved.filter((row) => text(row.io_type) !== "exchange_out");
+  const exchangeRows = saved.filter((row) => text(row.io_type) === "exchange_out");
+  const movementCount =
+    await writeInventoryMovements(returnRows, "return_in").catch(() => 0) +
+    await writeInventoryMovements(exchangeRows, "exchange_out").catch(() => 0);
+  await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
+
+  return {
+    ok: true,
+    message: removedColumns.length
+      ? `FN OS return/exchange DB saved ${saved.length} rows. Skipped unavailable columns: ${removedColumns.join(", ")}.`
+      : `FN OS return/exchange DB saved ${saved.length} rows.`,
+    db_saved_count: saved.length,
+    success_count: saved.length,
+    fail_count: rows.length - saved.length,
+    duplicate_count: validRows.length - freshRows.length,
+    inventory_movement_count: movementCount,
+    errors: invalidErrors,
+    batch_id: batch.id,
+    external_sync_enabled: false,
+  };
+}
+
 export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
@@ -501,8 +543,12 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   };
 }
 
+function isReturnExchangeRow(row: RawRow) {
+  return /RETURN_EXCHANGE|RETURN|EXCHANGE/i.test(text(row.source_file_name)) || ["return_in", "exchange_out"].includes(text(row.io_type));
+}
+
 export async function dashboardSummary() {
-  const [sales, purchases, inventory, orders, orderItems, shipments, channels, ads, expenses, legacyExpenses, importOrders, archives, logs] = await Promise.all([
+  const [allSales, purchases, inventory, orders, orderItems, shipments, channels, ads, expenses, legacyExpenses, importOrders, archives, logs] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 500 }),
     optionalRows("purchases", { order: "created_at.desc", limit: 300 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 300 }),
@@ -517,6 +563,8 @@ export async function dashboardSummary() {
     optionalRows("archive_items", { order: "created_at.desc", limit: 50 }),
     optionalRows("api_sync_logs", { order: "created_at.desc", limit: 20 }),
   ]);
+  const returnExchangeRows = allSales.filter(isReturnExchangeRow);
+  const sales = allSales.filter((row) => !isReturnExchangeRow(row));
 
   const today = todayCompact();
   const month = today.slice(0, 6);
@@ -566,6 +614,7 @@ export async function dashboardSummary() {
     purchase_due_count: purchaseDue.length,
     unpaid_customer_count: unpaidCustomers.size,
     recent_sales: sales.slice(0, 30),
+    recent_returns: returnExchangeRows.slice(0, 100),
     recent_purchases: purchases.slice(0, 30),
     recent_orders: orders.slice(0, 30),
     recent_order_items: orderItems.slice(0, 30),

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError } from "@/lib/fnos-db";
-import { dashboardSummary, deleteEntryGroups, importSalesRows, updateEntryGroup } from "@/lib/sales-inventory";
+import { dashboardSummary, deleteEntryGroups, importReturnExchangeRows, importSalesRows, updateEntryGroup } from "@/lib/sales-inventory";
 
 export async function GET() {
   try {
@@ -19,7 +19,10 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ ok: false, error: "rows 배열이 필요합니다." }, { status: 400 });
     }
-    const result = await importSalesRows(rows, body.source_file_name || body.sourceFileName);
+    const sourceFileName = body.source_file_name || body.sourceFileName;
+    const result = /RETURN_EXCHANGE|RETURN|EXCHANGE/i.test(String(sourceFileName || ""))
+      ? await importReturnExchangeRows(rows, sourceFileName)
+      : await importSalesRows(rows, sourceFileName);
     return NextResponse.json(result);
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
