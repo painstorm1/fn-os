@@ -10874,6 +10874,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       render();
       resetViewHistory();
       refreshEmptyBaseRows();
+      window.__fnosTradeAnalysisReady = true;
     </script></body></html>`;
     const popupUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
@@ -10882,6 +10883,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("거래 분석 팝업을 열 수 없습니다. 브라우저 팝업 차단을 확인해 주세요.");
       return;
     }
+    window.setTimeout(() => {
+      try {
+        const target = popup as Window & { __fnosTradeAnalysisReady?: boolean };
+        if (target.closed || target.__fnosTradeAnalysisReady) return;
+        target.document.open();
+        target.document.write(html);
+        target.document.close();
+      } catch {
+        // Some browsers make blob popups temporarily inaccessible; the blob path remains the primary path.
+      }
+    }, 600);
     popup.focus();
   }
 
