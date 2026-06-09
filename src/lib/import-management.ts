@@ -52,6 +52,19 @@ function dateKey(value: unknown) {
   return raw.slice(0, 10);
 }
 
+function parseSkuAllocation(value: unknown): Record<string, string> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" && !Array.isArray(value) ? value as Record<string, string> : {};
+}
+
 function sqlList(values: string[]) {
   return `in.(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(",")})`;
 }
@@ -66,6 +79,18 @@ function productName(row: AnyRecord) {
 
 function productOption(row: AnyRecord) {
   return text(row.option_name || row.size_des || row.SIZE_DES);
+}
+
+function linkOptionName(link?: AnyRecord | null) {
+  return text(link?.option_name || link?.import_option_name || link?.import_option_key);
+}
+
+function sameImportOption(link: AnyRecord, optionName: string) {
+  return linkOptionName(link) === text(optionName);
+}
+
+function skuAllocationKey(link: AnyRecord) {
+  return text(link.product_id || productSku((link.product as AnyRecord) || {}) || link.sku);
 }
 
 function productImage(row: AnyRecord) {
@@ -456,7 +481,59 @@ async function decrementCurrentInventoryForPurchase(row: AnyRecord) {
   return true;
 }
 
-export async function deleteImportReceiptForOrder(orderId: string | number) {
+async function expectedPurchaseProductCodesForOrder(orderKey: string) {
+  const items = await selectRows<AnyRecord>("import_erp_order_items", {
+    order_id: `eq.${orderKey}`,
+    order: "sort_order.asc",
+    limit: 1000,
+  }).catch(() => []);
+  const codes = new Set<string>();
+  for (const item of items) {
+    const productId = text(item.product_id);
+    if (!productId) continue;
+    const allLinks = await listImportProductLinks(productId).catch(() => []);
+    const optionValue = text(item.option_value);
+    const optionLinks = optionValue ? allLinks.filter((link) => sameImportOption(link, optionValue)) : [];
+    const links = optionLinks.length ? optionLinks : allLinks.filter((link) => !linkOptionName(link));
+    const skuAllocations = parseSkuAllocation(item.sku_allocation_json || item.sku_allocations || item.linked_sku_qty);
+    for (const link of links) {
+      const savedQty = text(skuAllocations[skuAllocationKey(link)]);
+      const defaultQty = numberValue(link.default_qty);
+      const lineQty = numberValue(savedQty || defaultQty || item.quantity || 0);
+      if (lineQty <= 0) continue;
+      const product = (link.product as AnyRecord) || {};
+      const code = productSku(product) || text(link.sku);
+      if (code && code !== "-") codes.add(code);
+    }
+  }
+  return Array.from(codes);
+}
+
+async function fallbackImportEntryPurchases(orderKey: string, arrivalDate?: string) {
+  const purchaseDate = dateKey(arrivalDate);
+  if (!arrivalDate || !purchaseDate) return [];
+  const productCodes = await expectedPurchaseProductCodesForOrder(orderKey);
+  if (!productCodes.length) return [];
+  const baseFilters = {
+    cust_name: "eq.FN해외 상품 구매(소싱)",
+    prod_cd: sqlList(productCodes),
+    limit: 1000,
+  };
+  const rows = [
+    ...await selectRows<AnyRecord>("purchases", { ...baseFilters, io_date: `eq.${purchaseDate}` }).catch(() => []),
+    ...await selectRows<AnyRecord>("purchases", { ...baseFilters, purchase_date: `eq.${purchaseDate}` }).catch(() => []),
+  ];
+  const safeSourcePattern = /^import-order-|^manual-purchase-/;
+  return rows.filter((row) => {
+    const sourceRef = text(row.source_ref_id);
+    const sourceFile = text(row.source_file_name);
+    return safeSourcePattern.test(sourceRef)
+      || sourceFile === "FN_OS_IMPORT_PURCHASE_ENTRY"
+      || sourceFile === "FN_OS_PURCHASE_ENTRY";
+  });
+}
+
+export async function deleteImportReceiptForOrder(orderId: string | number, options: { arrivalDate?: string } = {}) {
   if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
   const orderKey = text(orderId);
   if (!orderKey) throw new Error("orderId is required.");
@@ -478,8 +555,9 @@ export async function deleteImportReceiptForOrder(orderId: string | number) {
     source_ref_id: `like.import-order-${orderKey}-%`,
     limit: 1000,
   }).catch(() => []);
+  const fallbackPurchases = await fallbackImportEntryPurchases(orderKey, options.arrivalDate).catch(() => []);
   const purchaseMap = new Map<string, AnyRecord>();
-  for (const row of [...purchasesByAllocation, ...directPurchases, ...entryPurchases]) {
+  for (const row of [...purchasesByAllocation, ...directPurchases, ...entryPurchases, ...fallbackPurchases]) {
     if (!row) continue;
     const purchase = row as AnyRecord;
     const key = text(purchase.id || purchase.source_ref_id);
@@ -496,16 +574,22 @@ export async function deleteImportReceiptForOrder(orderId: string | number) {
   let purchasesDeleted = 0;
   for (const purchase of purchases) {
     const purchaseId = text(purchase.id);
+    const purchaseSourceRefId = text(purchase.source_ref_id);
     if (purchaseId) {
       movementsDeleted += (await deleteRows<AnyRecord>("inventory_movements", {
         source_type: "eq.purchases",
         source_ref_id: `eq.${purchaseId}`,
       }).catch(() => [])).length;
+      if (purchaseSourceRefId) {
+        movementsDeleted += (await deleteRows<AnyRecord>("inventory_movements", {
+          source_type: "eq.purchases",
+          source_ref_id: `eq.${purchaseSourceRefId}`,
+        }).catch(() => [])).length;
+      }
       purchasesDeleted += (await deleteRows<AnyRecord>("purchases", { id: `eq.${purchaseId}` }).catch(() => [])).length;
     } else {
-      const sourceRefId = text(purchase.source_ref_id);
-      if (sourceRefId) {
-        purchasesDeleted += (await deleteRows<AnyRecord>("purchases", { source_ref_id: `eq.${sourceRefId}` }).catch(() => [])).length;
+      if (purchaseSourceRefId) {
+        purchasesDeleted += (await deleteRows<AnyRecord>("purchases", { source_ref_id: `eq.${purchaseSourceRefId}` }).catch(() => [])).length;
       }
     }
   }

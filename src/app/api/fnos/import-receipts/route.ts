@@ -17,7 +17,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const orderId = request.nextUrl.searchParams.get("orderId") || request.nextUrl.searchParams.get("import_order_id") || "";
-    const result = await deleteImportReceiptForOrder(orderId);
+    const arrivalDate = request.nextUrl.searchParams.get("arrivalDate") || undefined;
+    const result = await deleteImportReceiptForOrder(orderId, { arrivalDate });
     return NextResponse.json(result);
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

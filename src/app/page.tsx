@@ -1525,8 +1525,10 @@ function sameImportOption(link: ImportSkuLink, optionName: string) {
   return linkOptionName(link) === String(optionName || "").trim();
 }
 
-async function deleteImportPurchaseEntriesForOrder(orderId: number | string) {
-  const res = await fetch(`/api/fnos/import-receipts?orderId=${encodeURIComponent(String(orderId))}`, {
+async function deleteImportPurchaseEntriesForOrder(orderId: number | string, arrivalDate?: string | null) {
+  const params = new URLSearchParams({ orderId: String(orderId) });
+  if (arrivalDate) params.set("arrivalDate", arrivalDate);
+  const res = await fetch(`/api/fnos/import-receipts?${params.toString()}`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -3075,7 +3077,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
       }
       if (order.fn_arrived && !stageValues.fn_arrived) {
         const deletePurchase = window.confirm("FN입고가 취소되었습니다.\n해당 구매입력을 취소하시겠습니까?");
-        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(order.id);
+        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(order.id, order.fn_arrived);
       }
       onSaved(next);
     }
@@ -5222,7 +5224,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
       }
       if (order?.fn_arrived && !visibleStageValues.fn_arrived && savedId) {
         const deletePurchase = window.confirm("FN입고가 취소되었습니다.\n해당 구매입력을 취소하시겠습니까?");
-        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(savedId);
+        if (deletePurchase) await deleteImportPurchaseEntriesForOrder(savedId, order.fn_arrived);
       }
       window.location.href = importHref("/orders");
     } catch (err) {
