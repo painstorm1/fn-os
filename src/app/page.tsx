@@ -19597,10 +19597,12 @@ function AccountingCategoryRankChart({
   rows,
   mode,
   title,
+  periodLabel,
 }: {
   rows: Array<Record<string, unknown>>;
   mode: "income" | "expense";
   title: string;
+  periodLabel?: string;
 }) {
   const chartRows = accountingTopRowsWithOther(rows);
   const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
@@ -19610,7 +19612,7 @@ function AccountingCategoryRankChart({
     : ["#f97316", "#f43f5e", "#eab308", "#ef4444", "#a855f7", "#94a3b8"];
   return (
     <Card className="p-4">
-      <SectionHeader title={title} className="mb-2" />
+      <SectionHeader title={title} description={periodLabel} className="mb-2" />
       <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
             const amount = asNumber(row.amount);
@@ -19907,7 +19909,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     save_rule: true,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
-  const defaultLedgerFilters = { q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0) };
+  const defaultLedgerFilters = { q: "", source: "", categoryLarge: "", categoryMiddle: "", month: accountingMonthValue(0), rangeEnabled: false, fromMonth: "2026-01", toMonth: accountingMonthValue(0) };
   const [ledgerMode, setLedgerMode] = useState<"bank" | "card">(() => {
     const restored = readAccountingSessionState(ACCOUNTING_LEDGER_SESSION_KEY, { mode: "" }).mode;
     if (tab === "card" || tab === "bank") return tab;
@@ -20925,6 +20927,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const incomeVendorRows = summary?.by_income_vendor || [];
   const expenseCategoryRows = summary?.by_expense_category || categoryRows;
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
+  const dashboardPeriodLabel = monthRows.length
+    ? `기준 기간 ${String(monthRows[0]?.label || "").replace("-", ".")}~${String(monthRows[monthRows.length - 1]?.label || "").replace("-", ".")}`
+    : "기준 기간 없음";
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter((row) => String(row.review_status || "") === "pending");
   const largestCategory = categoryRows[0];
@@ -20962,7 +20967,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       }).filter((option) => option.value) },
       { key: "memo", label: "메모" },
     ];
-  const ledgerMonthRange = accountingMonthRange(ledgerFilters.month);
+  const ledgerMonthRange = ledgerFilters.rangeEnabled
+    ? {
+      from: accountingMonthRange(ledgerFilters.fromMonth || ledgerFilters.month).from,
+      to: accountingMonthRange(ledgerFilters.toMonth || ledgerFilters.month).to,
+    }
+    : accountingMonthRange(ledgerFilters.month);
   const currentLedgerRows = ledgerSourceRows
     .filter((row) => String(row.source_type || "") === ledgerMode)
     .filter((row) => {
@@ -21507,8 +21517,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         <>
           <section className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr_0.95fr]">
             <AccountingDualLineChart rows={monthRows} />
-            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" />
-            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" />
+            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" periodLabel={dashboardPeriodLabel} />
+            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" periodLabel={dashboardPeriodLabel} />
           </section>
 
           <section>
@@ -21628,6 +21638,36 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               />
               <button type="button" className="h-full px-2.5 text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="다음 달" onClick={() => setLedgerFilters((prev) => ({ ...prev, month: accountingShiftMonth(prev.month, 1) }))}>▶</button>
             </div>
+            <label className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-black text-slate-600">
+              <input
+                type="checkbox"
+                checked={Boolean(ledgerFilters.rangeEnabled)}
+                onChange={(event) => setLedgerFilters((prev) => ({
+                  ...prev,
+                  rangeEnabled: event.target.checked,
+                  fromMonth: prev.fromMonth || "2026-01",
+                  toMonth: prev.toMonth || prev.month || accountingMonthValue(0),
+                }))}
+              />
+              월 기간
+            </label>
+            {ledgerFilters.rangeEnabled && (
+              <div className="flex h-9 shrink-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+                <input
+                  className="h-full w-[118px] border-0 px-2 text-sm font-bold outline-orange-400"
+                  type="month"
+                  value={ledgerFilters.fromMonth}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromMonth: event.target.value || "2026-01" }))}
+                />
+                <span className="px-1 text-xs font-black text-slate-400">~</span>
+                <input
+                  className="h-full w-[118px] border-0 px-2 text-sm font-bold outline-orange-400"
+                  type="month"
+                  value={ledgerFilters.toMonth}
+                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toMonth: event.target.value || prev.month || accountingMonthValue(0) }))}
+                />
+              </div>
+            )}
             <button
               type="button"
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-emerald-600 hover:bg-orange-50"

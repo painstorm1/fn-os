@@ -97,6 +97,12 @@ function inferSourceType(fileName: string, fallback: string) {
   return fallback;
 }
 
+function usableSourceType(value: unknown) {
+  const sourceType = clean(value);
+  if (!sourceType || /^auto$/i.test(sourceType) || sourceType === "자동 분류") return "";
+  return sourceType;
+}
+
 function colName(index: number) {
   return XLSX.utils.encode_col(index);
 }
@@ -225,7 +231,7 @@ export async function parseExpenseFiles(files: File[], sourceType: string, fileS
   const filesSummary: Array<{ name: string; source_type: string; sheet_count: number; row_count: number }> = [];
 
   for (const [fileIndex, file] of files.entries()) {
-    const fileSourceType = clean(fileSourceTypes[fileIndex]) || inferSourceType(file.name, sourceType);
+    const fileSourceType = usableSourceType(fileSourceTypes[fileIndex]) || inferSourceType(file.name, usableSourceType(sourceType) || "auto");
     const buffer = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
     let fileRowCount = 0;

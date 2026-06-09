@@ -46,6 +46,21 @@ function matchText(value: unknown) {
   return text(value).toLowerCase().replace(/\s+/g, "").replace(/[()[\]{}<>.,'"`|\\/_-]/g, "");
 }
 
+function isAutoAccountingSource(value: unknown) {
+  const raw = text(value).toLowerCase();
+  return !raw || raw === "auto" || raw === "자동 분류";
+}
+
+function accountingSourceFromFileName(fileName: unknown) {
+  const compact = matchText(fileName);
+  if (!compact) return "";
+  if (/cardusage|카드이용내역|가온글로벌|가온글로벌카드|globalcard/.test(compact)) return "가온글로벌카드";
+  if (/승인내역조회|국민카드|국민기업카드|kbcard/.test(compact)) return "국민기업카드";
+  if (/47870101245017|국민은행|kbbank/.test(compact)) return "국민은행";
+  if (/거래내역조회.*입출식|기업은행|ibk/.test(compact)) return "기업은행";
+  return "";
+}
+
 function transactionMatchName(row: RawRow) {
   return matchText(row.merchant_name || row.description);
 }
@@ -169,7 +184,8 @@ function sourceTypeHint(raw: string) {
 }
 
 function sourceMeta(row: RawRow, accounts: AccountingSourceAccountContext = {}) {
-  const raw = text(row.source_name || row.source_type || row.sourceType);
+  const rowSource = row.source_name || row.source_type || row.sourceType;
+  const raw = isAutoAccountingSource(rowSource) ? accountingSourceFromFileName(row.source_file_name) || text(rowSource) : text(rowSource);
   const hint = sourceTypeHint(raw);
   const cardAccount = hint !== "bank" ? findAccountingSourceAccount(raw, accounts.cardAccounts || [], "card") : null;
   if (cardAccount) {
