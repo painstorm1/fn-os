@@ -10109,10 +10109,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </div>
       </div>
     </div><script>
-      const baseRows = ${safeJson};
+      let baseRows = ${safeJson};
       const products = ${productsJson};
       const warehouseOptions = ${warehouseOptionsJson};
-      const customerOptions = ${customerOptionsJson};
+      let customerOptions = ${customerOptionsJson};
       const companyInfo = ${companyInfoJson};
       const fmt = new Intl.NumberFormat("ko-KR");
       const krw = (n) => fmt.format(Math.round(Number(n)||0)) + "원";
@@ -10168,6 +10168,107 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const basis = document.getElementById("basis").value;
         if (basis === "entry") return baseRows.map((row) => ({...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}));
         return baseRows.flatMap((row) => row.bom && row.bom.length ? row.bom.map((item) => ({...row, actualProductCode: item.componentCode || row.productCode, actualProductName: item.componentName || item.componentCode || row.productName, actualQty: row.qty * item.qtyPerUnit, isBom: true})) : [{...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}]);
+      }
+      function rawText(value){ return String(value ?? "").trim(); }
+      function rawNumber(value){
+        const parsed = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      function rawEntryDate(row){
+        const raw = rawText(row.io_date || row.sale_date || row.purchase_date || row.created_at);
+        if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+        if (/^\d{8}$/.test(raw)) return raw.slice(0,4) + "-" + raw.slice(4,6) + "-" + raw.slice(6,8);
+        const parsed = new Date(raw);
+        return Number.isNaN(parsed.getTime()) ? "" : formatDate(parsed);
+      }
+      function rawEntryCustomer(row, type){
+        return rawText(row.cust_name || row.customer_name || row.supplier_name || row.cust_code || (type === "sales" ? "\uac70\ub798\ucc98" : "\uad6c\ub9e4\ucc98") || "-");
+      }
+      function rawEntryProductCode(row){ return rawText(row.representative_product_code || row.prod_cd || row.product_code || row.sku); }
+      function rawEntryProductName(row){ return rawText(row.representative_product_name || row.prod_name || row.product_name || row.representative_product_code || row.prod_cd || row.sku || "-"); }
+      function rawEntryWarehouse(row){ return rawText(row.wh_cd || row.warehouse_code || row.warehouse_name || "100"); }
+      function rawEntryAmount(row){ return rawNumber(row.total_amount ?? row.supply_amount ?? row.supply_amt); }
+      function rawEntryQty(row){ return rawNumber(row.qty ?? row.quantity ?? row.order_qty); }
+      function rawEntryMemo(row){ return rawText(row.remarks || row.memo || "-"); }
+      function rawEntryNo(row, type){
+        const sourceRef = rawText(row.source_ref_id);
+        const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+        if (manualMatch?.[1]) return manualMatch[1];
+        const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
+        if (sourceBase && sourceBase !== sourceRef) return sourceBase;
+        return type === "sales" ? "manual-sale" : "manual-purchase";
+      }
+      function firstRows(){
+        for (const source of arguments) {
+          if (Array.isArray(source) && source.length) return source;
+        }
+        return [];
+      }
+      function normalizeFetchedRow(row, type){
+        const productCode = rawEntryProductCode(row);
+        const productName = rawEntryProductName(row);
+        const qty = rawEntryQty(row);
+        const amount = rawEntryAmount(row);
+        const rawPrice = rawNumber(row.price ?? row.unit_price ?? row.in_price ?? row.out_price);
+        const unitPrice = rawPrice || (qty ? amount / qty : 0);
+        const date = rawEntryDate(row);
+        return {
+          type,
+          typeLabel: type === "sales" ? "\ud310\ub9e4" : "\uad6c\ub9e4",
+          date,
+          month: date.slice(0, 7),
+          no: rawEntryNo(row, type),
+          customer: rawEntryCustomer(row, type),
+          warehouse: rawEntryWarehouse(row),
+          productCode,
+          productName,
+          qty,
+          unitPrice,
+          amount,
+          memo: rawEntryMemo(row),
+          sourceProductCode: productCode,
+          sourceProductName: productName,
+          sourceQty: qty,
+          sourceAmount: amount,
+          bom: [],
+        };
+      }
+      function rebuildCustomerOptions(){
+        const map = new Map();
+        baseRows.forEach((row) => {
+          const name = rawText(row.customer);
+          if (name) map.set(name, { code: name, name });
+        });
+        customerOptions = Array.from(map.values());
+      }
+      function resetPeriodToBaseRows(){
+        const latest = baseRows.map((row) => rawText(row.date)).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort().at(-1);
+        if (!latest) return;
+        const latestMonth = latest.slice(0, 7);
+        const parts = latestMonth.split("-").map(Number);
+        const fromDate = new Date(parts[0], parts[1] - 3, 1);
+        document.getElementById("fromMonth").value = formatMonth(fromDate);
+        document.getElementById("toMonth").value = latestMonth;
+        document.getElementById("fromDay").value = latest;
+        document.getElementById("toDay").value = latest;
+      }
+      function refreshEmptyBaseRows(){
+        if (baseRows.length) return;
+        fetch("/api/dashboard/summary?tradeAnalysisRefresh=" + Date.now(), { credentials: "include", cache: "no-store" })
+          .then((res) => res.json())
+          .then((data) => {
+            const salesRows = firstRows(data.sales_inventory_basis, data.recent_sales_lines, data.recent_sales);
+            const purchaseRows = firstRows(data.purchase_inventory_basis, data.recent_purchase_lines, data.recent_purchases);
+            baseRows = [
+              ...salesRows.map((row) => normalizeFetchedRow(row, "sales")),
+              ...purchaseRows.map((row) => normalizeFetchedRow(row, "purchase")),
+            ].filter((row) => row.date);
+            rebuildCustomerOptions();
+            resetPeriodToBaseRows();
+            render();
+            resetViewHistory();
+          })
+          .catch(() => {});
       }
       function monthEnd(month){
         if (!month) return "";
