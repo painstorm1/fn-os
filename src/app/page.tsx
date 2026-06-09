@@ -17955,20 +17955,20 @@ function SalesInventoryTable({
       </div>
       <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
       <div className="fn-table-shell overflow-x-auto">
-        <table className="w-full min-w-[1180px] table-fixed text-sm">
+        <table className="w-full min-w-[1120px] table-fixed text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
             <tr>
               <th className="w-14 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={selection.allSelected} onChange={(event) => selection.toggleAll(event.target.checked)} /></th>
               <th className="w-32 py-2 text-left">일자-NO.</th>
               {isReturnHistory && <th className="w-24 py-2 text-left">반품/교환</th>}
-              <th className="w-44 py-2 text-left">{partnerLabel}명</th>
-              <th className="w-24 py-2 text-left">창고</th>
-              <th className="w-32 py-2 text-left">대표품목코드</th>
-              <th className="py-2 text-left">대표품목명</th>
-              <th className="w-24 py-2 text-right">품목수</th>
+              <th className="w-36 py-2 text-left">{partnerLabel}명</th>
+              <th className="w-20 py-2 text-left">창고</th>
+              <th className="w-28 py-2 text-left">대표품목코드</th>
+              <th className="w-56 py-2 text-left">대표품목명</th>
+              <th className="w-20 py-2 text-right">품목수</th>
               <th className="w-24 py-2 text-right">수량합계</th>
-              <th className="w-36 py-2 text-right">금액합계</th>
-              <th className="w-40 py-2 text-center">메모</th>
+              <th className="w-32 py-2 pr-6 text-right">금액합계</th>
+              <th className="w-56 py-2 pl-4 pr-3 text-center">메모</th>
             </tr>
           </thead>
           <tbody>
@@ -17987,8 +17987,8 @@ function SalesInventoryTable({
                   <td className="truncate py-2 font-bold">{entryRowProduct(row)}</td>
                   <td className="py-2 text-right">{Number(row.line_count || 1).toLocaleString("ko-KR")}</td>
                   <td className={`py-2 text-right ${isReturnHistory ? tone : ""}`}>{entryRowQty(row).toLocaleString("ko-KR")}</td>
-                  <td className={`py-2 text-right font-black ${isReturnHistory ? tone : ""}`}>{krw(entryRowAmount(row))}</td>
-                  <td className="py-1 text-center">
+                  <td className={`py-2 pr-6 text-right font-black ${isReturnHistory ? tone : ""}`}>{krw(entryRowAmount(row))}</td>
+                  <td className="py-1 pl-4 pr-3 text-center">
                     <input
                       className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs"
                       value={memoValue(row, index)}
