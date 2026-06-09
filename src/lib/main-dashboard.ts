@@ -126,7 +126,7 @@ function entryGroupKey(row: Row, mode: "sales" | "purchases") {
   const batchId = text(row.upload_batch_id);
   if (batchId) return `batch:${batchId}`;
   const ref = text(row.source_ref_id);
-  const manualMatch = ref.match(/^(manual-(?:sale|purchase)-\d+)/);
+  const manualMatch = ref.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   if (manualMatch?.[1]) return `manual:${manualMatch[1]}`;
   return `row:${text(row.id || ref || `${mode}-${entryDate(row, mode)}-${entryProductCode(row)}-${entryQty(row)}`)}`;
 }
@@ -175,6 +175,11 @@ function summarizeEntryRows(rows: Row[], mode: "sales" | "purchases", limit: num
     .sort((left, right) => numberValue(left._recent_order) - numberValue(right._recent_order))
     .slice(0, limit)
     .map(({ _recent_order: _removed, ...row }) => row);
+}
+
+function isReturnExchangeRow(row: Row) {
+  const value = text(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || row.source_ref_id);
+  return /RETURN_EXCHANGE|RETURN|EXCHANGE|return_in|exchange_out|manual-return|manual-exchange|반품|교환/i.test(value);
 }
 
 function metricTitle(base: string, date: string, today: string, yesterday: string) {
@@ -287,7 +292,7 @@ function monthlySeries(rows: Row[], months: number, pickDate: (row: Row) => unkn
 
 export async function mainDashboardSummary() {
   const [
-    sales,
+    allSales,
     purchases,
     orders,
     inventory,
@@ -335,6 +340,8 @@ export async function mainDashboardSummary() {
 
   const salesDate = (row: Row) => row.io_date ?? row.sale_date ?? row.created_at;
   const salesAmount = (row: Row) => row.total_amount ?? row.supply_amount ?? row.supply_amt;
+  const returnExchangeRows = allSales.filter(isReturnExchangeRow);
+  const sales = allSales.filter((row) => !isReturnExchangeRow(row));
   const orderDate = (row: Row) => row.order_date ?? row.created_at;
   const adRows = adReports.length ? adReports : adDailyMetrics;
   const adDate = (row: Row) => row.report_date ?? row.metric_date ?? row.created_at;
@@ -472,8 +479,10 @@ export async function mainDashboardSummary() {
     sales_inventory_basis: sales.slice(0, 1500),
     purchase_inventory_basis: purchases.slice(0, 1500),
     recent_sales: summarizeEntryRows(sales, "sales", 80),
+    recent_returns: summarizeEntryRows(returnExchangeRows, "sales", 100),
     recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
     recent_sales_lines: sales.slice(0, 500),
+    recent_return_lines: returnExchangeRows.slice(0, 500),
     recent_purchase_lines: purchases.slice(0, 500),
     inquiry_channels: inquiryChannels,
     ad_label: metricTitle("광고비", latestAdDate, today, yesterday),
