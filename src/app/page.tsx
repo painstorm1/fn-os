@@ -10138,10 +10138,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const warehouseOptions = ${warehouseOptionsJson};
       let customerOptions = ${customerOptionsJson};
       const companyInfo = ${companyInfoJson};
+      const thead = document.getElementById("thead");
+      const tbody = document.getElementById("tbody");
       const fmt = new Intl.NumberFormat("ko-KR");
       const krw = (n) => fmt.format(Math.round(Number(n)||0)) + "원";
       const text = (v) => String(v ?? "").toLowerCase();
-      const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[ch]));
+      const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
       const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i;
       const selected = { product: [], warehouse: [], customer: [] };
       let activePicker = "product";
