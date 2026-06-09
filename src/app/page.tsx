@@ -20003,6 +20003,20 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   async function saveLoan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = loanDraft.id ? "PATCH" : "POST";
+    let loanName = String(loanDraft.loan_name || "").trim();
+    if (!loanDraft.id && loanName) {
+      const existingNames = new Set((summary?.loans || []).map((row) => String(row.loan_name || row.title || "").trim()).filter(Boolean));
+      if (existingNames.has(loanName)) {
+        let suffix = 2;
+        let suggestedName = `${loanName} (${suffix})`;
+        while (existingNames.has(suggestedName)) {
+          suffix += 1;
+          suggestedName = `${loanName} (${suffix})`;
+        }
+        if (!window.confirm(`같은 이름의 대출명이 있습니다. "${suggestedName}"로 입력할까요?`)) return;
+        loanName = suggestedName;
+      }
+    }
     const isPrincipalInterest = loanDraft.loan_type === "principal_interest";
     const expectedPrincipal = isPrincipalInterest ? asNumber(loanDraft.expected_principal_amount) : 0;
     const expectedInterest = asNumber(loanDraft.expected_interest_amount || loanDraft.expected_payment_amount);
@@ -20012,6 +20026,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...loanDraft,
+        loan_name: loanName,
         expected_principal_amount: String(expectedPrincipal),
         expected_interest_amount: String(expectedInterest),
         expected_payment_amount: String(expectedPayment),
