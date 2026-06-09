@@ -23,6 +23,9 @@ export function hasDbConfig() {
 }
 
 function friendlySupabaseError(text: string, status: number) {
+  if (/ON CONFLICT DO UPDATE command cannot affect row a second time|21000|duplicate constrained values/i.test(text)) {
+    return "업로드 파일 안에 같은 거래로 판단되는 중복 행이 있습니다. FN OS가 중복 거래를 한 번만 저장하도록 정리한 뒤 다시 시도합니다.";
+  }
   const missingColumn = text.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i) || text.match(/column ['"]?([^'"\s]+)['"]? does not exist/i);
   if (missingColumn?.[1]) {
     return `FN OS DB 컬럼 '${missingColumn[1]}'이 현재 Supabase 스키마에 없습니다. 저장 가능한 기존 컬럼만으로 다시 시도합니다.`;

@@ -1265,7 +1265,17 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
       }));
     }
     const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
-    const fresh = rowsWithBatch.filter((row) => !existingKeys.has(text(row.dedupe_key)));
+    const freshByKey = new Map<string, RawRow>();
+    let uploadDuplicateCount = 0;
+    for (const row of rowsWithBatch) {
+      const key = text(row.dedupe_key);
+      if (!key || existingKeys.has(key) || freshByKey.has(key)) {
+        uploadDuplicateCount += 1;
+        continue;
+      }
+      freshByKey.set(key, row);
+    }
+    const fresh = Array.from(freshByKey.values());
     const savedChunks = await Promise.all(chunkRows(fresh, 200).map((chunk) => upsertRows<RawRow>("accounting_transactions", chunk, "dedupe_key")));
     const saved = savedChunks.flat();
     const gaonPointTotal = saved
@@ -1290,6 +1300,7 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
       success_count: saved.length,
       new_count: saved.length,
       duplicate_count: classified.length - fresh.length,
+      upload_duplicate_count: uploadDuplicateCount,
       review_count: reviewCount,
     };
   } catch (error) {
