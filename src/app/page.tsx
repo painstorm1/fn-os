@@ -2964,7 +2964,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             prod_name: fnProductName(product),
             qty: savedQty || (defaultQty > 0 ? String(defaultQty) : String(item.quantity || "1")),
             price: fnProductPrice(product) ? String(fnProductPrice(product)) : "",
-            memo: `${order.order_code || savedOrderId} ${item.product_name || ""}`.trim(),
+            memo: "",
           };
         }).filter(Boolean) as Array<Partial<SalesPurchaseEntryLine>>;
       });
@@ -5107,7 +5107,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
           prod_name: productName,
           qty: linkPurchaseQty(line, link),
           price: fnProductPrice(product) ? String(fnProductPrice(product)) : "",
-          memo: `${order?.order_code || savedOrderId} ${line.product_name || ""}`.trim(),
+          memo: "",
         };
       }).filter(Boolean) as Array<Partial<SalesPurchaseEntryLine>>);
 
