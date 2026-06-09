@@ -18646,6 +18646,7 @@ function AccountingCategoryChart({
 
 type AccountingSummary = {
   ok?: boolean;
+  scope?: string;
   error?: string;
   categories?: Array<Record<string, unknown>>;
   rules?: Array<Record<string, unknown>>;
@@ -18709,6 +18710,7 @@ const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_VERSION = "2026-06-09-ledger-repair-v2";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
+type AccountingSummaryScope = "dashboard" | "full";
 const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
 const ACCOUNTING_LEDGER_SESSION_KEY = "fnos.accounting.ledger.state.v1";
 
@@ -18783,13 +18785,25 @@ function writeAccountingSessionState(key: string, value: Record<string, unknown>
   }
 }
 
-function readCachedAccountingSummary() {
-  return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`, storageTtl: ACCOUNTING_STORAGE_TTL });
+function accountingSummaryEndpoint(scope: AccountingSummaryScope) {
+  return `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=${scope}`;
 }
 
-function fetchCachedAccountingSummary(force = false) {
-  return cachedClientJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, {
-    key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`,
+function accountingSummaryCacheKey(scope: AccountingSummaryScope) {
+  return `${ACCOUNTING_SUMMARY_ENDPOINT}:${scope}:${ACCOUNTING_CACHE_VERSION}`;
+}
+
+function readCachedAccountingSummary(scope: AccountingSummaryScope) {
+  return readCachedJson<AccountingSummary>(accountingSummaryEndpoint(scope), { key: accountingSummaryCacheKey(scope), storageTtl: ACCOUNTING_STORAGE_TTL });
+}
+
+function readInitialCachedAccountingSummary(scope: AccountingSummaryScope) {
+  return readInitialCachedJson<AccountingSummary>(accountingSummaryEndpoint(scope), { key: accountingSummaryCacheKey(scope), storageTtl: ACCOUNTING_STORAGE_TTL });
+}
+
+function fetchCachedAccountingSummary(scope: AccountingSummaryScope, force = false) {
+  return cachedClientJson<AccountingSummary>(accountingSummaryEndpoint(scope), {
+    key: accountingSummaryCacheKey(scope),
     ttl: ACCOUNTING_CACHE_TTL,
     storageTtl: ACCOUNTING_STORAGE_TTL,
     force,
@@ -18803,9 +18817,10 @@ function invalidateAccountingCache() {
 }
 
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
-  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`, storageTtl: ACCOUNTING_STORAGE_TTL });
   const normalizedTab = tab === "bank" || tab === "card" ? "ledger" : tab;
   const activeTab = normalizedTab === "settings" || normalizedTab === "review" ? "db" : accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
+  const summaryScope: AccountingSummaryScope = activeTab === "dashboard" ? "dashboard" : "full";
+  const initialSummary = readInitialCachedAccountingSummary(summaryScope);
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [ledgerRows, setLedgerRows] = useState<Array<Record<string, unknown>>>([]);
   const ledgerMonthInitializedRef = useRef(false);
@@ -18989,12 +19004,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   function loadSummary(force = false) {
     setLoading(true);
-    const cached = force ? null : readCachedAccountingSummary();
+    const scope = activeTab === "dashboard" ? "dashboard" : "full";
+    const cached = force ? null : readCachedAccountingSummary(scope);
     if (cached && !force) {
       setSummary(cached);
       setLoading(false);
     }
-    fetchCachedAccountingSummary(force || Boolean(cached))
+    fetchCachedAccountingSummary(scope, force || Boolean(cached))
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
       .finally(() => setLoading(false));
@@ -19017,7 +19033,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "ledger") return;
@@ -21603,7 +21619,7 @@ function AccountingRightPanel() {
   const defaultRange = adRangeForPreset("30d");
   const dateFrom = defaultRange.from;
   const dateTo = defaultRange.to;
-  const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
+  const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&scope=dashboard`;
   const endpointCacheKey = `${endpoint}:${ACCOUNTING_CACHE_VERSION}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
