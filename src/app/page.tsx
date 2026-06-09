@@ -19613,6 +19613,7 @@ function AccountingCategoryRankChart({
   return (
     <Card className="p-4">
       <SectionHeader title={title} description={periodLabel} className="mb-2" />
+      {periodLabel && <p className="mb-2 text-xs font-semibold text-slate-500">{periodLabel}</p>}
       <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
             const amount = asNumber(row.amount);
@@ -19658,6 +19659,7 @@ type AccountingSummary = {
   import_orders?: Array<Record<string, unknown>>;
   review_queue?: Array<Record<string, unknown>>;
   card_settlements?: Array<Record<string, unknown>>;
+  card_panel_cards?: Array<Record<string, unknown>>;
   fixed_costs?: Array<Record<string, unknown>>;
   fixed_cost_occurrences?: Array<Record<string, unknown>>;
   loans?: Array<Record<string, unknown>>;
@@ -19711,7 +19713,7 @@ function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
 }
 
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-09-source-cleanup";
+const ACCOUNTING_CACHE_VERSION = "2026-06-09-card-panel-income";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full";
@@ -23316,10 +23318,7 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
 }
 
 function AccountingRightPanel() {
-  const defaultRange = adRangeForPreset("30d");
-  const dateFrom = defaultRange.from;
-  const dateTo = defaultRange.to;
-  const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&scope=dashboard`;
+  const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=dashboard`;
   const endpointCacheKey = `${endpoint}:${ACCOUNTING_CACHE_VERSION}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
@@ -23357,6 +23356,7 @@ function AccountingRightPanel() {
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
   const settlements = summary?.card_settlements || [];
+  const cardPanelCards = summary?.card_panel_cards || [];
   const upcomingFixedCosts = summary?.upcoming_fixed_costs || [];
   const pendingSettlements = settlements.filter((row) => row.paid !== true);
   const nextSettlement = pendingSettlements[0];
@@ -23364,6 +23364,8 @@ function AccountingRightPanel() {
   const kbSettlement = pendingSettlements.find((row) => String(row.card_name || "") === "국민기업카드");
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
+  const gaonCard = cardPanelCards.find((row) => String(row.card_key || "") === "gaon");
+  const kbCard = cardPanelCards.find((row) => String(row.card_key || "") === "kb");
   const gaonPoint = asNumber(summary?.card_points?.["가온글로벌카드"]?.balance);
   const fixedCostGroups = upcomingFixedCosts.reduce((map, row) => {
     const key = String(row.due_date || "");
@@ -23388,20 +23390,21 @@ function AccountingRightPanel() {
 
   function cardStatusCard({
     title,
-    settlement,
+    card,
     point,
   }: {
     title: string;
-    settlement?: Record<string, unknown>;
+    card?: Record<string, unknown>;
     point?: number;
   }) {
-    const limit = asNumber(settlement?.card_limit);
-    const used = asNumber(settlement?.amount_krw || settlement?.domestic_amount);
+    const limit = asNumber(card?.card_limit);
+    const used = asNumber(card?.current_amount);
+    const dueAmount = asNumber(card?.settlement_amount);
     const usageRate = limit ? Math.round((used / limit) * 100) : 0;
-    const start = accountingShortMonthDay(settlement?.settlement_start);
-    const end = accountingShortMonthDay(recentBatches[0]?.created_at || settlement?.settlement_end);
-    const due = accountingShortMonthDay(settlement?.payment_due_date);
-    const period = `${accountingShortMonthDay(settlement?.settlement_start)}-${accountingShortMonthDay(settlement?.settlement_end)}`;
+    const start = accountingShortMonthDay(card?.usage_start);
+    const end = accountingShortMonthDay(card?.usage_end);
+    const due = accountingShortMonthDay(card?.payment_due_date);
+    const period = `${accountingShortMonthDay(card?.settlement_start)}-${accountingShortMonthDay(card?.settlement_end)}`;
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="text-sm font-bold text-slate-800">{title}</h3>
@@ -23411,7 +23414,7 @@ function AccountingRightPanel() {
           <span className="pb-0.5 text-[11px] font-semibold text-slate-500">/ {limit ? `${Math.round(limit / 10000).toLocaleString("ko-KR")}만원` : "-"} ({usageRate}%)</span>
         </p>
         <p className="mt-3 text-[11px] font-semibold text-slate-500">결제예정 {due} ({period} 사용분)</p>
-        <p className="mt-1 text-xl font-bold tracking-normal text-slate-950">{krw(used)}</p>
+        <p className="mt-1 text-xl font-bold tracking-normal text-slate-950">{krw(dueAmount)}</p>
         {point !== undefined && (
           <div className="mt-4 flex items-center gap-2">
             <button
@@ -23482,8 +23485,8 @@ function AccountingRightPanel() {
             {!upcomingFixedCosts.length && <p className="py-5 text-center text-sm font-bold text-slate-400">7일 내 예정 고정비가 없습니다.</p>}
           </div>
         </div>
-        {cardStatusCard({ title: "가온글로벌카드", settlement: cardSettlementFor(/가온|글로벌|gaon|global/i), point: gaonPoint })}
-        {cardStatusCard({ title: "국민 기업카드", settlement: cardSettlementFor(/국민|기업|KB|IBK/i) })}
+        {cardStatusCard({ title: "가온글로벌카드", card: gaonCard, point: gaonPoint })}
+        {cardStatusCard({ title: "국민 기업카드", card: kbCard })}
       </div>
       {pointModalOpen && (
         <FormModal

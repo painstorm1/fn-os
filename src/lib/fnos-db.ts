@@ -78,7 +78,26 @@ async function request<T>(table: string, init: RequestInit = {}, query?: Record<
 }
 
 export async function selectRows<T>(table: string, query?: Record<string, QueryValue>) {
-  return request<T[]>(table, { method: "GET" }, { select: "*", ...(query || {}) });
+  const requestedLimit = Number(query?.limit);
+  if (!Number.isFinite(requestedLimit) || requestedLimit <= 1000) {
+    return request<T[]>(table, { method: "GET" }, { select: "*", ...(query || {}) });
+  }
+
+  const rows: T[] = [];
+  const pageSize = 1000;
+  const baseOffset = Number(query?.offset) || 0;
+  while (rows.length < requestedLimit) {
+    const limit = Math.min(pageSize, requestedLimit - rows.length);
+    const page = await request<T[]>(table, { method: "GET" }, {
+      select: "*",
+      ...(query || {}),
+      limit,
+      offset: baseOffset + rows.length,
+    });
+    rows.push(...page);
+    if (page.length < limit) break;
+  }
+  return rows;
 }
 
 export async function insertRows<T>(table: string, rows: Record<string, unknown> | Record<string, unknown>[]) {

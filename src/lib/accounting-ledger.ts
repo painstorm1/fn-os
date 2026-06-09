@@ -104,6 +104,13 @@ function signedAccountingAmount(row: RawRow) {
   return isCardCancel(row) ? -Math.abs(amount) : amount;
 }
 
+function accountingCardKey(value: unknown) {
+  const normalized = matchText(value);
+  if (/가온|gaon|global/.test(normalized)) return "gaon";
+  if (/국민.*기업|기업.*카드|kb.*card|국민기업/.test(normalized)) return "kb";
+  return normalized;
+}
+
 function isoDate(value: unknown) {
   const raw = text(value);
   if (!raw) return "";
@@ -247,6 +254,61 @@ function settlementFor(cardName: string, date: string, cardAccount?: RawRow) {
     };
   }
   return null;
+}
+
+function cardPanelCycle(cardKey: string, date: string) {
+  const config = cardKey === "gaon"
+    ? { startDay: 22, endDay: 21, paymentDay: 5, limit: 20000000 }
+    : cardKey === "kb"
+      ? { startDay: 6, endDay: 5, paymentDay: 20, limit: 10000000 }
+      : null;
+  if (!config) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const startBase = day >= config.startDay ? { year, month } : addMonths(year, month, -1);
+  const endBase = config.startDay > config.endDay ? addMonths(startBase.year, startBase.month, 1) : startBase;
+  const dueBase = config.paymentDay < config.endDay ? addMonths(startBase.year, startBase.month, 2) : addMonths(startBase.year, startBase.month, 1);
+  return {
+    settlement_start: dateText(startBase.year, startBase.month, config.startDay),
+    settlement_end: dateText(endBase.year, endBase.month, Math.min(config.endDay, lastDayOfMonth(endBase.year, endBase.month))),
+    payment_due_date: dateText(dueBase.year, dueBase.month, Math.min(config.paymentDay, lastDayOfMonth(dueBase.year, dueBase.month))),
+    card_limit: config.limit,
+  };
+}
+
+function cardPanelStatuses(rows: RawRow[], settlements: RawRow[]) {
+  const latestDate = rows.map((row) => isoDate(row.transaction_date)).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || kstToday();
+  return [
+    { key: "gaon", title: "가온글로벌카드" },
+    { key: "kb", title: "국민기업카드" },
+  ].map((card) => {
+    const cycle = cardPanelCycle(card.key, latestDate);
+    const cardRows = rows.filter((row) => accountingCardKey(row.card_name || row.source_name) === card.key && row.affects_card_settlement !== false);
+    const currentRows = cycle ? cardRows.filter((row) => {
+      const date = isoDate(row.transaction_date);
+      return date >= cycle.settlement_start && date <= latestDate;
+    }) : [];
+    const currentAmount = currentRows.reduce((sum, row) => sum + signedAccountingAmount(row), 0);
+    const dueSettlement = settlements
+      .filter((row) => accountingCardKey(row.card_name) === card.key && row.paid !== true && text(row.payment_due_date) >= latestDate)
+      .sort((left, right) => text(left.payment_due_date).localeCompare(text(right.payment_due_date)))[0];
+    const limit = numberValue(dueSettlement?.card_limit) || numberValue(cycle?.card_limit);
+    const settlementAmount = numberValue(dueSettlement?.amount_krw || dueSettlement?.domestic_amount);
+    return {
+      card_key: card.key,
+      card_name: card.title,
+      as_of_date: latestDate,
+      usage_start: cycle?.settlement_start || "",
+      usage_end: latestDate,
+      current_amount: currentAmount,
+      card_limit: limit,
+      usage_rate: limit ? currentAmount / limit : 0,
+      settlement_start: text(dueSettlement?.settlement_start || cycle?.settlement_start),
+      settlement_end: text(dueSettlement?.settlement_end || cycle?.settlement_end),
+      payment_due_date: text(dueSettlement?.payment_due_date || cycle?.payment_due_date),
+      settlement_amount: settlementAmount || currentAmount,
+    };
+  });
 }
 
 function directionFor(sourceType: string, row: RawRow, merchant: string, debit: number, credit: number) {
@@ -505,6 +567,17 @@ function manualCategoryPath(row: RawRow) {
   const sourceName = text(row.source_name);
   const haystack = `${existingLarge} ${existingMiddle} ${existingSmall} ${merchant} ${text(row.description)}`;
   const pair = (large: string, middle: string) => ({ large, middle });
+  if (sourceType === "bank" && (text(row.direction) === "income" || numberValue(row.credit_amount) > 0)) {
+    if (/스마트스토어|NAVER\s*FINANCIAL|네이버/i.test(haystack)) return pair("판매 정산금", "스마트스토어");
+    if (/쿠팡|COUPANG/i.test(haystack)) return pair("판매 정산금", "쿠팡");
+    if (/11ST|11번가|십일번가/i.test(haystack)) return pair("판매 정산금", "11번가");
+    if (/지마켓|G마켓|GMARKET/i.test(haystack)) return pair("판매 정산금", "지마켓");
+    if (/옥션|AUCTION/i.test(haystack)) return pair("판매 정산금", "옥션");
+    if (/롯데온|LOTTEON/i.test(haystack)) return pair("판매 정산금", "롯데온");
+    if (/SSG|신세계/i.test(haystack)) return pair("판매 정산금", "신세계");
+    if (/카카오/i.test(haystack)) return pair("판매 정산금", "카카오");
+    if (/토스|TOSS/i.test(haystack)) return pair("판매 정산금", "토스");
+  }
 
   if (/카드대금|카드출금|가온글로벌|가온 글로벌/.test(haystack)) return pair("카드대금", "가온글로벌카드");
   if (/국민기업카드|국민기업/.test(haystack) && /카드|출금/.test(haystack)) return pair("카드대금", "국민기업카드");
@@ -1426,6 +1499,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const cashIn = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.credit_amount), 0);
   const cashOut = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.debit_amount), 0);
   const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.amount_krw || row.domestic_amount), 0);
+  const cardPanelCards = cardPanelStatuses(filtered, settlements);
   const group = (pick: (row: RawRow) => string, sourceRows = filtered, amountPick: (row: RawRow) => number = (row) => row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount)) => {
     const map = new Map<string, { label: string; amount: number; count: number }>();
     for (const row of sourceRows) {
@@ -1451,6 +1525,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   }, new Map<string, { label: string; income: number; expense: number; amount: number; count: number }>()).values()).sort((a, b) => a.label.localeCompare(b.label));
   const incomeRows = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false);
   const expenseRows = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false);
+  const incomeRankPick = (row: RawRow) => text(row.category_middle || row.category_large || row.merchant_name || row.source_name);
   const categoryLarge = group((row) => text(row.category_large));
   const confirmedRows = dashboardOnly ? [] : filtered.filter((item) => text(item.review_status) === "confirmed");
   const reviewSuggestions = dashboardOnly ? {} : Object.fromEntries(
@@ -1464,6 +1539,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       scope: "dashboard",
       batches,
       card_settlements: settlements,
+      card_panel_cards: cardPanelCards,
       card_points: { "가온글로벌카드": gaonCardPoints },
       fx_rates: fxRates,
       upcoming_fixed_costs: upcomingFixedCosts,
@@ -1480,7 +1556,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       by_category_large: categoryLarge,
       by_category: categoryLarge,
       by_vendor: group((row) => text(row.merchant_name)),
-      by_income_vendor: group((row) => text(row.merchant_name || row.source_name), incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
+      by_income_vendor: group(incomeRankPick, incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
       by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
       by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
       by_card: group((row) => text(row.card_name || row.source_name)),
@@ -1496,6 +1572,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     batches,
     review_queue: reviewQueue,
     card_settlements: settlements,
+    card_panel_cards: cardPanelCards,
     card_points: { "가온글로벌카드": gaonCardPoints },
     fx_rates: fxRates,
     fixed_costs: activeFixedCosts,
@@ -1519,7 +1596,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     by_category_large: categoryLarge,
     by_category: categoryLarge,
     by_vendor: group((row) => text(row.merchant_name)),
-    by_income_vendor: group((row) => text(row.merchant_name || row.source_name), incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
+    by_income_vendor: group(incomeRankPick, incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
     by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
     by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
     by_card: group((row) => text(row.card_name || row.source_name)),
