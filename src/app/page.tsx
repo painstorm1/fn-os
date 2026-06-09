@@ -19970,28 +19970,107 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     loadSummary(true);
   }
 
+  const fixedCostDownloadHeaders = [
+    "속성",
+    "카테고리1",
+    "카테고리2",
+    "명칭",
+    "납입방식",
+    "금액(비용/합계)",
+    "예상 원금",
+    "예상 이자",
+    "예상 납입액",
+    "결제일/납입일",
+    "결제구분",
+    "연동계좌/카드",
+    "은행",
+    "예금주",
+    "계좌번호",
+    "대출금액",
+    "대출 시작일",
+    "대출 만료일",
+    "대출기간(개월)",
+    "메모",
+  ];
+  function fixedCostDownloadNumber(value: unknown) {
+    const amount = asNumber(value);
+    return amount ? String(amount) : "";
+  }
+  function fixedCostLoanTypeLabel(value: unknown) {
+    return normalizeLoanType(value) === "interest_only" ? "이자납입" : "원리금상환";
+  }
+  function fixedCostLoanExpectedPayment(row: Record<string, unknown>) {
+    const expectedPrincipal = asNumber(row.expected_principal_amount);
+    const expectedInterest = asNumber(row.expected_interest_amount);
+    if (expectedPrincipal || expectedInterest) return String(expectedPrincipal + expectedInterest);
+    return fixedCostDownloadNumber(row.expected_payment_amount || row.amount);
+  }
+  function fixedCostDownloadRow(row: Record<string, unknown>) {
+    const isLoan = String(row.row_type || "") === "loan";
+    if (isLoan) {
+      const expectedPayment = fixedCostLoanExpectedPayment(row);
+      return [
+        "대출",
+        String(row.category_large || ""),
+        String(row.category_middle || ""),
+        fixedCostRowTitle(row),
+        fixedCostLoanTypeLabel(row.loan_type),
+        expectedPayment,
+        fixedCostDownloadNumber(row.expected_principal_amount),
+        fixedCostDownloadNumber(row.expected_interest_amount),
+        expectedPayment,
+        fixedCostDueLabel(row),
+        fixedCostPaymentLabel(row),
+        "",
+        String(row.bank_name || row.payment_source || ""),
+        String(row.account_holder || ""),
+        String(row.account_number || ""),
+        fixedCostDownloadNumber(row.principal_amount),
+        String(row.loan_start_date || "").slice(0, 10),
+        String(row.loan_end_date || "").slice(0, 10),
+        String(row.loan_period_months || ""),
+        String(row.memo || ""),
+      ];
+    }
+    return [
+      "비용",
+      String(row.category_large || ""),
+      String(row.category_middle || ""),
+      fixedCostRowTitle(row),
+      "",
+      fixedCostDownloadNumber(row.expected_amount || row.amount),
+      "",
+      "",
+      "",
+      fixedCostDueLabel(row),
+      fixedCostPaymentLabel(row),
+      String(row.payment_source || ""),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      String(row.memo || ""),
+    ];
+  }
+
   function downloadFixedCostTemplate() {
     void downloadTableXlsx(
       "FN_OS_고정비_엑셀폼.xlsx",
       "고정비",
-      ["속성", "카테고리1", "카테고리2", "고정비명/대출명", "금액", "결제일", "결제구분", "연동계좌/카드", "메모"],
-      [["비용", "유지비", "임대료", "임대료 최석윤(아진가)", "2205000", "말일", "통장", "국민", ""]],
+      fixedCostDownloadHeaders,
+      [
+        ["비용", "유지비", "임대료", "임대료 최석윤(아진가)", "", "2205000", "", "", "", "말일", "통장", "국민은행 사업자통장", "", "", "", "", "", "", "", ""],
+        ["대출", "금융비용", "대출 원리금", "KB 소상공인 신용대출", "원리금상환", "913465", "800000", "113465", "913465", "말일", "통장", "", "KB국민은행", "김재욱", "000000-00-000000", "30000000", "2026-01-01", "2028-12-31", "36", "원금/이자 분리 입력"],
+      ],
     );
   }
 
   function downloadFixedCosts() {
-    const rows = combinedFixedRows.map((row) => [
-      String(row.row_type || "") === "loan" ? "대출" : "비용",
-      String(row.category_large || ""),
-      String(row.category_middle || ""),
-      fixedCostRowTitle(row),
-      String(fixedCostRowAmount(row)),
-      fixedCostDueLabel(row),
-      fixedCostPaymentLabel(row),
-      String(row.payment_source || row.bank_name || ""),
-      String(row.memo || ""),
-    ]);
-    void downloadTableXlsx(`FN_OS_고정비_${rows.length}건_${todayMmdd()}.xlsx`, "고정비", ["속성", "카테고리1", "카테고리2", "고정비명", "금액", "결제일", "결제구분", "연동정보", "메모"], rows);
+    const rows = combinedFixedRows.map(fixedCostDownloadRow);
+    void downloadTableXlsx(`FN_OS_고정비_${rows.length}건_${todayMmdd()}.xlsx`, "고정비", fixedCostDownloadHeaders, rows);
   }
 
   function loanPeriodMonths() {
