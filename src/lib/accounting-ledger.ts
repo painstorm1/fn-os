@@ -297,6 +297,12 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<RawRow>(table, query).catch(() => []);
 }
 
+function chunkRows<T>(rows: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) chunks.push(rows.slice(index, index + size));
+  return chunks;
+}
+
 async function fxRatesMap() {
   const rows = await optionalRows("import_erp_fx_rates", { order: "currency.asc", limit: 50 });
   return Object.fromEntries(rows.map((row) => [text(row.currency).toUpperCase(), numberValue(row.rate)]));
@@ -1249,37 +1255,55 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
     status: "processing",
     memo: options.memo || null,
   });
-  const rowsWithBatch: RawRow[] = classified.map((row) => ({ ...row, batch_id: batch.id }));
-  const existing = rowsWithBatch.length
-    ? await optionalRows("accounting_transactions", { dedupe_key: `in.(${rowsWithBatch.map((row) => `"${String(row.dedupe_key).replace(/"/g, '\\"')}"`).join(",")})`, limit: rowsWithBatch.length })
-    : [];
-  const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
-  const fresh = rowsWithBatch.filter((row) => !existingKeys.has(text(row.dedupe_key)));
-  const saved = fresh.length ? await upsertRows<RawRow>("accounting_transactions", fresh, "dedupe_key") : [];
-  const gaonPointTotal = saved
-    .filter((row) => text(row.card_name || row.source_name) === "가온글로벌카드")
-    .reduce((sum, row) => sum + numberValue((row.raw_json as RawRow | undefined)?.reward_points ?? row.reward_points), 0);
-  if (gaonPointTotal) await addAccountingCardPoints("가온글로벌카드", gaonPointTotal);
-  await upsertReviewRows(saved);
-  await rebuildCardSettlements();
-  const reviewCount = saved.filter((row) => text(row.review_status) === "pending").length;
-  await patchRows("accounting_import_batches", { id: `eq.${batch.id}` }, {
-    new_count: saved.length,
-    duplicate_count: classified.length - fresh.length,
-    error_count: 0,
-    review_count: reviewCount,
-    status: "uploaded",
-    updated_at: new Date().toISOString(),
-  });
-  return {
-    ok: true,
-    batch_id: batch.id,
-    total_count: classified.length,
-    success_count: saved.length,
-    new_count: saved.length,
-    duplicate_count: classified.length - fresh.length,
-    review_count: reviewCount,
-  };
+  try {
+    const rowsWithBatch: RawRow[] = classified.map((row) => ({ ...row, batch_id: batch.id }));
+    const existing: RawRow[] = [];
+    for (const keyChunk of chunkRows(rowsWithBatch.map((row) => text(row.dedupe_key)).filter(Boolean), 100)) {
+      existing.push(...await optionalRows("accounting_transactions", {
+        dedupe_key: `in.(${keyChunk.map((key) => `"${key.replace(/"/g, '\\"')}"`).join(",")})`,
+        limit: keyChunk.length,
+      }));
+    }
+    const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
+    const fresh = rowsWithBatch.filter((row) => !existingKeys.has(text(row.dedupe_key)));
+    const savedChunks = await Promise.all(chunkRows(fresh, 200).map((chunk) => upsertRows<RawRow>("accounting_transactions", chunk, "dedupe_key")));
+    const saved = savedChunks.flat();
+    const gaonPointTotal = saved
+      .filter((row) => text(row.card_name || row.source_name) === "가온글로벌카드")
+      .reduce((sum, row) => sum + numberValue((row.raw_json as RawRow | undefined)?.reward_points ?? row.reward_points), 0);
+    if (gaonPointTotal) await addAccountingCardPoints("가온글로벌카드", gaonPointTotal);
+    for (const chunk of chunkRows(saved, 300)) await upsertReviewRows(chunk);
+    await rebuildCardSettlements();
+    const reviewCount = saved.filter((row) => text(row.review_status) === "pending").length;
+    await patchRows("accounting_import_batches", { id: `eq.${batch.id}` }, {
+      new_count: saved.length,
+      duplicate_count: classified.length - fresh.length,
+      error_count: 0,
+      review_count: reviewCount,
+      status: "uploaded",
+      updated_at: new Date().toISOString(),
+    });
+    return {
+      ok: true,
+      batch_id: batch.id,
+      total_count: classified.length,
+      success_count: saved.length,
+      new_count: saved.length,
+      duplicate_count: classified.length - fresh.length,
+      review_count: reviewCount,
+    };
+  } catch (error) {
+    await patchRows("accounting_import_batches", { id: `eq.${batch.id}` }, {
+      new_count: 0,
+      duplicate_count: 0,
+      error_count: classified.length,
+      review_count: 0,
+      status: "failed",
+      memo: error instanceof Error ? error.message.slice(0, 500) : "회계 업로드 실패",
+      updated_at: new Date().toISOString(),
+    }).catch(() => []);
+    throw error;
+  }
 }
 
 export async function accountingLedgerSummary(range?: { from?: string; to?: string; scope?: string }) {

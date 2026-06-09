@@ -20208,32 +20208,38 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }
 
   async function uploadExpenses() {
+    if (uploading) return;
     if (!uploadedExpenseFiles.length) {
       setMessage("먼저 비용 파일을 업로드해 주세요.");
       return;
     }
     setUploading(true);
     setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
-    const form = new FormData();
-    form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
-    form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
-    uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
-    const res = await fetch("/api/accounting/ledger/upload", {
-      method: "POST",
-      body: form,
-    });
-    const data = await res.json();
-    setUploading(false);
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "비용 업로드 실패");
-      return;
+    try {
+      const form = new FormData();
+      form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
+      form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
+      uploadedExpenseFiles.forEach((item) => form.append("files", item.file));
+      const res = await fetch("/api/accounting/ledger/upload", {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "비용 업로드 실패");
+        return;
+      }
+      setMessage(`데이터 생성 완료: 파일 ${Number(data.files?.length || uploadedExpenseFiles.length).toLocaleString("ko-KR")}개 / 비용 ${Number(data.success_count || 0).toLocaleString("ko-KR")}건 저장`);
+      setUploadedExpenseFiles([]);
+      setPreviewRows([]);
+      setParsedFiles(Array.isArray(data.files) ? data.files : []);
+      invalidateAccountingCache();
+      loadSummary(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "비용 업로드 실패");
+    } finally {
+      setUploading(false);
     }
-    setMessage(`데이터 생성 완료: 파일 ${Number(data.files?.length || uploadedExpenseFiles.length).toLocaleString("ko-KR")}개 / 비용 ${Number(data.success_count || 0).toLocaleString("ko-KR")}건 저장`);
-    setUploadedExpenseFiles([]);
-    setPreviewRows([]);
-    setParsedFiles(Array.isArray(data.files) ? data.files : []);
-    invalidateAccountingCache();
-    loadSummary(true);
   }
 
   function resetCategoryDraft() {
