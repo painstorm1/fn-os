@@ -1228,7 +1228,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const activeFixedCosts = fixedCosts.filter((row) => row.is_active !== false);
   const activeLoans = loans.filter((row) => row.is_active !== false);
   const today = kstToday();
-  const threeDaysLater = addDays(today, 3);
+  const sevenDaysLater = addDays(today, 7);
   const occurrenceAnchors = from && to ? monthAnchorsForRange(from, to) : [today];
   const fixedCostOccurrences = occurrenceAnchors.flatMap((anchor) => activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows, anchor)));
   const loanOccurrences = occurrenceAnchors.flatMap((anchor) => activeLoans.map((row) => loanOccurrence(row, today, rows, anchor)));
@@ -1241,7 +1241,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     });
   const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences, ...loanMaturityOccurrences];
   const upcomingFixedCosts = [...fixedCostOccurrences, ...loanOccurrences]
-    .filter((row) => row.paid !== true && text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
+    .filter((row) => row.paid !== true && text(row.due_date) >= today && text(row.due_date) <= sevenDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
     .slice(0, 30);
   const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);

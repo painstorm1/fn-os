@@ -18880,65 +18880,127 @@ function AccountingLineChart({
   );
 }
 
-function AccountingCategoryChart({
-  rows,
-  compact = false,
-  title = "카테고리 비중",
-  centerLabel = "비용",
-}: {
-  rows: Array<Record<string, unknown>>;
-  compact?: boolean;
-  title?: string;
-  centerLabel?: string;
-}) {
-  const chartRows = rows.slice(0, 6);
-  const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
-  const colors = ["#f97316", "#0ea5e9", "#10b981", "#f43f5e", "#64748b", "#a855f7"];
-  let offset = 0;
+function AccountingDualLineChart({ rows, title = "월별 입금/비용 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
+  const chartRows = rows.slice(-8);
+  const max = Math.max(1, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
+  const linePoints = (key: "income" | "expense") => chartRows.map((row, index) => {
+    const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
+    const y = 92 - (asNumber(row[key]) / max) * 76;
+    return `${x},${y}`;
+  }).join(" ");
+  const dot = (row: Record<string, unknown>, index: number, key: "income" | "expense") => ({
+    x: chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100,
+    y: 92 - (asNumber(row[key]) / max) * 76,
+  });
   return (
-    <Card className={compact ? "border-0 p-0 shadow-none" : "p-5"}>
-      {!compact && <SectionHeader title={title} />}
-      <div className="grid gap-4 rounded-xl bg-gray-50 p-3 md:grid-cols-[160px_1fr]">
-        <svg viewBox="0 0 42 42" className="h-40 w-40">
-          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" strokeWidth="6" />
+    <Card className="p-5">
+      <SectionHeader
+        title={title}
+        actions={
+          <div className="flex items-center gap-3 text-xs font-black">
+            <span className="inline-flex items-center gap-1 text-emerald-600"><i className="h-2 w-2 rounded-full bg-emerald-500" />입금</span>
+            <span className="inline-flex items-center gap-1 text-orange-600"><i className="h-2 w-2 rounded-full bg-orange-500" />비용</span>
+          </div>
+        }
+      />
+      <div className="mt-4 rounded-xl bg-slate-50 p-4">
+        <svg viewBox="0 0 100 100" className="h-56 w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
+          <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
+          {chartRows.length > 0 && <polyline points={linePoints("income")} fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+          {chartRows.length > 0 && <polyline points={linePoints("expense")} fill="none" stroke="#f97316" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
           {chartRows.map((row, index) => {
-            const value = (asNumber(row.amount) / total) * 100;
-            const dash = `${value} ${100 - value}`;
-            const rotate = offset;
-            offset += value;
+            const income = dot(row, index, "income");
+            const expense = dot(row, index, "expense");
             return (
-              <circle
-                key={`${String(row.label)}-${index}`}
-                cx="21"
-                cy="21"
-                r="15.915"
-                fill="transparent"
-                stroke={colors[index % colors.length]}
-                strokeWidth="6"
-                strokeDasharray={dash}
-                strokeDashoffset="25"
-                transform={`rotate(${rotate * 3.6} 21 21)`}
-              />
+              <g key={`${String(row.label)}-${index}`}>
+                <circle cx={income.x} cy={income.y} r="2.8" fill="#10b981" />
+                <circle cx={expense.x} cy={expense.y} r="2.8" fill="#f97316" />
+              </g>
             );
           })}
-          <text x="21" y="20" textAnchor="middle" className="fill-slate-950 text-[4px] font-black">{centerLabel}</text>
-          <text x="21" y="25" textAnchor="middle" className="fill-orange-600 text-[4px] font-black">{chartRows.length}개</text>
         </svg>
-        <div className="space-y-2">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {chartRows.slice(-4).map((row, index) => (
+            <div key={`${String(row.label)}-${index}`} className="rounded bg-white px-3 py-2 text-xs">
+              <p className="font-black text-slate-500">{String(row.label || "-")}</p>
+              <p className="mt-1 font-black text-emerald-600">{krw(asNumber(row.income))}</p>
+              <p className="mt-0.5 font-black text-orange-600">{krw(asNumber(row.expense))}</p>
+            </div>
+          ))}
+          {!chartRows.length && <div className="col-span-full"><EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" /></div>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function accountingTopRowsWithOther(rows: Array<Record<string, unknown>>) {
+  const sorted: Array<Record<string, unknown> & { amount: number }> = rows
+    .map((row) => ({ ...row, amount: asNumber(row.amount) }))
+    .filter((row) => asNumber(row.amount) > 0);
+  const top = sorted.slice(0, 3);
+  const otherAmount = sorted.slice(3).reduce((sum, row) => sum + asNumber(row.amount), 0);
+  const otherCount = sorted.slice(3).reduce((sum, row) => sum + asNumber(row.count), 0);
+  return otherAmount > 0 ? [...top, { label: "기타", amount: otherAmount, count: otherCount }] : top;
+}
+
+function AccountingCategoryRankChart({
+  incomeRows,
+  expenseRows,
+}: {
+  incomeRows: Array<Record<string, unknown>>;
+  expenseRows: Array<Record<string, unknown>>;
+}) {
+  const [mode, setMode] = useState<"income" | "expense">("income");
+  const chartRows = accountingTopRowsWithOther(mode === "income" ? incomeRows : expenseRows);
+  const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
+  const max = Math.max(1, ...chartRows.map((row) => asNumber(row.amount)));
+  const color = mode === "income" ? "#10b981" : "#f97316";
+  return (
+    <Card className="p-5">
+      <SectionHeader
+        title="입금-비용 비중"
+        actions={
+          <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+            {[
+              ["income", "입금"],
+              ["expense", "비용"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`h-8 rounded-md px-3 text-xs font-black ${mode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
+                onClick={() => setMode(value as "income" | "expense")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
+      <div className="mt-4 space-y-3 rounded-xl bg-slate-50 p-4">
           {chartRows.map((row, index) => {
             const amount = asNumber(row.amount);
+            const percent = (amount / total) * 100;
             return (
-              <div key={`${String(row.label)}-${index}`}>
-                <div className="mb-1 flex justify-between gap-3 text-xs font-bold">
-                  <span className="truncate text-slate-700"><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />{String(row.label || "-")}</span>
-                  <span className="text-slate-950">{krw(amount)}</span>
+              <div
+                key={`${String(row.label)}-${index}`}
+                className="rounded-lg bg-white px-3 py-3"
+              >
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate font-black text-slate-800">{index + 1}. {String(row.label || "-")}</span>
+                  <span className="shrink-0 font-black text-slate-950">{krw(amount)}</span>
                 </div>
-                <div className="h-2 rounded bg-white"><div className="h-2 rounded" style={{ width: `${Math.max(4, (amount / total) * 100)}%`, backgroundColor: colors[index % colors.length] }} /></div>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-2.5 flex-1 rounded-full bg-slate-100">
+                    <div className="h-2.5 rounded-full" style={{ width: `${Math.max(4, (amount / max) * 100)}%`, backgroundColor: color }} />
+                  </div>
+                  <span className="w-12 text-right text-xs font-black text-slate-500">{percent.toFixed(1)}%</span>
+                </div>
               </div>
             );
           })}
-          {!chartRows.length && <EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" />}
-        </div>
+          {!chartRows.length && <EmptyState title="데이터 없음" className="min-h-32 border-0 bg-white" />}
       </div>
     </Card>
   );
@@ -20456,23 +20518,49 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       {activeTab === "dashboard" && (
         <>
           <section className="grid gap-4 xl:grid-cols-2">
-            <AccountingLineChart rows={monthRows} title="월별 입금 추이" valueKey="income" color="#10b981" />
-            <AccountingCategoryChart rows={incomeVendorRows} title="입금 거래처 비중" centerLabel="입금" />
-            <AccountingLineChart rows={monthRows} title="월별 비용 추이" valueKey="expense" color="#f97316" />
-            <AccountingCategoryChart rows={expenseCategoryRows} title="비용 카테고리 비중" centerLabel="비용" />
+            <AccountingDualLineChart rows={monthRows} />
+            <AccountingCategoryRankChart incomeRows={incomeVendorRows} expenseRows={expenseCategoryRows} />
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <section>
             <Card className="p-5">
-              <SectionHeader title="월별 손익 계산" description="매출, 매입, 광고비, 비용을 한 화면에서 비교합니다." />
+              <SectionHeader title="월별 손익 계산" description="손익반영 기준 입금과 비용으로 계산합니다." />
               <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-                <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead className="bg-gray-50 text-xs font-semibold text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">월</th>
+                      <th className="px-3 py-2 text-right">입금</th>
+                      <th className="px-3 py-2 text-right">비용</th>
+                      <th className="px-3 py-2 text-right">손익</th>
+                      <th className="px-3 py-2 text-right">거래수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthRows.slice(-8).reverse().map((row, index) => {
+                      const income = asNumber(row.income);
+                      const expense = asNumber(row.expense);
+                      const profit = income - expense;
+                      return (
+                        <tr key={`${String(row.label)}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/60">
+                          <td className="px-3 py-3 font-semibold">{String(row.label || "-")}</td>
+                          <td className="px-3 py-3 text-right font-bold text-emerald-600">{krw(income)}</td>
+                          <td className="px-3 py-3 text-right font-bold text-orange-600">{krw(expense)}</td>
+                          <td className={`px-3 py-3 text-right font-black ${profit >= 0 ? "text-slate-950" : "text-red-600"}`}>{krw(profit)}</td>
+                          <td className="px-3 py-3 text-right text-gray-500">{asNumber(row.count).toLocaleString("ko-KR")}건</td>
+                        </tr>
+                      );
+                    })}
+                    {!monthRows.length && <tr><td colSpan={5} className="px-3 py-8"><EmptyState title="데이터 없음" className="min-h-24" /></td></tr>}
+                  </tbody>
+                </table>
+                <table className="hidden">
                   <thead className="bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="px-3 py-2 text-left">월</th><th className="px-3 py-2 text-right">매출</th><th className="px-3 py-2 text-right">상품매입</th><th className="px-3 py-2 text-right">광고비</th><th className="px-3 py-2 text-right">비용</th><th className="px-3 py-2 text-right">예상 순이익</th></tr></thead>
                   <tbody><tr className="border-t border-gray-100 hover:bg-orange-50/60"><td className="px-3 py-3 font-semibold">{String(totals.month || "-")}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.sales_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.purchase_amount))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.ad_spend))}</td><td className="px-3 py-3 text-right">{krw(asNumber(totals.expense_amount))}</td><td className="px-3 py-3 text-right font-bold text-[#ff6a00]">{krw(asNumber(totals.estimated_profit))}</td></tr></tbody>
                 </table>
               </div>
             </Card>
-            <div className="space-y-4">
+            <div className="hidden">
               <ReportList title="업체별 비용" rows={expenseVendorRows} />
             </div>
           </section>
@@ -20779,6 +20867,17 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                     <ActionButton type="button" className="h-9 px-3 text-xs" onClick={uploadExpenses} disabled={uploading || !uploadedExpenseFiles.length}>{`DB 저장${uploadedExpenseFiles.length ? ` (${uploadedExpenseFiles.length})` : ""}`}</ActionButton>
                   </div>
                 </div>
+                <div className="mt-3 border-t border-gray-100 pt-2 text-[11px] font-semibold text-gray-500">
+                  <p className="font-black text-gray-600">최근 업로드</p>
+                  <div className="mt-1 space-y-0.5">
+                    {recentBatches.slice(0, 3).map((row, index) => (
+                      <p key={`${String(row.id || row.source_file_name)}-${index}`} className="truncate">
+                        {String(row.source_file_name || row.source_type || "-")} · 저장 {asNumber(row.new_count || row.success_count).toLocaleString("ko-KR")}건 · 중복 {asNumber(row.duplicate_count).toLocaleString("ko-KR")}건
+                      </p>
+                    ))}
+                    {!recentBatches.length && <p>업로드 내역 없음</p>}
+                  </div>
+                </div>
               </div>
 
               <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
@@ -20792,7 +20891,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <p className="text-xs font-semibold text-gray-500">입출금/비용 분류 기준</p>
               </div>
 
-              <div className="flex h-[168px] min-w-0 flex-col justify-between rounded-xl border border-gray-200 bg-white p-4">
+              <div className="hidden">
                 <div>
                   <p className="text-xs font-black text-gray-500">검토필요</p>
                   <p className="mt-2 text-2xl font-black text-red-600">{pendingReviewRows.length.toLocaleString("ko-KR")}건</p>
@@ -21338,6 +21437,22 @@ function accountingReviewDate(value?: unknown) {
   return `${match[1].slice(2)}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
 
+function accountingMonthDayWeekText(value?: unknown) {
+  const raw = String(value || "");
+  const match = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (!match) return raw || "-";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${Number(match[2])}월${Number(match[3])}일(${weekdays[date.getDay()]})`;
+}
+
+function accountingShortMonthDay(value?: unknown) {
+  const raw = String(value || "");
+  const match = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (!match) return raw || "-";
+  return `${Number(match[2])}/${Number(match[3])}`;
+}
+
 function accountingShortSource(row: Record<string, unknown>) {
   const source = String(row.source_name || row.source_type || row.card_name || row.account_name || "");
   if (/국민.*카드|KB.*card|kbcard/i.test(source)) return "국민카드";
@@ -21689,6 +21804,7 @@ function ExpenseTable({
   const [page, setPage] = useState(Number(restoredTableState.page) || 1);
   const [pageSize, setPageSize] = useState(Number(restoredTableState.pageSize) || 30);
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(restoredTableState.sortState);
+  const [cardAmountFilter, setCardAmountFilter] = useState<"all" | "domestic" | "foreign">("all");
   const effectivePageSize = compact ? rows.length || 1 : pageSize;
   const tableMode = mode || (rows.length && rows.every((row) => String(row.source_type || "") === "bank")
     ? "bank"
@@ -21702,7 +21818,10 @@ function ExpenseTable({
     if (key === "credit") return asNumber(row.credit_amount);
     return String(row[key] ?? row.source_name ?? row.merchant_name ?? row.description ?? "").toLowerCase();
   };
-  const sortedRows = [...rows].sort((a, b) => {
+  const amountFilteredRows = tableMode === "card" && cardAmountFilter !== "all"
+    ? rows.filter((row) => cardAmountFilter === "domestic" ? accountingCurrency(row) === "KRW" : accountingCurrency(row) !== "KRW")
+    : rows;
+  const sortedRows = [...amountFilteredRows].sort((a, b) => {
     if (!sortState) return accountingRowTime(b) - accountingRowTime(a);
     const left = valueForSort(a, sortState.key);
     const right = valueForSort(b, sortState.key);
@@ -21719,13 +21838,14 @@ function ExpenseTable({
   const filteredDebitTotal = sortedRows.reduce((sum, row) => sum + accountingBankDebitAmount(row), 0);
   const filteredCreditTotal = sortedRows.reduce((sum, row) => sum + accountingBankCreditAmount(row), 0);
   const usdRate = asNumber(fxRates?.USD);
-  const filteredCardDomesticTotal = sortedRows
+  const cardTotalRows = tableMode === "card" ? rows : sortedRows;
+  const filteredCardDomesticTotal = cardTotalRows
     .filter((row) => accountingCurrency(row) === "KRW")
     .reduce((sum, row) => sum + accountingSignedDisplayAmount(row), 0);
-  const filteredCardForeignTotal = sortedRows
+  const filteredCardForeignTotal = cardTotalRows
     .filter((row) => accountingCurrency(row) !== "KRW")
     .reduce((sum, row) => sum + accountingCardForeignAmount(row), 0);
-  const filteredCardConvertedTotal = sortedRows.reduce((sum, row) => sum + accountingCardConvertedAmount(row, usdRate), 0);
+  const filteredCardConvertedTotal = cardTotalRows.reduce((sum, row) => sum + accountingCardConvertedAmount(row, usdRate), 0);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -21779,11 +21899,12 @@ function ExpenseTable({
               </>
             ) : (
               <span>
-                총 사용금액: <strong className="text-base text-[#ff6a00]">{krw(filteredCardDomesticTotal)}</strong>
+                <button type="button" className="font-black hover:text-[#ff6a00]" onClick={() => setCardAmountFilter("all")}>총 사용금액:</button>{" "}
+                <button type="button" className={`text-base font-black hover:underline ${cardAmountFilter === "domestic" ? "text-[#ff6a00]" : "text-[#ff6a00]"}`} onClick={() => { setCardAmountFilter("domestic"); setPage(1); }}>{krw(filteredCardDomesticTotal)}</button>
                 {Math.abs(filteredCardForeignTotal) > 0 && (
                   <>
                     <span className="mx-1 text-slate-400">+</span>
-                    <strong className="text-base text-sky-700">{usdText(filteredCardForeignTotal)}</strong>
+                    <button type="button" className={`text-base font-black hover:underline ${cardAmountFilter === "foreign" ? "text-sky-900" : "text-sky-700"}`} onClick={() => { setCardAmountFilter("foreign"); setPage(1); }}>{usdText(filteredCardForeignTotal)}</button>
                     <span className="mx-1 text-slate-400">/</span>
                     <strong className="text-base text-slate-950">{krw(filteredCardConvertedTotal)}</strong>
                   </>
@@ -22020,6 +22141,65 @@ function AccountingRightPanel() {
   const gaonUsage = asNumber(gaonSettlement?.usage_rate) ? `${(asNumber(gaonSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const kbUsage = asNumber(kbSettlement?.usage_rate) ? `${(asNumber(kbSettlement?.usage_rate) * 100).toFixed(1)}%` : "0%";
   const gaonPoint = asNumber(summary?.card_points?.["가온글로벌카드"]?.balance);
+  const fixedCostGroups = upcomingFixedCosts.reduce((map, row) => {
+    const key = String(row.due_date || "");
+    map.set(key, [...(map.get(key) || []), row]);
+    return map;
+  }, new Map<string, Array<Record<string, unknown>>>());
+
+  function cardSettlementFor(namePattern: RegExp) {
+    const matches = settlements
+      .filter((row) => namePattern.test(String(row.card_name || "")))
+      .sort((left, right) => String(right.settlement_start || "").localeCompare(String(left.settlement_start || "")));
+    const today = new Date().toISOString().slice(0, 10);
+    return matches.find((row) => row.paid !== true && String(row.payment_due_date || "") >= today) || matches[0];
+  }
+
+  function cardStatusCard({
+    title,
+    settlement,
+    point,
+  }: {
+    title: string;
+    settlement?: Record<string, unknown>;
+    point?: number;
+  }) {
+    const limit = asNumber(settlement?.card_limit);
+    const used = asNumber(settlement?.amount_krw || settlement?.domestic_amount);
+    const usageRate = limit ? Math.round((used / limit) * 100) : 0;
+    const start = accountingShortMonthDay(settlement?.settlement_start);
+    const end = accountingShortMonthDay(recentBatches[0]?.created_at || settlement?.settlement_end);
+    const due = accountingShortMonthDay(settlement?.payment_due_date);
+    const period = `${accountingShortMonthDay(settlement?.settlement_start)}-${accountingShortMonthDay(settlement?.settlement_end)}`;
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-black text-slate-700">{title}</h3>
+        <p className="mt-3 text-xs font-bold text-slate-500">사용중 금액 {start}-{end}</p>
+        <p className="mt-1 flex items-end gap-1">
+          <span className="text-2xl font-black text-slate-950">{krw(used)}</span>
+          <span className="pb-0.5 text-xs font-black text-slate-500">/ {limit ? `${Math.round(limit / 10000).toLocaleString("ko-KR")}만원` : "-"} ({usageRate}%)</span>
+        </p>
+        <p className="mt-4 text-xs font-bold text-slate-500">결제예정 {due} ({period} 사용분)</p>
+        <p className="mt-1 text-2xl font-black text-slate-950">{krw(used)}</p>
+        {point !== undefined && (
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              className="h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-700 hover:bg-emerald-100"
+              onClick={() => {
+                setPointInput("");
+                setPointUseAll(false);
+                setPointModalOpen(true);
+              }}
+            >
+              Point
+            </button>
+            <span className="text-sm font-black text-emerald-700">포인트리: {point.toLocaleString("ko-KR")}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   async function saveCardPoint(mode: "use" | "set") {
     const amount = pointUseAll && mode === "use" ? gaonPoint : asNumber(pointInput);
@@ -22043,34 +22223,38 @@ function AccountingRightPanel() {
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-      <div className="space-y-3">
-        <AccountingMetric label="업로드 상태" value={`${recentBatches.length.toLocaleString("ko-KR")}회`} note={String(recentBatches[0]?.status || "업로드 없음")} tone="orange" />
-        <AccountingMetric label="다음 카드 출금" value={nextSettlement ? krw(asNumber(nextSettlement.domestic_amount)) : "예정 없음"} note={nextSettlement ? `${String(nextSettlement.card_name)} / ${String(nextSettlement.payment_due_date)}` : "card_settlements 기준"} />
-        <AccountingMetric label="검토필요" value={`${asNumber(totals.review_count).toLocaleString("ko-KR")}건`} note="KCP/네이버/미분류 확인" tone="rose" />
-        <AccountingMetric label="3일 내 고정비" value={krw(asNumber(totals.fixed_cost_due_amount))} note={`${upcomingFixedCosts.length.toLocaleString("ko-KR")}개 예정`} tone={upcomingFixedCosts.length ? "rose" : "green"} />
-        <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-          <div>
-            <p className="text-xs font-semibold text-gray-500">가온글로벌카드</p>
-            <p className="mt-1 text-lg font-black text-gray-950">20,000,000원</p>
-            <p className="mt-1 text-xs font-bold text-gray-500">사용률 {gaonUsage}</p>
-            <p className="mt-1 text-xs font-black text-emerald-700">포인트리: {gaonPoint.toLocaleString("ko-KR")}</p>
-          </div>
-          <div className="mt-2 flex justify-end">
-            <button
-              type="button"
-              className="h-7 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-black text-emerald-700 hover:bg-emerald-100"
-              onClick={() => {
-                setPointInput("");
-                setPointUseAll(false);
-                setPointModalOpen(true);
-              }}
-            >
-              Point
-            </button>
+      <div className="space-y-4">
+        <div className="rounded-none border border-blue-200 bg-white p-4">
+          <h3 className="text-lg font-black text-slate-700">7일간 예정 고정비 지출</h3>
+          <div className="mt-3 space-y-3">
+            {Array.from(fixedCostGroups.entries()).map(([date, rows]) => (
+              <div key={date}>
+                <p className="text-base font-black text-red-500">{accountingMonthDayWeekText(date)}</p>
+                <div className="mt-1 space-y-1">
+                  {rows.map((row, index) => (
+                    (() => {
+                      const category = String(row.category_middle || row.category_large || "");
+                      const title = String(row.title || row.display_title || "-");
+                      const label = category && !title.includes(`[${category}]`) && !title.includes(category) ? `[${category}] ${title}` : title;
+                      return (
+                        <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+                          <div className="min-w-0">
+                            <p className="truncate font-black text-slate-700">{label}</p>
+                            <p className="mt-0.5 truncate text-xs font-bold text-slate-400">{String(row.due_date || "-")} / {String(row.payment_source || row.bank_name || row.payment_type || "bank")}</p>
+                          </div>
+                          <p className="text-right font-black text-orange-500">{krw(asNumber(row.amount))}</p>
+                        </div>
+                      );
+                    })()
+                  ))}
+                </div>
+              </div>
+            ))}
+            {!upcomingFixedCosts.length && <p className="py-5 text-center text-sm font-bold text-slate-400">7일 내 예정 고정비가 없습니다.</p>}
           </div>
         </div>
-        <AccountingMetric label="국민기업카드" value="10,000,000원" note={`사용률 ${kbUsage}`} tone="orange" />
-        <AccountingMetric label="카드대금 처리" value="현금흐름" note="손익 비용으로 중복 반영하지 않음" />
+        {cardStatusCard({ title: "가온글로벌카드", settlement: cardSettlementFor(/가온|글로벌|gaon|global/i), point: gaonPoint })}
+        {cardStatusCard({ title: "국민 기업카드", settlement: cardSettlementFor(/국민|기업|KB|IBK/i) })}
       </div>
       {pointModalOpen && (
         <FormModal
@@ -22105,7 +22289,7 @@ function AccountingRightPanel() {
           </div>
         </FormModal>
       )}
-      <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="hidden">
         <h3 className="text-xs font-semibold text-gray-500">기간 KPI</h3>
         <div className="mt-2 space-y-2">
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">판매 정산금</span><span className="font-bold text-gray-900">{krw(asNumber(totals.income_amount))}</span></div>
@@ -22114,7 +22298,7 @@ function AccountingRightPanel() {
           <div className="flex justify-between gap-2 text-xs"><span className="font-semibold text-gray-600">통장 순현금흐름</span><span className="font-bold text-gray-900">{krw(asNumber(totals.cashflow_amount))}</span></div>
         </div>
       </div>
-      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="hidden">
         <h3 className="text-xs font-semibold text-gray-500">도래 고정비</h3>
         <div className="mt-2 space-y-2">
           {upcomingFixedCosts.map((row, index) => (
@@ -22129,7 +22313,7 @@ function AccountingRightPanel() {
           {!upcomingFixedCosts.length && <p className="text-xs font-semibold text-gray-400">3일 내 예정된 고정비가 없습니다.</p>}
         </div>
       </div>
-      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="hidden">
         <h3 className="text-xs font-semibold text-gray-500">최근 업로드</h3>
         <div className="mt-2 space-y-2">
           {recentBatches.slice(0, 4).map((row, index) => (
