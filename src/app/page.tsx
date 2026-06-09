@@ -8685,7 +8685,7 @@ type InventoryListRow = {
   settingMode: "자동" | "수동";
   setting?: InventorySetting;
 };
-type InventoryHistoryReason = "all" | "return" | "exchange" | "transfer" | "manual";
+type InventoryHistoryReason = "return" | "exchange" | "transfer" | "manual";
 type InventoryHistoryRow = {
   id: string;
   reason: InventoryHistoryReason;
@@ -8708,6 +8708,7 @@ type InventoryHistoryRow = {
 };
 
 const INVENTORY_SETTINGS_STORAGE_KEY = "fnos.salesInventory.inventorySettings.v1";
+const INVENTORY_HISTORY_MEMO_STORAGE_KEY = "fnos.inventoryHistory.memoDrafts.v2";
 
 function addMonthsToDate(value: string, months: number) {
   const [year, month, day] = (value || entryDateToday()).split("-").map(Number);
@@ -8816,8 +8817,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [inventoryHistoryOpen, setInventoryHistoryOpen] = useState(false);
   const [inventoryHistoryRows, setInventoryHistoryRows] = useState<InventoryHistoryRow[]>([]);
   const [inventoryHistoryLoading, setInventoryHistoryLoading] = useState(false);
-  const [inventoryHistoryFilters, setInventoryHistoryFilters] = useState({ reason: "all" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
-  const [inventoryHistoryDraftFilters, setInventoryHistoryDraftFilters] = useState({ reason: "all" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [inventoryHistoryFilters, setInventoryHistoryFilters] = useState({ reason: "manual" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
+  const [inventoryHistoryDraftFilters, setInventoryHistoryDraftFilters] = useState({ reason: "manual" as InventoryHistoryReason, query: "", from: entryDateDaysAgo(30), to: entryDateToday() });
   const [inventoryHistoryMemoDrafts, setInventoryHistoryMemoDrafts] = useState<Record<string, string>>({});
   const inventoryPickerDragModeRef = useRef<"select" | "deselect" | null>(null);
   const lastInventoryPickerSelectionIndexRef = useRef<number | null>(null);
@@ -8990,7 +8991,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setInventorySettings({});
     }
     try {
-      const savedHistoryMemos = window.localStorage.getItem("fnos.inventoryHistory.memoDrafts.v1");
+      const savedHistoryMemos = window.localStorage.getItem(INVENTORY_HISTORY_MEMO_STORAGE_KEY);
       if (savedHistoryMemos) setInventoryHistoryMemoDrafts(JSON.parse(savedHistoryMemos));
     } catch {
       setInventoryHistoryMemoDrafts({});
@@ -11278,7 +11279,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const selectedInventoryRows = inventoryListRows.filter((row) => selectedInventoryKeys.includes(row.key));
   const editingInventoryRow = inventoryListRows.find((row) => row.key === inventoryEditKey);
   const filteredInventoryHistoryRows = inventoryHistoryRows.filter((row) => {
-    if (inventoryHistoryFilters.reason !== "all" && row.reason !== inventoryHistoryFilters.reason) return false;
+    if (row.reason !== inventoryHistoryFilters.reason) return false;
     if (inventoryHistoryFilters.from && row.date < inventoryHistoryFilters.from) return false;
     if (inventoryHistoryFilters.to && row.date > inventoryHistoryFilters.to) return false;
     const query = inventoryHistoryFilters.query.trim().toLowerCase();
@@ -11286,24 +11287,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return true;
   });
   const inventoryHistoryReasonOptions: Array<{ value: InventoryHistoryReason; label: string }> = [
-    { value: "all", label: "전체" },
-    { value: "return", label: "반품(반품입고됨)" },
-    { value: "exchange", label: "교환(교환출고됨)" },
-    { value: "transfer", label: "창고이동" },
     { value: "manual", label: "수동변경" },
+    { value: "transfer", label: "창고이동" },
   ];
-  const inventoryHistoryReasonLabel = (reason: InventoryHistoryReason) => inventoryHistoryReasonOptions.find((option) => option.value === reason)?.label || reason;
-
   function inventoryHistoryMemoValue(row: InventoryHistoryRow) {
     if (Object.prototype.hasOwnProperty.call(inventoryHistoryMemoDrafts, row.id)) return inventoryHistoryMemoDrafts[row.id] || "";
-    return row.memo || "";
+    return "";
   }
 
   function updateInventoryHistoryMemo(row: InventoryHistoryRow, value: string) {
     setInventoryHistoryMemoDrafts((prev) => {
       const next = { ...prev, [row.id]: value };
       try {
-        window.localStorage.setItem("fnos.inventoryHistory.memoDrafts.v1", JSON.stringify(next));
+        window.localStorage.setItem(INVENTORY_HISTORY_MEMO_STORAGE_KEY, JSON.stringify(next));
       } catch {
         // Keep the draft in memory when browser storage is unavailable.
       }
@@ -12350,7 +12346,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {inventoryHistoryOpen && (
         <FormModal
           title="재고이력"
-          description="입고/출고 전표를 제외한 반품, 교환, 창고이동, 수동변경 재고 흐름을 확인합니다."
+          description="입고/출고 전표를 제외한 창고이동, 수동변경 재고 흐름을 확인합니다."
           onClose={() => setInventoryHistoryOpen(false)}
           size="full"
           footer={
@@ -12361,41 +12357,45 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }
         >
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <select className="field-input h-9 w-[190px] rounded-md border border-slate-200 px-2 text-sm font-bold" value={inventoryHistoryDraftFilters.reason} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, reason: event.target.value as InventoryHistoryReason }))} onKeyDown={inventoryHistorySearchKeyDown}>
+            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+              <select className="field-input h-9 !w-[120px] shrink-0 rounded-md border border-slate-200 px-2 text-sm font-bold" value={inventoryHistoryDraftFilters.reason} onChange={(event) => {
+                const reason = event.target.value as InventoryHistoryReason;
+                setInventoryHistoryDraftFilters((prev) => ({ ...prev, reason }));
+                setInventoryHistoryFilters((prev) => ({ ...prev, reason }));
+              }} onKeyDown={inventoryHistorySearchKeyDown}>
                 {inventoryHistoryReasonOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <input className="field-input h-9 w-[240px] rounded-md border border-slate-200 px-3 text-sm" value={inventoryHistoryDraftFilters.query} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} placeholder="품목/창고/메모 검색" />
-              <input className="field-input h-9 w-[150px] rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.from} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, from: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
-              <input className="field-input h-9 w-[150px] rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.to} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, to: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
-              <button type="button" className="h-9 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyInventoryHistorySearch}>찾기</button>
-              <span className="text-xs font-bold text-slate-500">총 {filteredInventoryHistoryRows.length.toLocaleString("ko-KR")}건</span>
+              <input className="field-input h-9 !w-[360px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={inventoryHistoryDraftFilters.query} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} placeholder="품목/창고코드 검색" />
+              <input className="field-input h-9 !w-[142px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.from} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, from: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <input className="field-input h-9 !w-[142px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.to} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, to: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <button type="button" className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyInventoryHistorySearch}>찾기</button>
+              <span className="shrink-0 text-xs font-bold text-slate-500">총 {filteredInventoryHistoryRows.length.toLocaleString("ko-KR")}건</span>
             </div>
             <div className="max-h-[68vh] overflow-auto rounded-xl border border-slate-200 bg-white">
               {inventoryHistoryFilters.reason === "transfer" ? (
-                <table className="w-full min-w-[1120px] table-fixed text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
                     <tr>
-                      <th className="w-28 px-2 py-2 text-left">날짜</th>
-                      <th className="w-36 px-2 py-2 text-left">품목코드</th>
+                      <th className="w-[88px] px-1 py-2 text-left">날짜</th>
+                      <th className="w-[120px] px-1 py-2 text-left">품목코드</th>
                       <th className="px-2 py-2 text-left">품목명</th>
-                      <th className="w-36 px-2 py-2 text-left">출고창고명</th>
-                      <th className="w-36 px-2 py-2 text-left">입고창고명</th>
-                      <th className="w-24 px-2 py-2 text-right">수량</th>
-                      <th className="w-32 px-2 py-2 text-right">금액</th>
-                      <th className="w-64 px-2 py-2 text-left">메모</th>
+                      <th className="w-[105px] px-1 py-2 text-left">출고창고코드</th>
+                      <th className="w-[105px] px-1 py-2 text-left">입고창고코드</th>
+                      <th className="w-[70px] px-1 py-2 text-right">수량</th>
+                      <th className="w-[105px] px-1 py-2 text-right">금액</th>
+                      <th className="w-[180px] px-2 py-2 text-left">메모</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredInventoryHistoryRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-2 py-2 font-bold">{row.date || "-"}</td>
-                        <td className="truncate px-2 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
+                        <td className="px-1 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="truncate px-1 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
                         <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
-                        <td className="truncate px-2 py-2" title={row.from_warehouse_name || row.from_warehouse_code}>{row.from_warehouse_name || row.from_warehouse_code || "-"}</td>
-                        <td className="truncate px-2 py-2" title={row.to_warehouse_name || row.to_warehouse_code}>{row.to_warehouse_name || row.to_warehouse_code || "-"}</td>
-                        <td className="px-2 py-2 text-right font-black">{row.qty.toLocaleString("ko-KR")}</td>
-                        <td className="px-2 py-2 text-right font-black">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
+                        <td className="truncate px-1 py-2" title={row.from_warehouse_code}>{row.from_warehouse_code || "-"}</td>
+                        <td className="truncate px-1 py-2" title={row.to_warehouse_code}>{row.to_warehouse_code || "-"}</td>
+                        <td className="px-1 py-2 text-right font-black">{row.qty.toLocaleString("ko-KR")}</td>
+                        <td className="px-1 py-2 text-right font-black">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
                         <td className="px-2 py-1"><input className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs" value={inventoryHistoryMemoValue(row)} onChange={(event) => updateInventoryHistoryMemo(row, event.target.value)} /></td>
                       </tr>
                     ))}
@@ -12403,35 +12403,33 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   </tbody>
                 </table>
               ) : (
-                <table className="w-full min-w-[1180px] table-fixed text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
                     <tr>
-                      <th className="w-36 px-2 py-2 text-left">변경사유</th>
-                      <th className="w-28 px-2 py-2 text-left">날짜</th>
-                      <th className="w-36 px-2 py-2 text-left">품목코드</th>
+                      <th className="w-[88px] px-1 py-2 text-left">날짜</th>
+                      <th className="w-[120px] px-1 py-2 text-left">품목코드</th>
                       <th className="px-2 py-2 text-left">품목명</th>
-                      <th className="w-36 px-2 py-2 text-left">창고명</th>
-                      <th className="w-28 px-2 py-2 text-right">변경 전 수량</th>
-                      <th className="w-28 px-2 py-2 text-right">변경 수량</th>
-                      <th className="w-28 px-2 py-2 text-right">변경 후 수량</th>
-                      <th className="w-64 px-2 py-2 text-left">메모</th>
+                      <th className="w-[105px] px-1 py-2 text-left">창고코드</th>
+                      <th className="w-[95px] px-1 py-2 text-right">변경 전 수량</th>
+                      <th className="w-[90px] px-1 py-2 text-right">변경 수량</th>
+                      <th className="w-[95px] px-1 py-2 text-right">변경 후 수량</th>
+                      <th className="w-[180px] px-2 py-2 text-left">메모</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredInventoryHistoryRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-2 py-2 font-black">{inventoryHistoryReasonLabel(row.reason)}</td>
-                        <td className="px-2 py-2 font-bold">{row.date || "-"}</td>
-                        <td className="truncate px-2 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
+                        <td className="px-1 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="truncate px-1 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
                         <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
-                        <td className="truncate px-2 py-2" title={row.warehouse_name || row.warehouse_code}>{row.warehouse_name || row.warehouse_code || "-"}</td>
-                        <td className="px-2 py-2 text-right">{row.before_qty ? row.before_qty.toLocaleString("ko-KR") : "-"}</td>
-                        <td className="px-2 py-2 text-right font-black">{row.change_qty ? row.change_qty.toLocaleString("ko-KR") : row.qty.toLocaleString("ko-KR")}</td>
-                        <td className="px-2 py-2 text-right">{row.after_qty ? row.after_qty.toLocaleString("ko-KR") : "-"}</td>
+                        <td className="truncate px-1 py-2" title={row.warehouse_code}>{row.warehouse_code || "-"}</td>
+                        <td className="px-1 py-2 text-right">{row.before_qty ? row.before_qty.toLocaleString("ko-KR") : "-"}</td>
+                        <td className="px-1 py-2 text-right font-black">{row.change_qty ? row.change_qty.toLocaleString("ko-KR") : row.qty.toLocaleString("ko-KR")}</td>
+                        <td className="px-1 py-2 text-right">{row.after_qty ? row.after_qty.toLocaleString("ko-KR") : "-"}</td>
                         <td className="px-2 py-1"><input className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs" value={inventoryHistoryMemoValue(row)} onChange={(event) => updateInventoryHistoryMemo(row, event.target.value)} /></td>
                       </tr>
                     ))}
-                    {!filteredInventoryHistoryRows.length && <tr><td colSpan={9} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td></tr>}
+                    {!filteredInventoryHistoryRows.length && <tr><td colSpan={8} className="py-8 text-center text-sm font-bold text-slate-500">검색 결과가 없습니다.</td></tr>}
                   </tbody>
                 </table>
               )}
