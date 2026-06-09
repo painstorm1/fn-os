@@ -1711,6 +1711,8 @@ type SalesInventorySummary = {
   sync_fail_count?: number;
   recent_sales?: Array<Record<string, unknown>>;
   recent_sales_lines?: Array<Record<string, unknown>>;
+  recent_returns?: Array<Record<string, unknown>>;
+  recent_return_lines?: Array<Record<string, unknown>>;
   sales_by_date?: Array<Record<string, unknown>>;
   sales_by_customer?: Array<Record<string, unknown>>;
   sales_by_product?: Array<Record<string, unknown>>;
@@ -8049,6 +8051,8 @@ function DirectShippingPreviewGrid({ headers, rows }: { headers: string[]; rows:
 }
 
 type SalesPurchaseMode = "sales" | "purchases";
+type SalesHistoryMode = SalesPurchaseMode | "returns";
+type ReturnExchangeKind = "return_in" | "exchange_out";
 type SalesPurchaseVatMode = "included" | "excluded";
 type SalesPurchaseEntryLine = {
   id: string;
@@ -8068,6 +8072,7 @@ type SalesPurchaseEntryPrefill = {
   sourceRefBase?: string;
   sourceFileName?: string;
   replaceGroupKey?: string;
+  returnExchangeKind?: ReturnExchangeKind;
   title?: string;
   lines?: Array<Partial<SalesPurchaseEntryLine>>;
 };
@@ -8260,9 +8265,23 @@ function entryRowMemo(row: Record<string, unknown>) {
   return String(row.remarks || row.memo || "-");
 }
 
+function returnExchangeKind(row: Record<string, unknown>): ReturnExchangeKind {
+  const value = String(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || "").toLowerCase();
+  return value.includes("exchange") || value.includes("??") ? "exchange_out" : "return_in";
+}
+
+function returnExchangeLabel(row: Record<string, unknown> | ReturnExchangeKind) {
+  const kind = typeof row === "string" ? row : returnExchangeKind(row);
+  return kind === "exchange_out" ? "????" : "????";
+}
+
+function historyEntryMode(mode: SalesHistoryMode): SalesPurchaseMode {
+  return mode === "purchases" ? "purchases" : "sales";
+}
+
 function entryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode, index = 0) {
   const sourceRef = String(row.source_ref_id || "");
-  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
   const groupedSourceRef = sourceBase && sourceBase !== sourceRef ? sourceBase : "";
   const batchId = String(row.upload_batch_id || "");
@@ -8271,7 +8290,7 @@ function entryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode, inde
 
 function entryRowSourceRefBase(row: Record<string, unknown>, mode: SalesPurchaseMode) {
   const sourceRef = String(row.source_ref_id || "");
-  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+  const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   if (manualMatch?.[1]) return manualMatch[1];
   const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
   if (sourceBase && sourceBase !== sourceRef) return sourceBase;
@@ -8659,8 +8678,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
   const [showJsonTool, setShowJsonTool] = useState(false);
-  const [historyMode, setHistoryMode] = useState<SalesPurchaseMode>("sales");
-  const [entryModalMode, setEntryModalMode] = useState<SalesPurchaseMode | null>(null);
+  const [historyMode, setHistoryMode] = useState<SalesHistoryMode>("sales");
+  const [entryModalMode, setEntryModalMode] = useState<SalesHistoryMode | null>(null);
   const [partnerBalanceMode, setPartnerBalanceMode] = useState<SalesPurchaseMode | null>(null);
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
@@ -8864,7 +8883,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         ? "현재고와 수동 재고 조정을 확인합니다."
         : "거래처, 품목, 창고, 쇼핑몰, 인사 기준정보를 관리합니다.";
 
-  function makeEntryDraft(mode: "sales" | "purchases", sequence = entryRows.length + 1) {
+  function makeEntryDraft(mode: SalesHistoryMode, sequence = entryRows.length + 1) {
     const date = new Date().toISOString().slice(0, 10);
     return {
       io_date: date,
@@ -8880,7 +8899,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     };
   }
 
-  function openEntryModal(mode: "sales" | "purchases") {
+  function openEntryModal(mode: SalesHistoryMode) {
     setEntryPrefill(null);
     setEntryModalMode(mode);
     setEntryRows([]);
@@ -9885,16 +9904,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   });
 
-  const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
-  const historyLineRows = historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
-  const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters, historyLineRows);
+  const activeHistoryEntryMode = historyEntryMode(historyMode);
+  const historyRows = historyMode === "returns" ? summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
+  const historyLineRows = historyMode === "returns" ? summary?.recent_return_lines || summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
+  const filteredHistoryRows = filterEntryRows(historyRows, activeHistoryEntryMode, historyFilters, historyLineRows);
   const partnerBalanceRows = useMemo(() => {
     const rows = partnerBalanceMode === "sales"
       ? summary?.recent_sales_lines || summary?.sales_inventory_basis || summary?.recent_sales || []
       : summary?.recent_purchase_lines || summary?.purchase_inventory_basis || summary?.recent_purchases || [];
     const map = new Map<string, { customer: string; count: number; qty: number; amount: number; balance: number; latest: string }>();
     rows.forEach((row) => {
-      const mode = partnerBalanceMode || historyMode;
+      const mode = partnerBalanceMode || activeHistoryEntryMode;
       const customer = entryRowCustomer(row, mode).trim();
       if (!customer || customer === "-" || customer === "거래처" || customer === "구매처") return;
       const current = map.get(customer) || { customer, count: 0, qty: 0, amount: 0, balance: 0, latest: "" };
@@ -10105,7 +10125,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
       .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
-      .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:164px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 24px;display:grid;grid-template-columns:minmax(330px,.9fr) 1fr;gap:18px;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}.summaryCard.salesCard{background:linear-gradient(135deg,#eefcff 0%,#f8fdff 58%,#e8f6ff 100%)}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff1e8 0%,#ffd1b8 100%);border-color:#f7b390}.summaryTitle{transform:translateY(-6px);font-size:38px;line-height:1;font-weight:900;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#147df5}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px}.metricLabel{font-size:15px;color:#334155;font-weight:800}.metricValue{font-size:22px;font-weight:800;color:#0f172a}.totalLine{grid-column:1/3;font-size:22px;font-weight:800;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:36px;align-items:center;color:#334155;font-size:15px;font-weight:800}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:22px;font-weight:800;cursor:pointer;padding:0}.rankList{display:grid;gap:8px}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 2px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(100px,1fr) 132px;gap:10px;align-items:center;font-size:12px;font-weight:800}.rankName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rankBar{height:7px;border-radius:999px;background:#38bdf8}.rankAmount{text-align:right;font-size:12px;font-weight:950}.purchaseSide{justify-self:end;width:176px;border-radius:10px;background:rgba(255,255,255,.78);padding:18px 14px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.purchaseSideLabel{font-size:17px;font-weight:800}.purchaseSideDate{font-size:25px;line-height:1.12;margin:8px 0 22px}.purchaseSideCycle{font-size:17px;font-weight:800}.purchaseSideDays{font-size:28px;line-height:1.1;font-weight:800}
+      .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:146px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:16px 20px;display:grid;grid-template-columns:minmax(310px,.92fr) minmax(220px,1fr);gap:18px;align-items:center;box-shadow:0 8px 20px rgba(15,23,42,.05)}.summaryCard.salesCard{background:linear-gradient(135deg,#effbff 0%,#f8fdff 62%,#edf8ff 100%);border-color:#cfeaf7}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff3eb 0%,#ffe0cf 100%);border-color:#f6b48d}.summaryCard>div:first-child{display:grid;grid-template-columns:108px 1fr;gap:10px 18px;align-items:start}.summaryTitle{font-size:34px;line-height:1;font-weight:950;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#1378ef}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;align-items:center}.metricLine{display:grid;grid-template-columns:auto 1fr;align-items:baseline;gap:8px}.metricLabel{font-size:14px;color:#334155;font-weight:900}.metricValue{font-size:21px;font-weight:950;color:#0f172a}.totalLine{grid-column:1/3;font-size:21px;font-weight:950;color:#0f172a}.scopeLine{grid-column:1/3;display:flex;gap:30px;align-items:center;color:#334155;font-size:14px;font-weight:900}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:21px;font-weight:950;cursor:pointer;padding:0}.rankList{display:grid;gap:7px;border-left:1px solid rgba(15,23,42,.08);padding-left:18px}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 3px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(112px,1fr) 122px;gap:10px;align-items:center;font-size:12px;font-weight:900}.rankName{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.rankBar{height:6px;border-radius:999px;background:#38bdf8;margin-top:3px}.rankAmount{text-align:right;font-size:12px;font-weight:950;color:#0f172a}.purchaseSide{justify-self:end;width:154px;border-radius:10px;background:rgba(255,255,255,.78);padding:14px 12px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}.purchaseSideLabel{font-size:15px;font-weight:900}.purchaseSideDate{font-size:22px;line-height:1.12;margin:8px 0 16px}.purchaseSideCycle{font-size:15px;font-weight:900}.purchaseSideDays{font-size:26px;line-height:1.1;font-weight:950}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
       .tableWrap{overflow:visible;border:1px solid #dbe2ea;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px;min-width:1420px}th{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:12px;z-index:1}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;white-space:nowrap}td.num,th.num{text-align:right}.muted{color:#64748b}.badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.groupRow td{background:#f1f5f9;color:#0f172a;font-weight:950}.groupSummaryName{font-size:14px}.groupSummaryMetric{font-size:14px;font-weight:950}.voucherRow{cursor:pointer}.voucherRow td{font-weight:900}.voucherDetail td{background:#fbfdff;color:#334155}.voucherDetail .detailIndent{padding-left:28px;color:#64748b;font-weight:800}
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
@@ -10699,7 +10719,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         await ensureCustomerDirectory();
         const popup = window.open("", "_blank", "width=980,height=900");
         if (!popup) { window.alert("팝업이 차단되었습니다."); return; }
-        popup.document.write(analysisReportPdfHtml());
+        const pdfHtml = analysisReportPdfHtml().replace("</style>", ".summaryGrid{display:none!important}.info tbody tr:nth-child(3) th,.info tbody tr:nth-child(3) td{border-top:7px solid #fff}</style>");
+        popup.document.write(pdfHtml);
         popup.document.close();
       }
       async function emailStatementPdf(){
@@ -10955,9 +10976,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function openEntryEditModal(row: Record<string, unknown>) {
-    const groupKey = entryRowKey(row, historyMode);
-    const sourceRefBase = entryRowSourceRefBase(row, historyMode);
-    const matchingLines = historyLineRows.filter((line, index) => entryRowKey(line, historyMode, index) === groupKey);
+    const entryMode = historyEntryMode(historyMode);
+    const groupKey = entryRowKey(row, entryMode);
+    const sourceRefBase = entryRowSourceRefBase(row, entryMode);
+    const matchingLines = historyLineRows.filter((line, index) => entryRowKey(line, entryMode, index) === groupKey);
     const lines = (matchingLines.length ? matchingLines : [row]).map((line) => ({
       prod_cd: entryRowProductCode(line),
       prod_name: entryRowProduct(line),
@@ -10969,13 +10991,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       title: historyMode === "sales" ? "판매 수정" : "구매 수정",
       entryDate: entryRowDate(row) || entryDateToday(),
       customerCode: String(row.cust_code || row.customer_code || row.supplier_code || ""),
-      customerText: entryRowCustomer(row, historyMode),
+      customerText: entryRowCustomer(row, entryMode),
       warehouseCode: entryRowWarehouse(row),
       warehouseText: entryRowWarehouse(row),
       vatMode: String(row.vat_type || "").includes("별도") || String(row.vat_type || "").includes("excluded") ? "excluded" : "included",
       sourceRefBase,
-      sourceFileName: historyMode === "sales" ? "FN_OS_SALES_ENTRY_EDIT" : "FN_OS_PURCHASE_ENTRY_EDIT",
+      sourceFileName: historyMode === "returns" ? "FN_OS_RETURN_EXCHANGE_ENTRY_EDIT" : historyMode === "sales" ? "FN_OS_SALES_ENTRY_EDIT" : "FN_OS_PURCHASE_ENTRY_EDIT",
       replaceGroupKey: groupKey,
+      returnExchangeKind: historyMode === "returns" ? returnExchangeKind(row) : undefined,
       lines,
     });
     setEntryModalMode(historyMode);
@@ -11857,7 +11880,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <SalesInventoryTable
             rows={filteredHistoryRows}
             lineRows={historyLineRows}
-            mode={historyMode}
+            mode={activeHistoryEntryMode}
+            historyMode={historyMode}
             onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }}
             onEditEntry={openEntryEditModal}
             topLeft={(
@@ -11869,7 +11893,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setHistoryMode(mode as "sales" | "purchases")}
+                    onClick={() => setHistoryMode(mode as SalesHistoryMode)}
                     className={`h-9 rounded-md px-5 text-sm font-black transition ${historyMode === mode ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "border border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"}`}
                   >
                     {label}
@@ -11881,7 +11905,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <>
                 <button
                   type="button"
-                  onClick={() => setPartnerBalanceMode(historyMode)}
+                  onClick={() => { if (historyMode !== "returns") setPartnerBalanceMode(historyMode); }}
                   className="h-9 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 hover:bg-orange-100"
                 >
                   {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
@@ -11921,7 +11945,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           {historyCustomerPickerQuery !== null && (
             <SalesHistoryCustomerPicker
               query={historyCustomerPickerQuery}
-              mode={historyMode}
+              mode={activeHistoryEntryMode}
+            historyMode={historyMode}
               onClose={() => setHistoryCustomerPickerQuery(null)}
               onApply={applyHistoryCustomerSelection}
             />
@@ -12450,7 +12475,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {entryModalMode && (
         <SalesPurchaseEntryModal
           mode={entryModalMode}
-          recentRows={entryModalMode === "sales" ? summary?.recent_sales_lines || summary?.recent_sales || [] : summary?.recent_purchase_lines || summary?.recent_purchases || []}
+          recentRows={entryModalMode === "returns" ? summary?.recent_returns || [] : entryModalMode === "sales" ? summary?.recent_sales_lines || summary?.recent_sales || [] : summary?.recent_purchase_lines || summary?.recent_purchases || []}
           initialDraft={entryPrefill || undefined}
           onClose={() => {
             setEntryPrefill(null);
@@ -12458,7 +12483,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }}
           onSaved={(savedRows) => {
             if (savedRows.length) {
-              const key = entryModalMode === "sales" ? "recent_sales" : "recent_purchases";
+              const key = entryModalMode === "returns" ? "recent_returns" : entryModalMode === "sales" ? "recent_sales" : "recent_purchases";
               setSummary((prev) => prev ? { ...prev, [key]: [...savedRows, ...((prev[key] as Array<Record<string, unknown>> | undefined) || [])].slice(0, 30) } : prev);
             }
             invalidateSalesInventoryCaches();
@@ -12551,7 +12576,7 @@ function SalesPurchaseEntryModal({
   onClose,
   onSaved,
 }: {
-  mode: SalesPurchaseMode;
+  mode: SalesHistoryMode;
   recentRows: Array<Record<string, unknown>>;
   initialDraft?: SalesPurchaseEntryPrefill;
   onClose: () => void;
@@ -12563,6 +12588,7 @@ function SalesPurchaseEntryModal({
     ? initialDraft.lines.map((line) => ({ ...defaultLine(), ...line }))
     : [defaultLine()];
   const [entryDate, setEntryDate] = useState(initialDraft?.entryDate || entryDateToday());
+  const [returnKind, setReturnKind] = useState<ReturnExchangeKind>(initialDraft?.returnExchangeKind || "return_in");
   const [customerText, setCustomerText] = useState(initialDraft?.customerText || "");
   const [customerCode, setCustomerCode] = useState(initialDraft?.customerCode || "");
   const [warehouseText, setWarehouseText] = useState(initialDraft?.warehouseText || "100");
@@ -12582,6 +12608,7 @@ function SalesPurchaseEntryModal({
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState("");
   const formRef = useRef<HTMLDivElement | null>(null);
+  const returnKindRef = useRef<HTMLSelectElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
   const excelFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -12605,8 +12632,8 @@ function SalesPurchaseEntryModal({
   }, []);
 
   useEffect(() => {
-    window.setTimeout(() => dateInputRef.current?.focus(), 0);
-  }, []);
+    window.setTimeout(() => (isReturnExchangeMode ? returnKindRef.current : dateInputRef.current)?.focus(), 0);
+  }, [isReturnExchangeMode]);
 
   useEffect(() => {
     function stopDragging() {
@@ -12832,7 +12859,7 @@ function SalesPurchaseEntryModal({
   }
 
   function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine {
-    const price = mode === "sales" ? Number(product.standard_price || fnProductPrice(product)) : Number(product.cost_price || fnProductPrice(product));
+    const price = mode === "purchases" ? Number(product.cost_price || fnProductPrice(product)) : Number(product.standard_price || fnProductPrice(product));
     const recentPrice = recentUnitPriceForProduct(fnProductSku(product));
     const normalizedPrice = vatMode === "excluded" ? Math.round(price / 1.1) : price;
     return {
@@ -13076,13 +13103,16 @@ function SalesPurchaseEntryModal({
       setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 또는 품목명 1개 이상, 수량은 필수입니다.");
       return;
     }
-    const sourceRefBase = initialDraft?.sourceRefBase || `${mode === "sales" ? "manual-sale" : "manual-purchase"}-${Date.now()}`;
+    const sourceRefPrefix = mode === "returns" ? (returnKind === "return_in" ? "manual-return" : "manual-exchange") : mode === "sales" ? "manual-sale" : "manual-purchase";
+    const sourceRefBase = initialDraft?.sourceRefBase || `${sourceRefPrefix}-${Date.now()}`;
     const rows = validLines.map((line, index) => ({
       io_date: entryDate,
-      sale_date: mode === "sales" ? entryDate : "",
+      sale_date: mode !== "purchases" ? entryDate : "",
       purchase_date: mode === "purchases" ? entryDate : "",
       upload_ser_no: String(index + 1),
       source_ref_id: `${sourceRefBase}-${index + 1}-${line.prod_cd}`,
+      io_type: mode === "returns" ? returnKind : "",
+      return_exchange_type: mode === "returns" ? returnKind : "",
       cust_code: customerCode,
       cust_name: customerText,
       wh_cd: warehouseCode,
@@ -13097,7 +13127,7 @@ function SalesPurchaseEntryModal({
     }));
     setSaving(true);
     try {
-      const endpoint = mode === "sales" ? "/api/sales/import" : "/api/purchases/import";
+      const endpoint = mode === "purchases" ? "/api/purchases/import" : "/api/sales/import";
       if (initialDraft?.replaceGroupKey) {
         const deleteRes = await fetch(endpoint, {
           method: "DELETE",
@@ -13115,7 +13145,7 @@ function SalesPurchaseEntryModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ rows, source_file_name: initialDraft?.sourceFileName || (mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY") }),
+        body: JSON.stringify({ rows, source_file_name: initialDraft?.sourceFileName || (mode === "returns" ? "FN_OS_RETURN_EXCHANGE_ENTRY" : mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY") }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -13136,7 +13166,7 @@ function SalesPurchaseEntryModal({
         created_at: new Date().toISOString(),
         sync_status: "SAVED",
         source_type: "fn_os",
-        source_file_name: initialDraft?.sourceFileName || (mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY"),
+        source_file_name: initialDraft?.sourceFileName || (mode === "returns" ? "FN_OS_RETURN_EXCHANGE_ENTRY" : mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY"),
       })));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "저장 실패");
