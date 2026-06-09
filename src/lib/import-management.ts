@@ -385,7 +385,7 @@ export async function createImportReceipt(payload: {
       qty: numberValue(item.allocated_qty),
       source_type: "import_order",
       source_ref_id: text(savedPurchases[index]?.id || sourceRefId),
-      memo: text(payload.memo) || "수입관리 구매/입고 반영",
+      memo: text(payload.memo) || null,
       created_at: now,
     };
   });
@@ -555,9 +555,13 @@ export async function deleteImportReceiptForOrder(orderId: string | number, opti
     source_ref_id: `like.import-order-${orderKey}-%`,
     limit: 1000,
   }).catch(() => []);
+  const entryBasePurchases = await selectRows<AnyRecord>("purchases", {
+    source_ref_id: `eq.import-order-${orderKey}`,
+    limit: 1000,
+  }).catch(() => []);
   const fallbackPurchases = await fallbackImportEntryPurchases(orderKey, options.arrivalDate).catch(() => []);
   const purchaseMap = new Map<string, AnyRecord>();
-  for (const row of [...purchasesByAllocation, ...directPurchases, ...entryPurchases, ...fallbackPurchases]) {
+  for (const row of [...purchasesByAllocation, ...directPurchases, ...entryPurchases, ...entryBasePurchases, ...fallbackPurchases]) {
     if (!row) continue;
     const purchase = row as AnyRecord;
     const key = text(purchase.id || purchase.source_ref_id);

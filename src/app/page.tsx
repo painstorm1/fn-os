@@ -4726,7 +4726,7 @@ function ImportReceiptModal({ detail, onClose }: { detail: ImportOrderDetail; on
           purchase_date: order.fn_arrived || formatDateKey(new Date()),
           supplier_name: order.factory_name || "",
           source_ref_id: order.id,
-          memo: `${order.repr_product || order.order_code || "수입관리"} / ${order.order_code || order.id} / ${order.shipping_method || ""} / ${order.note || ""}`,
+          memo: "",
           allocations: rows,
         }),
       });
