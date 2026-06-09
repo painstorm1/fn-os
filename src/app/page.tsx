@@ -282,12 +282,15 @@ function CalendarMemo() {
     function loadServerMemos() {
       const start = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
       const end = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
-      Promise.all([
+      const accountingUrl = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}&v=${encodeURIComponent(ACCOUNTING_CACHE_VERSION)}`;
+      Promise.allSettled([
         cachedJson<Record<string, Array<string | CalendarServerMemo>>>("/api/fnos/calendar-production-memos", 30_000),
-        cachedJson<AccountingSummary>(`${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}`, 30_000),
+        cachedJson<AccountingSummary>(accountingUrl, 30_000),
       ])
-        .then(([data, accounting]) => {
+        .then(([memoResult, accountingResult]) => {
           if (!alive) return;
+          const data = memoResult.status === "fulfilled" ? memoResult.value : {};
+          const accounting = accountingResult.status === "fulfilled" ? accountingResult.value : null;
           const normalized: Record<string, CalendarServerMemo[]> = Object.fromEntries(
             Object.entries(data || {}).map(([date, items]) => [
               date,
@@ -299,12 +302,12 @@ function CalendarMemo() {
           (accounting?.fixed_cost_occurrences || []).forEach((row) => {
             const dueDate = String(row.due_date || "");
             if (!dueDate) return;
-            if (dueDate < formatDateKey(new Date())) return;
+            if (dueDate < "2026-04-01" || row.paid === true) return;
             const title = String(row.title || row.display_title || row.fixed_cost_name || "고정비");
             const amount = asNumber(row.amount || row.expected_amount);
-            const source = String(row.payment_source || row.payment_type || "통장/카드");
+            const displayTitle = title.startsWith("[") ? title : `[${title}]`;
             const item: CalendarServerMemo = {
-              memo: `[고정비] ${title}${amount ? ` ${krw(amount)}` : ""} / ${source}`,
+              memo: `${displayTitle}${amount ? ` ${krw(amount)}` : ""}`,
               tone: "fixed",
             };
             normalized[dueDate] = [...(normalized[dueDate] || []), item];
@@ -386,7 +389,10 @@ function CalendarMemo() {
         {days.map((day) => {
           const key = formatDateKey(new Date(year, month, day));
           const isSelected = key === selected;
-          const hasMemo = Boolean(memos[key]?.length || serverMemos[key]?.length);
+          const serverItems = serverMemos[key] || [];
+          const hasLocalMemo = Boolean(memos[key]?.length);
+          const hasImportMemo = hasLocalMemo || serverItems.some((memo) => memo.tone !== "fixed");
+          const hasFixedMemo = serverItems.some((memo) => memo.tone === "fixed");
           return (
             <button
               key={key}
@@ -397,7 +403,12 @@ function CalendarMemo() {
               }`}
             >
               {day}
-              {hasMemo && <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-current" />}
+              {(hasImportMemo || hasFixedMemo) && (
+                <span className="absolute bottom-1 left-1/2 flex -translate-x-1/2 gap-0.5">
+                  {hasImportMemo && <span className="h-1 w-1 rounded-full bg-slate-900" />}
+                  {hasFixedMemo && <span className="h-1 w-1 rounded-full bg-rose-500" />}
+                </span>
+              )}
             </button>
           );
         })}
@@ -1712,12 +1723,12 @@ type SalesInventorySummary = {
 };
 
 function apiUrl(path: string) {
-  if (path.startsWith("/api/fnos/")) return path;
+  if (path.startsWith("/api/fnos/") || path.startsWith("/api/accounting/")) return path;
   return `/api/import-erp${path}`;
 }
 
 function needsImportErpServer(path: string) {
-  return !path.startsWith("/api/fnos/");
+  return !path.startsWith("/api/fnos/") && !path.startsWith("/api/accounting/");
 }
 
 const DEFAULT_CACHE_TTL = 45_000;
@@ -10654,8 +10665,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("거래 분석 팝업을 열 수 없습니다. 브라우저 팝업 차단을 확인해 주세요.");
       return;
     }
-    popup.document.write(html);
-    popup.document.close();
     popup.focus();
   }
 

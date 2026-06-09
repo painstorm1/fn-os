@@ -226,10 +226,11 @@ function fixedCostKeywords(row: RawRow) {
 
 function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
   const keywords = fixedCostKeywords(fixedCost);
-  if (!keywords.length) return null;
   const from = addDays(dueDate, -3);
-  const to = text(fixedCost.base_day) === "말일" || text(fixedCost.base_day) === "last" ? addDays(dueDate, 2) : addDays(dueDate, 2);
+  const to = addDays(dueDate, 3);
   const sourceHint = text(fixedCost.payment_source || fixedCost.source_account_name || fixedCost.source_card_name);
+  const categoryLarge = text(fixedCost.category_large);
+  const categoryMiddle = text(fixedCost.category_middle);
   const candidates = transactions
     .filter((row) => {
       const txDate = isoDate(row.transaction_date);
@@ -237,7 +238,11 @@ function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], du
       if (text(row.source_type) === "bank" && numberValue(row.debit_amount) <= 0) return false;
       if (sourceHint && !`${text(row.source_name)} ${text(row.account_name)} ${text(row.card_name)}`.includes(sourceHint)) return false;
       const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`;
-      return keywords.some((keyword) => haystack.includes(keyword));
+      if (keywords.some((keyword) => haystack.includes(keyword))) return true;
+      if (categoryMiddle && text(row.category_middle) === categoryMiddle) {
+        return !categoryLarge || text(row.category_large) === categoryLarge;
+      }
+      return false;
     })
     .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
   return candidates[0] || null;
@@ -245,11 +250,11 @@ function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], du
 
 function actualDateInDueWindow(actualDate: string, dueDate: string, today: string) {
   if (!actualDate || !dueDate || actualDate > today) return false;
-  return actualDate >= addDays(dueDate, -3) && actualDate <= addDays(dueDate, 2);
+  return actualDate >= addDays(dueDate, -3) && actualDate <= addDays(dueDate, 3);
 }
 
-function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = []) {
-  const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, today);
+function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = [], dueAnchor = today) {
+  const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, dueAnchor);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
   const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
   const savedActualDate = isoDate(row.last_actual_date);
@@ -711,8 +716,8 @@ function matchingLoanPaymentTransaction(loan: RawRow, transactions: RawRow[], du
   return candidates[0] || null;
 }
 
-function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = []) {
-  const dueDate = monthDueDate(row.payment_day ?? row.base_day, today);
+function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = [], dueAnchor = today) {
+  const dueDate = monthDueDate(row.payment_day ?? row.base_day, dueAnchor);
   const amount = numberValue(row.expected_payment_amount)
     || numberValue(row.expected_principal_amount) + numberValue(row.expected_interest_amount);
   const actualRow = matchingLoanPaymentTransaction(row, transactions, dueDate, today, amount);
@@ -773,6 +778,27 @@ function loanMaturityOccurrence(row: RawRow) {
     memo: row.memo,
     row_type: "loan_maturity",
   };
+}
+
+function monthAnchorsForRange(from: string, to: string) {
+  if (!from || !to) return [kstToday()];
+  const start = isoDate(from).slice(0, 7);
+  const end = isoDate(to).slice(0, 7);
+  if (!start || !end || start > end) return [kstToday()];
+  const [startYear, startMonth] = start.split("-").map(Number);
+  const anchors: string[] = [];
+  let year = startYear;
+  let month = startMonth;
+  for (let guard = 0; guard < 120; guard += 1) {
+    const anchor = `${dateText(year, month, 1)}`;
+    if (anchor.slice(0, 7) > end) break;
+    anchors.push(anchor);
+    const next = addMonths(year, month, 1);
+    year = next.year;
+    month = next.month;
+    if (`${year}-${String(month).padStart(2, "0")}` > end) break;
+  }
+  return anchors.length ? anchors : [kstToday()];
 }
 
 function suggestReview(row: RawRow, rules: RawRow[], confirmedRows: RawRow[]) {
@@ -991,7 +1017,8 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
 export async function accountingLedgerSummary(range?: { from?: string; to?: string }) {
   const from = text(range?.from);
   const to = text(range?.to);
-  const dateFilter = from && to ? `gte.${from}` : undefined;
+  const queryFrom = from && to ? addDays(from, -3) : from;
+  const dateFilter = queryFrom ? `gte.${queryFrom}` : undefined;
   const rows = await optionalRows("accounting_transactions", {
     ...(dateFilter ? { transaction_date: dateFilter } : {}),
     order: "transaction_date.desc",
@@ -1023,12 +1050,19 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const cardAccounts = await optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 });
   const today = kstToday();
   const threeDaysLater = addDays(today, 3);
-  const fixedCostOccurrences = activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows));
-  const loanOccurrences = activeLoans.map((row) => loanOccurrence(row, today, rows));
-  const loanMaturityOccurrences = activeLoans.map((row) => loanMaturityOccurrence(row)).filter(Boolean) as RawRow[];
+  const occurrenceAnchors = from && to ? monthAnchorsForRange(from, to) : [today];
+  const fixedCostOccurrences = occurrenceAnchors.flatMap((anchor) => activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows, anchor)));
+  const loanOccurrences = occurrenceAnchors.flatMap((anchor) => activeLoans.map((row) => loanOccurrence(row, today, rows, anchor)));
+  const loanMaturityOccurrences = (activeLoans.map((row) => loanMaturityOccurrence(row)).filter(Boolean) as RawRow[])
+    .filter((row) => {
+      const dueDate = text(row.due_date);
+      if (from && dueDate < from) return false;
+      if (to && dueDate > to) return false;
+      return true;
+    });
   const calendarFixedCostOccurrences = [...fixedCostOccurrences, ...loanOccurrences, ...loanMaturityOccurrences];
   const upcomingFixedCosts = [...fixedCostOccurrences, ...loanOccurrences]
-    .filter((row) => text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
+    .filter((row) => row.paid !== true && text(row.due_date) >= today && text(row.due_date) <= threeDaysLater)
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
     .slice(0, 30);
   const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);
