@@ -18466,14 +18466,12 @@ type ExpenseUploadItem = {
 };
 
 const ACCOUNTING_AUTO_SOURCE_TYPE = "auto";
-type AccountingCategoryBulkField = "category_large" | "category_middle" | "affects_profit" | "affects_cashflow" | "affects_card_settlement" | "memo";
+type AccountingCategoryBulkField = "category_large" | "affects_profit" | "affects_cashflow" | "affects_card_settlement";
 const accountingCategoryBulkFields: Array<{ key: AccountingCategoryBulkField; label: string; type?: "text" | "checkbox" }> = [
-  { key: "category_large", label: "1차 카테고리" },
-  { key: "category_middle", label: "2차 카테고리" },
+  { key: "category_large", label: "카테고리 이동" },
   { key: "affects_profit", label: "손익 반영", type: "checkbox" },
   { key: "affects_cashflow", label: "현금흐름 반영", type: "checkbox" },
   { key: "affects_card_settlement", label: "카드결제예정 반영", type: "checkbox" },
-  { key: "memo", label: "메모" },
 ];
 const jaewookPersonalPaymentItems = [
   ["재욱 교보 무배당베스트라이프종합보험약관", 37369],
@@ -18647,11 +18645,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
   const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
     category_large: "",
-    category_middle: "",
     affects_profit: true,
     affects_cashflow: true,
     affects_card_settlement: false,
-    memo: "",
   });
   const [ruleDraft, setRuleDraft] = useState({
     id: "",
@@ -19041,6 +19037,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   async function saveCategoryBulkEdit() {
     if (!selectedCategoryIds.length || !categoryBulkSelectedFields.length) return;
+    if (categoryBulkSelectedFields.includes("category_large") && !String(categoryBulkDraft.category_large || "").trim()) {
+      setMessage("이동할 1차 카테고리를 선택해주세요.");
+      return;
+    }
     const selectedRows = categories.filter((row) => selectedCategoryIds.includes(String(row.id || "")));
     let saved = 0;
     for (const row of selectedRows) {
@@ -20237,6 +20237,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                             <input type="checkbox" checked={Boolean(categoryBulkDraft[field.key])} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, [field.key]: event.target.checked }))} />
                             적용
                           </label>
+                        ) : field.key === "category_large" ? (
+                          <select className={modalSelectClass} value={String(categoryBulkDraft.category_large || "")} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, category_large: event.target.value }))}>
+                            <option value="">이동할 1차 선택</option>
+                            {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+                          </select>
                         ) : (
                           <input className={modalInputClass} value={String(categoryBulkDraft[field.key] || "")} onChange={(event) => setCategoryBulkDraft((prev) => ({ ...prev, [field.key]: event.target.value }))} />
                         )}
