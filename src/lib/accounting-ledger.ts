@@ -348,8 +348,8 @@ export function normalizeAccountingTransaction(row: RawRow) {
   const explicitAmount = numberValue(first(row, ["amount", "total_amount", "금액원", "금액", "이용금액", "승인금액", "결제금액", "사용금액"]));
   const amount = explicitAmount || withdrawal || deposit;
   const cashDirection = text(row.cash_direction || row.category || row["분류"]);
-  const debit = meta.sourceType === "card" ? amount : withdrawal || (/출금/.test(cashDirection) ? amount : 0);
-  const credit = meta.sourceType === "bank" ? deposit || (/입금/.test(cashDirection) ? amount : 0) : 0;
+  const debit = meta.sourceType === "card" ? amount : /입금/.test(cashDirection) ? 0 : withdrawal || (/출금/.test(cashDirection) ? amount : 0);
+  const credit = meta.sourceType === "bank" ? /출금/.test(cashDirection) ? 0 : deposit || (/입금/.test(cashDirection) ? amount : 0) : 0;
   const foreignAmount = numberValue(first(row, ["foreign_amount", "해외금액", "USD", "외화금액"]));
   const currency = text(first(row, ["currency", "통화"])) || (foreignAmount > 0 && amount === 0 ? "USD" : "KRW");
   const fxRate = numberValue(first(row, ["fx_rate", "환율"]));

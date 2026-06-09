@@ -18496,6 +18496,7 @@ const accountingTabLabel: Record<string, string> = {
   fixed: "고정비",
 };
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
+const ACCOUNTING_CACHE_VERSION = "2026-06-09-ledger-repair";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
@@ -18573,11 +18574,12 @@ function writeAccountingSessionState(key: string, value: Record<string, unknown>
 }
 
 function readCachedAccountingSummary() {
-  return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+  return readCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`, storageTtl: ACCOUNTING_STORAGE_TTL });
 }
 
 function fetchCachedAccountingSummary(force = false) {
   return cachedClientJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, {
+    key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`,
     ttl: ACCOUNTING_CACHE_TTL,
     storageTtl: ACCOUNTING_STORAGE_TTL,
     force,
@@ -18591,7 +18593,7 @@ function invalidateAccountingCache() {
 }
 
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
-  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+  const initialSummary = readInitialCachedJson<AccountingSummary>(ACCOUNTING_SUMMARY_ENDPOINT, { key: `${ACCOUNTING_SUMMARY_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`, storageTtl: ACCOUNTING_STORAGE_TTL });
   const normalizedTab = tab === "bank" || tab === "card" ? "ledger" : tab;
   const activeTab = normalizedTab === "settings" || normalizedTab === "review" ? "db" : accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
@@ -18789,9 +18791,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }
 
   function loadLedgerRows(force = false) {
-    const cached = force ? null : readCachedJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, { storageTtl: ACCOUNTING_STORAGE_TTL });
+    const ledgerCacheKey = `${ACCOUNTING_TRANSACTIONS_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`;
+    const cached = force ? null : readCachedJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, { key: ledgerCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
     if (cached?.transactions?.length && !force) setLedgerRows(cached.transactions);
     cachedClientJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, {
+      key: ledgerCacheKey,
       ttl: ACCOUNTING_CACHE_TTL,
       storageTtl: ACCOUNTING_STORAGE_TTL,
       force: force || Boolean(cached),
@@ -21270,19 +21274,21 @@ function AccountingRightPanel() {
   const dateFrom = defaultRange.from;
   const dateTo = defaultRange.to;
   const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
-  const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
+  const endpointCacheKey = `${endpoint}:${ACCOUNTING_CACHE_VERSION}`;
+  const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
 
   useEffect(() => {
     let alive = true;
     let cachedTimer: number | undefined;
-    const cached = readCachedJson<AccountingSummary>(endpoint, { storageTtl: ACCOUNTING_STORAGE_TTL });
+    const cached = readCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
     if (cached) {
       cachedTimer = window.setTimeout(() => {
         if (alive) setSummary(cached);
       }, 0);
     }
     cachedClientJson<AccountingSummary>(endpoint, {
+      key: endpointCacheKey,
       ttl: ACCOUNTING_CACHE_TTL,
       storageTtl: ACCOUNTING_STORAGE_TTL,
       force: Boolean(cached),
@@ -21297,7 +21303,7 @@ function AccountingRightPanel() {
       alive = false;
       if (cachedTimer) window.clearTimeout(cachedTimer);
     };
-  }, [endpoint]);
+  }, [endpoint, endpointCacheKey]);
 
   const totals = summary?.totals || {};
   const recentBatches = summary?.batches || [];
