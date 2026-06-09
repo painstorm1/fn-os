@@ -9884,6 +9884,30 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const historyRows = historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
   const historyLineRows = historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
   const filteredHistoryRows = filterEntryRows(historyRows, historyMode, historyFilters, historyLineRows);
+  const partnerBalanceRows = useMemo(() => {
+    const rows = partnerBalanceMode === "sales"
+      ? summary?.recent_sales_lines || summary?.sales_inventory_basis || summary?.recent_sales || []
+      : summary?.recent_purchase_lines || summary?.purchase_inventory_basis || summary?.recent_purchases || [];
+    const map = new Map<string, { customer: string; count: number; qty: number; amount: number; balance: number; latest: string }>();
+    rows.forEach((row) => {
+      const mode = partnerBalanceMode || historyMode;
+      const customer = entryRowCustomer(row, mode).trim();
+      if (!customer || customer === "-" || customer === "거래처" || customer === "구매처") return;
+      const current = map.get(customer) || { customer, count: 0, qty: 0, amount: 0, balance: 0, latest: "" };
+      const amount = entryRowAmount(row);
+      const explicitBalance = Number(row.balance_amount ?? row.unpaid_amount ?? row.receivable_amount ?? row.payable_amount ?? row.remaining_amount ?? NaN);
+      current.count += 1;
+      current.qty += entryRowQty(row);
+      current.amount += amount;
+      current.balance += Number.isFinite(explicitBalance) ? explicitBalance : amount;
+      const date = entryRowDate(row);
+      if (date > current.latest) current.latest = date;
+      map.set(customer, current);
+    });
+    return Array.from(map.values())
+      .filter((row) => Math.round(row.balance) !== 0)
+      .sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance) || left.customer.localeCompare(right.customer, "ko-KR"));
+  }, [historyMode, partnerBalanceMode, summary]);
 
   function applyHistorySearch(nextDraft = historyFilterDraft) {
     const customerText = nextDraft.customer.trim();
@@ -10128,6 +10152,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let lastExportRows = [];
       let expandedVoucherKey = "";
       let customerDirectory = [];
+      let customerDirectoryLoaded = false;
       let viewHistory = [];
       let viewHistoryIndex = 0;
       const pad = (n) => String(n).padStart(2, "0");
@@ -10136,12 +10161,44 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function optionKey(item){ return String(item.code || item.name || ""); }
       function optionLabel(item){ return item.code && item.name && item.code !== item.name ? item.code + " / " + item.name : (item.name || item.code || "-"); }
       function selectedSet(kind){ return new Set(selected[kind].map(optionKey)); }
-      fetch("/api/fnos/customers?page=1&pageSize=5000").then((res) => res.json()).then((data) => { customerDirectory = data.customers || []; }).catch(() => { customerDirectory = []; });
-      function customerEmail(name){
+      const customerDirectoryPromise = fetch("/api/fnos/customers?page=1&pageSize=5000").then((res) => res.json()).then((data) => {
+        customerDirectory = data.customers || [];
+        customerDirectoryLoaded = true;
+        return customerDirectory;
+      }).catch(() => {
+        customerDirectory = [];
+        customerDirectoryLoaded = true;
+        return customerDirectory;
+      });
+      function ensureCustomerDirectory(){
+        return customerDirectoryLoaded ? Promise.resolve(customerDirectory) : customerDirectoryPromise;
+      }
+      function customerRecord(name){
         const normalized = String(name || "").trim();
-        const customer = customerDirectory.find((item) => [item.customer_name, item.cust_name, item.customer_code, item.cust_code].map((value) => String(value || "").trim()).includes(normalized));
+        return customerDirectory.find((item) => [item.customer_name, item.cust_name, item.customer_code, item.cust_code].map((value) => String(value || "").trim()).includes(normalized)) || null;
+      }
+      function customerField(customer, keys){
+        for (const key of keys) {
+          const value = String(customer?.[key] || "").trim();
+          if (value) return value;
+        }
+        return "";
+      }
+      function customerEmail(name){
+        const customer = customerRecord(name);
         const source = [customer?.email, customer?.memo, customer?.note, customer?.customer_memo].map((value) => String(value || "")).join(" ");
         return source.match(emailRegex)?.[0] || "";
+      }
+      function companyPhone(){
+        const phone = String(companyInfo.phone || "").trim();
+        return phone === "031-7675-455" ? "031-767-5455" : phone;
+      }
+      function partnerBalance(type, customer){
+        const target = String(customer || "").trim();
+        if (!target) return 0;
+        return baseRows
+          .filter((row) => row.type === type && String(row.customer || "").trim() === target)
+          .reduce((sum, row) => sum + Number(row.balance_amount ?? row.unpaid_amount ?? row.receivable_amount ?? row.payable_amount ?? row.remaining_amount ?? row.amount ?? 0), 0);
       }
       function activeVouchers(){
         if (String(lastExportRows[0]?.__exportType || "") !== "voucher") return [];
@@ -10176,13 +10233,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       function rawEntryDate(row){
         const raw = rawText(row.io_date || row.sale_date || row.purchase_date || row.created_at);
-        if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-        if (/^\d{8}$/.test(raw)) return raw.slice(0,4) + "-" + raw.slice(4,6) + "-" + raw.slice(6,8);
+        if (/^\\d{4}-\\d{2}-\\d{2}/.test(raw)) return raw.slice(0, 10);
+        if (/^\\d{8}$/.test(raw)) return raw.slice(0,4) + "-" + raw.slice(4,6) + "-" + raw.slice(6,8);
         const parsed = new Date(raw);
         return Number.isNaN(parsed.getTime()) ? "" : formatDate(parsed);
       }
       function rawEntryCustomer(row, type){
-        return rawText(row.cust_name || row.customer_name || row.supplier_name || row.cust_code || (type === "sales" ? "\uac70\ub798\ucc98" : "\uad6c\ub9e4\ucc98") || "-");
+        return rawText(row.cust_name || row.customer_name || row.supplier_name || row.cust_code || (type === "sales" ? "거래처" : "구매처") || "-");
       }
       function rawEntryProductCode(row){ return rawText(row.representative_product_code || row.prod_cd || row.product_code || row.sku); }
       function rawEntryProductName(row){ return rawText(row.representative_product_name || row.prod_name || row.product_name || row.representative_product_code || row.prod_cd || row.sku || "-"); }
@@ -10192,9 +10249,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function rawEntryMemo(row){ return rawText(row.remarks || row.memo || "-"); }
       function rawEntryNo(row, type){
         const sourceRef = rawText(row.source_ref_id);
-        const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\d+)/);
+        const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase)-\\d+)/);
         if (manualMatch?.[1]) return manualMatch[1];
-        const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
+        const sourceBase = sourceRef.replace(/-\\d+-.+$/, "");
         if (sourceBase && sourceBase !== sourceRef) return sourceBase;
         return type === "sales" ? "manual-sale" : "manual-purchase";
       }
@@ -10214,7 +10271,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const date = rawEntryDate(row);
         return {
           type,
-          typeLabel: type === "sales" ? "\ud310\ub9e4" : "\uad6c\ub9e4",
+          typeLabel: type === "sales" ? "판매" : "구매",
           date,
           month: date.slice(0, 7),
           no: rawEntryNo(row, type),
@@ -10242,7 +10299,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         customerOptions = Array.from(map.values());
       }
       function resetPeriodToBaseRows(){
-        const latest = baseRows.map((row) => rawText(row.date)).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort().at(-1);
+        const latest = baseRows.map((row) => rawText(row.date)).filter((date) => /^\\d{4}-\\d{2}-\\d{2}$/.test(date)).sort().at(-1);
         if (!latest) return;
         const latestMonth = latest.slice(0, 7);
         const parts = latestMonth.split("-").map(Number);
@@ -10528,10 +10585,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           const vat = totalAmount - supply;
           const lineRows = lines.slice(0, 12).map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(Number(line.unitPrice||0)))+"</td><td class='num'>"+fmt.format(Math.round(Number(line.amount||0)))+"</td><td></td><td></td></tr>").join("");
           const blankRows = Array.from({length: Math.max(0, 12 - Math.min(12, lines.length))}, () => "<tr class='blank'><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>").join("");
-          const balanceNote = "전잔액";
-          return "<section class='page "+(index === 0 ? "active" : "")+"'><div class='statementHead'><h1>거래명세서</h1><div class='receiver'><div>"+esc(voucher.customer||"-")+" 貴 中</div><div>"+esc(companyInfo.business_no||"")+"</div><div>날짜 : "+esc(String(voucher.date||"").replace(/-/g,""))+"</div></div><table class='supplier'><tbody><tr><th rowspan='4' class='vertical'>공<br>급<br>자</th><th>일련번호</th><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><th>TEL</th><td>"+esc(companyInfo.phone||"")+"</td></tr><tr><th>사업자번호</th><td>"+esc(companyInfo.business_no||"")+"</td><th>성명</th><td class='sealCell'>"+esc(companyInfo.representative_name||"")+sealHtml("seal")+"</td></tr><tr><th>상호</th><td colspan='3'>"+esc(companyInfo.company_name||"")+"</td></tr><tr><th>주소</th><td colspan='3'>"+esc(companyInfo.address||"")+"</td></tr></tbody></table></div><div class='amountBox'><span>금 액 : "+koreanAmount(totalAmount)+" 정</span><strong>(₩ "+fmt.format(totalAmount)+")</strong></div><table class='items'><thead><tr><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>합계</th><th>담당자</th><th>참조</th></tr></thead><tbody>"+lineRows+"<tr class='total'><th colspan='2'>종합계</th><th class='num'>"+fmt.format(voucher.qty||0)+"</th><th></th><th class='num'>"+fmt.format(totalAmount)+"</th><th></th><th></th></tr>"+blankRows+"</tbody></table><table class='sum'><tbody><tr><th>수량</th><td>"+fmt.format(voucher.qty||0)+"</td><th>공급가액</th><td class='num'>"+fmt.format(supply)+"</td><th>VAT</th><td class='num'>"+fmt.format(vat)+"</td><th>합계</th><td class='num'>"+fmt.format(totalAmount)+"</td><th>인수</th><td>인</td></tr><tr><th>전잔액</th><td colspan='4'>"+balanceNote+"</td><td colspan='5'></td></tr></tbody></table><div class='watermark'>수신자확인 건</div><div class='pageCount'>["+(index+1)+"/"+vouchers.length+"]</div></section>";
+          const receiver = customerRecord(voucher.customer);
+          const receiverBusinessNo = customerField(receiver, ["business_no", "business_number", "biz_no", "registration_no"]);
+          const balanceAmount = Math.round(partnerBalance(voucher.type, voucher.customer));
+          const balanceNote = balanceAmount ? "전잔액: " + krw(balanceAmount) : "";
+          return "<section class='page "+(index === 0 ? "active" : "")+"'><div class='statementHead'><h1>거래명세서</h1><div class='receiver'><div>"+esc(voucher.customer||"")+" 貴 中</div><div>"+esc(receiverBusinessNo)+"</div><div>날짜 : "+esc(String(voucher.date||"").replace(/-/g,""))+"</div></div><table class='supplier'><tbody><tr><th rowspan='4' class='vertical'>공<br>급<br>자</th><th>일련번호</th><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><th>TEL</th><td>"+esc(companyPhone())+"</td></tr><tr><th>사업자번호</th><td>"+esc(companyInfo.business_no||"")+"</td><th>성명</th><td class='sealCell'><span class='repName'>"+esc(companyInfo.representative_name||"")+"</span>"+sealHtml("seal")+"</td></tr><tr><th>상호</th><td colspan='3'>"+esc(companyInfo.company_name||"")+"</td></tr><tr><th>주소</th><td colspan='3'>"+esc(companyInfo.address||"")+"</td></tr></tbody></table></div><div class='amountBox'><span>금 액 : "+koreanAmount(totalAmount)+" 정</span><strong>(₩ "+fmt.format(totalAmount)+")</strong></div><table class='items'><thead><tr><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>합계</th><th>담당자</th><th>참조</th></tr></thead><tbody>"+lineRows+"<tr class='total'><th colspan='2'>종합계</th><th class='num'>"+fmt.format(voucher.qty||0)+"</th><th></th><th class='num'>"+fmt.format(totalAmount)+"</th><th></th><th></th></tr>"+blankRows+"</tbody></table><table class='sum'><tbody><tr><th>수량</th><td>"+fmt.format(voucher.qty||0)+"</td><th>공급가액</th><td class='num'>"+fmt.format(supply)+"</td><th>VAT</th><td class='num'>"+fmt.format(vat)+"</td><th>합계</th><td class='num'>"+fmt.format(totalAmount)+"</td><th>인수</th><td>인</td></tr><tr><th>전잔액</th><td colspan='4'>"+balanceNote+"</td><td colspan='5'></td></tr></tbody></table><div class='pageCount'>["+(index+1)+"/"+vouchers.length+"]</div></section>";
         }).join("");
-        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래명세서</title><style>@page{size:A4 portrait;margin:14mm 12mm 12mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:186mm;min-height:265mm;margin:0 auto;display:none;padding-top:6mm}.page.active{display:block}h1{margin:0 0 9mm;text-align:center;font-size:28px;letter-spacing:0;font-weight:900}.statementHead{display:grid;grid-template-columns:82mm 1fr;gap:5mm;align-items:start}.receiver{border:1.5px solid #111;min-height:31mm;padding:5mm;text-align:center;font-size:14px;line-height:1.7}.supplier{font-size:12px}.supplier th,.supplier td{border:1px solid #111;padding:3px 5px;text-align:center;height:9mm}.supplier .vertical{width:8mm;font-size:14px;font-weight:900;line-height:1.5}.supplier .sealCell{position:relative}.seal{position:absolute;right:3px;top:-8px;width:25mm;height:25mm;object-fit:contain;opacity:.78}.amountBox{display:flex;justify-content:space-between;align-items:center;border:2px solid #111;margin:3mm 0 2.5mm;padding:2mm 6mm;font-size:18px;font-weight:900}.items{height:78mm}.items,.sum{width:100%;border-collapse:collapse;font-size:12px}.items th,.items td,.sum th,.sum td{border:1px solid #8c8c8c;padding:2px 4px;text-align:center}.items th{background:#f5f5f5}.items td{height:7mm}.items .left{text-align:left}.num{text-align:right}.items .total th,.items .total td{background:#f4f4f4;font-weight:900}.sum{margin-top:3mm}.sum th{background:#f4f4f4}.sum td,.sum th{height:8mm}.watermark{position:absolute;left:58mm;top:112mm;color:rgba(0,0,0,.32);font-size:28px;letter-spacing:10px;pointer-events:none}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}.toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}.pager{min-width:64px;text-align:center;font-weight:800}.pageCount{margin-top:4mm;text-align:right;font-size:12px;font-weight:700}@media print{.toolbar{display:none}.page{display:block;break-after:page;width:auto;min-height:auto;margin:0}.page:last-of-type{break-after:auto}}</style></head><body>"+pages+"<div class='toolbar'><button id='prevPage' type='button'>◀</button><span id='pager' class='pager'>1/"+vouchers.length+"</span><button id='nextPage' type='button'>▶</button><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>const pages=Array.from(document.querySelectorAll('.page'));let current=0;function render(){pages.forEach((page,index)=>page.classList.toggle('active',index===current));document.getElementById('pager').textContent=(current+1)+'/'+pages.length;document.getElementById('prevPage').disabled=current===0;document.getElementById('nextPage').disabled=current>=pages.length-1;}document.getElementById('prevPage').onclick=()=>{current=Math.max(0,current-1);render();};document.getElementById('nextPage').onclick=()=>{current=Math.min(pages.length-1,current+1);render();};render();<\\/script></body></html>";
+        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래명세서</title><style>@page{size:A4 portrait;margin:14mm 12mm 12mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:186mm;min-height:265mm;margin:0 auto;display:none;padding-top:6mm}.page.active{display:block}h1{margin:0 0 9mm;text-align:center;font-size:28px;letter-spacing:0;font-weight:900}.statementHead{display:grid;grid-template-columns:82mm 1fr;gap:5mm;align-items:start}.receiver{border:1.5px solid #111;min-height:31mm;padding:5mm;text-align:center;font-size:14px;line-height:1.7}.supplier{font-size:12px}.supplier th,.supplier td{border:1px solid #111;padding:3px 5px;text-align:center;height:9mm}.supplier .vertical{width:8mm;font-size:14px;font-weight:900;line-height:1.5}.supplier .sealCell{position:relative}.repName{position:relative;z-index:1;display:inline-block;min-width:20mm}.seal{position:absolute;right:-2px;top:1mm;width:12mm;height:12mm;object-fit:contain;opacity:.78}.amountBox{display:flex;justify-content:space-between;align-items:center;border:2px solid #111;margin:3mm 0 2.5mm;padding:2mm 6mm;font-size:18px;font-weight:900}.items{height:78mm}.items,.sum{width:100%;border-collapse:collapse;font-size:12px}.items th,.items td,.sum th,.sum td{border:1px solid #8c8c8c;padding:2px 4px;text-align:center}.items th{background:#f5f5f5}.items td{height:7mm}.items .left{text-align:left}.num{text-align:right}.items .total th,.items .total td{background:#f4f4f4;font-weight:900}.sum{margin-top:3mm}.sum th{background:#f4f4f4}.sum td,.sum th{height:8mm}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}.toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}.pager{min-width:64px;text-align:center;font-weight:800}.pageCount{margin-top:4mm;text-align:right;font-size:12px;font-weight:700}@media print{.toolbar{display:none}.page{display:block;break-after:page;width:auto;min-height:auto;margin:0}.page:last-of-type{break-after:auto}}</style></head><body>"+pages+"<div class='toolbar'><button id='prevPage' type='button'>◀</button><span id='pager' class='pager'>1/"+vouchers.length+"</span><button id='nextPage' type='button'>▶</button><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>const pages=Array.from(document.querySelectorAll('.page'));let current=0;function render(){pages.forEach((page,index)=>page.classList.toggle('active',index===current));document.getElementById('pager').textContent=(current+1)+'/'+pages.length;document.getElementById('prevPage').disabled=current===0;document.getElementById('nextPage').disabled=current>=pages.length-1;}document.getElementById('prevPage').onclick=()=>{current=Math.max(0,current-1);render();};document.getElementById('nextPage').onclick=()=>{current=Math.min(pages.length-1,current+1);render();};render();<\\/script></body></html>";
       }
       function analysisScreenPdfHtml(){
         const groupLabel = document.getElementById("group").selectedOptions[0]?.textContent || "상세내역";
@@ -10557,17 +10617,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const memo = "기준: " + typeLabel + " / " + groupLabel;
         return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래 분석 PDF</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#222;font-family:Arial,'Malgun Gothic',sans-serif}.page{width:186mm;margin:0 auto}.title{text-align:center;font-size:25px;font-weight:900;text-decoration:underline;margin:10mm 0 9mm}.meta{display:flex;justify-content:space-between;font-size:12px;margin-bottom:2mm}.info,.ledger{width:100%;border-collapse:collapse;font-size:11px}.info th,.info td{border:1px solid #cfcfcf;padding:5px 6px;height:8mm}.info th{width:35mm;background:#f5f5f5;text-align:left}.info .wide{width:auto}.sectionTitle{border:1px solid #d9e0e7;background:#f8fafc;text-align:center;font-weight:900;padding:3mm;margin-top:3mm}.ledger th,.ledger td{border:1px solid #d9e0e7;padding:4px 5px}.ledger th{height:9mm;background:#f8fafc;text-align:center}.ledger td{height:7.5mm}.left{text-align:left}.num{text-align:right}.headRow{background:#f3f3f3}.salesCell{background:#f3dddd}.purchaseCell{background:#eef6ff}.balanceCell{font-weight:900}.lineRow td{background:#fff}.lineRow .left{padding-left:7mm}.totalRow th,.totalRow td{background:#f3f3f3;font-weight:900}.stamp{margin-top:3mm;text-align:right;font-size:11px}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}}</style></head><body><main class='page'><div class='title'>("+esc(typeLabel)+") "+esc(customerLabel)+" 관리대장("+esc(groupLabel)+")</div><div class='meta'><span>회사명 : "+esc(companyInfo.company_name||"에프엔")+" / 담당 : FN OS</span><span>"+esc(range.from || "")+" ~ "+esc(range.to || "")+"</span></div><table class='info'><tbody><tr><th>사업자등록번호</th><td>"+esc(companyInfo.business_no||"")+"</td><th>대표자</th><td>"+esc(companyInfo.representative_name||"")+"</td></tr><tr><th>여신한도</th><td>0</td><th>전화</th><td>"+esc(companyInfo.phone||"")+"</td></tr><tr><th>Email</th><td>"+esc(email)+"</td><th>Fax</th><td>"+esc(companyInfo.fax||"")+"</td></tr><tr><th>주 소</th><td colspan='3'>"+esc(companyInfo.address||"")+"</td></tr><tr><th>적요</th><td colspan='3'>"+esc(memo)+"</td></tr></tbody></table><div class='sectionTitle'>판매/구매내역</div><table class='ledger'><thead><tr><th style='width:26mm'>일자</th><th>적요</th><th style='width:25mm'>판매</th><th style='width:25mm'>구매</th><th style='width:27mm'>잔액</th></tr></thead><tbody>"+body+"<tr class='totalRow'><th colspan='2'>"+esc(monthLabel)+" 계</th><td class='num'>"+fmt.format(salesTotal)+"</td><td class='num'>"+fmt.format(purchaseTotal)+"</td><td class='num'>"+fmt.format(balance)+"</td></tr><tr class='totalRow'><th colspan='2'>누계</th><td class='num'>"+fmt.format(salesTotal)+"</td><td class='num'>"+fmt.format(purchaseTotal)+"</td><td class='num'>"+fmt.format(balance)+"</td></tr></tbody></table><div class='stamp'>"+formatDate(new Date())+" "+new Date().toLocaleTimeString("ko-KR")+"</div></main><div class='toolbar'><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\\/script></body></html>";
       }
-      function openStatementPdf(){
+      async function openStatementPdf(){
+        if (document.getElementById("group").value === "voucher") {
+          const vouchers = activeVouchers();
+          if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
+          await ensureCustomerDirectory();
+          const popup = window.open("", "_blank", "width=980,height=900");
+          if (!popup) { window.alert("팝업이 차단되었습니다."); return; }
+          popup.document.write(statementHtml(vouchers));
+          popup.document.close();
+          return;
+        }
         const popup = window.open("", "_blank", "width=980,height=900");
         if (!popup) { window.alert("팝업이 차단되었습니다."); return; }
         popup.document.write(analysisScreenPdfHtml());
         popup.document.close();
       }
-      function emailStatementPdf(){
+      async function emailStatementPdf(){
         const vouchers = activeVouchers();
         if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
         const customers = Array.from(new Set(vouchers.map((voucher) => String(voucher.customer || "").trim()).filter(Boolean)));
         if (customers.length !== 1) { window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다. 거래처를 검색하거나 전표 하나를 펼친 뒤 눌러주세요."); return; }
+        await ensureCustomerDirectory();
         const email = customerEmail(customers[0]) || window.prompt("거래처 이메일 주소를 입력해 주세요.", "");
         if (!email) return;
         const subjectDate = String(vouchers[0].displayNo || vouchers[0].date || "").replace(/\\D/g, "").slice(0, 6) || "${today.replace(/\D/g, "").slice(2)}";
@@ -10731,6 +10802,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function renderAndReset(){ render(); resetViewHistory(); }
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") { if (event.target.id === "pickerQuery") return; if (event.target.id === "product" || event.target.id === "warehouse" || event.target.id === "customer") { event.preventDefault(); openPicker(event.target.id); } else renderAndReset(); } }));
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",(event)=>{ if (event.target.id !== "pickerQuery") renderAndReset(); }));
+      ["product","warehouse","customer"].forEach((kind) => document.getElementById(kind).addEventListener("click", () => openPicker(kind)));
       ["product","warehouse","customer"].forEach((kind) => document.getElementById(kind).addEventListener("input", () => clearSelectedForInput(kind)));
       document.getElementById("periodMode").addEventListener("change", () => {
         updatePeriodInputVisibility();
@@ -10799,6 +10871,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       });
       render();
       resetViewHistory();
+      refreshEmptyBaseRows();
     </script></body></html>`;
     const popupUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
@@ -12327,19 +12400,38 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {partnerBalanceMode && (
         <FormModal
           title={partnerBalanceMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
-          description="거래 발생, 회계 업로드 자동 후보 입력, 사용자 저장 확정까지 추적하려면 전용 원장 테이블이 필요합니다."
+          description={partnerBalanceMode === "sales" ? "판매 거래처별 미수 잔액을 확인합니다." : "구매 거래처별 미지급 잔액을 확인합니다."}
           onClose={() => setPartnerBalanceMode(null)}
           size="lg"
           footer={<ActionButton type="button" onClick={() => setPartnerBalanceMode(null)}>닫기</ActionButton>}
         >
-          <div className="space-y-3 text-sm font-bold leading-6 text-slate-700">
-            <p className="rounded-lg border border-orange-100 bg-orange-50 p-3 text-orange-700">공통 DB 테이블 변경 제안 승인 후 연결할 영역입니다.</p>
-            <ul className="list-disc space-y-1 pl-5">
-              <li>판매는 미수금, 구매는 미지급금 발생 원장을 누적합니다.</li>
-              <li>쇼핑몰 속성 거래처는 두 리스트에서 제외합니다.</li>
-              <li>회계/비용 업로드 금액은 입력창에 후보로 자동 반영하고, 저장 버튼을 눌러야 잔액 차감이 확정됩니다.</li>
-              <li>잔액이 0이면 리스트에서 제거되고, 새 거래가 발생하면 다시 자동 추가됩니다.</li>
-            </ul>
+          <div className="max-h-[62vh] overflow-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">거래처</th>
+                  <th className="px-3 py-2 text-right">건수</th>
+                  <th className="px-3 py-2 text-right">수량</th>
+                  <th className="px-3 py-2 text-right">거래금액</th>
+                  <th className="px-3 py-2 text-right">{partnerBalanceMode === "sales" ? "미수금" : "미지급"}</th>
+                  <th className="px-3 py-2 text-left">최근일자</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partnerBalanceRows.length ? partnerBalanceRows.map((row) => (
+                  <tr key={row.customer} className="border-b border-slate-100">
+                    <td className="px-3 py-2 font-black text-slate-800">{row.customer}</td>
+                    <td className="px-3 py-2 text-right font-bold">{row.count.toLocaleString("ko-KR")}</td>
+                    <td className="px-3 py-2 text-right font-bold">{row.qty.toLocaleString("ko-KR")}</td>
+                    <td className="px-3 py-2 text-right font-bold">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
+                    <td className="px-3 py-2 text-right font-black text-orange-600">{Math.round(row.balance).toLocaleString("ko-KR")}</td>
+                    <td className="px-3 py-2 text-slate-500">{row.latest || "-"}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={6} className="px-3 py-8 text-center font-bold text-slate-400">표시할 잔액이 없습니다.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </FormModal>
       )}
@@ -17047,17 +17139,18 @@ function SalesInventoryTable({
       </tr>`).join("");
     const blankRows = Array.from({ length: Math.max(0, 12 - Math.min(12, lines.length)) }, () => `<tr class="blank"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
     const seal = company.seal_image_url ? `<img class="seal" src="${htmlEscape(company.seal_image_url)}" onerror="this.style.display='none'">` : "";
+    const companyPhone = company.phone === "031-7675-455" ? "031-767-5455" : company.phone;
     return `<section class="page ${pageNumber === 1 ? "active" : ""}" data-page="${pageNumber}">
       <div class="statement-head">
         <h1>거래명세서</h1>
         <div class="receiver">
           <div>${htmlEscape(entryRowCustomer(row, mode))} 貴 中</div>
-          <div>${htmlEscape(company.business_no)}</div>
+          <div></div>
           <div>날짜 : ${htmlEscape(entryDateFilterKey(entryRowDate(row)))}</div>
         </div>
         <table class="supplier"><tbody>
-          <tr><th rowspan="4" class="vertical">공<br>급<br>자</th><th>일련번호</th><td>${htmlEscape(entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), pageNumber))}</td><th>TEL</th><td>${htmlEscape(company.phone)}</td></tr>
-          <tr><th>사업자번호</th><td>${htmlEscape(company.business_no)}</td><th>성명</th><td class="seal-cell">${htmlEscape(company.representative_name)}${seal}</td></tr>
+          <tr><th rowspan="4" class="vertical">공<br>급<br>자</th><th>일련번호</th><td>${htmlEscape(entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), pageNumber))}</td><th>TEL</th><td>${htmlEscape(companyPhone)}</td></tr>
+          <tr><th>사업자번호</th><td>${htmlEscape(company.business_no)}</td><th>성명</th><td class="seal-cell"><span class="rep-name">${htmlEscape(company.representative_name)}</span>${seal}</td></tr>
           <tr><th>상호</th><td colspan="3">${htmlEscape(company.company_name)}</td></tr>
           <tr><th>주소</th><td colspan="3">${htmlEscape(company.address)}</td></tr>
         </tbody></table>
@@ -17067,7 +17160,6 @@ function SalesInventoryTable({
         <tr class="total"><th colspan="2">종합계</th><th class="num">${totalQty.toLocaleString("ko-KR")}</th><th></th><th class="num">${roundedTotal.toLocaleString("ko-KR")}</th><th></th><th></th></tr>${blankRows}
       </tbody></table>
       <table class="sum"><tbody><tr><th>수량</th><td>${totalQty.toLocaleString("ko-KR")}</td><th>공급가액</th><td class="num">${supply.toLocaleString("ko-KR")}</td><th>VAT</th><td class="num">${vat.toLocaleString("ko-KR")}</td><th>합계</th><td class="num">${roundedTotal.toLocaleString("ko-KR")}</td><th>인수</th><td>인</td></tr><tr><th>전잔액</th><td colspan="4">전잔:</td><td colspan="5"></td></tr></tbody></table>
-      <div class="watermark">수신자확인 건</div>
       <div class="page-count">[${pageNumber}/${totalPages}]</div>
     </section>`;
   }
@@ -17088,14 +17180,13 @@ function SalesInventoryTable({
       .supplier{width:100%;border-collapse:collapse;font-size:12px}
       .supplier th,.supplier td{border:1px solid #111;padding:3px 5px;text-align:center;height:9mm}
       .supplier .vertical{width:8mm;font-size:14px;font-weight:900;line-height:1.5}
-      .seal-cell{position:relative}.seal{position:absolute;right:3px;top:-8px;width:25mm;height:25mm;object-fit:contain;opacity:.78}
+      .seal-cell{position:relative}.rep-name{position:relative;z-index:1;display:inline-block;min-width:20mm}.seal{position:absolute;right:-2px;top:1mm;width:12mm;height:12mm;object-fit:contain;opacity:.78}
       .amount-box{display:flex;justify-content:space-between;align-items:center;border:2px solid #111;margin:3mm 0 2.5mm;padding:2mm 6mm;font-size:18px;font-weight:900}
       .items,.sum{width:100%;border-collapse:collapse;font-size:12px}.items{height:78mm}
       .items th,.items td,.sum th,.sum td{border:1px solid #8c8c8c;padding:2px 4px;text-align:center}
       .items th,.sum th{background:#f5f5f5}.items td{height:7mm}.left{text-align:left}.num{text-align:right}
       .items .total th,.items .total td{background:#f4f4f4;font-weight:900}
       .sum{margin-top:3mm}.sum td,.sum th{height:8mm}
-      .watermark{position:absolute;left:58mm;top:112mm;color:rgba(0,0,0,.32);font-size:28px;letter-spacing:10px;pointer-events:none}
       .toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}
       .toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}
       .pager{min-width:64px;text-align:center;font-weight:800}.page-count{margin-top:4mm;text-align:right;font-size:12px;font-weight:700}
