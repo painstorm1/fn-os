@@ -10585,7 +10585,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function statementHtml(vouchers){
         function sealHtml(className){
           const url = companyInfo.seal_image_url || "${FN_SEAL_FALLBACK_URL}";
-          return url ? "<img class='"+className+"' src='"+esc(url)+"' onerror=\"this.style.display='none'\">" : "";
+          return url ? "<img class='"+className+"' src='"+esc(url)+"'>" : "";
         }
         function koreanAmount(value){
           const units = ["","만","억","조"];
