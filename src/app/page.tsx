@@ -23227,6 +23227,13 @@ function AccountingRightPanel() {
     map.set(key, [...(map.get(key) || []), row]);
     return map;
   }, new Map<string, Array<Record<string, unknown>>>());
+  function upcomingFixedCostTitle(row: Record<string, unknown>) {
+    const category = String(row.category_middle || row.category_large || (String(row.row_type || "") === "loan" ? "대출 원리금" : "고정비")).trim();
+    const title = String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-").replace(/^\[[^\]]+\]\s*/, "").trim();
+    if (!category) return title || "-";
+    if (!title || title === "-" || title === category) return `[${category}]`;
+    return `[${category}] ${title}`;
+  }
 
   function cardSettlementFor(namePattern: RegExp) {
     const matches = settlements
@@ -23314,9 +23321,7 @@ function AccountingRightPanel() {
                 <div className="mt-1 space-y-1">
                   {rows.map((row, index) => (
                     (() => {
-                      const category = String(row.category_middle || row.category_large || "");
-                      const title = String(row.title || row.display_title || "-");
-                      const label = category && !title.includes(`[${category}]`) && !title.includes(category) ? `[${category}] ${title}` : title;
+                      const label = upcomingFixedCostTitle(row);
                       return (
                         <div key={`${String(row.fixed_cost_id || row.id)}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 text-[13px]">
                           <div className="min-w-0">
