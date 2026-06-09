@@ -1669,7 +1669,6 @@ type FnBankAccount = {
   account_number?: string;
   password_hint?: string;
   display_alias?: string;
-  source_aliases?: string[] | string;
   list_enabled?: boolean;
   memo?: string;
   sort_order?: number | string;
@@ -1690,7 +1689,6 @@ type FnCardAccount = {
   card_limit?: number | string;
   withdrawal_account_name?: string;
   display_alias?: string;
-  source_aliases?: string[] | string;
   list_enabled?: boolean;
   physical_owner?: string;
   memo?: string;
@@ -19194,19 +19192,16 @@ function accountingSummaryEndpoint(scope: AccountingSummaryScope) {
   return `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=${scope}`;
 }
 
-function normalizeAccountSourceAliases(value: unknown) {
-  const values = Array.isArray(value)
-    ? value
-    : String(value || "").split(/[\n,]/);
-  return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean)));
-}
-
-function accountSourceAliasesInput(value: unknown) {
-  return normalizeAccountSourceAliases(value).join("\n");
-}
-
 function accountDisplayAlias(value: unknown) {
   return String(value || "").trim().slice(0, 3);
+}
+
+function defaultAccountDisplayAlias(value: unknown, mode: "bank" | "card") {
+  const text = String(value || "").trim();
+  const withoutSuffix = mode === "bank"
+    ? text.replace(/은행.*$/, "").replace(/통장.*$/, "").trim()
+    : text.replace(/카드.*$/, "").trim();
+  return accountDisplayAlias(withoutSuffix || text);
 }
 
 function accountingAccountDisplayLabel(row: Record<string, unknown>, mode: "bank" | "card") {
@@ -19230,11 +19225,6 @@ function accountingAccountOptionValue(row: Record<string, unknown>, mode: "bank"
   return String(mode === "bank" ? row.account_name || row.bank_name || row.source_name || "" : row.card_name || row.source_name || "");
 }
 
-function accountingAccountSourceAliases(row: Record<string, unknown>) {
-  const raw = row.source_aliases || row.sourceAliases;
-  return Array.isArray(raw) ? raw.map((item) => String(item || "").trim()).filter(Boolean) : String(raw || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
-}
-
 function accountingAccountMatchesSource(row: Record<string, unknown>, sourceName: unknown, mode: "bank" | "card") {
   const target = String(sourceName || "").trim().toLowerCase().replace(/\s+/g, "");
   if (!target) return false;
@@ -19242,7 +19232,6 @@ function accountingAccountMatchesSource(row: Record<string, unknown>, sourceName
     accountingAccountOptionValue(row, mode),
     mode === "bank" ? row.bank_name : row.card_name,
     row.source_name,
-    ...accountingAccountSourceAliases(row),
   ];
   return names.some((name) => {
     const candidate = String(name || "").trim().toLowerCase().replace(/\s+/g, "");
@@ -23097,7 +23086,7 @@ function AccountFileModal({
 }
 
 function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
-  const emptyDraft: FnBankAccount = { id: "", account_type: "business", bank_name: "", account_holder: "", account_number: "", password_hint: "", display_alias: "", source_aliases: [], list_enabled: true, memo: "", sort_order: 0 };
+  const emptyDraft: FnBankAccount = { id: "", account_type: "business", bank_name: "", account_holder: "", account_number: "", password_hint: "", display_alias: "", list_enabled: true, memo: "", sort_order: 0 };
   const [accounts, setAccounts] = useState<FnBankAccount[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23209,7 +23198,16 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }, [fileAccount, modalOpen, rowKeys, secretView, selectedKeys]);
 
   function updateDraft(key: keyof FnBankAccount, value: string | boolean) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "bank_name" && next.list_enabled !== false && !prev.display_alias) next.display_alias = defaultAccountDisplayAlias(value, "bank");
+      if (key === "list_enabled") {
+        if (value === true && !next.display_alias) next.display_alias = defaultAccountDisplayAlias(next.bank_name, "bank");
+        if (value === false) next.display_alias = "";
+      }
+      if (key === "display_alias") next.display_alias = accountDisplayAlias(value);
+      return next;
+    });
   }
 
   function openNew() {
@@ -23218,7 +23216,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }
 
   function openEdit(account: FnBankAccount) {
-    setDraft({ ...emptyDraft, ...account, account_type: account.account_type || "business", display_alias: accountDisplayAlias(account.display_alias), source_aliases: normalizeAccountSourceAliases(account.source_aliases), list_enabled: account.list_enabled !== false });
+    setDraft({ ...emptyDraft, ...account, account_type: account.account_type || "business", display_alias: account.list_enabled === false ? "" : accountDisplayAlias(account.display_alias), list_enabled: account.list_enabled !== false });
     setModalOpen(true);
   }
 
@@ -23269,8 +23267,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       account_holder: String(draft.account_holder || "").trim(),
       account_number: String(draft.account_number || "").trim(),
       password_hint: String(draft.password_hint || "").trim(),
-      display_alias: accountDisplayAlias(draft.display_alias),
-      source_aliases: normalizeAccountSourceAliases(draft.source_aliases),
+      display_alias: draft.list_enabled === false ? "" : accountDisplayAlias(draft.display_alias),
     };
     if (!payload.account_type || !payload.bank_name || !payload.account_holder || !payload.account_number || !payload.password_hint) {
       window.alert("메모를 제외한 모든 항목은 필수입니다.");
@@ -23278,6 +23275,10 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     if (String(draft.display_alias || "").trim().length > 3) {
       window.alert("별명은 3글자 이내로 입력해 주세요.");
+      return;
+    }
+    if (payload.list_enabled !== false && !payload.display_alias) {
+      window.alert("리스트 반영 통장은 별명을 입력해 주세요.");
       return;
     }
     const res = await fetch(FN_BANK_ACCOUNTS_ENDPOINT, {
@@ -23346,7 +23347,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const filteredAccounts = accounts.filter((account) => {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return `${account.bank_name || ""} ${account.display_alias || ""} ${accountSourceAliasesInput(account.source_aliases)} ${account.account_holder || ""} ${account.account_number || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+    return `${account.bank_name || ""} ${account.display_alias || ""} ${account.account_holder || ""} ${account.account_number || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -23361,12 +23362,12 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
             <ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
-          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 별명 / 원본명 / 계좌번호 검색" />
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 별명 / 계좌번호 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1180px] table-fixed text-sm">
+          <table className="w-full min-w-[1060px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
-              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-20 py-2 text-left">별명</th><th className="w-24 py-2 text-center">속성</th><th className="w-40 py-2 text-left">예금주</th><th className="w-52 py-2 text-left">계좌번호</th><th className="w-52 py-2 text-left">회계 원본명</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
+              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-20 py-2 text-left">별명</th><th className="w-24 py-2 text-center">속성</th><th className="w-40 py-2 text-left">예금주</th><th className="w-52 py-2 text-left">계좌번호</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
             </thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
@@ -23412,7 +23413,6 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                         </span>
                       </div>
                     </td>
-                    <td className="truncate py-2 text-slate-500" title={accountSourceAliasesInput(account.source_aliases)}>{normalizeAccountSourceAliases(account.source_aliases).join(", ") || "-"}</td>
                     <td className="py-2" onClick={(event) => event.stopPropagation()}>
                       <FolderAttachmentButton count={fileCounts[key]} title="통장 첨부파일" onClick={() => setFileAccount(account)} />
                     </td>
@@ -23438,9 +23438,8 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="예금주" required><input className={modalInputClass} value={draft.account_holder || ""} onChange={(event) => updateDraft("account_holder", event.target.value)} /></FormField>
               <FormField label="계좌번호" required><input className={modalInputClass} value={draft.account_number || ""} onChange={(event) => updateDraft("account_number", event.target.value)} /></FormField>
               <FormField label="비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.password_hint || ""} onChange={(event) => updateDraft("password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "통장 비밀번호", label: "비밀번호", value: String(draft.password_hint || "") })}>보기</ActionButton></div></FormField>
-              <FormField label="별명"><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value.slice(0, 3))} placeholder="3글자 이내" maxLength={3} /></FormField>
               <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
-              <FormField label="회계 원본명 별칭" className="md:col-span-2"><textarea className={modalTextareaClass} value={accountSourceAliasesInput(draft.source_aliases)} onChange={(event) => updateDraft("source_aliases", event.target.value)} placeholder={"기업은행\nIBK\n기업통장"} /></FormField>
+              {draft.list_enabled !== false && <FormField label="별명" required><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value)} placeholder="3글자 이내" maxLength={3} /></FormField>}
               <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
             </div>
           </div>
@@ -23453,7 +23452,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 }
 
 function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
-  const emptyDraft: FnCardAccount = { id: "", card_type: "business", card_name: "", card_number: "", expiry_date: "", cvc_hint: "", secure_message: "", payment_password_hint: "", cutoff_start_day: "", cutoff_end_day: "", payment_day: "", card_limit: "", display_alias: "", source_aliases: [], list_enabled: true, physical_owner: "", memo: "", sort_order: 0 };
+  const emptyDraft: FnCardAccount = { id: "", card_type: "business", card_name: "", card_number: "", expiry_date: "", cvc_hint: "", secure_message: "", payment_password_hint: "", cutoff_start_day: "", cutoff_end_day: "", payment_day: "", card_limit: "", display_alias: "", list_enabled: true, physical_owner: "", memo: "", sort_order: 0 };
   const [accounts, setAccounts] = useState<FnCardAccount[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23558,7 +23557,16 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }, [fileAccount, modalOpen, rowKeys, secretView, selectedKeys]);
 
   function updateDraft(key: keyof FnCardAccount, value: string | boolean) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "card_name" && next.list_enabled !== false && !prev.display_alias) next.display_alias = defaultAccountDisplayAlias(value, "card");
+      if (key === "list_enabled") {
+        if (value === true && !next.display_alias) next.display_alias = defaultAccountDisplayAlias(next.card_name, "card");
+        if (value === false) next.display_alias = "";
+      }
+      if (key === "display_alias") next.display_alias = accountDisplayAlias(value);
+      return next;
+    });
   }
 
   function openNew() {
@@ -23574,8 +23582,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       card_type: account.card_type || "business",
       card_number: formatCardNumber(account.card_number),
       expiry_date: formatCardExpiryInput(account.expiry_date),
-      display_alias: accountDisplayAlias(account.display_alias),
-      source_aliases: normalizeAccountSourceAliases(account.source_aliases),
+      display_alias: account.list_enabled === false ? "" : accountDisplayAlias(account.display_alias),
       list_enabled: account.list_enabled !== false,
       card_limit: formatCommaNumber(account.card_limit),
     });
@@ -23637,8 +23644,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       cutoff_end_day: billingPeriod.end,
       payment_day: onlyDigits(draft.payment_day).slice(0, 2),
       card_limit: onlyDigits(draft.card_limit),
-      display_alias: accountDisplayAlias(draft.display_alias),
-      source_aliases: normalizeAccountSourceAliases(draft.source_aliases),
+      display_alias: draft.list_enabled === false ? "" : accountDisplayAlias(draft.display_alias),
     };
     if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
       window.alert("해외안심 결제 개인 확인 메세지, 결제 비밀번호, 실물 소유자, 메모를 제외한 항목은 필수입니다.");
@@ -23650,6 +23656,10 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     if (String(draft.display_alias || "").trim().length > 3) {
       window.alert("별명은 3글자 이내로 입력해 주세요.");
+      return;
+    }
+    if (payload.list_enabled !== false && !payload.display_alias) {
+      window.alert("리스트 반영 카드는 별명을 입력해 주세요.");
       return;
     }
     const res = await fetch(FN_CARD_ACCOUNTS_ENDPOINT, { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -23685,7 +23695,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const filteredAccounts = accounts.filter((account) => {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return `${account.card_name || ""} ${account.display_alias || ""} ${accountSourceAliasesInput(account.source_aliases)} ${account.card_number || ""} ${account.physical_owner || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+    return `${account.card_name || ""} ${account.display_alias || ""} ${account.card_number || ""} ${account.physical_owner || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -23693,11 +23703,11 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       <Panel title="카드관리" subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체카드</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">카드수 {accounts.length.toLocaleString("ko-KR")}개</span></div>} action={<ActionButton type="button" onClick={openNew}>F2 새 카드</ActionButton>}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2"><ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton><span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span></div>
-          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 별명 / 원본명 / 소유자 검색" />
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 별명 / 소유자 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1500px] table-fixed text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-20 py-2 text-left">별명</th><th className="w-52 py-2 text-left">카드번호</th><th className="w-40 py-2 text-left">유효기간/CVC</th><th className="w-32 py-2 text-left">기간</th><th className="w-28 py-2 text-left">결제일</th><th className="w-32 py-2 text-left">소유자</th><th className="w-52 py-2 text-left">회계 원본명</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr></thead>
+          <table className="w-full min-w-[1320px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-20 py-2 text-left">별명</th><th className="w-52 py-2 text-left">카드번호</th><th className="w-40 py-2 text-left">유효기간/CVC</th><th className="w-32 py-2 text-left">기간</th><th className="w-28 py-2 text-left">결제일</th><th className="w-32 py-2 text-left">소유자</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr></thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
                 const key = String(account.id || "");
@@ -23725,7 +23735,6 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                     <td className="truncate py-2 font-bold text-slate-700">{formatCardPeriod(account.cutoff_start_day, account.cutoff_end_day)}</td>
                     <td className="truncate py-2 font-bold text-slate-700">{formatMonthlyDay(account.payment_day)}</td>
                     <td className="truncate py-2 font-bold">{account.physical_owner || "-"}</td>
-                    <td className="truncate py-2 text-slate-500" title={accountSourceAliasesInput(account.source_aliases)}>{normalizeAccountSourceAliases(account.source_aliases).join(", ") || "-"}</td>
                     <td className="py-2" onClick={(event) => event.stopPropagation()}>
                       <FolderAttachmentButton count={fileCounts[key]} title="카드 첨부파일" onClick={() => setFileAccount(account)} />
                     </td>
@@ -23749,20 +23758,17 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="유효기간" required><input className={modalInputClass} inputMode="numeric" value={draft.expiry_date || ""} onChange={(event) => updateDraft("expiry_date", formatCardExpiryInput(event.target.value))} placeholder="10/28" maxLength={5} /></FormField>
               <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
             </div>
-            <div className="grid gap-4 md:grid-cols-[180px_1fr]">
-              <FormField label="별명"><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value.slice(0, 3))} placeholder="3글자 이내" maxLength={3} /></FormField>
-              <FormField label="회계 원본명 별칭"><textarea className={modalTextareaClass} value={accountSourceAliasesInput(draft.source_aliases)} onChange={(event) => updateDraft("source_aliases", event.target.value)} placeholder={"국민카드 1\n가온글로벌\nKB카드출금"} /></FormField>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 xl:grid-cols-[4fr_4fr_2fr]">
               <FormField label="해외안심 결제 개인 확인 메세지"><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
               <FormField label="결제 비밀번호"><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.payment_password_hint || ""} onChange={(event) => updateDraft("payment_password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "카드 결제 비밀번호", label: "결제 비밀번호", value: String(draft.payment_password_hint || "") })}>보기</ActionButton></div></FormField>
+              <FormField label="실물 소유자"><input className={modalInputClass} value={draft.physical_owner || ""} onChange={(event) => updateDraft("physical_owner", event.target.value)} /></FormField>
             </div>
             <div className="grid gap-4 xl:grid-cols-[1.1fr_0.7fr_1fr_0.9fr_1fr]">
               <FormField label="결제 기준기간" required><input className={`${modalInputClass} text-center font-mono`} inputMode="numeric" value={billingPeriodDraft} onChange={(event) => setBillingPeriodDraft(formatBillingPeriodInput(event.target.value))} placeholder="  일-  일" maxLength={7} /></FormField>
               <FormField label="결제일" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={draft.payment_day || ""} onChange={(event) => updateDraft("payment_day", onlyDigits(event.target.value).slice(0, 2))} placeholder="5" /></FormField>
               <FormField label="한도" required><input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(draft.card_limit)} onChange={(event) => updateDraft("card_limit", formatCommaNumber(event.target.value))} /></FormField>
               <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
-              <FormField label="실물 소유자"><input className={modalInputClass} value={draft.physical_owner || ""} onChange={(event) => updateDraft("physical_owner", event.target.value)} /></FormField>
+              {draft.list_enabled !== false ? <FormField label="별명" required><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value)} placeholder="3글자 이내" maxLength={3} /></FormField> : <div />}
             </div>
             <div>
               <FormField label="메모"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>

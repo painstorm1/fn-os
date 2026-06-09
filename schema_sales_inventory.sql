@@ -899,7 +899,6 @@ create table if not exists accounting_bank_accounts (
   account_number text,
   password_hint text,
   display_alias text,
-  source_aliases jsonb default '[]'::jsonb,
   list_enabled boolean default true,
   memo text,
   is_active boolean default true,
@@ -924,7 +923,6 @@ create table if not exists accounting_card_accounts (
   card_limit numeric,
   withdrawal_account_name text,
   display_alias text,
-  source_aliases jsonb default '[]'::jsonb,
   list_enabled boolean default true,
   physical_owner text,
   memo text,
@@ -935,9 +933,7 @@ create table if not exists accounting_card_accounts (
 );
 
 alter table accounting_bank_accounts add column if not exists display_alias text;
-alter table accounting_bank_accounts add column if not exists source_aliases jsonb default '[]'::jsonb;
 alter table accounting_card_accounts add column if not exists display_alias text;
-alter table accounting_card_accounts add column if not exists source_aliases jsonb default '[]'::jsonb;
 
 create table if not exists accounting_loans (
   id uuid primary key default gen_random_uuid(),

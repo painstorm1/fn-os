@@ -9,15 +9,6 @@ type AccountingSourceAccountContext = {
   cardAccounts?: RawRow[];
 };
 
-export function normalizeAccountingSourceAliases(value: unknown) {
-  const values = Array.isArray(value)
-    ? value
-    : text(value)
-      .split(/[\n,]/)
-      .map((item) => item.trim());
-  return Array.from(new Set(values.map((item) => text(item)).filter(Boolean)));
-}
-
 export function accountingAccountDisplayName(row: RawRow, mode: "bank" | "card") {
   const alias = text(row.display_alias || row.displayAlias);
   if (alias) return alias;
@@ -31,7 +22,6 @@ export function findAccountingSourceAccount(sourceName: unknown, accounts: RawRo
     const names = [
       mode === "bank" ? account.bank_name : account.card_name,
       account.source_name,
-      ...normalizeAccountingSourceAliases(account.source_aliases || account.sourceAliases),
     ];
     return names.some((name) => {
       const candidate = matchText(name);
@@ -1099,7 +1089,6 @@ function cleanBankAccountPayload(row: RawRow) {
     account_number: text(row.account_number || row.accountNumber) || null,
     password_hint: text(row.password_hint || row.passwordHint) || null,
     display_alias: text(row.display_alias || row.displayAlias) || null,
-    source_aliases: normalizeAccountingSourceAliases(row.source_aliases || row.sourceAliases),
     list_enabled: row.list_enabled ?? row.listEnabled ?? true,
     memo: text(row.memo) || null,
     is_active: row.is_active ?? row.isActive ?? true,
@@ -1154,7 +1143,6 @@ function cleanCardAccountPayload(row: RawRow) {
     card_limit: numberValue(row.card_limit ?? row.cardLimit) || null,
     withdrawal_account_name: text(row.withdrawal_account_name || row.withdrawalAccountName) || null,
     display_alias: text(row.display_alias || row.displayAlias) || null,
-    source_aliases: normalizeAccountingSourceAliases(row.source_aliases || row.sourceAliases),
     list_enabled: row.list_enabled ?? row.listEnabled ?? true,
     physical_owner: text(row.physical_owner || row.physicalOwner) || null,
     memo: text(row.memo) || null,
