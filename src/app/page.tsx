@@ -8371,13 +8371,13 @@ function entryRowMemo(row: Record<string, unknown>) {
 }
 
 function returnExchangeKind(row: Record<string, unknown>): ReturnExchangeKind {
-  const value = String(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || "").toLowerCase();
-  return value.includes("exchange") || value.includes("??") ? "exchange_out" : "return_in";
+  const value = String(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || row.source_ref_id || "").toLowerCase();
+  return value.includes("exchange") || value.includes("교환") ? "exchange_out" : "return_in";
 }
 
 function returnExchangeLabel(row: Record<string, unknown> | ReturnExchangeKind) {
   const kind = typeof row === "string" ? row : returnExchangeKind(row);
-  return kind === "exchange_out" ? "????" : "????";
+  return kind === "exchange_out" ? "교환출고" : "반품입고";
 }
 
 function historyEntryMode(mode: SalesHistoryMode): SalesPurchaseMode {
