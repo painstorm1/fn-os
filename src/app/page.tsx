@@ -19341,10 +19341,19 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   async function saveLoan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const method = loanDraft.id ? "PATCH" : "POST";
+    const isPrincipalInterest = loanDraft.loan_type === "principal_interest";
+    const expectedPrincipal = isPrincipalInterest ? asNumber(loanDraft.expected_principal_amount) : 0;
+    const expectedInterest = asNumber(loanDraft.expected_interest_amount || loanDraft.expected_payment_amount);
+    const expectedPayment = isPrincipalInterest ? expectedPrincipal + expectedInterest : expectedInterest;
     const res = await fetch("/api/accounting/ledger/loans", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(loanDraft),
+      body: JSON.stringify({
+        ...loanDraft,
+        expected_principal_amount: String(expectedPrincipal),
+        expected_interest_amount: String(expectedInterest),
+        expected_payment_amount: String(expectedPayment),
+      }),
     });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
@@ -19566,6 +19575,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const fixedCostRowKey = (row: Record<string, unknown>) => `${String(row.row_type || "fixed")}:${String(row.id || row.fixed_cost_id || row.loan_id || row.title || row.loan_name || "")}`;
   const fixedCostRowTitle = (row: Record<string, unknown>) => String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-");
   const fixedCostRowAmount = (row: Record<string, unknown>) => asNumber(row.amount || row.last_actual_amount || row.expected_amount || row.expected_payment_amount);
+  const normalizeLoanType = (value: unknown) => /interest_only|이자/.test(String(value || "")) ? "interest_only" : "principal_interest";
   const fixedCostCategoryLargeOptions = Array.from(new Set(categories.map((row) => String(row.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
   const fixedCostCategoryMiddleOptions = (large: string) => Array.from(new Set(categories
     .filter((row) => !large || String(row.category_large || "").trim() === large)
@@ -19802,7 +19812,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       setLoanDraft({
         id: String(row.loan_id || row.id || ""),
         loan_name: String(row.loan_name || row.title || ""),
-        loan_type: String(row.loan_type || "principal_interest"),
+        loan_type: normalizeLoanType(row.loan_type),
         category_large: String(row.category_large || "금융비용"),
         category_middle: String(row.category_middle || "대출 원리금"),
         principal_amount: String(row.principal_amount || ""),
@@ -19994,6 +20004,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + endDate.getMonth() - startDate.getMonth() + 1;
     return Math.max(0, months);
   }
+
+  const loanExpectedPrincipal = loanDraft.loan_type === "principal_interest" ? asNumber(loanDraft.expected_principal_amount) : 0;
+  const loanExpectedInterest = asNumber(loanDraft.expected_interest_amount || loanDraft.expected_payment_amount);
+  const loanExpectedPaymentTotal = loanExpectedPrincipal + loanExpectedInterest;
 
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
@@ -20709,7 +20723,20 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           ) : (
             <form id="accounting-loan-form" onSubmit={saveLoan} className="grid gap-3 md:grid-cols-2">
               <FormField label="납입 방식" required>
-                <select className={modalSelectClass} value={loanDraft.loan_type} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_type: event.target.value }))}>
+                <select
+                  className={modalSelectClass}
+                  value={loanDraft.loan_type}
+                  onChange={(event) => setLoanDraft((prev) => {
+                    const nextType = event.target.value;
+                    const carriedPayment = asNumber(prev.expected_payment_amount);
+                    return {
+                      ...prev,
+                      loan_type: nextType,
+                      expected_principal_amount: nextType === "principal_interest" ? prev.expected_principal_amount : "0",
+                      expected_interest_amount: prev.expected_interest_amount || (nextType === "interest_only" ? String(carriedPayment) : ""),
+                    };
+                  })}
+                >
                   <option value="principal_interest">원리금상환</option>
                   <option value="interest_only">이자납입</option>
                 </select>
@@ -20730,9 +20757,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <FormField label="대출금액" required>
                 <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, principal_amount: String(asNumber(event.target.value)) }))} />
               </FormField>
-              <FormField label="예상 납입액" required>
-                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_payment_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_payment_amount: String(asNumber(event.target.value)) }))} />
-              </FormField>
+              {loanDraft.loan_type === "principal_interest" ? (
+                <>
+                  <FormField label="예상 원금" required>
+                    <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_principal_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_principal_amount: String(asNumber(event.target.value)) }))} />
+                  </FormField>
+                  <FormField label="예상 이자" required>
+                    <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_interest_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_interest_amount: String(asNumber(event.target.value)) }))} />
+                  </FormField>
+                  <FormField label="예상 납입액">
+                    <div className="flex h-11 items-center justify-end rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-900">{krw(loanExpectedPaymentTotal)}</div>
+                  </FormField>
+                </>
+              ) : (
+                <FormField label="예상 이자 납입액" required>
+                  <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(loanDraft.expected_interest_amount || loanDraft.expected_payment_amount)} onChange={(event) => setLoanDraft((prev) => ({ ...prev, expected_interest_amount: String(asNumber(event.target.value)), expected_payment_amount: String(asNumber(event.target.value)) }))} />
+                </FormField>
+              )}
               <FormField label="은행" required>
                 <input className={modalInputClass} value={loanDraft.bank_name} onChange={(event) => setLoanDraft((prev) => ({ ...prev, bank_name: event.target.value }))} />
               </FormField>

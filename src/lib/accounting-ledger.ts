@@ -40,6 +40,12 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeLoanType(value: unknown) {
+  const raw = text(value);
+  if (/interest_only|이자/.test(raw)) return "interest_only";
+  return "principal_interest";
+}
+
 function isCardCancel(row: RawRow) {
   return text(row.source_type) === "card" && /취소|cancel/i.test(`${text(row.description)} ${text(row.merchant_name)} ${text(row.status)} ${text(row.raw_status)} ${text(row.memo)}`);
 }
@@ -657,6 +663,12 @@ export async function deactivateAccountingFixedCost(id: string) {
 
 
 function cleanLoanPayload(row: RawRow) {
+  const loanType = normalizeLoanType(row.loan_type || row.loanType);
+  const expectedPrincipal = loanType === "principal_interest" ? numberValue(row.expected_principal_amount ?? row.expectedPrincipalAmount) : 0;
+  const expectedInterest = numberValue(row.expected_interest_amount ?? row.expectedInterestAmount ?? (loanType === "interest_only" ? row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount : 0));
+  const expectedPayment = loanType === "principal_interest"
+    ? expectedPrincipal + expectedInterest
+    : expectedInterest || numberValue(row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount);
   return {
     loan_name: text(row.loan_name || row.loanName || row.name),
     principal_amount: numberValue(row.principal_amount ?? row.principalAmount),
@@ -668,10 +680,10 @@ function cleanLoanPayload(row: RawRow) {
     loan_start_date: isoDate(row.loan_start_date || row.loanStartDate) || null,
     loan_period_months: numberValue(row.loan_period_months ?? row.loanPeriodMonths) || null,
     payment_day: text(row.payment_day || row.paymentDay || row.base_day || row.baseDay),
-    loan_type: text(row.loan_type || row.loanType) || "principal_interest",
-    expected_principal_amount: numberValue(row.expected_principal_amount ?? row.expectedPrincipalAmount),
-    expected_interest_amount: numberValue(row.expected_interest_amount ?? row.expectedInterestAmount),
-    expected_payment_amount: numberValue(row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount),
+    loan_type: loanType,
+    expected_principal_amount: expectedPrincipal,
+    expected_interest_amount: expectedInterest,
+    expected_payment_amount: expectedPayment,
     payer_name: text(row.payer_name || row.payerName) || null,
     is_active: row.is_active ?? row.isActive ?? true,
     memo: text(row.memo) || null,
@@ -745,7 +757,7 @@ function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] 
     status: paid ? "paid" : daysUntil < 0 ? "overdue" : daysUntil <= 3 ? "upcoming" : "scheduled",
     memo: row.memo,
     row_type: "loan",
-    loan_type: row.loan_type,
+    loan_type: normalizeLoanType(row.loan_type),
     principal_amount: row.principal_amount,
     expected_principal_amount: row.expected_principal_amount,
     expected_interest_amount: row.expected_interest_amount,
@@ -1066,8 +1078,25 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     .sort((left, right) => text(left.due_date).localeCompare(text(right.due_date)))
     .slice(0, 30);
   const fixedCostDueAmount = upcomingFixedCosts.reduce((total, row) => total + numberValue(row.amount), 0);
+  const loanProfitAmountByTransactionId = new Map<string, number>();
+  for (const occurrence of loanOccurrences) {
+    const transactionId = text(occurrence.matched_transaction_id);
+    if (!transactionId) continue;
+    const totalAmount = numberValue(occurrence.last_actual_amount ?? occurrence.amount);
+    const expectedInterest = numberValue(occurrence.expected_interest_amount);
+    const expectedPrincipal = numberValue(occurrence.expected_principal_amount);
+    const profitAmount = text(occurrence.loan_type) === "principal_interest"
+      ? expectedInterest || Math.max(0, totalAmount - expectedPrincipal)
+      : totalAmount;
+    loanProfitAmountByTransactionId.set(transactionId, profitAmount);
+  }
+  const profitExpenseAmount = (row: RawRow) => {
+    const loanProfitAmount = loanProfitAmountByTransactionId.get(text(row.id));
+    if (loanProfitAmount !== undefined) return loanProfitAmount;
+    return signedAccountingAmount(row);
+  };
   const income = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false).reduce((total, row) => total + numberValue(row.amount_krw ?? row.amount), 0);
-  const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + signedAccountingAmount(row), 0);
+  const expense = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false).reduce((total, row) => total + profitExpenseAmount(row), 0);
   const cashIn = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.credit_amount), 0);
   const cashOut = filtered.filter((row) => row.source_type === "bank" && row.affects_cashflow !== false).reduce((total, row) => total + numberValue(row.debit_amount), 0);
   const pendingCard = settlements.filter((row) => row.paid !== true).reduce((total, row) => total + numberValue(row.domestic_amount), 0);
@@ -1086,8 +1115,9 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     const label = isoDate(row.transaction_date).slice(0, 7) || "미지정";
     const prev = map.get(label) || { label, income: 0, expense: 0, amount: 0, count: 0 };
     const amount = row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount);
+    const expenseAmount = profitExpenseAmount(row);
     if (row.direction === "income" && row.affects_profit !== false) prev.income += amount;
-    if (row.direction === "expense" && row.affects_profit !== false) prev.expense += amount;
+    if (row.direction === "expense" && row.affects_profit !== false) prev.expense += expenseAmount;
     prev.amount = prev.income - prev.expense;
     prev.count += 1;
     map.set(label, prev);
@@ -1132,8 +1162,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     by_category: categoryLarge,
     by_vendor: group((row) => text(row.merchant_name)),
     by_income_vendor: group((row) => text(row.merchant_name || row.source_name), incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
-    by_expense_category: group((row) => text(row.category_large), expenseRows),
-    by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows),
+    by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
+    by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
     by_card: group((row) => text(row.card_name || row.source_name)),
     by_month: byMonth,
     review_suggestions: reviewSuggestions,
