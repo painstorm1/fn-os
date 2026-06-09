@@ -8094,6 +8094,85 @@ type FnLocationInfo = {
   rent_amount: string;
   memo: string;
 };
+
+const FN_SETTINGS_COMPANY_STORAGE_KEY = "fnos-settings-company-info";
+const FN_SEAL_FALLBACK_URL = "/fn-seal-kim-jae-wook.png";
+const FN_DEFAULT_DOCUMENT_COMPANY: FnCompanyInfo = {
+  id: "head-office",
+  company_name: "에프엔",
+  business_no: "599-26-00311",
+  representative_name: "김재욱",
+  representative_birth: "1981-03-19",
+  opened_at: "2017-03-13",
+  phone: "031-767-5455",
+  fax: "031-321-1060",
+  postal_code: "",
+  road_address: "",
+  jibun_address: "",
+  detail_address: "",
+  address: "경기도 용인시 처인구 모현읍 초부리 29-22 (백옥대로2101번길 42-19)",
+  business_types: [""],
+  business_items: [""],
+  seal_image_url: "",
+  seal_image_name: "",
+  memo: "",
+};
+
+function htmlEscape(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch] || ch));
+}
+
+function safeInlineJson(value: unknown) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function normalizeFnDocumentCompany(value?: Partial<FnCompanyInfo> | null): FnCompanyInfo {
+  const next = { ...FN_DEFAULT_DOCUMENT_COMPANY, ...(value || {}) };
+  return {
+    ...next,
+    business_no: String(next.business_no || FN_DEFAULT_DOCUMENT_COMPANY.business_no),
+    representative_name: String(next.representative_name || FN_DEFAULT_DOCUMENT_COMPANY.representative_name),
+    phone: String(next.phone || FN_DEFAULT_DOCUMENT_COMPANY.phone),
+    fax: String(next.fax || FN_DEFAULT_DOCUMENT_COMPANY.fax),
+    address: composeFnSettingsAddress(next) || FN_DEFAULT_DOCUMENT_COMPANY.address,
+    seal_image_url: String(next.seal_image_url || FN_SEAL_FALLBACK_URL),
+  };
+}
+
+function getFnDocumentCompanyInfo() {
+  if (typeof window === "undefined") return normalizeFnDocumentCompany();
+  try {
+    return normalizeFnDocumentCompany(JSON.parse(window.localStorage.getItem(FN_SETTINGS_COMPANY_STORAGE_KEY) || "null") as Partial<FnCompanyInfo> | null);
+  } catch {
+    return normalizeFnDocumentCompany();
+  }
+}
+
+function amountToKoreanText(value: number) {
+  const units = ["", "만", "억", "조"];
+  const digits = ["", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"];
+  const smallUnits = ["", "십", "백", "천"];
+  const clean = Math.max(0, Math.round(Number(value) || 0));
+  if (!clean) return "영";
+  const groups = String(clean).replace(/\B(?=(\d{4})+(?!\d))/g, ",").split(",").map(Number);
+  return groups.map((group, groupIndex) => {
+    if (!group) return "";
+    const chars = String(group).padStart(4, "0").split("").map(Number);
+    const part = chars.map((num, index) => {
+      if (!num) return "";
+      const unitIndex = 3 - index;
+      return `${digits[num]}${smallUnits[unitIndex]}`;
+    }).join("");
+    const unit = units[groups.length - groupIndex - 1] || "";
+    return `${part}${unit}`;
+  }).filter(Boolean).join("");
+}
+
 type ProductSearchAttributeFilter = "plain" | "set" | "rg" | "import" | "all";
 const productSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter; label: string }> = [
   { value: "plain", label: "일반" },
@@ -9907,6 +9986,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       price: Number(product.standard_price || 0),
       bomCount: (product.bom || []).length,
     }))).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const companyInfoJson = safeInlineJson(getFnDocumentCompanyInfo());
     const today = entryDateToday();
     const thisMonth = today.slice(0, 7);
     const analysisDefaultFromMonth = addMonthsToDate(`${thisMonth}-01`, -2).slice(0, 7);
@@ -10013,6 +10093,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const products = ${productsJson};
       const warehouseOptions = ${warehouseOptionsJson};
       const customerOptions = ${customerOptionsJson};
+      const companyInfo = ${companyInfoJson};
       const fmt = new Intl.NumberFormat("ko-KR");
       const krw = (n) => fmt.format(Math.round(Number(n)||0)) + "원";
       const text = (v) => String(v ?? "").toLowerCase();
@@ -10276,21 +10357,57 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById("purchaseSide").innerHTML = "<div class='purchaseSideLabel'>최근입고</div><div class='purchaseSideDate'>"+esc(latest || "-")+"</div><div class='purchaseSideCycle'>평균 입고주기</div><div class='purchaseSideDays'>"+fmt.format(avgCycle)+"일</div>";
       }
       function statementHtml(vouchers){
+        function sealHtml(className){
+          const url = companyInfo.seal_image_url || "${FN_SEAL_FALLBACK_URL}";
+          return url ? "<img class='"+className+"' src='"+esc(url)+"' onerror=\"this.style.display='none'\">" : "";
+        }
+        function koreanAmount(value){
+          const units = ["","만","억","조"];
+          const digits = ["","일","이","삼","사","오","육","칠","팔","구"];
+          const small = ["","십","백","천"];
+          const clean = Math.max(0, Math.round(Number(value)||0));
+          if (!clean) return "영";
+          return String(clean).replace(/\\B(?=(\\d{4})+(?!\\d))/g,",").split(",").map(Number).map((group, groupIndex, groups) => {
+            if (!group) return "";
+            const part = String(group).padStart(4,"0").split("").map(Number).map((num,index) => num ? digits[num] + small[3-index] : "").join("");
+            return part + (units[groups.length - groupIndex - 1] || "");
+          }).filter(Boolean).join("");
+        }
         const pages = vouchers.map((voucher, index) => {
           const lines = Array.isArray(voucher.lines) ? voucher.lines : [];
-          const lineRows = lines.map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty||0)+"</td><td class='num'>"+krw(line.unitPrice||0)+"</td><td class='num'>"+krw(line.amount||0)+"</td><td>"+esc(line.memo||"")+"</td></tr>").join("");
-          return "<section class='page "+(index === 0 ? "active" : "")+"'><h1>거래명세서</h1><div class='top'><div class='customerBox'>"+esc(voucher.customer||"-")+" 귀중</div><table><tbody><tr><th>일자 NO</th><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><th>TEL</th><td></td></tr><tr><th>상호</th><td colspan='3'>에프엔</td></tr><tr><th>주소</th><td colspan='3'></td></tr></tbody></table></div><div class='amount'><span>금액</span><span>"+krw(voucher.amount||0)+"</span></div><table><thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가</th><th>합계</th><th>메모</th></tr></thead><tbody>"+lineRows+"<tr><th colspan='2'>종합계</th><th class='num'>"+fmt.format(voucher.qty||0)+"</th><th></th><th class='num'>"+krw(voucher.amount||0)+"</th><th></th></tr></tbody></table><div class='pageCount'>["+(index+1)+"/"+vouchers.length+"]</div></section>";
+          const totalAmount = Math.round(Number(voucher.amount || 0));
+          const supply = Math.round(totalAmount / 1.1);
+          const vat = totalAmount - supply;
+          const lineRows = lines.slice(0, 12).map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(Number(line.unitPrice||0)))+"</td><td class='num'>"+fmt.format(Math.round(Number(line.amount||0)))+"</td><td></td><td></td></tr>").join("");
+          const blankRows = Array.from({length: Math.max(0, 12 - Math.min(12, lines.length))}, () => "<tr class='blank'><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>").join("");
+          const balanceNote = "전잔액";
+          return "<section class='page "+(index === 0 ? "active" : "")+"'><div class='statementHead'><h1>거래명세서</h1><div class='receiver'><div>"+esc(voucher.customer||"-")+" 貴 中</div><div>"+esc(companyInfo.business_no||"")+"</div><div>날짜 : "+esc(String(voucher.date||"").replace(/-/g,""))+"</div></div><table class='supplier'><tbody><tr><th rowspan='4' class='vertical'>공<br>급<br>자</th><th>일련번호</th><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><th>TEL</th><td>"+esc(companyInfo.phone||"")+"</td></tr><tr><th>사업자번호</th><td>"+esc(companyInfo.business_no||"")+"</td><th>성명</th><td class='sealCell'>"+esc(companyInfo.representative_name||"")+sealHtml("seal")+"</td></tr><tr><th>상호</th><td colspan='3'>"+esc(companyInfo.company_name||"")+"</td></tr><tr><th>주소</th><td colspan='3'>"+esc(companyInfo.address||"")+"</td></tr></tbody></table></div><div class='amountBox'><span>금 액 : "+koreanAmount(totalAmount)+" 정</span><strong>(₩ "+fmt.format(totalAmount)+")</strong></div><table class='items'><thead><tr><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>합계</th><th>담당자</th><th>참조</th></tr></thead><tbody>"+lineRows+"<tr class='total'><th colspan='2'>종합계</th><th class='num'>"+fmt.format(voucher.qty||0)+"</th><th></th><th class='num'>"+fmt.format(totalAmount)+"</th><th></th><th></th></tr>"+blankRows+"</tbody></table><table class='sum'><tbody><tr><th>수량</th><td>"+fmt.format(voucher.qty||0)+"</td><th>공급가액</th><td class='num'>"+fmt.format(supply)+"</td><th>VAT</th><td class='num'>"+fmt.format(vat)+"</td><th>합계</th><td class='num'>"+fmt.format(totalAmount)+"</td><th>인수</th><td>인</td></tr><tr><th>전잔액</th><td colspan='4'>"+balanceNote+"</td><td colspan='5'></td></tr></tbody></table><div class='watermark'>수신자확인 건</div><div class='pageCount'>["+(index+1)+"/"+vouchers.length+"]</div></section>";
         }).join("");
-        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래명세서</title><style>body{font-family:Arial,'Malgun Gothic',sans-serif;margin:24px;color:#111}.page{width:760px;margin:0 auto;display:none}.page.active{display:block}h1{text-align:center;font-size:30px;margin:18px 0}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border:1px solid #111;padding:6px;text-align:center}.left{text-align:left}.num{text-align:right}.top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.customerBox{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}.amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}.toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}.pager{min-width:64px;text-align:center;font-weight:800}.pageCount{margin-top:10px;text-align:right;font-size:12px;font-weight:700}@media print{.toolbar{display:none}body{margin:0}.page{display:block;break-after:page;width:auto;margin:18mm}.page:last-of-type{break-after:auto}}</style></head><body>"+pages+"<div class='toolbar'><button id='prevPage' type='button'>◀</button><span id='pager' class='pager'>1/"+vouchers.length+"</span><button id='nextPage' type='button'>▶</button><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>const pages=Array.from(document.querySelectorAll('.page'));let current=0;function render(){pages.forEach((page,index)=>page.classList.toggle('active',index===current));document.getElementById('pager').textContent=(current+1)+'/'+pages.length;document.getElementById('prevPage').disabled=current===0;document.getElementById('nextPage').disabled=current>=pages.length-1;}document.getElementById('prevPage').onclick=()=>{current=Math.max(0,current-1);render();};document.getElementById('nextPage').onclick=()=>{current=Math.min(pages.length-1,current+1);render();};render();<\\/script></body></html>";
+        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래명세서</title><style>@page{size:A4 portrait;margin:14mm 12mm 12mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:186mm;min-height:265mm;margin:0 auto;display:none;padding-top:6mm}.page.active{display:block}h1{margin:0 0 9mm;text-align:center;font-size:28px;letter-spacing:0;font-weight:900}.statementHead{display:grid;grid-template-columns:82mm 1fr;gap:5mm;align-items:start}.receiver{border:1.5px solid #111;min-height:31mm;padding:5mm;text-align:center;font-size:14px;line-height:1.7}.supplier{font-size:12px}.supplier th,.supplier td{border:1px solid #111;padding:3px 5px;text-align:center;height:9mm}.supplier .vertical{width:8mm;font-size:14px;font-weight:900;line-height:1.5}.supplier .sealCell{position:relative}.seal{position:absolute;right:3px;top:-8px;width:25mm;height:25mm;object-fit:contain;opacity:.78}.amountBox{display:flex;justify-content:space-between;align-items:center;border:2px solid #111;margin:3mm 0 2.5mm;padding:2mm 6mm;font-size:18px;font-weight:900}.items{height:78mm}.items,.sum{width:100%;border-collapse:collapse;font-size:12px}.items th,.items td,.sum th,.sum td{border:1px solid #8c8c8c;padding:2px 4px;text-align:center}.items th{background:#f5f5f5}.items td{height:7mm}.items .left{text-align:left}.num{text-align:right}.items .total th,.items .total td{background:#f4f4f4;font-weight:900}.sum{margin-top:3mm}.sum th{background:#f4f4f4}.sum td,.sum th{height:8mm}.watermark{position:absolute;left:58mm;top:112mm;color:rgba(0,0,0,.32);font-size:28px;letter-spacing:10px;pointer-events:none}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}.toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}.pager{min-width:64px;text-align:center;font-weight:800}.pageCount{margin-top:4mm;text-align:right;font-size:12px;font-weight:700}@media print{.toolbar{display:none}.page{display:block;break-after:page;width:auto;min-height:auto;margin:0}.page:last-of-type{break-after:auto}}</style></head><body>"+pages+"<div class='toolbar'><button id='prevPage' type='button'>◀</button><span id='pager' class='pager'>1/"+vouchers.length+"</span><button id='nextPage' type='button'>▶</button><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>const pages=Array.from(document.querySelectorAll('.page'));let current=0;function render(){pages.forEach((page,index)=>page.classList.toggle('active',index===current));document.getElementById('pager').textContent=(current+1)+'/'+pages.length;document.getElementById('prevPage').disabled=current===0;document.getElementById('nextPage').disabled=current>=pages.length-1;}document.getElementById('prevPage').onclick=()=>{current=Math.max(0,current-1);render();};document.getElementById('nextPage').onclick=()=>{current=Math.min(pages.length-1,current+1);render();};render();<\\/script></body></html>";
       }
       function analysisScreenPdfHtml(){
-        const header = document.querySelector(".header")?.outerHTML || "";
-        const panel = document.querySelector(".panel")?.outerHTML || "";
-        const summary = document.querySelector(".summary")?.outerHTML || "";
-        const nav = document.getElementById("analysisNav")?.outerHTML || "";
-        const table = document.querySelector(".tableWrap")?.outerHTML || "";
-        const label = document.getElementById("navLabel")?.textContent || "거래 분석";
-        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래 분석 PDF</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif}.pdfPage{width:100%;min-height:190mm}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}.header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:8px}.title{font-size:22px;font-weight:900}.sub{margin-top:3px;color:#64748b;font-size:10px;font-weight:700}.panel{border:1px solid #dbe2ea;background:#fff;border-radius:8px;padding:8px;margin-bottom:8px}.topFilters,.filters{display:flex;align-items:center;gap:5px;flex-wrap:wrap}.field{height:26px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:0 6px;font-size:9px;font-weight:800;color:#0f172a}.btn{height:26px;border:0;border-radius:6px;background:#ff6a00;color:#fff;padding:0 8px;font-size:9px;font-weight:900}.filterSpacer{flex:1}.period{display:flex;gap:4px;align-items:center}.selectedBar{display:flex;flex-wrap:wrap;gap:4px}.chip,.emptySelection{display:inline-flex;border-radius:999px;background:#f1f5f9;padding:3px 7px;font-size:9px;font-weight:900}.summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.summaryCard{min-height:78px;border:1px solid #dbe2ea;border-radius:8px;padding:8px;display:grid;grid-template-columns:.8fr 1fr;gap:8px;box-shadow:none}.salesCard{background:#f0fbff}.purchaseCard{background:#fff1e8}.summaryTitle{font-size:22px;line-height:1;font-weight:900}.salesText{color:#147df5}.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:4px}.metricLabel{font-size:9px;font-weight:800;color:#334155}.metricValue,.totalLine,.scopeButton{font-size:12px;font-weight:900;color:#0f172a}.rankList,.purchaseSide{font-size:8px}.analysisNav{text-align:center;margin:4px 0 6px;font-size:10px;font-weight:900}.navTextButton{display:none}.navLabel:before{content:'" + label.replace(/[\\\\'<>]/g, "") + "'}.navLabel{font-size:0}.tableWrap{overflow:visible;border:1px solid #dbe2ea;border-radius:8px;background:#fff}table{width:100%;min-width:0!important;border-collapse:collapse;font-size:8px;table-layout:auto}th{position:static!important;background:#f8fafc;color:#475569;font-size:8px}th,td{border-bottom:1px solid #e5e7eb;padding:3px 4px;text-align:left;white-space:normal;word-break:keep-all}td.num,th.num{text-align:right}.badge{display:inline-flex;border-radius:999px;padding:1px 5px;font-size:7px;font-weight:900}.badge.sales{background:#e0f2fe;color:#0369a1}.badge.purchase{background:#ffedd5;color:#c2410c}.rowSales{background:#f8fcff;color:#075985}.rowPurchase{background:#fffaf0;color:#9a3412}.voucherRow td{font-weight:900}.voucherDetail td{background:#fbfdff}.groupRow td{background:#f1f5f9;font-weight:950}tr{break-inside:avoid;page-break-inside:avoid}@media print{.toolbar{display:none}.pdfPage{min-height:auto}.panel,.summary,.analysisNav,.tableWrap{break-inside:avoid-page}}</style></head><body><main class='pdfPage'>"+header+panel+summary+nav+table+"</main><div class='toolbar'><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\\/script></body></html>";
+        const groupLabel = document.getElementById("group").selectedOptions[0]?.textContent || "상세내역";
+        const typeLabel = document.getElementById("type").selectedOptions[0]?.textContent || "전체";
+        const range = currentDateRange();
+        const customerLabel = selected.customer.length === 1 ? optionLabel(selected.customer[0]) : document.getElementById("customer").value.trim() || "전체";
+        const source = document.getElementById("group").value === "voucher" ? activeVouchers() : [];
+        const rows = source.length ? source.flatMap((voucher) => [{...voucher, ledgerKind:"voucher"}, ...((voucher.lines || []).map((line) => ({...line, ledgerKind:"line", parent:voucher})))]) : (lastRows.length ? lastRows : filtered()).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+        let balance = 0;
+        let salesTotal = 0;
+        let purchaseTotal = 0;
+        const body = rows.map((row) => {
+          const isLine = row.ledgerKind === "line";
+          const amount = Math.round(Number(row.amount || 0));
+          const sales = row.type === "sales" ? amount : 0;
+          const purchase = row.type === "purchase" ? amount : 0;
+          if (!isLine) { salesTotal += sales; purchaseTotal += purchase; balance += sales - purchase; }
+          const desc = isLine ? (String(row.actualProductName || row.productName || "-") + " / " + fmt.format(Number(row.actualQty || row.qty || 0)) + " * " + fmt.format(Math.round(Number(row.unitPrice || 0)))) : [row.customer, row.warehouse, row.memo].filter(Boolean).join(" / ");
+          return "<tr class='"+(isLine ? "lineRow" : "headRow")+"'><td>"+(isLine ? "" : esc(row.date || ""))+"</td><td class='left'>"+esc(desc || "-")+"</td><td class='num salesCell'>"+(sales ? fmt.format(sales) : "")+"</td><td class='num purchaseCell'>"+(purchase ? fmt.format(purchase) : "")+"</td><td class='num balanceCell'>"+(isLine ? "" : fmt.format(balance))+"</td></tr>";
+        }).join("");
+        const monthLabel = (range.to || "").slice(0,7).replace("-","/");
+        const email = String(companyInfo.memo || "").match(emailRegex)?.[0] || "fn_kjw@nate.com";
+        const memo = "기준: " + typeLabel + " / " + groupLabel;
+        return "<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래 분석 PDF</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#222;font-family:Arial,'Malgun Gothic',sans-serif}.page{width:186mm;margin:0 auto}.title{text-align:center;font-size:25px;font-weight:900;text-decoration:underline;margin:10mm 0 9mm}.meta{display:flex;justify-content:space-between;font-size:12px;margin-bottom:2mm}.info,.ledger{width:100%;border-collapse:collapse;font-size:11px}.info th,.info td{border:1px solid #cfcfcf;padding:5px 6px;height:8mm}.info th{width:35mm;background:#f5f5f5;text-align:left}.info .wide{width:auto}.sectionTitle{border:1px solid #d9e0e7;background:#f8fafc;text-align:center;font-weight:900;padding:3mm;margin-top:3mm}.ledger th,.ledger td{border:1px solid #d9e0e7;padding:4px 5px}.ledger th{height:9mm;background:#f8fafc;text-align:center}.ledger td{height:7.5mm}.left{text-align:left}.num{text-align:right}.headRow{background:#f3f3f3}.salesCell{background:#f3dddd}.purchaseCell{background:#eef6ff}.balanceCell{font-weight:900}.lineRow td{background:#fff}.lineRow .left{padding-left:7mm}.totalRow th,.totalRow td{background:#f3f3f3;font-weight:900}.stamp{margin-top:3mm;text-align:right;font-size:11px}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}}</style></head><body><main class='page'><div class='title'>("+esc(typeLabel)+") "+esc(customerLabel)+" 관리대장("+esc(groupLabel)+")</div><div class='meta'><span>회사명 : "+esc(companyInfo.company_name||"에프엔")+" / 담당 : FN OS</span><span>"+esc(range.from || "")+" ~ "+esc(range.to || "")+"</span></div><table class='info'><tbody><tr><th>사업자등록번호</th><td>"+esc(companyInfo.business_no||"")+"</td><th>대표자</th><td>"+esc(companyInfo.representative_name||"")+"</td></tr><tr><th>여신한도</th><td>0</td><th>전화</th><td>"+esc(companyInfo.phone||"")+"</td></tr><tr><th>Email</th><td>"+esc(email)+"</td><th>Fax</th><td>"+esc(companyInfo.fax||"")+"</td></tr><tr><th>주 소</th><td colspan='3'>"+esc(companyInfo.address||"")+"</td></tr><tr><th>적요</th><td colspan='3'>"+esc(memo)+"</td></tr></tbody></table><div class='sectionTitle'>판매/구매내역</div><table class='ledger'><thead><tr><th style='width:26mm'>일자</th><th>적요</th><th style='width:25mm'>판매</th><th style='width:25mm'>구매</th><th style='width:27mm'>잔액</th></tr></thead><tbody>"+body+"<tr class='totalRow'><th colspan='2'>"+esc(monthLabel)+" 계</th><td class='num'>"+fmt.format(salesTotal)+"</td><td class='num'>"+fmt.format(purchaseTotal)+"</td><td class='num'>"+fmt.format(balance)+"</td></tr><tr class='totalRow'><th colspan='2'>누계</th><td class='num'>"+fmt.format(salesTotal)+"</td><td class='num'>"+fmt.format(purchaseTotal)+"</td><td class='num'>"+fmt.format(balance)+"</td></tr></tbody></table><div class='stamp'>"+formatDate(new Date())+" "+new Date().toLocaleTimeString("ko-KR")+"</div></main><div class='toolbar'><button onclick='window.print()'>인쇄/PDF저장</button><button onclick='window.close()'>닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\\/script></body></html>";
       }
       function openStatementPdf(){
         const popup = window.open("", "_blank", "width=980,height=900");
@@ -11444,6 +11561,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </div>
           <SalesInventoryTable
             rows={filteredHistoryRows}
+            lineRows={historyLineRows}
             mode={historyMode}
             onChanged={() => { invalidateSalesInventoryCaches(); loadSummary(true); }}
             onEditEntry={openEntryEditModal}
@@ -16684,6 +16802,7 @@ function MasterEntryPanel({ config, setMessage, loadSummary }: { config: (typeof
 
 function SalesInventoryTable({
   rows,
+  lineRows = [],
   mode,
   onChanged,
   onEditEntry,
@@ -16692,6 +16811,7 @@ function SalesInventoryTable({
   filterBar,
 }: {
   rows: Array<Record<string, unknown>>;
+  lineRows?: Array<Record<string, unknown>>;
   mode: SalesPurchaseMode;
   onChanged: () => void;
   onEditEntry: (row: Record<string, unknown>) => void;
@@ -16739,63 +16859,96 @@ function SalesInventoryTable({
     onChanged();
   }
 
-  function statementPageHtml(row: Record<string, unknown>, pageNumber: number, totalPages: number) {
-    const lines = [{
-      productCode: entryRowProductCode(row),
-      productName: entryRowProduct(row),
-      qty: entryRowQty(row),
-      amount: entryRowAmount(row),
-      memo: entryRowMemo(row),
-    }];
+  function statementLines(row: Record<string, unknown>) {
+    const key = entryRowKey(row, mode);
+    const matches = lineRows.filter((line, index) => entryRowKey(line, mode, index) === key);
+    return (matches.length ? matches : [row]).map((line) => {
+      const qty = entryRowQty(line);
+      const amount = entryRowAmount(line);
+      const rawPrice = Number(line.price ?? line.unit_price ?? line.in_price ?? line.out_price ?? 0);
+      return {
+        productCode: entryRowProductCode(line),
+        productName: entryRowProduct(line),
+        qty,
+        unitPrice: rawPrice || (qty ? amount / qty : 0),
+        amount,
+      };
+    });
+  }
+
+  function statementPageHtml(row: Record<string, unknown>, pageNumber: number, totalPages: number, company: FnCompanyInfo) {
+    const key = entryRowKey(row, mode);
+    const lines = statementLines(row);
     const totalQty = lines.reduce((sum, line) => sum + line.qty, 0);
     const totalAmount = lines.reduce((sum, line) => sum + line.amount, 0);
-    const rowsHtml = lines.map((line) => `
+    const roundedTotal = Math.round(totalAmount);
+    const supply = Math.round(roundedTotal / 1.1);
+    const vat = roundedTotal - supply;
+    const rowsHtml = lines.slice(0, 12).map((line) => `
       <tr>
-        <td>${line.productCode || ""}</td>
-        <td class="left">${line.productName || ""}</td>
-        <td class="right">${line.qty.toLocaleString("ko-KR")}</td>
-        <td class="right"></td>
-        <td class="right">${Math.round(line.amount).toLocaleString("ko-KR")}</td>
-        <td>${line.memo === "-" ? "" : line.memo}</td>
+        <td>${htmlEscape(line.productCode)}</td>
+        <td class="left">${htmlEscape(line.productName)}</td>
+        <td class="num">${line.qty.toLocaleString("ko-KR")}</td>
+        <td class="num">${Math.round(line.unitPrice).toLocaleString("ko-KR")}</td>
+        <td class="num">${Math.round(line.amount).toLocaleString("ko-KR")}</td>
+        <td></td>
+        <td></td>
       </tr>`).join("");
-    return `<section class="page" data-page="${pageNumber}">
-      <h1>거래명세서</h1>
-      <div class="top">
-        <div class="box">${entryRowCustomer(row, mode)} 귀중</div>
-        <table><tbody>
-          <tr><th>일련번호</th><td>${compactEntryNumber(entryRowDate(row), pageNumber)}</td><th>TEL</th><td></td></tr>
-          <tr><th>상호</th><td colspan="3">에프엔</td></tr>
-          <tr><th>주소</th><td colspan="3"></td></tr>
+    const blankRows = Array.from({ length: Math.max(0, 12 - Math.min(12, lines.length)) }, () => `<tr class="blank"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
+    const seal = company.seal_image_url ? `<img class="seal" src="${htmlEscape(company.seal_image_url)}" onerror="this.style.display='none'">` : "";
+    return `<section class="page ${pageNumber === 1 ? "active" : ""}" data-page="${pageNumber}">
+      <div class="statement-head">
+        <h1>거래명세서</h1>
+        <div class="receiver">
+          <div>${htmlEscape(entryRowCustomer(row, mode))} 貴 中</div>
+          <div>${htmlEscape(company.business_no)}</div>
+          <div>날짜 : ${htmlEscape(entryDateFilterKey(entryRowDate(row)))}</div>
+        </div>
+        <table class="supplier"><tbody>
+          <tr><th rowspan="4" class="vertical">공<br>급<br>자</th><th>일련번호</th><td>${htmlEscape(entryNumbers.get(key) || compactEntryNumber(entryRowDate(row), pageNumber))}</td><th>TEL</th><td>${htmlEscape(company.phone)}</td></tr>
+          <tr><th>사업자번호</th><td>${htmlEscape(company.business_no)}</td><th>성명</th><td class="seal-cell">${htmlEscape(company.representative_name)}${seal}</td></tr>
+          <tr><th>상호</th><td colspan="3">${htmlEscape(company.company_name)}</td></tr>
+          <tr><th>주소</th><td colspan="3">${htmlEscape(company.address)}</td></tr>
         </tbody></table>
       </div>
-      <div class="amount"><span>금액</span><span>${krw(totalAmount)}</span></div>
-      <table><thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가</th><th>합계</th><th>메모</th></tr></thead><tbody>${rowsHtml}
-        <tr><th colspan="2">종합계</th><th class="right">${totalQty.toLocaleString("ko-KR")}</th><th></th><th class="right">${Math.round(totalAmount).toLocaleString("ko-KR")}</th><th></th></tr>
+      <div class="amount-box"><span>금 액 : ${amountToKoreanText(roundedTotal)} 정</span><strong>(₩ ${roundedTotal.toLocaleString("ko-KR")})</strong></div>
+      <table class="items"><thead><tr><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>합계</th><th>담당자</th><th>참조</th></tr></thead><tbody>${rowsHtml}
+        <tr class="total"><th colspan="2">종합계</th><th class="num">${totalQty.toLocaleString("ko-KR")}</th><th></th><th class="num">${roundedTotal.toLocaleString("ko-KR")}</th><th></th><th></th></tr>${blankRows}
       </tbody></table>
+      <table class="sum"><tbody><tr><th>수량</th><td>${totalQty.toLocaleString("ko-KR")}</td><th>공급가액</th><td class="num">${supply.toLocaleString("ko-KR")}</td><th>VAT</th><td class="num">${vat.toLocaleString("ko-KR")}</td><th>합계</th><td class="num">${roundedTotal.toLocaleString("ko-KR")}</td><th>인수</th><td>인</td></tr><tr><th>전잔액</th><td colspan="4">전잔:</td><td colspan="5"></td></tr></tbody></table>
+      <div class="watermark">수신자확인 건</div>
       <div class="page-count">[${pageNumber}/${totalPages}]</div>
     </section>`;
   }
 
-  function statementHtml(targetRows: Array<Record<string, unknown>>) {
+  function statementHtml(targetRows: Array<Record<string, unknown>>, autoPrint = false) {
     const title = mode === "sales" ? "판매 거래명세서" : "구매 거래명세서";
+    const company = getFnDocumentCompanyInfo();
     const pages = targetRows.length ? targetRows : [];
-    const pagesHtml = pages.map((row, index) => statementPageHtml(row, index + 1, pages.length)).join("");
-    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
-      body{font-family:Arial,"Malgun Gothic",sans-serif;margin:24px;color:#111}
-      .page{width:760px;margin:0 auto;display:none}
+    const pagesHtml = pages.map((row, index) => statementPageHtml(row, index + 1, pages.length, company)).join("");
+    return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
+      @page{size:A4 portrait;margin:14mm 12mm 12mm}
+      *{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,"Malgun Gothic",sans-serif}
+      .page{position:relative;width:186mm;min-height:265mm;margin:0 auto;display:none;padding-top:6mm}
       .page.active{display:block}
-      h1{text-align:center;font-size:30px;margin:18px 0}
-      table{width:100%;border-collapse:collapse;font-size:13px}
-      td,th{border:1px solid #111;padding:6px;text-align:center}
-      .left{text-align:left}.right{text-align:right}
-      .top{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-      .box{border:1px solid #111;min-height:70px;padding:10px;text-align:center;font-weight:700}
-      .amount{margin:8px 0;border:2px solid #111;padding:6px 12px;font-weight:900;font-size:16px;display:flex;justify-content:space-between}
+      h1{grid-column:1/3;margin:0 0 9mm;text-align:center;font-size:28px;letter-spacing:0;font-weight:900}
+      .statement-head{display:grid;grid-template-columns:82mm 1fr;gap:5mm;align-items:start}
+      .receiver{border:1.5px solid #111;min-height:31mm;padding:5mm;text-align:center;font-size:14px;line-height:1.7}
+      .supplier{width:100%;border-collapse:collapse;font-size:12px}
+      .supplier th,.supplier td{border:1px solid #111;padding:3px 5px;text-align:center;height:9mm}
+      .supplier .vertical{width:8mm;font-size:14px;font-weight:900;line-height:1.5}
+      .seal-cell{position:relative}.seal{position:absolute;right:3px;top:-8px;width:25mm;height:25mm;object-fit:contain;opacity:.78}
+      .amount-box{display:flex;justify-content:space-between;align-items:center;border:2px solid #111;margin:3mm 0 2.5mm;padding:2mm 6mm;font-size:18px;font-weight:900}
+      .items,.sum{width:100%;border-collapse:collapse;font-size:12px}.items{height:78mm}
+      .items th,.items td,.sum th,.sum td{border:1px solid #8c8c8c;padding:2px 4px;text-align:center}
+      .items th,.sum th{background:#f5f5f5}.items td{height:7mm}.left{text-align:left}.num{text-align:right}
+      .items .total th,.items .total td{background:#f4f4f4;font-weight:900}
+      .sum{margin-top:3mm}.sum td,.sum th{height:8mm}
+      .watermark{position:absolute;left:58mm;top:112mm;color:rgba(0,0,0,.32);font-size:28px;letter-spacing:10px;pointer-events:none}
       .toolbar{position:fixed;left:12px;bottom:12px;display:flex;align-items:center;gap:8px}
       .toolbar button{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:8px 12px;font-weight:700}
-      .pager{min-width:64px;text-align:center;font-weight:800}
-      .page-count{margin-top:10px;text-align:right;font-size:12px;font-weight:700}
-      @media print{.toolbar{display:none}body{margin:0}.page{display:block;break-after:page;width:auto;margin:18mm}.page:last-of-type{break-after:auto}}
+      .pager{min-width:64px;text-align:center;font-weight:800}.page-count{margin-top:4mm;text-align:right;font-size:12px;font-weight:700}
+      @media print{.toolbar{display:none}.page{display:block;break-after:page;width:auto;min-height:auto;margin:0}.page:last-of-type{break-after:auto}}
     </style></head><body>${pagesHtml}
       <div class="toolbar">
         <button id="prevPage" type="button">‹</button>
@@ -16816,23 +16969,29 @@ function SalesInventoryTable({
         document.getElementById("prevPage").onclick = () => { current = Math.max(0, current - 1); render(); };
         document.getElementById("nextPage").onclick = () => { current = Math.min(pages.length - 1, current + 1); render(); };
         render();
+        ${autoPrint ? "window.addEventListener('load', () => setTimeout(() => window.print(), 250));" : ""}
       </script>
     </body></html>`;
   }
 
-  function openStatement(targetRows: Array<Record<string, unknown>>) {
+  function openStatement(targetRows: Array<Record<string, unknown>>, autoPrint = false) {
     const popup = window.open("", "_blank", "width=980,height=900");
     if (!popup) return;
-    popup.document.write(statementHtml(targetRows));
+    popup.document.write(statementHtml(targetRows, autoPrint));
     popup.document.close();
   }
 
-  function emailStatement(row: Record<string, unknown>) {
-    const fallback = window.prompt("거래처 이메일 주소를 입력해 주세요.", String(row.email || ""));
+  function emailStatement(targetRows: Array<Record<string, unknown>>) {
+    const customers = Array.from(new Set(targetRows.map((row) => entryRowCustomer(row, mode).trim()).filter(Boolean)));
+    if (customers.length !== 1) {
+      window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다.");
+      return;
+    }
+    const fallback = window.prompt("거래처 이메일 주소를 입력해 주세요.", String(targetRows[0]?.email || ""));
     if (!fallback) return;
-    const date = entryDateToday().replace(/\D/g, "").slice(2);
-    const subject = `${date} - ${mode === "sales" ? "판매" : "구매"} 거래명세서 - 에프엔`;
-    const body = "거래명세서 내용을 확인해 주세요.\n\n보내는 사람: fn_kjw@nate.com\n\n※ 현재 FN OS에는 SMTP 발송 설정이 없어 메일 작성창으로 연결합니다.";
+    const firstDate = entryDateFilterKey(entryRowDate(targetRows[0] || {})).slice(2) || entryDateToday().replace(/\D/g, "").slice(2);
+    const subject = `${firstDate} - ${mode === "sales" ? "판매" : "구매"} 거래명세서 - 에프엔`;
+    const body = `안녕하세요.\n\n${subject} PDF 거래명세서를 전달드립니다.\n거래명세서 PDF는 FN OS의 PDF 버튼에서 저장한 파일을 첨부해 주세요.\n\n감사합니다.\n에프엔`;
     window.location.href = `mailto:${encodeURIComponent(fallback)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
@@ -16846,8 +17005,9 @@ function SalesInventoryTable({
       </div>
       <div className="mb-1 flex items-center gap-2 whitespace-nowrap">
         <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
-        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const row = selectedRows()[0]; if (row) emailStatement(row); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
+        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
+        <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
         <div className="ml-auto flex shrink-0 justify-end">{filterBar}</div>
       </div>
       <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
