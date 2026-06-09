@@ -470,6 +470,7 @@ export async function mainDashboardSummary() {
     inventory_risk_items: riskItems.slice(0, 10),
     inventory: inventory.slice(0, 500),
     sales_inventory_basis: sales.slice(0, 1500),
+    purchase_inventory_basis: purchases.slice(0, 1500),
     recent_sales: summarizeEntryRows(sales, "sales", 80),
     recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
     recent_sales_lines: sales.slice(0, 500),

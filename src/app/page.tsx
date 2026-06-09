@@ -1719,6 +1719,7 @@ type SalesInventorySummary = {
   purchases_by_product?: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
   sales_inventory_basis?: Array<Record<string, unknown>>;
+  purchase_inventory_basis?: Array<Record<string, unknown>>;
   logs?: Array<Record<string, unknown>>;
 };
 
@@ -9974,9 +9975,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         })).filter((item) => item.componentCode || item.componentName),
       };
     };
+    const firstAnalysisRows = (...sources: Array<Array<Record<string, unknown>> | undefined>) => (
+      sources.find((source) => Array.isArray(source) && source.length > 0) || []
+    );
+    const salesAnalysisRows = firstAnalysisRows(summary?.sales_inventory_basis, summary?.recent_sales_lines, summary?.recent_sales);
+    const purchaseAnalysisRows = firstAnalysisRows(summary?.purchase_inventory_basis, summary?.recent_purchase_lines, summary?.recent_purchases);
     const baseRows = [
-      ...((summary?.recent_sales_lines || summary?.sales_inventory_basis || summary?.recent_sales || []) as Array<Record<string, unknown>>).map((row) => normalizeAnalysisRow(row, "sales")),
-      ...((summary?.recent_purchase_lines || summary?.recent_purchases || []) as Array<Record<string, unknown>>).map((row) => normalizeAnalysisRow(row, "purchase")),
+      ...salesAnalysisRows.map((row) => normalizeAnalysisRow(row, "sales")),
+      ...purchaseAnalysisRows.map((row) => normalizeAnalysisRow(row, "purchase")),
     ];
     const customerOptionMap = new Map<string, { code: string; name: string }>();
     baseRows.forEach((row) => {
@@ -9999,7 +10005,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }))).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const companyInfoJson = safeInlineJson(getFnDocumentCompanyInfo());
     const today = entryDateToday();
-    const thisMonth = today.slice(0, 7);
+    const analysisDefaultDay = baseRows.map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort().at(-1) || today;
+    const thisMonth = analysisDefaultDay.slice(0, 7);
     const analysisDefaultFromMonth = addMonthsToDate(`${thisMonth}-01`, -2).slice(0, 7);
     const title = "거래 분석";
     (window as unknown as { __fnosDownloadTradeAnalysisXlsx?: (rows: Array<Record<string, unknown>>) => void }).__fnosDownloadTradeAnalysisXlsx = (rows) => {
@@ -10080,7 +10087,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="customer" class="field searchInput" placeholder="거래처 검색">
           <button id="search" class="btn search">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button><button id="downloadPdf" class="btn pdf" title="PDF 저장" type="button">PDF</button><button id="emailPdf" class="btn mail" title="E-mail" type="button">E-mail</button>
           <div class="filterSpacer"></div>
-          <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${today}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${today}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
+          <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
       </div>
       <div class="summary">
@@ -10215,8 +10222,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById("periodMode").value = "month";
         document.getElementById("fromMonth").value = "${analysisDefaultFromMonth}";
         document.getElementById("toMonth").value = "${thisMonth}";
-        document.getElementById("fromDay").value = "${today}";
-        document.getElementById("toDay").value = "${today}";
+        document.getElementById("fromDay").value = "${analysisDefaultDay}";
+        document.getElementById("toDay").value = "${analysisDefaultDay}";
         expandedVoucherKey = "";
         updatePeriodInputVisibility();
         render();
