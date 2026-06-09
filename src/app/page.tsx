@@ -9966,7 +9966,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setHistoryFilters({ ...nextFilters, customer: nextFilters.customer.trim() === historyCustomerSelection.label ? historyCustomerSelection.filter : nextFilters.customer });
   }
 
-  function openTradeAnalysisPopup() {
+  async function openTradeAnalysisPopup() {
+    let analysisSummary = summary;
+    try {
+      const res = await fetch(`/api/dashboard/summary?tradeAnalysisOpen=${Date.now()}`, { credentials: "include", cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.ok !== false) analysisSummary = data as DashboardSummary;
+    } catch {
+      // Use the already loaded dashboard summary when a foreground refresh is unavailable.
+    }
     const productMap = new Map(inventoryProducts.map((product) => [inventoryProductCode(product), product]));
     const productNameMap = new Map(inventoryProducts.map((product) => [inventoryProductName(product), product]));
     const normalizeAnalysisRow = (row: Record<string, unknown>, type: "sales" | "purchase") => {
@@ -10006,8 +10014,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const firstAnalysisRows = (...sources: Array<Array<Record<string, unknown>> | undefined>) => (
       sources.find((source) => Array.isArray(source) && source.length > 0) || []
     );
-    const salesAnalysisRows = firstAnalysisRows(summary?.sales_inventory_basis, summary?.recent_sales_lines, summary?.recent_sales);
-    const purchaseAnalysisRows = firstAnalysisRows(summary?.purchase_inventory_basis, summary?.recent_purchase_lines, summary?.recent_purchases);
+    const salesAnalysisRows = firstAnalysisRows(analysisSummary?.sales_inventory_basis, analysisSummary?.recent_sales_lines, analysisSummary?.recent_sales);
+    const purchaseAnalysisRows = firstAnalysisRows(analysisSummary?.purchase_inventory_basis, analysisSummary?.recent_purchase_lines, analysisSummary?.recent_purchases);
     const baseRows = [
       ...salesAnalysisRows.map((row) => normalizeAnalysisRow(row, "sales")),
       ...purchaseAnalysisRows.map((row) => normalizeAnalysisRow(row, "purchase")),
@@ -10890,24 +10898,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       refreshEmptyBaseRows();
       window.__fnosTradeAnalysisReady = true;
     </script></body></html>`;
-    const popupUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    const popupKey = `trade-analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let storedPopupHtml = false;
+    try {
+      sessionStorage.setItem(`fnos:${popupKey}`, html);
+      storedPopupHtml = true;
+    } catch {
+      // Some browser modes restrict sessionStorage; localStorage below is the F5 fallback.
+    }
+    try {
+      localStorage.setItem("fnos:lastTradeAnalysisHtml", html);
+      localStorage.setItem("fnos:lastTradeAnalysisKey", popupKey);
+      storedPopupHtml = true;
+    } catch {
+      // Keep the explicit alert below instead of opening an empty popup.
+    }
+    if (!storedPopupHtml) {
+      window.alert("\uac70\ub798 \ubd84\uc11d \ub370\uc774\ud130\ub97c \ube0c\ub77c\uc6b0\uc800\uc5d0 \uc800\uc7a5\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \uc800\uc7a5\uc18c \uad8c\ud55c\uc744 \ud655\uc778\ud55c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.");
+      return;
+    }
+    const popupUrl = `/trade-analysis-popup?key=${encodeURIComponent(popupKey)}`;
     const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
     if (!popup) {
-      URL.revokeObjectURL(popupUrl);
       window.alert("\uac70\ub798 \ubd84\uc11d \ud31d\uc5c5\uc744 \uc5f4 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ube0c\ub77c\uc6b0\uc800 \ud31d\uc5c5 \ucc28\ub2e8\uc744 \ud655\uc778\ud574 \uc8fc\uc138\uc694.");
       return;
     }
-    window.setTimeout(() => {
-      try {
-        const target = popup as Window & { __fnosTradeAnalysisReady?: boolean };
-        if (target.closed || target.__fnosTradeAnalysisReady) return;
-        target.document.open();
-        target.document.write(html);
-        target.document.close();
-      } catch {
-        // Some browsers make blob popups temporarily inaccessible; the blob path remains the primary path.
-      }
-    }, 600);
     popup.focus();
   }
 
