@@ -19220,6 +19220,12 @@ function accountingAccountOptionLabel(row: Record<string, unknown>, mode: "bank"
   return accountingAccountDisplayLabel(row, mode);
 }
 
+function accountingAccountOptionDetailLabel(row: Record<string, unknown>, mode: "bank" | "card") {
+  const label = accountingAccountOptionLabel(row, mode);
+  const number = String(mode === "bank" ? row.account_number || "" : row.card_number || "").trim();
+  return number ? `${label} / ${number}` : label;
+}
+
 function accountingAccountOptionValue(row: Record<string, unknown>, mode: "bank" | "card") {
   return String(mode === "bank" ? row.account_name || row.bank_name || row.source_name || "" : row.card_name || row.source_name || "");
 }
@@ -19429,6 +19435,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const fixedCostSelectModeRef = useRef<"select" | "deselect">("select");
   const [fixedCostSortState, setFixedCostSortState] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [loanDraft, setLoanDraft] = useState(emptyLoanDraft);
+  const fixedCostExcelFileInputRef = useRef<HTMLInputElement | null>(null);
   const [jaewookModalRow, setJaewookModalRow] = useState<Record<string, unknown> | null>(null);
   const emptyBankAccountDraft = {
     id: "",
@@ -20337,7 +20344,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       { key: "payment_type", label: "결제 구분", inputType: "select", options: [{ value: "bank", label: "통장 출금" }, { value: "card", label: "카드 사용" }] },
       { key: "payment_source", label: "연동 계좌/카드", inputType: "select", options: [...activeBankAccounts, ...activeCardAccounts].map((row) => {
         const mode = row.card_name ? "card" : "bank";
-        const label = accountingAccountOptionLabel(row, mode);
+        const label = accountingAccountOptionDetailLabel(row, mode);
         const value = accountingAccountOptionValue(row, mode) || label;
         return { value, label };
       }).filter((option) => option.value) },
@@ -20724,6 +20731,100 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     void downloadTableXlsx(`FN_OS_고정비_${rows.length}건_${todayMmdd()}.xlsx`, "고정비", fixedCostDownloadHeaders, rows);
   }
 
+  function fixedCostExcelHeaderKey(value: unknown) {
+    return String(value || "").replace(/\s+/g, "").replace(/[()\/_-]/g, "").toLowerCase();
+  }
+
+  function fixedCostExcelCell(row: Record<string, unknown>, headers: string[], index: number, keys: string[]) {
+    const headerIndex = headers.findIndex((header) => keys.some((key) => header.includes(key)));
+    return row[String(headerIndex >= 0 ? headerIndex : index)] ?? "";
+  }
+
+  function fixedCostExcelText(value: unknown) {
+    return String(value ?? "").trim();
+  }
+
+  function fixedCostExcelNumber(value: unknown) {
+    return String(asNumber(value) || "");
+  }
+
+  function fixedCostExcelDate(value: unknown, xlsx: XlsxModule) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const parsed = xlsx.SSF.parse_date_code(value);
+      if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+    return String(value || "").trim().slice(0, 10);
+  }
+
+  async function uploadFixedCostExcel(file: File) {
+    try {
+      const xlsx = await loadXlsxModule();
+      const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: false });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = xlsx.utils.sheet_to_json<Array<string | number | boolean>>(worksheet, { header: 1, blankrows: false, defval: "" });
+      const [headerRow, ...bodyRows] = rawRows;
+      const headers = (headerRow || []).map(fixedCostExcelHeaderKey);
+      let saved = 0;
+      let skipped = 0;
+      for (const cells of bodyRows) {
+        const row = Object.fromEntries(cells.map((value, index) => [String(index), value]));
+        const kind = fixedCostExcelText(fixedCostExcelCell(row, headers, 0, ["속성", "type", "kind"]));
+        const name = fixedCostExcelText(fixedCostExcelCell(row, headers, 3, ["명칭", "고정비명", "대출명", "name", "title"]));
+        if (!name) {
+          skipped += 1;
+          continue;
+        }
+        const isLoan = /대출|loan/i.test(kind);
+        const categoryLarge = fixedCostExcelText(fixedCostExcelCell(row, headers, 1, ["카테고리1", "categorylarge"]));
+        const categoryMiddle = fixedCostExcelText(fixedCostExcelCell(row, headers, 2, ["카테고리2", "categorymiddle"]));
+        const memo = fixedCostExcelText(fixedCostExcelCell(row, headers, 19, ["메모", "memo"]));
+        const endpoint = isLoan ? "/api/accounting/ledger/loans" : "/api/accounting/ledger/fixed-costs";
+        const payload = isLoan
+          ? {
+            loan_name: name,
+            category_large: categoryLarge,
+            category_middle: categoryMiddle,
+            loan_type: /이자|interest/i.test(fixedCostExcelText(fixedCostExcelCell(row, headers, 4, ["납입방식", "loantype"]))) ? "interest_only" : "principal_interest",
+            principal_amount: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 15, ["대출금액", "principalamount"])),
+            expected_principal_amount: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 6, ["예상원금", "expectedprincipal"])),
+            expected_interest_amount: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 7, ["예상이자", "expectedinterest"])),
+            expected_payment_amount: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 8, ["예상납입액", "expectedpayment"])),
+            payment_day: fixedCostExcelText(fixedCostExcelCell(row, headers, 9, ["납입일", "결제일", "paymentday"])),
+            bank_name: fixedCostExcelText(fixedCostExcelCell(row, headers, 12, ["은행", "bank"])),
+            account_holder: fixedCostExcelText(fixedCostExcelCell(row, headers, 13, ["예금주", "holder"])),
+            account_number: fixedCostExcelText(fixedCostExcelCell(row, headers, 14, ["계좌번호", "accountnumber"])),
+            loan_start_date: fixedCostExcelDate(fixedCostExcelCell(row, headers, 16, ["대출시작일", "loanstart"]), xlsx),
+            loan_end_date: fixedCostExcelDate(fixedCostExcelCell(row, headers, 17, ["대출만료일", "loanend"]), xlsx),
+            loan_period_months: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 18, ["대출기간", "loanperiod"])),
+            memo,
+          }
+          : {
+            fixed_cost_name: name,
+            category_large: categoryLarge,
+            category_middle: categoryMiddle,
+            expected_amount: fixedCostExcelNumber(fixedCostExcelCell(row, headers, 5, ["금액", "amount"])),
+            base_day: fixedCostExcelText(fixedCostExcelCell(row, headers, 9, ["결제일", "납입일", "baseday"])),
+            payment_type: /카드|card/i.test(fixedCostExcelText(fixedCostExcelCell(row, headers, 10, ["결제구분", "paymenttype"]))) ? "card" : "bank",
+            payment_source: fixedCostExcelText(fixedCostExcelCell(row, headers, 11, ["연동계좌", "연동카드", "paymentsource"])),
+            memo,
+          };
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) saved += 1;
+        else skipped += 1;
+      }
+      setMessage(`고정비 엑셀등록 완료: 저장 ${saved.toLocaleString("ko-KR")}건 / 스킵 ${skipped.toLocaleString("ko-KR")}건`);
+      invalidateAccountingCache();
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("fnos-calendar-refresh"));
+      loadSummary(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "고정비 엑셀등록 실패");
+    }
+  }
+
   function loanPeriodMonths() {
     const start = String(loanDraft.loan_start_date || "");
     const end = String((loanDraft as Record<string, string>).loan_end_date || "");
@@ -20962,8 +21063,18 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <ActionButton type="button" onClick={openNewFixedCost}>F2 새 고정비</ActionButton>
-                <ActionButton type="button" variant="secondary" onClick={openNewLoan}>대출 추가</ActionButton>
-                <ActionButton type="button" variant="secondary" onClick={() => setMessage("고정비 엑셀등록은 업로드 파서 연결 후 활성화 예정입니다.")}>엑셀등록</ActionButton>
+                <ActionButton type="button" variant="secondary" onClick={() => fixedCostExcelFileInputRef.current?.click()}>엑셀등록</ActionButton>
+                <input
+                  ref={fixedCostExcelFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadFixedCostExcel(file);
+                    event.target.value = "";
+                  }}
+                />
                 <ActionButton type="button" variant="secondary" onClick={downloadFixedCosts}>고정비정보 다운로드</ActionButton>
                 <button
                   type="button"
@@ -21562,7 +21673,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   <option value="">선택</option>
                   {(fixedCostDraft.payment_type === "card" ? activeCardAccounts : activeBankAccounts).map((row) => {
                     const mode = fixedCostDraft.payment_type === "card" ? "card" : "bank";
-                    const label = accountingAccountOptionLabel(row, mode);
+                    const label = accountingAccountOptionDetailLabel(row, mode);
                     const value = accountingAccountOptionValue(row, mode) || label;
                     return <option key={`${fixedCostDraft.payment_type}-${String(row.id || value)}`} value={value}>{label}</option>;
                   })}
@@ -21638,10 +21749,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <FormField label="원리금 납입일" required>
                 <input className={modalInputClass} value={loanDraft.payment_day} onChange={(event) => setLoanDraft((prev) => ({ ...prev, payment_day: event.target.value }))} placeholder="3, 15, 말일" />
               </FormField>
-              <FormField label="대출 시작일" required>
+              <FormField label="대출 시작일">
                 <input className={modalInputClass} type="date" value={loanDraft.loan_start_date} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_start_date: event.target.value }))} />
               </FormField>
-              <FormField label="대출 만료일" required>
+              <FormField label="대출 만료일">
                 <input className={modalInputClass} type="date" value={String((loanDraft as Record<string, string>).loan_end_date || "")} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_end_date: event.target.value, loan_period_months: String(loanPeriodMonths()) }))} />
                 <p className="mt-1 text-xs font-bold text-slate-500">{loanPeriodMonths().toLocaleString("ko-KR")}개월</p>
               </FormField>
