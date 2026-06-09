@@ -6923,21 +6923,114 @@ async function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSh
   URL.revokeObjectURL(url);
 }
 
-function tableXlsxBlob(xlsx: XlsxModule, sheetName: string, headers: string[], rows: string[][]) {
-  const workbook = xlsx.utils.book_new();
-  const worksheet = xlsx.utils.aoa_to_sheet([headers, ...rows]);
-  setWorksheetFontSize(xlsx, worksheet, 11);
-  worksheet["!cols"] = headers.map((header, index) => ({
-    wch: Math.min(Math.max(header.length + 2, ...rows.map((row) => String(row[index] || "").length + 2)), 60),
-  }));
-  xlsx.utils.book_append_sheet(workbook, worksheet, sheetName);
-  const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+type TableXlsxOptions = {
+  requiredHeaders?: string[];
+  dropdowns?: Record<string, string[]>;
+  noteRows?: string[][];
+  dropdownRowCount?: number;
+};
+
+const EXCEL_TEMPLATE_ROW_COUNT = 500;
+
+function excelCleanHeader(value: string) {
+  return String(value || "").replace(/\*/g, "").trim();
+}
+
+function excelListFormula(values: string[]) {
+  return `"${values.map((value) => String(value).replace(/"/g, '""')).join(",")}"`;
+}
+
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function excelDropdownValues(values: string[]) {
+  const cleanValues = values.map((value) => String(value || "").trim()).filter(Boolean);
+  const selected: string[] = [];
+  for (const value of cleanValues) {
+    const next = [...selected, value].join(",");
+    if (next.length > 240) break;
+    selected.push(value);
+  }
+  return selected;
+}
+
+function tableXlsxDropdownValidations(xlsx: XlsxModule, headers: string[], options?: TableXlsxOptions) {
+  const dropdowns = options?.dropdowns || {};
+  return Object.entries(dropdowns)
+    .map(([header, values]) => {
+      const col = headers.findIndex((item) => excelCleanHeader(item) === excelCleanHeader(header));
+      const cleanValues = excelDropdownValues(values);
+      if (col < 0 || !cleanValues.length) return null;
+      const lastRow = Math.max(2, options?.dropdownRowCount || EXCEL_TEMPLATE_ROW_COUNT);
+      return {
+        sqref: `${xlsx.utils.encode_cell({ r: 1, c: col })}:${xlsx.utils.encode_cell({ r: lastRow - 1, c: col })}`,
+        formula1: excelListFormula(cleanValues),
+      };
+    })
+    .filter((item): item is { sqref: string; formula1: string } => Boolean(item));
+}
+
+function applyTableXlsxOptions(xlsx: XlsxModule, worksheet: Record<string, unknown>, headers: string[], options?: TableXlsxOptions) {
+  const requiredHeaders = new Set((options?.requiredHeaders || []).map(excelCleanHeader));
+  headers.forEach((header, index) => {
+    if (!requiredHeaders.has(excelCleanHeader(header))) return;
+    const address = xlsx.utils.encode_cell({ r: 0, c: index });
+    const cell = worksheet[address] as { s?: Record<string, unknown> } | undefined;
+    if (!cell) return;
+    cell.s = {
+      ...(cell.s || {}),
+      font: { ...(cell.s?.font as Record<string, unknown> | undefined), bold: true, color: { rgb: "991B1B" } },
+      fill: { fgColor: { rgb: "FEE2E2" } },
+    };
+  });
+
+  const validations = tableXlsxDropdownValidations(xlsx, headers, options);
+  if (validations.length) {
+    (worksheet as Record<string, unknown>)["!dataValidation"] = validations;
+    (worksheet as Record<string, unknown>)["!dataValidations"] = validations;
+  }
+}
+
+async function injectXlsxDropdownXml(xlsx: XlsxModule, blob: Blob, headers: string[], options?: TableXlsxOptions) {
+  const validations = tableXlsxDropdownValidations(xlsx, headers, options);
+  if (!validations.length) return blob;
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const sheetPath = "xl/worksheets/sheet1.xml";
+  const file = zip.file(sheetPath);
+  if (!file) return blob;
+  let xml = await file.async("string");
+  const validationXml = `<dataValidations count="${validations.length}">${validations.map((validation) => `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${xmlEscape(validation.sqref)}"><formula1>${xmlEscape(validation.formula1)}</formula1></dataValidation>`).join("")}</dataValidations>`;
+  xml = xml.replace(/<dataValidations[\s\S]*?<\/dataValidations>/, "");
+  xml = xml.includes("</worksheet>") ? xml.replace("</worksheet>", `${validationXml}</worksheet>`) : xml;
+  zip.file(sheetPath, xml);
+  const output = await zip.generateAsync({ type: "arraybuffer" });
   return new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
-async function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][]) {
+async function tableXlsxBlob(xlsx: XlsxModule, sheetName: string, headers: string[], rows: string[][], options?: TableXlsxOptions) {
+  const workbook = xlsx.utils.book_new();
+  const noteRows = options?.noteRows?.length ? [[""], ...options.noteRows] : [];
+  const worksheet = xlsx.utils.aoa_to_sheet([headers, ...rows, ...noteRows]);
+  setWorksheetFontSize(xlsx, worksheet, 11);
+  applyTableXlsxOptions(xlsx, worksheet as Record<string, unknown>, headers, options);
+  const widthRows = [...rows, ...noteRows];
+  worksheet["!cols"] = headers.map((header, index) => ({
+    wch: Math.min(Math.max(header.length + 2, ...widthRows.map((row) => String(row[index] || "").length + 2)), 60),
+  }));
+  xlsx.utils.book_append_sheet(workbook, worksheet, sheetName);
+  const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+  const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  return injectXlsxDropdownXml(xlsx, blob, headers, options);
+}
+
+async function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][], options?: TableXlsxOptions) {
   const xlsx = await loadXlsxModule();
-  downloadBlob(fileName, tableXlsxBlob(xlsx, sheetName, headers, rows));
+  downloadBlob(fileName, await tableXlsxBlob(xlsx, sheetName, headers, rows, options));
 }
 
 function timeLabel() {
@@ -13252,7 +13345,10 @@ function SalesPurchaseEntryModal({
     };
     const headers = [...salesSheetDisplayHeaders(sheetName), "삭제하세요", "삭제하세요"];
     const row = [...entrySheetHeaders().map((header) => sample[header] || ""), "삭제하세요", "삭제하세요"];
-    void downloadTableXlsx(`FN_OS_${sheetName}_엑셀폼.xlsx`, sheetName, headers, [row]);
+    void downloadTableXlsx(`FN_OS_${sheetName}_엑셀폼.xlsx`, sheetName, headers, [row], {
+      requiredHeaders: ["일자", "거래처코드", "거래처명", warehouseHeader, "품목코드", "품목명", "수량"],
+      dropdowns: { "VAT 포함/별도": ["포함", "별도"] },
+    });
   }
 
   function downloadCurrentEntry() {
@@ -13277,8 +13373,26 @@ function SalesPurchaseEntryModal({
       const pick = (row: Array<string | number>, header: string) => String(row[headerIndex.get(header) ?? -1] || "").trim();
       const sheetName = entrySheetName();
       const warehouseHeader = salesEntryWarehouseHeader(sheetName);
+      const dataRows = rawRows.slice(1).filter((rawRow) => {
+        const row = rawRow as Array<string | number>;
+        return entrySheetHeaders().some((header) => pick(row, header)) || pick(row, warehouseHeader);
+      });
+      const missingRows: Array<{ rowNumber: number; missing: string[] }> = [];
+      dataRows.forEach((rawRow, index) => {
+        const row = rawRow as Array<string | number>;
+        const missing: string[] = [];
+        if (index === 0) {
+          if (!normalizeEntryDate(pick(row, "일자"))) missing.push("일자");
+          if (!(pick(row, "거래처코드") || pick(row, "거래처명"))) missing.push("거래처코드/거래처명");
+          if (!pick(row, warehouseHeader)) missing.push(warehouseHeader);
+        }
+        if (!(pick(row, "품목코드") || pick(row, "품목명"))) missing.push("품목코드/품목명");
+        if (!pick(row, "수량")) missing.push("수량");
+        if (missing.length) missingRows.push({ rowNumber: index + 2, missing });
+      });
+      if (alertExcelMissingRequired(sheetName, missingRows)) return;
       const importedLines: SalesPurchaseEntryLine[] = [];
-      for (const rawRow of rawRows.slice(1)) {
+      for (const rawRow of dataRows) {
         const row = rawRow as Array<string | number>;
         const prod_cd = pick(row, "품목코드");
         const prod_name = pick(row, "품목명");
@@ -14340,6 +14454,29 @@ async function readXlsxObjects(file: File) {
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
   return xlsx.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false });
+}
+
+function excelObjectText(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return "";
+}
+
+function isExcelObjectRowEmpty(row: Record<string, unknown>) {
+  return Object.values(row).every((value) => !String(value ?? "").trim());
+}
+
+function alertExcelMissingRequired(title: string, missingRows: Array<{ rowNumber: number; missing: string[] }>) {
+  if (!missingRows.length) return false;
+  const details = missingRows
+    .slice(0, 10)
+    .map((row) => `${row.rowNumber}행: ${row.missing.join(", ")}`)
+    .join("\n");
+  const more = missingRows.length > 10 ? `\n외 ${missingRows.length - 10}건` : "";
+  window.alert(`${title} 필수값을 확인해주세요.\n\n${details}${more}`);
+  return true;
 }
 
 function MasterManagementPanel({
@@ -15542,14 +15679,28 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       "거래처",
       ["속성", "거래처코드", "거래처명", "사업자번호", "담당자", "전화번호", "주소/Email/기타메모"],
       [["일반", "CUST001", "샘플거래처", "1111111111", "담당자", "010-0000-0000", "주소: 서울 / Email: sample@fnos.local"]],
+      {
+        requiredHeaders: ["속성", "거래처코드", "거래처명"],
+        dropdowns: { "속성": ["일반", "쇼핑몰", "공급처", "고객"] },
+      },
     );
   }
 
   async function uploadCustomers(file: File) {
     const rows = await readXlsxObjects(file);
+    const targetRows = rows.filter((row) => !isExcelObjectRowEmpty(row));
+    const missingRows = targetRows.map((row, index) => {
+      const missing = [
+        excelObjectText(row, ["속성", "거래처속성", "거래처구분", "구분"]) ? "" : "속성",
+        excelObjectText(row, ["거래처코드", "거래처 코드", "코드", "customer_code"]) ? "" : "거래처코드",
+        excelObjectText(row, ["거래처명", "거래처명칭", "상호", "customer_name"]) ? "" : "거래처명",
+      ].filter(Boolean);
+      return { rowNumber: index + 2, missing };
+    }).filter((row) => row.missing.length);
+    if (alertExcelMissingRequired("거래처 엑셀등록", missingRows)) return;
     const allData = await cachedClientJson<{ customers?: FnCustomer[] }>("/api/fnos/customers?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
     const existing = new Map<string, FnCustomer>((allData.customers || []).map((customer: FnCustomer) => [String(customer.customer_code || customer.cust_code || ""), customer]));
-    const normalized = rows
+    const normalized = targetRows
       .map((row) => ({
         customer_type: normalizeCustomerAttribute(row["속성"] || row["거래처속성"] || row["거래처구분"] || row["구분"]),
         customer_code: String(row["거래처코드"] || row["거래처 코드"] || row["코드"] || row["customer_code"] || "").trim(),
@@ -16084,6 +16235,13 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       "품목",
       ["품목코드", "품목명", "속성", "입고가", "출고가", "창고코드", "재고등록(수정)", "BOM구성품코드", "BOM수량"],
       [["SET001", "[SET]세트상품명", "SET", "1200", "5900", warehouses[0]?.warehouse_code || "100", "0", "FL0001", "2"]],
+      {
+        requiredHeaders: ["품목코드", "품목명"],
+        dropdowns: {
+          "속성": ["일반", "SET", "RG"],
+          "창고코드": Array.from(new Set(warehouses.map((warehouse) => String(warehouse.warehouse_code || "").trim()).filter(Boolean))).slice(0, 50),
+        },
+      },
     );
   }
 
@@ -16119,9 +16277,18 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   async function uploadProducts(file: File) {
     const rows = await readXlsxObjects(file);
+    const targetRows = rows.filter((row) => !isExcelObjectRowEmpty(row));
+    const missingRows = targetRows.map((row, index) => {
+      const missing = [
+        excelObjectText(row, ["품목코드", "SKU", "sku"]) ? "" : "품목코드",
+        excelObjectText(row, ["품목명", "상품명"]) ? "" : "품목명",
+      ].filter(Boolean);
+      return { rowNumber: index + 2, missing };
+    }).filter((row) => row.missing.length);
+    if (alertExcelMissingRequired("품목 엑셀등록", missingRows)) return;
     const allData = await cachedClientJson<{ products?: FnProduct[] }>("/api/fnos/products/master?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
     const existing = new Map<string, FnProduct>((allData.products || []).map((product: FnProduct) => [String(product.product_code || product.sku || ""), product]));
-    const normalized = rows
+    const normalized = targetRows
       .map((row) => {
         const rawProductName = String(row["품목명"] || row["상품명"] || "").trim();
         const rawAttribute = String(row["속성"] || row["품목속성"] || "").toUpperCase();
@@ -16673,14 +16840,28 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
       "창고",
       ["속성", "창고코드", "창고명", "창고 주소", "창고 연락처", "담당자 이름", "담당자 연락처", "메모"],
       [["일반", "100", "에프엔 본사창고", "서울", "010-0000-0000", "", "", ""]],
+      {
+        requiredHeaders: ["속성", "창고코드", "창고명"],
+        dropdowns: { "속성": ["일반", "풀필먼트"] },
+      },
     );
   }
 
   async function uploadWarehouses(file: File) {
     const rows = await readXlsxObjects(file);
+    const targetRows = rows.filter((row) => !isExcelObjectRowEmpty(row));
+    const missingRows = targetRows.map((row, index) => {
+      const missing = [
+        excelObjectText(row, ["속성", "창고속성", "구분", "warehouse_type"]) ? "" : "속성",
+        excelObjectText(row, ["창고코드", "창고 코드", "코드", "warehouse_code"]) ? "" : "창고코드",
+        excelObjectText(row, ["창고명", "창고명칭", "warehouse_name"]) ? "" : "창고명",
+      ].filter(Boolean);
+      return { rowNumber: index + 2, missing };
+    }).filter((row) => row.missing.length);
+    if (alertExcelMissingRequired("창고 엑셀등록", missingRows)) return;
     const allData = await cachedClientJson<{ warehouses?: FnWarehouse[] }>("/api/fnos/warehouses?page=1&pageSize=5000", { ttl: 60_000, storageTtl: 5 * 60_000 });
     const existing = new Map<string, FnWarehouse>((allData.warehouses || []).map((warehouse) => [String(warehouse.warehouse_code || ""), warehouse]));
-    const normalized = rows
+    const normalized = targetRows
       .map((row) => ({
         warehouse_type: normalizeWarehouseAttribute(row["속성"] || row["창고속성"] || row["구분"] || row["warehouse_type"]),
         warehouse_code: String(row["창고코드"] || row["창고 코드"] || row["코드"] || row["warehouse_code"] || "").trim(),
