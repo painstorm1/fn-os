@@ -10056,7 +10056,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     };
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
-      .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
+      .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.headerActions{display:flex;align-items:center;gap:8px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
       .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
@@ -10066,7 +10066,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{padding:20px 24px 0;overflow:auto}.pickerSearch{display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:12px}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:space-between}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}.pickerCloseFooter{height:38px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;padding:0 14px;font-size:13px;font-weight:900}
       @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
     </style></head><body><div class="app">
-      <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><button class="btn secondary" onclick="window.close()">닫기</button></div>
+      <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><div class="headerActions"><button id="resetAnalysis" class="btn secondary" type="button">F5초기화</button><button class="btn secondary" onclick="window.close()">닫기</button></div></div>
       <div class="panel">
         <div class="topFilters">
           <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
@@ -10194,6 +10194,33 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           to.value = formatDate(b);
         }
         render();
+      }
+      function updatePeriodInputVisibility(){
+        const monthMode = document.getElementById("periodMode").value === "month";
+        document.getElementById("fromMonth").style.display = monthMode ? "" : "none";
+        document.getElementById("toMonth").style.display = monthMode ? "" : "none";
+        document.getElementById("fromDay").style.display = monthMode ? "none" : "";
+        document.getElementById("toDay").style.display = monthMode ? "none" : "";
+      }
+      function resetAnalysisDefaults(){
+        selected.product = [];
+        selected.warehouse = [];
+        selected.customer = [];
+        document.getElementById("type").value = "all";
+        document.getElementById("basis").value = "actual";
+        document.getElementById("group").value = "detail";
+        document.getElementById("product").value = "";
+        document.getElementById("warehouse").value = "";
+        document.getElementById("customer").value = "";
+        document.getElementById("periodMode").value = "month";
+        document.getElementById("fromMonth").value = "${analysisDefaultFromMonth}";
+        document.getElementById("toMonth").value = "${thisMonth}";
+        document.getElementById("fromDay").value = "${today}";
+        document.getElementById("toDay").value = "${today}";
+        expandedVoucherKey = "";
+        updatePeriodInputVisibility();
+        render();
+        resetViewHistory();
       }
       function filtered(){
         const type = document.getElementById("type").value;
@@ -10596,11 +10623,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",(event)=>{ if (event.target.id !== "pickerQuery") renderAndReset(); }));
       ["product","warehouse","customer"].forEach((kind) => document.getElementById(kind).addEventListener("input", () => clearSelectedForInput(kind)));
       document.getElementById("periodMode").addEventListener("change", () => {
-        const monthMode = document.getElementById("periodMode").value === "month";
-        document.getElementById("fromMonth").style.display = monthMode ? "" : "none";
-        document.getElementById("toMonth").style.display = monthMode ? "" : "none";
-        document.getElementById("fromDay").style.display = monthMode ? "none" : "";
-        document.getElementById("toDay").style.display = monthMode ? "none" : "";
+        updatePeriodInputVisibility();
         renderAndReset();
       });
       document.getElementById("periodPrev").addEventListener("click", () => { shiftPeriod(-1); resetViewHistory(); });
@@ -10629,6 +10652,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         renderPicker();
       }));
       document.getElementById("search").addEventListener("click",renderAndReset);
+      document.getElementById("resetAnalysis").addEventListener("click", resetAnalysisDefaults);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "F5") {
+          event.preventDefault();
+          resetAnalysisDefaults();
+        }
+      });
       document.getElementById("downloadExcel").addEventListener("click", () => {
         if (window.opener && window.opener.__fnosDownloadTradeAnalysisXlsx) window.opener.__fnosDownloadTradeAnalysisXlsx(lastExportRows.length ? lastExportRows : lastRows);
         else window.alert("엑셀 다운로드를 실행할 수 없습니다. 거래 분석 창을 다시 열어주세요.");
@@ -10660,8 +10690,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       render();
       resetViewHistory();
     </script></body></html>`;
-    const popup = window.open("", "fnosTradeAnalysis", "width=1500,height=900");
+    const popupUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    const popup = window.open(popupUrl, "fnosTradeAnalysis", "width=1500,height=900");
     if (!popup) {
+      URL.revokeObjectURL(popupUrl);
       window.alert("거래 분석 팝업을 열 수 없습니다. 브라우저 팝업 차단을 확인해 주세요.");
       return;
     }
