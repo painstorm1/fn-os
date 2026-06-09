@@ -18881,7 +18881,7 @@ function AccountingLineChart({
 }
 
 function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
-  const chartRows = rows.slice(-8);
+  const chartRows = rows.slice(-6);
   const max = Math.max(1, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
   const linePoints = (key: "income" | "expense") => chartRows.map((row, index) => {
     const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
@@ -18939,9 +18939,9 @@ function accountingTopRowsWithOther(rows: Array<Record<string, unknown>>) {
   const sorted: Array<Record<string, unknown> & { amount: number }> = rows
     .map((row) => ({ ...row, amount: asNumber(row.amount) }))
     .filter((row) => asNumber(row.amount) > 0);
-  const top = sorted.slice(0, 5);
-  const otherAmount = sorted.slice(5).reduce((sum, row) => sum + asNumber(row.amount), 0);
-  const otherCount = sorted.slice(5).reduce((sum, row) => sum + asNumber(row.count), 0);
+  const top = sorted.slice(0, 4);
+  const otherAmount = sorted.slice(4).reduce((sum, row) => sum + asNumber(row.amount), 0);
+  const otherCount = sorted.slice(4).reduce((sum, row) => sum + asNumber(row.count), 0);
   return otherAmount > 0 ? [...top, { label: "기타", amount: otherAmount, count: otherCount }] : top;
 }
 
@@ -18972,7 +18972,7 @@ function AccountingCategoryRankChart({
   return (
     <Card className="p-4">
       <SectionHeader title={title} className="mb-2" />
-      <div className="space-y-2 rounded-xl bg-slate-50 px-3 py-3">
+      <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
             const amount = asNumber(row.amount);
             const percent = (amount / total) * 100;
@@ -18982,15 +18982,15 @@ function AccountingCategoryRankChart({
                 key={`${String(row.label)}-${index}`}
                 className="min-w-0"
               >
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="min-w-0 truncate font-semibold text-slate-700">{accountingRankLabel(row.label)}</span>
-                  <span className="shrink-0 font-bold text-slate-800">{krw(amount)}</span>
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate font-bold text-slate-700">{accountingRankLabel(row.label)}</span>
+                  <span className="shrink-0 font-bold text-slate-900">{krw(amount)}</span>
                 </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="h-2 flex-1 rounded-full bg-white">
-                    <div className="h-2 rounded-full" style={{ width: `${Math.max(4, (amount / max) * 100)}%`, backgroundColor: color }} />
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-2.5 flex-1 rounded-full bg-white">
+                    <div className="h-2.5 rounded-full" style={{ width: `${Math.max(4, (amount / max) * 100)}%`, backgroundColor: color }} />
                   </div>
-                  <span className="w-10 text-right text-[11px] font-semibold text-slate-500">{percent.toFixed(1)}%</span>
+                  <span className="w-12 text-right text-xs font-semibold text-slate-500">{percent.toFixed(1)}%</span>
                 </div>
               </div>
             );
@@ -22496,7 +22496,7 @@ function AccountingRightPanel() {
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-[#f8fafc] px-4 py-6 xl:block">
       <div className="space-y-4">
-        <div className="border border-blue-200 bg-white p-4">
+        <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
           <h3 className="text-base font-bold text-slate-800">7일간 예정 고정비 지출</h3>
           <div className="mt-3 space-y-2.5">
             {Array.from(fixedCostGroups.entries()).map(([date, rows]) => (
