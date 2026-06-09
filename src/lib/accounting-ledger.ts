@@ -926,7 +926,7 @@ export async function upsertAccountingLoan(row: RawRow) {
   if (!payload.loan_name) throw new Error("대출명이 필요합니다.");
   if (!payload.payment_day) throw new Error("납입 기준일이 필요합니다.");
   if (id) return patchRows("accounting_loans", { id: `eq.${id}` }, payload);
-  return upsertRows("accounting_loans", { ...payload, created_at: new Date().toISOString() }, "loan_name");
+  return insertRows("accounting_loans", { ...payload, created_at: new Date().toISOString() });
 }
 
 export async function deactivateAccountingLoan(id: string) {
