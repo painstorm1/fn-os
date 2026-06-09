@@ -5,7 +5,6 @@ import { FnosDbError, selectRows } from "@/lib/fnos-db";
 export async function GET() {
   try {
     const bankAccounts = await selectRows("accounting_bank_accounts", {
-      select: "id,account_type,bank_name,account_holder,account_number,password_hint,list_enabled,memo,sort_order,is_active",
       or: "(is_active.is.null,is_active.eq.true)",
       order: "sort_order.asc",
       limit: 500,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { parseExpenseFiles } from "@/lib/accounting-files";
-import { accountingFxRates, classifyAccountingTransactions, normalizeAccountingTransaction } from "@/lib/accounting-ledger";
+import { accountingFxRates, accountingSourceAccounts, classifyAccountingTransactions, normalizeAccountingTransaction } from "@/lib/accounting-ledger";
 
 export const runtime = "nodejs";
 
@@ -18,8 +18,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "업로드할 파일이 없습니다." }, { status: 400 });
     }
     const parsed = await parseExpenseFiles(files, sourceType, Array.isArray(fileSourceTypes) ? fileSourceTypes : []);
-    const fxRates = await accountingFxRates();
-    const normalized = parsed.rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || sourceType }, fxRates));
+    const [fxRates, sourceAccounts] = await Promise.all([accountingFxRates(), accountingSourceAccounts()]);
+    const normalized = parsed.rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || sourceType }, fxRates, sourceAccounts));
     const rows = await classifyAccountingTransactions(normalized);
     return NextResponse.json({ ok: true, rows, files: parsed.files });
   } catch (error) {

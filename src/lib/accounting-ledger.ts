@@ -4,17 +4,41 @@ type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
 const CARD_POINT_SETTING_PREFIX = "accounting_card_points";
 
-const SOURCE_ALIASES: Record<string, { sourceType: "card" | "bank"; sourceName: string; cardName?: string; accountName?: string }> = {
-  "가온글로벌카드": { sourceType: "card", sourceName: "가온글로벌카드", cardName: "가온글로벌카드" },
-  "국민기업카드": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
-  "국민카드": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
-  "국민카드 1": { sourceType: "card", sourceName: "가온글로벌카드", cardName: "가온글로벌카드" },
-  "국민카드 2": { sourceType: "card", sourceName: "국민기업카드", cardName: "국민기업카드" },
-  "국민은행": { sourceType: "bank", sourceName: "국민은행 통장", accountName: "국민은행 사업자통장" },
-  "국민은행 통장": { sourceType: "bank", sourceName: "국민은행 통장", accountName: "국민은행 사업자통장" },
-  "기업은행": { sourceType: "bank", sourceName: "기업은행 통장", accountName: "기업은행 사업자통장" },
-  "기업은행 통장": { sourceType: "bank", sourceName: "기업은행 통장", accountName: "기업은행 사업자통장" },
+type AccountingSourceAccountContext = {
+  bankAccounts?: RawRow[];
+  cardAccounts?: RawRow[];
 };
+
+export function normalizeAccountingSourceAliases(value: unknown) {
+  const values = Array.isArray(value)
+    ? value
+    : text(value)
+      .split(/[\n,]/)
+      .map((item) => item.trim());
+  return Array.from(new Set(values.map((item) => text(item)).filter(Boolean)));
+}
+
+export function accountingAccountDisplayName(row: RawRow, mode: "bank" | "card") {
+  const alias = text(row.display_alias || row.displayAlias);
+  if (alias) return alias;
+  return text(mode === "bank" ? row.bank_name || row.account_name || row.source_name : row.card_name || row.source_name);
+}
+
+export function findAccountingSourceAccount(sourceName: unknown, accounts: RawRow[], mode: "bank" | "card") {
+  const target = matchText(sourceName);
+  if (!target) return null;
+  return accounts.find((account) => {
+    const names = [
+      mode === "bank" ? account.bank_name : account.card_name,
+      account.source_name,
+      ...normalizeAccountingSourceAliases(account.source_aliases || account.sourceAliases),
+    ];
+    return names.some((name) => {
+      const candidate = matchText(name);
+      return candidate && (candidate === target || candidate.includes(target) || target.includes(candidate));
+    });
+  }) || null;
+}
 
 const REVIEW_CATEGORY_BY_REASON: Record<string, [string, string, string]> = {
   KCP확인: ["기타 출금", "검토필요", ""],
@@ -148,20 +172,52 @@ function inferCardPaymentName(row: RawRow) {
   return "";
 }
 
-function sourceMeta(row: RawRow) {
-  const raw = text(row.source_name || row.source_type || row.sourceType);
-  const alias = SOURCE_ALIASES[raw];
-  if (alias) return alias;
-  if (/가온/.test(raw)) return SOURCE_ALIASES["가온글로벌카드"];
-  if (/국민.*카드|기업카드/.test(raw)) return SOURCE_ALIASES["국민기업카드"];
-  if (/국민.*은행/.test(raw)) return SOURCE_ALIASES["국민은행"];
-  if (/기업.*은행|IBK/i.test(raw)) return SOURCE_ALIASES["기업은행"];
-  return { sourceType: /은행|통장/.test(raw) ? "bank" as const : "card" as const, sourceName: raw || "기타" };
+function sourceTypeHint(raw: string) {
+  if (/카드|승인|가온/i.test(raw)) return "card";
+  if (/은행|통장|입출식|IBK/i.test(raw)) return "bank";
+  return "";
 }
 
-function settlementFor(cardName: string, date: string) {
+function sourceMeta(row: RawRow, accounts: AccountingSourceAccountContext = {}) {
+  const raw = text(row.source_name || row.source_type || row.sourceType);
+  const hint = sourceTypeHint(raw);
+  const cardAccount = hint !== "bank" ? findAccountingSourceAccount(raw, accounts.cardAccounts || [], "card") : null;
+  if (cardAccount) {
+    const cardName = text(cardAccount.card_name || cardAccount.source_name);
+    return { sourceType: "card" as const, sourceName: cardName || raw || "기타", cardName: cardName || null };
+  }
+  const bankAccount = hint !== "card" ? findAccountingSourceAccount(raw, accounts.bankAccounts || [], "bank") : null;
+  if (bankAccount) {
+    const bankName = text(bankAccount.bank_name || bankAccount.account_name || bankAccount.source_name);
+    return { sourceType: "bank" as const, sourceName: bankName || raw || "기타", accountName: bankName || null };
+  }
+  const sourceType = hint === "bank" ? "bank" as const : "card" as const;
+  return {
+    sourceType,
+    sourceName: raw || "기타",
+    cardName: sourceType === "card" ? raw || null : null,
+    accountName: sourceType === "bank" ? raw || null : null,
+  };
+}
+
+function settlementFor(cardName: string, date: string, cardAccount?: RawRow) {
   const [year, month, day] = date.split("-").map(Number);
   if (!year || !month || !day) return null;
+  const cutoffStart = numberValue(cardAccount?.cutoff_start_day ?? cardAccount?.cutoffStartDay);
+  const cutoffEnd = numberValue(cardAccount?.cutoff_end_day ?? cardAccount?.cutoffEndDay);
+  const paymentDay = numberValue(cardAccount?.payment_day ?? cardAccount?.paymentDay);
+  const cardLimit = numberValue(cardAccount?.card_limit ?? cardAccount?.cardLimit);
+  if (cutoffStart && cutoffEnd && paymentDay) {
+    const startBase = day >= cutoffStart ? { year, month } : addMonths(year, month, -1);
+    const endBase = day >= cutoffStart ? addMonths(year, month, 1) : { year, month };
+    const dueBase = paymentDay < cutoffEnd ? addMonths(startBase.year, startBase.month, 2) : addMonths(startBase.year, startBase.month, 1);
+    return {
+      settlement_start: dateText(startBase.year, startBase.month, cutoffStart),
+      settlement_end: dateText(endBase.year, endBase.month, Math.min(cutoffEnd, lastDayOfMonth(endBase.year, endBase.month))),
+      payment_due_date: dateText(dueBase.year, dueBase.month, Math.min(paymentDay, lastDayOfMonth(dueBase.year, dueBase.month))),
+      card_limit: cardLimit || null,
+    };
+  }
   if (cardName === "가온글로벌카드") {
     const startBase = day >= 22 ? { year, month } : addMonths(year, month, -1);
     const endBase = day >= 22 ? addMonths(year, month, 1) : { year, month };
@@ -258,6 +314,14 @@ async function fxRatesMap() {
 
 export async function accountingFxRates() {
   return fxRatesMap();
+}
+
+export async function accountingSourceAccounts(): Promise<AccountingSourceAccountContext> {
+  const [bankAccounts, cardAccounts] = await Promise.all([
+    optionalRows("accounting_bank_accounts", { or: "(is_active.is.null,is_active.eq.true)", order: "sort_order.asc", limit: 500 }),
+    optionalRows("accounting_card_accounts", { or: "(is_active.is.null,is_active.eq.true)", order: "sort_order.asc", limit: 500 }),
+  ]);
+  return { bankAccounts, cardAccounts };
 }
 
 function cardPointSettingKey(cardName: string) {
@@ -480,8 +544,8 @@ function manualCategoryPath(row: RawRow) {
   return null;
 }
 
-export function normalizeAccountingTransaction(row: RawRow, fxRates: Record<string, number> = {}) {
-  const meta = sourceMeta(row);
+export function normalizeAccountingTransaction(row: RawRow, fxRates: Record<string, number> = {}, accounts: AccountingSourceAccountContext = {}) {
+  const meta = sourceMeta(row, accounts);
   const transactionDate = isoDate(first(row, ["transaction_date", "expense_date", "거래일", "일자", "날짜", "이용일자", "승인일자"]));
   const merchant = text(first(row, ["merchant_name", "vendor_name", "거래처", "가맹점명", "적요", "받는분", "사용처"]));
   const description = text(first(row, ["description", "거래내용", "내용", "이용내역", "메모", "적요"])) || merchant;
@@ -602,13 +666,17 @@ async function upsertReviewRows(transactions: RawRow[]) {
 }
 
 async function rebuildCardSettlements() {
-  const cardRows = await optionalRows("accounting_transactions", { source_type: "eq.card", is_active: "eq.true", limit: 5000 });
+  const [cardRows, cardAccounts] = await Promise.all([
+    optionalRows("accounting_transactions", { source_type: "eq.card", is_active: "eq.true", limit: 5000 }),
+    optionalRows("accounting_card_accounts", { or: "(is_active.is.null,is_active.eq.true)", limit: 500 }),
+  ]);
   const grouped = new Map<string, RawRow>();
   for (const row of cardRows) {
     if (row.affects_card_settlement === false) continue;
     const cardName = text(row.card_name || row.source_name);
     const txDate = isoDate(row.transaction_date);
-    const settlement = settlementFor(cardName, txDate);
+    const cardAccount = findAccountingSourceAccount(cardName, cardAccounts, "card") || undefined;
+    const settlement = settlementFor(cardName, txDate, cardAccount);
     if (!settlement) continue;
     const key = `${cardName}|${settlement.settlement_start}|${settlement.settlement_end}`;
     const prev = grouped.get(key) || {
@@ -1030,6 +1098,8 @@ function cleanBankAccountPayload(row: RawRow) {
     account_holder: text(row.account_holder || row.accountHolder) || null,
     account_number: text(row.account_number || row.accountNumber) || null,
     password_hint: text(row.password_hint || row.passwordHint) || null,
+    display_alias: text(row.display_alias || row.displayAlias) || null,
+    source_aliases: normalizeAccountingSourceAliases(row.source_aliases || row.sourceAliases),
     list_enabled: row.list_enabled ?? row.listEnabled ?? true,
     memo: text(row.memo) || null,
     is_active: row.is_active ?? row.isActive ?? true,
@@ -1038,12 +1108,30 @@ function cleanBankAccountPayload(row: RawRow) {
   };
 }
 
+async function writeAccountWithColumnFallback(table: string, payload: RawRow, options: { id?: string; conflictTarget?: string; createdAt?: boolean }) {
+  let nextPayload = { ...payload };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      if (options.id) return patchRows(table, { id: `eq.${options.id}` }, nextPayload);
+      return options.conflictTarget
+        ? upsertRows(table, { ...nextPayload, ...(options.createdAt ? { created_at: new Date().toISOString() } : {}) }, options.conflictTarget)
+        : insertRows(table, { ...nextPayload, ...(options.createdAt ? { created_at: new Date().toISOString() } : {}) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const missingColumn = message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+      if (!missingColumn || !(missingColumn in nextPayload)) throw error;
+      const { [missingColumn]: _removed, ...rest } = nextPayload;
+      nextPayload = rest;
+    }
+  }
+  throw new Error("계정 설정 저장 가능 컬럼 확인에 실패했습니다.");
+}
+
 export async function upsertAccountingBankAccount(row: RawRow) {
   const id = text(row.id);
   const payload = cleanBankAccountPayload(row);
   if (!payload.bank_name) throw new Error("은행명이 필요합니다.");
-  if (id) return patchRows("accounting_bank_accounts", { id: `eq.${id}` }, payload);
-  return insertRows("accounting_bank_accounts", { ...payload, created_at: new Date().toISOString() });
+  return writeAccountWithColumnFallback("accounting_bank_accounts", payload, { id, createdAt: true });
 }
 
 export async function deactivateAccountingBankAccount(id: string) {
@@ -1065,6 +1153,8 @@ function cleanCardAccountPayload(row: RawRow) {
     payment_day: numberValue(row.payment_day ?? row.paymentDay) || null,
     card_limit: numberValue(row.card_limit ?? row.cardLimit) || null,
     withdrawal_account_name: text(row.withdrawal_account_name || row.withdrawalAccountName) || null,
+    display_alias: text(row.display_alias || row.displayAlias) || null,
+    source_aliases: normalizeAccountingSourceAliases(row.source_aliases || row.sourceAliases),
     list_enabled: row.list_enabled ?? row.listEnabled ?? true,
     physical_owner: text(row.physical_owner || row.physicalOwner) || null,
     memo: text(row.memo) || null,
@@ -1078,8 +1168,7 @@ export async function upsertAccountingCardAccount(row: RawRow) {
   const id = text(row.id);
   const payload = cleanCardAccountPayload(row);
   if (!payload.card_name) throw new Error("카드명이 필요합니다.");
-  if (id) return patchRows("accounting_card_accounts", { id: `eq.${id}` }, payload);
-  return upsertRows("accounting_card_accounts", { ...payload, created_at: new Date().toISOString() }, "card_name");
+  return writeAccountWithColumnFallback("accounting_card_accounts", payload, { id, conflictTarget: "card_name", createdAt: true });
 }
 
 export async function deactivateAccountingCardAccount(id: string) {
@@ -1160,8 +1249,8 @@ export async function resolveAccountingReview(row: RawRow) {
 }
 
 export async function importAccountingLedgerRows(rows: RawRow[], options: { sourceType?: string; sourceFileName?: string; uploadedBy?: string; memo?: string } = {}) {
-  const fxRates = await fxRatesMap();
-  const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }, fxRates));
+  const [fxRates, sourceAccounts] = await Promise.all([fxRatesMap(), accountingSourceAccounts()]);
+  const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }, fxRates, sourceAccounts));
   const classified = await classifyAccountingTransactions(normalized);
   const [batch] = await insertRows<{ id: string }>("accounting_import_batches", {
     source_name: options.sourceType || "자동 분류",

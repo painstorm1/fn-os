@@ -1668,6 +1668,8 @@ type FnBankAccount = {
   account_holder?: string;
   account_number?: string;
   password_hint?: string;
+  display_alias?: string;
+  source_aliases?: string[] | string;
   list_enabled?: boolean;
   memo?: string;
   sort_order?: number | string;
@@ -1687,6 +1689,8 @@ type FnCardAccount = {
   payment_day?: number | string;
   card_limit?: number | string;
   withdrawal_account_name?: string;
+  display_alias?: string;
+  source_aliases?: string[] | string;
   list_enabled?: boolean;
   physical_owner?: string;
   memo?: string;
@@ -19104,11 +19108,6 @@ function accountingSourceFilterLabel(value: string, mode: "bank" | "card") {
   return value.replace(/글로벌|기업|카드/g, "").trim() || value;
 }
 
-function accountingSourceDisplayName(row: Record<string, unknown>, mode: "bank" | "card") {
-  const value = String(mode === "bank" ? row.account_name || row.source_name || row.bank_name || "" : row.card_name || row.source_name || "");
-  return accountingSourceFilterLabel(value || String(row.source_name || "-"), mode);
-}
-
 function accountingSourceMatches(row: Record<string, unknown>, filter: string, mode: "bank" | "card") {
   if (!filter) return true;
   const values = [
@@ -19150,6 +19149,68 @@ function writeAccountingSessionState(key: string, value: Record<string, unknown>
 
 function accountingSummaryEndpoint(scope: AccountingSummaryScope) {
   return `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=${scope}`;
+}
+
+function normalizeAccountSourceAliases(value: unknown) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value || "").split(/[\n,]/);
+  return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
+function accountSourceAliasesInput(value: unknown) {
+  return normalizeAccountSourceAliases(value).join("\n");
+}
+
+function accountDisplayAlias(value: unknown) {
+  return String(value || "").trim().slice(0, 3);
+}
+
+function accountingAccountDisplayLabel(row: Record<string, unknown>, mode: "bank" | "card") {
+  const alias = accountDisplayAlias(row.display_alias);
+  if (alias) return alias;
+  const name = String(mode === "bank" ? row.bank_name || row.account_name || row.source_name || "" : row.card_name || row.source_name || "");
+  return name || "-";
+}
+
+function accountingAccountOptionLabel(row: Record<string, unknown>, mode: "bank" | "card") {
+  return accountingAccountDisplayLabel(row, mode);
+}
+
+function accountingAccountOptionValue(row: Record<string, unknown>, mode: "bank" | "card") {
+  return String(mode === "bank" ? row.account_name || row.bank_name || row.source_name || "" : row.card_name || row.source_name || "");
+}
+
+function accountingAccountSourceAliases(row: Record<string, unknown>) {
+  const raw = row.source_aliases || row.sourceAliases;
+  return Array.isArray(raw) ? raw.map((item) => String(item || "").trim()).filter(Boolean) : String(raw || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function accountingAccountMatchesSource(row: Record<string, unknown>, sourceName: unknown, mode: "bank" | "card") {
+  const target = String(sourceName || "").trim().toLowerCase().replace(/\s+/g, "");
+  if (!target) return false;
+  const names = [
+    accountingAccountOptionValue(row, mode),
+    mode === "bank" ? row.bank_name : row.card_name,
+    row.source_name,
+    ...accountingAccountSourceAliases(row),
+  ];
+  return names.some((name) => {
+    const candidate = String(name || "").trim().toLowerCase().replace(/\s+/g, "");
+    return candidate && (candidate === target || candidate.includes(target) || target.includes(candidate));
+  });
+}
+
+function accountingMatchedAccount(row: Record<string, unknown>, mode: "bank" | "card", accounts: Array<Record<string, unknown>> = []) {
+  const sourceName = String(mode === "bank" ? row.account_name || row.source_name || row.bank_name || "" : row.card_name || row.source_name || "");
+  return accounts.find((account) => accountingAccountMatchesSource(account, sourceName, mode)) || null;
+}
+
+function accountingSourceDisplayName(row: Record<string, unknown>, mode: "bank" | "card", accounts: Array<Record<string, unknown>> = []) {
+  const sourceName = String(mode === "bank" ? row.account_name || row.source_name || row.bank_name || "" : row.card_name || row.source_name || "");
+  const account = accountingMatchedAccount(row, mode, accounts);
+  if (account) return accountingAccountDisplayLabel(account, mode);
+  return `${accountingSourceFilterLabel(sourceName || String(row.source_name || "-"), mode)} (미매칭)`;
 }
 
 function accountingSummaryCacheKey(scope: AccountingSummaryScope) {
@@ -20232,10 +20293,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       { key: "base_day", label: "결제일" },
       { key: "payment_type", label: "결제 구분", inputType: "select", options: [{ value: "bank", label: "통장 출금" }, { value: "card", label: "카드 사용" }] },
       { key: "payment_source", label: "연동 계좌/카드", inputType: "select", options: [...activeBankAccounts, ...activeCardAccounts].map((row) => {
-        const raw = String(row.account_name || row.bank_name || row.card_name || row.source_name || "");
         const mode = row.card_name ? "card" : "bank";
-        const label = accountingSourceFilterLabel(raw, mode);
-        return { value: label, label };
+        const label = accountingAccountOptionLabel(row, mode);
+        const value = accountingAccountOptionValue(row, mode) || label;
+        return { value, label };
       }).filter((option) => option.value) },
       { key: "memo", label: "메모" },
     ];
@@ -20256,12 +20317,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       if (q && !`${row.merchant_name || ""} ${row.vendor_name || ""} ${row.description || ""} ${row.memo || ""} ${sourceName} ${row.amount_krw || ""} ${row.amount || ""} ${row.debit_amount || ""} ${row.credit_amount || ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  const ledgerSourceOptions = (ledgerMode === "bank" ? activeBankAccounts : activeCardAccounts)
+  const ledgerAccounts = ledgerMode === "bank" ? activeBankAccounts : activeCardAccounts;
+  const ledgerSourceOptions = ledgerAccounts
     .map((row) => {
-      const value = String(ledgerMode === "bank" ? row.account_name || row.bank_name || row.source_name : row.card_name || row.source_name);
-      const fallback = value || String(ledgerMode === "bank" ? row.bank_name || row.source_name : row.card_name || row.source_name);
-      const label = accountingSourceFilterLabel(fallback || value, ledgerMode);
-      return { value: label, label };
+      const label = accountingAccountOptionLabel(row, ledgerMode);
+      const value = accountingAccountOptionValue(row, ledgerMode) || label;
+      return { value, label };
     })
     .filter((row) => row.value);
   const fallbackLedgerSourceOptions = Array.from(new Set(
@@ -20269,11 +20330,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       .filter((row) => String(row.source_type || "") === ledgerMode)
       .map((row) => String(row.account_name || row.card_name || row.source_name || ""))
       .filter(Boolean),
-  )).map((value) => {
-    const label = accountingSourceFilterLabel(value, ledgerMode);
-    return { value: label, label };
-  });
-  const effectiveLedgerSourceOptions = ledgerSourceOptions.length ? ledgerSourceOptions : fallbackLedgerSourceOptions;
+  ))
+    .filter((value) => !ledgerAccounts.some((account) => accountingAccountMatchesSource(account, value, ledgerMode)))
+    .map((value) => {
+      const label = `${accountingSourceFilterLabel(value, ledgerMode)} (미매칭)`;
+      return { value, label };
+    });
+  const effectiveLedgerSourceOptions = [...ledgerSourceOptions, ...fallbackLedgerSourceOptions];
   const ledgerCategoryLargeOptions = Array.from(new Set(
     ledgerSourceRows
       .filter((row) => String(row.source_type || "") === ledgerMode)
@@ -20820,6 +20883,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onMemoSave={saveExpenseMemo}
               storageKey={`fnos.accounting.ledger.table.${ledgerMode}.v1`}
               fxRates={summary?.fx_rates}
+              bankAccounts={activeBankAccounts}
+              cardAccounts={activeCardAccounts}
             />
           </div>
         </Card>
@@ -21453,9 +21518,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <select className={modalSelectClass} value={fixedCostDraft.payment_source} onChange={(event) => setFixedCostDraft((prev) => ({ ...prev, payment_source: event.target.value }))}>
                   <option value="">선택</option>
                   {(fixedCostDraft.payment_type === "card" ? activeCardAccounts : activeBankAccounts).map((row) => {
-                    const value = String(fixedCostDraft.payment_type === "card" ? row.card_name || row.source_name : row.account_name || row.bank_name || row.source_name);
-                    const label = accountingSourceFilterLabel(value, fixedCostDraft.payment_type === "card" ? "card" : "bank");
-                    return <option key={`${fixedCostDraft.payment_type}-${value}`} value={label}>{label}</option>;
+                    const mode = fixedCostDraft.payment_type === "card" ? "card" : "bank";
+                    const label = accountingAccountOptionLabel(row, mode);
+                    const value = accountingAccountOptionValue(row, mode) || label;
+                    return <option key={`${fixedCostDraft.payment_type}-${String(row.id || value)}`} value={value}>{label}</option>;
                   })}
                 </select>
               </FormField>
@@ -22060,6 +22126,8 @@ function ExpenseTable({
   onMemoSave,
   storageKey,
   fxRates,
+  bankAccounts = [],
+  cardAccounts = [],
 }: {
   rows: Array<Record<string, unknown>>;
   categoryById: Map<string, string>;
@@ -22071,6 +22139,8 @@ function ExpenseTable({
   onMemoSave?: (row: Record<string, unknown>, memo: string) => void;
   storageKey?: string;
   fxRates?: Record<string, number>;
+  bankAccounts?: Array<Record<string, unknown>>;
+  cardAccounts?: Array<Record<string, unknown>>;
 }) {
   const restoredTableState = readAccountingSessionState(storageKey || "", { page: 1, pageSize: 30, sortState: null as { key: string; dir: "asc" | "desc" } | null });
   const [page, setPage] = useState(Number(restoredTableState.page) || 1);
@@ -22237,9 +22307,11 @@ function ExpenseTable({
                 const isCancel = /취소|cancel/i.test(`${String(row.description || "")} ${String(row.status || "")} ${String(row.raw_status || "")}`);
                 const selected = selectedId && String(row.id || "") === selectedId;
                 const rowClass = `border-t border-gray-100 ${selected ? "bg-orange-100/80" : accountingSourceRowClass(row)} hover:bg-orange-50/80 ${onSelect || onOpen ? "cursor-pointer" : ""}`;
+                const sourceAccounts = tableMode === "bank" ? bankAccounts : cardAccounts;
+                const sourceTitle = String(row.source_name || row.account_name || row.card_name || row.source_type || "");
                 return tableMode === "bank" ? (
                   <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
-                    <td className="px-3 py-2"><StatusBadge>{accountingSourceDisplayName(row, "bank")}</StatusBadge></td>
+                    <td className="px-3 py-2" title={sourceTitle}><StatusBadge>{accountingSourceDisplayName(row, "bank", sourceAccounts)}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingBankDebitAmount(row) ? krw(accountingBankDebitAmount(row)) : "-"}</td>
@@ -22250,7 +22322,7 @@ function ExpenseTable({
                   </tr>
                 ) : (
                   <tr key={String(row.id || index)} className={rowClass} onClick={() => onSelect?.(row)} onDoubleClick={() => onOpen?.(row)}>
-                    <td className="px-3 py-2"><StatusBadge tone="orange">{accountingSourceDisplayName(row, "card")}</StatusBadge></td>
+                    <td className="px-3 py-2" title={sourceTitle}><StatusBadge tone="orange">{accountingSourceDisplayName(row, "card", sourceAccounts)}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[340px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.description || "-")}</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingCardAmountText(row)}</td>
@@ -22871,7 +22943,7 @@ function AccountFileModal({
 }
 
 function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
-  const emptyDraft: FnBankAccount = { id: "", account_type: "business", bank_name: "", account_holder: "", account_number: "", password_hint: "", list_enabled: true, memo: "", sort_order: 0 };
+  const emptyDraft: FnBankAccount = { id: "", account_type: "business", bank_name: "", account_holder: "", account_number: "", password_hint: "", display_alias: "", source_aliases: [], list_enabled: true, memo: "", sort_order: 0 };
   const [accounts, setAccounts] = useState<FnBankAccount[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22992,7 +23064,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   }
 
   function openEdit(account: FnBankAccount) {
-    setDraft({ ...emptyDraft, ...account, account_type: account.account_type || "business", list_enabled: account.list_enabled !== false });
+    setDraft({ ...emptyDraft, ...account, account_type: account.account_type || "business", display_alias: accountDisplayAlias(account.display_alias), source_aliases: normalizeAccountSourceAliases(account.source_aliases), list_enabled: account.list_enabled !== false });
     setModalOpen(true);
   }
 
@@ -23043,9 +23115,15 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       account_holder: String(draft.account_holder || "").trim(),
       account_number: String(draft.account_number || "").trim(),
       password_hint: String(draft.password_hint || "").trim(),
+      display_alias: accountDisplayAlias(draft.display_alias),
+      source_aliases: normalizeAccountSourceAliases(draft.source_aliases),
     };
     if (!payload.account_type || !payload.bank_name || !payload.account_holder || !payload.account_number || !payload.password_hint) {
       window.alert("메모를 제외한 모든 항목은 필수입니다.");
+      return;
+    }
+    if (String(draft.display_alias || "").trim().length > 3) {
+      window.alert("별명은 3글자 이내로 입력해 주세요.");
       return;
     }
     const res = await fetch(FN_BANK_ACCOUNTS_ENDPOINT, {
@@ -23114,7 +23192,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const filteredAccounts = accounts.filter((account) => {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return `${account.bank_name || ""} ${account.account_holder || ""} ${account.account_number || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+    return `${account.bank_name || ""} ${account.display_alias || ""} ${accountSourceAliasesInput(account.source_aliases)} ${account.account_holder || ""} ${account.account_number || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -23129,12 +23207,12 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
             <ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
-          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 예금주 / 계좌번호 검색" />
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="은행명 / 별명 / 원본명 / 계좌번호 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
+          <table className="w-full min-w-[1180px] table-fixed text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
-              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-24 py-2 text-center">속성</th><th className="w-44 py-2 text-left">예금주</th><th className="w-56 py-2 text-left">계좌번호</th><th className="w-20 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr>
+              <tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="통장 전체선택" /></th><th className="w-44 py-2 text-left">은행명</th><th className="w-20 py-2 text-left">별명</th><th className="w-24 py-2 text-center">속성</th><th className="w-40 py-2 text-left">예금주</th><th className="w-52 py-2 text-left">계좌번호</th><th className="w-52 py-2 text-left">회계 원본명</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr>
             </thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
@@ -23157,6 +23235,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                       </button>
                     </td>
                     <td className="truncate py-2 font-black" title={account.bank_name || ""}>{account.bank_name || "-"}</td>
+                    <td className="truncate py-2 font-black text-orange-600" title={account.display_alias || ""}>{account.display_alias || "-"}</td>
                     <td className="py-2 text-center"><StatusBadge tone={account.account_type === "personal" ? "muted" : "orange"}>{account.account_type === "personal" ? "개인" : "기업"}</StatusBadge></td>
                     <td className="truncate py-2 font-bold">{account.account_holder || "-"}</td>
                     <td className="py-2 font-mono text-slate-700">
@@ -23179,6 +23258,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                         </span>
                       </div>
                     </td>
+                    <td className="truncate py-2 text-slate-500" title={accountSourceAliasesInput(account.source_aliases)}>{normalizeAccountSourceAliases(account.source_aliases).join(", ") || "-"}</td>
                     <td className="py-2" onClick={(event) => event.stopPropagation()}>
                       <FolderAttachmentButton count={fileCounts[key]} title="통장 첨부파일" onClick={() => setFileAccount(account)} />
                     </td>
@@ -23204,7 +23284,9 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="예금주" required><input className={modalInputClass} value={draft.account_holder || ""} onChange={(event) => updateDraft("account_holder", event.target.value)} /></FormField>
               <FormField label="계좌번호" required><input className={modalInputClass} value={draft.account_number || ""} onChange={(event) => updateDraft("account_number", event.target.value)} /></FormField>
               <FormField label="비밀번호" required><div className="flex gap-2"><input className={`${modalInputClass} min-w-0 flex-1`} type="password" value={draft.password_hint || ""} onChange={(event) => updateDraft("password_hint", event.target.value)} /><ActionButton type="button" variant="secondary" onClick={() => setSecretView({ title: "통장 비밀번호", label: "비밀번호", value: String(draft.password_hint || "") })}>보기</ActionButton></div></FormField>
+              <FormField label="별명"><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value.slice(0, 3))} placeholder="3글자 이내" maxLength={3} /></FormField>
               <FormField label="리스트 반영" required><select className={modalSelectClass} value={draft.list_enabled === false ? "false" : "true"} onChange={(event) => updateDraft("list_enabled", event.target.value === "true")}><option value="true">반영</option><option value="false">미반영</option></select></FormField>
+              <FormField label="회계 원본명 별칭" className="md:col-span-2"><textarea className={modalTextareaClass} value={accountSourceAliasesInput(draft.source_aliases)} onChange={(event) => updateDraft("source_aliases", event.target.value)} placeholder={"기업은행\nIBK\n기업통장"} /></FormField>
               <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.memo || ""} onChange={(event) => updateDraft("memo", event.target.value)} /></FormField>
             </div>
           </div>
@@ -23217,7 +23299,7 @@ function FnBankSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
 }
 
 function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => void }) {
-  const emptyDraft: FnCardAccount = { id: "", card_type: "business", card_name: "", card_number: "", expiry_date: "", cvc_hint: "", secure_message: "", payment_password_hint: "", cutoff_start_day: "", cutoff_end_day: "", payment_day: "", card_limit: "", list_enabled: true, physical_owner: "", memo: "", sort_order: 0 };
+  const emptyDraft: FnCardAccount = { id: "", card_type: "business", card_name: "", card_number: "", expiry_date: "", cvc_hint: "", secure_message: "", payment_password_hint: "", cutoff_start_day: "", cutoff_end_day: "", payment_day: "", card_limit: "", display_alias: "", source_aliases: [], list_enabled: true, physical_owner: "", memo: "", sort_order: 0 };
   const [accounts, setAccounts] = useState<FnCardAccount[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23338,6 +23420,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       card_type: account.card_type || "business",
       card_number: formatCardNumber(account.card_number),
       expiry_date: formatCardExpiryInput(account.expiry_date),
+      display_alias: accountDisplayAlias(account.display_alias),
+      source_aliases: normalizeAccountSourceAliases(account.source_aliases),
       list_enabled: account.list_enabled !== false,
       card_limit: formatCommaNumber(account.card_limit),
     });
@@ -23399,6 +23483,8 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       cutoff_end_day: billingPeriod.end,
       payment_day: onlyDigits(draft.payment_day).slice(0, 2),
       card_limit: onlyDigits(draft.card_limit),
+      display_alias: accountDisplayAlias(draft.display_alias),
+      source_aliases: normalizeAccountSourceAliases(draft.source_aliases),
     };
     if (!payload.card_type || !payload.card_name || !payload.card_number || !payload.expiry_date || !payload.cvc_hint || !payload.cutoff_start_day || !payload.cutoff_end_day || !payload.payment_day || !payload.card_limit) {
       window.alert("해외안심 결제 개인 확인 메세지, 결제 비밀번호, 실물 소유자, 메모를 제외한 항목은 필수입니다.");
@@ -23406,6 +23492,10 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     }
     if (!validDayString(payload.cutoff_start_day) || !validDayString(payload.cutoff_end_day) || !validDayString(payload.payment_day)) {
       window.alert("결제 기준일과 결제일은 1일부터 31일 사이로 입력해 주세요.");
+      return;
+    }
+    if (String(draft.display_alias || "").trim().length > 3) {
+      window.alert("별명은 3글자 이내로 입력해 주세요.");
       return;
     }
     const res = await fetch(FN_CARD_ACCOUNTS_ENDPOINT, { method: payload.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -23441,7 +23531,7 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
   const filteredAccounts = accounts.filter((account) => {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return `${account.card_name || ""} ${account.card_number || ""} ${account.physical_owner || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
+    return `${account.card_name || ""} ${account.display_alias || ""} ${accountSourceAliasesInput(account.source_aliases)} ${account.card_number || ""} ${account.physical_owner || ""} ${account.memo || ""}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -23449,11 +23539,11 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       <Panel title="카드관리" subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체카드</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">카드수 {accounts.length.toLocaleString("ko-KR")}개</span></div>} action={<ActionButton type="button" onClick={openNew}>F2 새 카드</ActionButton>}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2"><ActionButton type="button" variant="secondary" className="border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => void deleteSelectedAccounts()}>삭제</ActionButton><span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span></div>
-          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 카드번호 / 소유자 검색" />
+          <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="카드명 / 별명 / 원본명 / 소유자 검색" />
         </div>
         <div className="fn-table-shell overflow-x-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-          <table className="w-full min-w-[1300px] table-fixed text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-56 py-2 text-left">카드번호</th><th className="w-44 py-2 text-left">유효기간/CVC</th><th className="w-36 py-2 text-left">기간</th><th className="w-32 py-2 text-left">결제일</th><th className="w-36 py-2 text-left">소유자</th><th className="w-20 py-2 text-left">파일</th><th className="w-64 py-2 text-left">메모</th></tr></thead>
+          <table className="w-full min-w-[1500px] table-fixed text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500"><tr><th className="w-20 py-2 text-center"><input type="checkbox" className="h-5 w-5" checked={allSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rowKeys : [])} aria-label="카드 전체선택" /></th><th className="w-48 py-2 text-left">카드명</th><th className="w-20 py-2 text-left">별명</th><th className="w-52 py-2 text-left">카드번호</th><th className="w-40 py-2 text-left">유효기간/CVC</th><th className="w-32 py-2 text-left">기간</th><th className="w-28 py-2 text-left">결제일</th><th className="w-32 py-2 text-left">소유자</th><th className="w-52 py-2 text-left">회계 원본명</th><th className="w-20 py-2 text-left">파일</th><th className="w-56 py-2 text-left">메모</th></tr></thead>
             <tbody>
               {filteredAccounts.map((account, index) => {
                 const key = String(account.id || "");
@@ -23475,11 +23565,13 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
                       </button>
                     </td>
                     <td className="truncate py-2 font-black" title={account.card_name || ""}>{cardExpiryWarning(account) && <span className="mr-2 rounded bg-rose-50 px-2 py-0.5 text-xs font-black text-rose-600">유효기간 만료</span>}{account.card_name || "-"}</td>
+                    <td className="truncate py-2 font-black text-orange-600" title={account.display_alias || ""}>{account.display_alias || "-"}</td>
                     <td className="truncate py-2 font-mono text-slate-700">{formatCardNumber(account.card_number) || "-"}</td>
                     <td className="truncate py-2 font-mono text-slate-700">{formatCardExpiry(account.expiry_date)} / {account.cvc_hint || "-"}</td>
                     <td className="truncate py-2 font-bold text-slate-700">{formatCardPeriod(account.cutoff_start_day, account.cutoff_end_day)}</td>
                     <td className="truncate py-2 font-bold text-slate-700">{formatMonthlyDay(account.payment_day)}</td>
                     <td className="truncate py-2 font-bold">{account.physical_owner || "-"}</td>
+                    <td className="truncate py-2 text-slate-500" title={accountSourceAliasesInput(account.source_aliases)}>{normalizeAccountSourceAliases(account.source_aliases).join(", ") || "-"}</td>
                     <td className="py-2" onClick={(event) => event.stopPropagation()}>
                       <FolderAttachmentButton count={fileCounts[key]} title="카드 첨부파일" onClick={() => setFileAccount(account)} />
                     </td>
@@ -23502,6 +23594,10 @@ function FnCardSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="카드번호" required><input className={modalInputClass} inputMode="numeric" value={draft.card_number || ""} onChange={(event) => updateDraft("card_number", formatCardNumber(event.target.value))} placeholder="1234-5678-9012-3456" /></FormField>
               <FormField label="유효기간" required><input className={modalInputClass} inputMode="numeric" value={draft.expiry_date || ""} onChange={(event) => updateDraft("expiry_date", formatCardExpiryInput(event.target.value))} placeholder="10/28" maxLength={5} /></FormField>
               <FormField label="CVC" required><input className={modalInputClass} value={draft.cvc_hint || ""} onChange={(event) => updateDraft("cvc_hint", event.target.value)} /></FormField>
+            </div>
+            <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+              <FormField label="별명"><input className={modalInputClass} value={draft.display_alias || ""} onChange={(event) => updateDraft("display_alias", event.target.value.slice(0, 3))} placeholder="3글자 이내" maxLength={3} /></FormField>
+              <FormField label="회계 원본명 별칭"><textarea className={modalTextareaClass} value={accountSourceAliasesInput(draft.source_aliases)} onChange={(event) => updateDraft("source_aliases", event.target.value)} placeholder={"국민카드 1\n가온글로벌\nKB카드출금"} /></FormField>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="해외안심 결제 개인 확인 메세지"><input className={modalInputClass} value={draft.secure_message || ""} onChange={(event) => updateDraft("secure_message", event.target.value)} /></FormField>
