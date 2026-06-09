@@ -8401,11 +8401,13 @@ function customerHistoryDraftLabel(customers: FnCustomer[]) {
 function SalesHistoryCustomerPicker({
   query,
   mode,
+  historyMode: _historyMode,
   onClose,
   onApply,
 }: {
   query: string;
   mode: SalesPurchaseMode;
+  historyMode?: SalesHistoryMode;
   onClose: () => void;
   onApply: (customers: FnCustomer[]) => void;
 }) {
@@ -11846,7 +11848,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </button>
             <button
               type="button"
-              onClick={() => setPartnerBalanceMode(historyMode)}
+              onClick={() => { if (historyMode !== "returns") setPartnerBalanceMode(historyMode); }}
               className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600 hover:bg-orange-100"
             >
               {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
@@ -12583,6 +12585,7 @@ function SalesPurchaseEntryModal({
   onSaved: (savedRows: Array<Record<string, unknown>>) => void;
 }) {
   const partnerLabel = mode === "sales" ? "거래처" : "구매처";
+  const isReturnExchangeMode = mode === "returns";
   const defaultLine = (): SalesPurchaseEntryLine => ({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, prod_cd: "", prod_name: "", qty: "1", price: "", memo: "" });
   const prefillLines = initialDraft?.lines?.length
     ? initialDraft.lines.map((line) => ({ ...defaultLine(), ...line }))
@@ -17184,6 +17187,7 @@ function SalesInventoryTable({
   rows,
   lineRows = [],
   mode,
+  historyMode: _historyMode,
   onChanged,
   onEditEntry,
   topLeft,
@@ -17193,6 +17197,7 @@ function SalesInventoryTable({
   rows: Array<Record<string, unknown>>;
   lineRows?: Array<Record<string, unknown>>;
   mode: SalesPurchaseMode;
+  historyMode?: SalesHistoryMode;
   onChanged: () => void;
   onEditEntry: (row: Record<string, unknown>) => void;
   topLeft?: ReactNode;
