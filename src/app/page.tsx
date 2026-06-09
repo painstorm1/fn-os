@@ -21982,7 +21982,7 @@ function AccountingRightPanel() {
                 setPointModalOpen(true);
               }}
             >
-              조정
+              Point
             </button>
           </div>
         </div>
