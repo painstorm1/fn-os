@@ -1373,6 +1373,27 @@ create table if not exists archive_links (
   unique (archive_item_id, linked_type, linked_id)
 );
 
+create table if not exists ai_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  snapshot_key text not null unique,
+  period_from date,
+  period_to date,
+  source text default 'fnos-ai-snapshot',
+  generated_at timestamptz not null default now(),
+  payload jsonb not null,
+  summary jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table ai_snapshots add column if not exists snapshot_key text;
+alter table ai_snapshots add column if not exists period_from date;
+alter table ai_snapshots add column if not exists period_to date;
+alter table ai_snapshots add column if not exists source text default 'fnos-ai-snapshot';
+alter table ai_snapshots add column if not exists generated_at timestamptz default now();
+alter table ai_snapshots add column if not exists payload jsonb;
+alter table ai_snapshots add column if not exists summary jsonb;
+
 insert into archive_categories (category_name, sort_order) values
   ('영어', 1),
   ('포토샵', 2),
@@ -1422,6 +1443,9 @@ create index if not exists idx_inventory_current_synced_at on inventory_current(
 create index if not exists idx_inventory_movements_sku on inventory_movements(sku);
 create index if not exists idx_inventory_prod_date on inventory_snapshots(product_id, snapshot_date);
 create index if not exists idx_inventory_synced_at on inventory_snapshots(synced_at desc);
+create unique index if not exists idx_ai_snapshots_key on ai_snapshots(snapshot_key);
+create index if not exists idx_ai_snapshots_period on ai_snapshots(period_from desc, period_to desc);
+create index if not exists idx_ai_snapshots_generated_at on ai_snapshots(generated_at desc);
 create index if not exists idx_bom_parent on product_boms(parent_product_id);
 create index if not exists idx_bom_items_bom on product_bom_items(bom_id);
 create index if not exists idx_orders_date on orders(order_date desc);
