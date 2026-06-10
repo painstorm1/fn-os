@@ -383,11 +383,14 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
   const currentRows = await optionalRows("inventory_current", {
     wh_cd: `eq.${whCd}`,
     prod_cd: `eq.${productCode}`,
-    limit: 1,
+    limit: 100,
   });
   const now = nowIso();
   const current = currentRows[0];
-  const prevQty = numberValue(current?.on_hand_qty ?? current?.bal_qty);
+  const duplicateRows = currentRows.slice(1);
+  const prevQty = currentRows.length
+    ? currentRows.reduce((total, item) => total + numberValue(item.on_hand_qty ?? item.bal_qty), 0)
+    : 0;
   const nextQty = prevQty + deltaQty;
 
   const values = {
@@ -408,9 +411,47 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
 
   if (current?.id) {
     await patchRowsWithSchemaFallback("inventory_current", { id: `eq.${current.id}` }, values);
+    await Promise.all(duplicateRows.map((item) => text(item.id) ? deleteRows("inventory_current", { id: `eq.${item.id}` }) : Promise.resolve([])));
     return;
   }
   await insertRowsWithSchemaFallback("inventory_current", [values]);
+}
+
+function inventoryCurrentGroupKey(row: RawRow) {
+  const wh = text(row.wh_cd || row.warehouse_code || row.warehouse_id);
+  const code = text(row.prod_cd || row.product_code || row.sku || row.product_id);
+  return wh && code ? `${wh}::${code}` : "";
+}
+
+async function consolidateInventoryCurrentDuplicates() {
+  const rows = await optionalRows("inventory_current", { order: "updated_at.desc", limit: 10000 });
+  const groups = new Map<string, RawRow[]>();
+  rows.forEach((row) => {
+    const key = inventoryCurrentGroupKey(row);
+    if (!key) return;
+    groups.set(key, [...(groups.get(key) || []), row]);
+  });
+  let removed = 0;
+  for (const group of groups.values()) {
+    if (group.length <= 1) continue;
+    const [keep, ...duplicates] = group;
+    const qty = group.reduce((total, row) => total + numberValue(row.on_hand_qty ?? row.bal_qty), 0);
+    const reservedQty = group.reduce((total, row) => total + numberValue(row.reserved_qty), 0);
+    await patchRowsWithSchemaFallback("inventory_current", { id: `eq.${keep.id}` }, {
+      on_hand_qty: qty,
+      reserved_qty: reservedQty,
+      available_qty: qty - reservedQty,
+      bal_qty: qty,
+      updated_at: nowIso(),
+      synced_at: nowIso(),
+    });
+    for (const row of duplicates) {
+      if (!text(row.id)) continue;
+      await deleteRows("inventory_current", { id: `eq.${row.id}` });
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in" | "return_in" | "exchange_out") {
@@ -682,10 +723,41 @@ export async function syncProducts(_payload?: unknown) {
 }
 
 export async function syncInventory(_payload?: unknown) {
+  if (!hasDbConfig()) return noDbResult([]);
+
+  const [allSales, purchases, movements] = await Promise.all([
+    optionalRows("sales", { order: "created_at.asc", limit: 5000 }),
+    optionalRows("purchases", { order: "created_at.asc", limit: 5000 }),
+    optionalRows("inventory_movements", { order: "created_at.desc", limit: 10000 }),
+  ]);
+  const movementRefs = new Set(movements.map((row) => text(row.source_ref_id)).filter(Boolean));
+  const missingMovement = (row: RawRow) => {
+    const id = text(row.id);
+    const sourceRef = text(row.source_ref_id);
+    return (!id || !movementRefs.has(id)) && (!sourceRef || !movementRefs.has(sourceRef));
+  };
+  const missingSales = allSales.filter(missingMovement);
+  const missingPurchases = purchases.filter(missingMovement);
+  const missingReturns = missingSales.filter((row) => returnExchangeKindFromRow(row) !== "exchange_out" && isReturnExchangeRow(row));
+  const missingExchanges = missingSales.filter((row) => returnExchangeKindFromRow(row) === "exchange_out");
+  const missingNormalSales = missingSales.filter((row) => !isReturnExchangeRow(row));
+
+  const movementCount =
+    await writeInventoryMovements(missingPurchases, "purchase_in") +
+    await writeInventoryMovements(missingNormalSales, "sale_out") +
+    await writeInventoryMovements(missingReturns, "return_in") +
+    await writeInventoryMovements(missingExchanges, "exchange_out");
+  const consolidated_inventory_rows = await consolidateInventoryCurrentDuplicates();
+
   return {
     ok: true,
-    count: 0,
-    message: "FN OS inventory_current is updated from purchases, sales, and inventory_movements.",
+    count: movementCount,
+    consolidated_inventory_rows,
+    purchase_backfill_count: missingPurchases.length,
+    sales_backfill_count: missingNormalSales.length,
+    return_backfill_count: missingReturns.length,
+    exchange_backfill_count: missingExchanges.length,
+    message: `FN OS inventory_current updated from ${movementCount.toLocaleString("ko-KR")} missing sales/purchase movements.`,
   };
 }
 
