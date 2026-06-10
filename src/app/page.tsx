@@ -19958,8 +19958,11 @@ function writeAccountingSessionState(key: string, value: Record<string, unknown>
   }
 }
 
-function accountingSummaryEndpoint(scope: AccountingSummaryScope) {
-  return `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=${scope}`;
+function accountingSummaryEndpoint(scope: AccountingSummaryScope, range?: { from?: string; to?: string }) {
+  const params = new URLSearchParams({ scope });
+  if (range?.from) params.set("from", range.from);
+  if (range?.to) params.set("to", range.to);
+  return `${ACCOUNTING_SUMMARY_ENDPOINT}?${params.toString()}`;
 }
 
 function accountDisplayAlias(value: unknown) {
@@ -20021,8 +20024,8 @@ function accountingSourceDisplayName(row: Record<string, unknown>, mode: "bank" 
   return `${accountingSourceFilterLabel(sourceName || String(row.source_name || "-"), mode)} (미매칭)`;
 }
 
-function accountingSummaryCacheKey(scope: AccountingSummaryScope) {
-  return `${ACCOUNTING_SUMMARY_ENDPOINT}:${scope}:${ACCOUNTING_CACHE_VERSION}`;
+function accountingSummaryCacheKey(scope: AccountingSummaryScope, range?: { from?: string; to?: string }) {
+  return `${ACCOUNTING_SUMMARY_ENDPOINT}:${scope}:${range?.from || ""}:${range?.to || ""}:${ACCOUNTING_CACHE_VERSION}`;
 }
 
 function readCachedAccountingSummary(scope: AccountingSummaryScope) {
@@ -20036,6 +20039,15 @@ function readInitialCachedAccountingSummary(scope: AccountingSummaryScope) {
 function fetchCachedAccountingSummary(scope: AccountingSummaryScope, force = false) {
   return cachedClientJson<AccountingSummary>(accountingSummaryEndpoint(scope), {
     key: accountingSummaryCacheKey(scope),
+    ttl: ACCOUNTING_CACHE_TTL,
+    storageTtl: ACCOUNTING_STORAGE_TTL,
+    force,
+  });
+}
+
+function fetchAccountingSummaryRange(scope: AccountingSummaryScope, range: { from: string; to: string }, force = false) {
+  return cachedClientJson<AccountingSummary>(accountingSummaryEndpoint(scope, range), {
+    key: accountingSummaryCacheKey(scope, range),
     ttl: ACCOUNTING_CACHE_TTL,
     storageTtl: ACCOUNTING_STORAGE_TTL,
     force,
@@ -20127,6 +20139,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [dashboardTrendOffset, setDashboardTrendOffset] = useState(0);
   const [dashboardIncomeMonthOffset, setDashboardIncomeMonthOffset] = useState(0);
   const [dashboardExpenseMonthOffset, setDashboardExpenseMonthOffset] = useState(0);
+  const [dashboardIncomeRankRows, setDashboardIncomeRankRows] = useState<Array<Record<string, unknown>>>([]);
+  const [dashboardExpenseRankRows, setDashboardExpenseRankRows] = useState<Array<Record<string, unknown>>>([]);
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
   const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
     category_large: "",
@@ -21145,6 +21159,34 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   };
   const dashboardIncomePeriod = dashboardMonthPeriod(dashboardIncomeMonthOffset);
   const dashboardExpensePeriod = dashboardMonthPeriod(dashboardExpenseMonthOffset);
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !dashboardIncomePeriod.from || !dashboardIncomePeriod.to) return;
+    let cancelled = false;
+    fetchAccountingSummaryRange("dashboard", { from: dashboardIncomePeriod.from, to: dashboardIncomePeriod.to })
+      .then((data) => {
+        if (!cancelled) setDashboardIncomeRankRows(data.by_income_vendor || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDashboardIncomeRankRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dashboardIncomePeriod.from, dashboardIncomePeriod.to]);
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !dashboardExpensePeriod.from || !dashboardExpensePeriod.to) return;
+    let cancelled = false;
+    fetchAccountingSummaryRange("dashboard", { from: dashboardExpensePeriod.from, to: dashboardExpensePeriod.to })
+      .then((data) => {
+        if (!cancelled) setDashboardExpenseRankRows(data.by_expense_category || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDashboardExpenseRankRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dashboardExpensePeriod.from, dashboardExpensePeriod.to]);
   const dashboardRankRows = (mode: "income" | "expense", from: string, to: string) => {
     const grouped = new Map<string, { label: string; amount: number; count: number }>();
     expenses.forEach((row) => {
@@ -21170,8 +21212,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     });
     return Array.from(grouped.values()).sort((left, right) => right.amount - left.amount);
   };
-  const incomeVendorRows = dashboardRankRows("income", dashboardIncomePeriod.from, dashboardIncomePeriod.to);
-  const expenseCategoryRows = dashboardRankRows("expense", dashboardExpensePeriod.from, dashboardExpensePeriod.to);
+  const incomeVendorRows = dashboardIncomeRankRows.length ? dashboardIncomeRankRows : dashboardRankRows("income", dashboardIncomePeriod.from, dashboardIncomePeriod.to);
+  const expenseCategoryRows = dashboardExpenseRankRows.length ? dashboardExpenseRankRows : dashboardRankRows("expense", dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
   const dashboardTrendPeriodLabel = accountingPeriodLabel(dashboardTrendFromMonth, dashboardTrendToMonth);
   const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
