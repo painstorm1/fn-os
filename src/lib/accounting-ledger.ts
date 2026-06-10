@@ -424,6 +424,8 @@ function ruleMatches(rule: RawRow, tx: RawRow) {
 
 function ambiguousReviewReason(row: RawRow) {
   const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)} ${text(row.memo)}`;
+  const amount = Math.abs(numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.credit_amount));
+  if (/KCP/i.test(haystack) && /자동과금|자동결제/i.test(haystack) && amount === 300000) return "";
   if (text(row.currency) !== "KRW" && numberValue(row.foreign_amount) > 0 && !numberValue(row.amount_krw)) return "외화환율 확인";
   if (/KCP|케이씨피|인터넷상거래_?4|자동결제_?1/i.test(haystack)) return "KCP확인";
   if (/네이버파이낸셜|비즈월렛|NAVER\s*FINANCIAL/i.test(haystack)) return "네이버확인";

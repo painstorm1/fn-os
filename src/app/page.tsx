@@ -10252,7 +10252,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const modeLabel = partnerBalanceMode === "sales" ? "미수금" : "미지급금";
     const tradeLabel = partnerBalanceMode === "sales" ? "판매" : "구매";
     const payLabel = partnerBalanceMode === "sales" ? "수금" : "지급";
-    const monthLabel = partnerBalanceMonth.replace("-", "년 ") + "월";
+    const [statementYear, statementMonth] = partnerBalanceMonth.split("-");
+    const monthLabel = `${statementYear}년 ${Number(statementMonth || "0") || ""}월`;
     const monthSlashLabel = partnerBalanceMonth.replace("-", "/");
     const krw = (value: unknown) => fmt.format(Math.round(Number(value || 0)));
     const shortDate = (value: unknown) => String(value || "").replace(/-/g, "/");
@@ -10279,27 +10280,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       });
       return parts.join("");
     };
+    const documentTitle = selectedPartnerBalanceRows.length === 1 ? `${selectedPartnerBalanceRows[0].customer} 거래내역서` : "거래처 거래내역서";
     const pages = selectedPartnerBalanceRows.map((row, index) => {
       const tradeAmount = Math.round(Number(row.trade_amount || 0));
       const paidAmount = Math.round(Number(row.paid_amount || 0));
       const balance = Math.round(Number(row.month_end_balance || 0));
       return `<section class="page">
-        <div class="titleBlock"><div class="docTitle">${esc(row.customer)} ${esc(modeLabel)} 거래내역서</div><div class="pageNo">${index + 1} / ${selectedPartnerBalanceRows.length}</div></div>
+        <div class="titleBlock"><div class="docTitle">${esc(row.customer)} 거래내역서</div><div class="docMonth">${esc(monthLabel)}</div><div class="pageNo">${index + 1} / ${selectedPartnerBalanceRows.length}</div></div>
+        <div class="companyLine"><span><strong>회사명</strong> ${esc(company.company_name)}</span><span class="divider">/</span><span><strong>사업자번호</strong> ${esc(company.business_no)}</span></div>
         <table class="info"><tbody>
-          <tr><th>회사명</th><td>${esc(company.company_name)}</td><th>사업자번호</th><td>${esc(company.business_no)}</td></tr>
           <tr><th>대표자</th><td>${esc(company.representative_name)}</td><th>전화/Fax</th><td>${esc([company.phone, company.fax].filter(Boolean).join(" / "))}</td></tr>
           <tr><th>주소</th><td colspan="3">${esc(company.address)}</td></tr>
           <tr><th>거래처</th><td>${esc(row.customer)}</td><th>거래처코드</th><td>${esc(row.customer_code || "-")}</td></tr>
         </tbody></table>
-        <table class="ledger"><thead><tr class="section"><th colspan="5">${esc(tradeLabel)}/${esc(payLabel)}내역</th></tr><tr><th>일자</th><th>적요</th><th>${esc(tradeLabel)}</th><th>${esc(payLabel)}</th><th>잔액</th></tr></thead><tbody>${lineHtml(row)}
+        <table class="ledger"><colgroup><col class="colDate"><col class="colDesc"><col class="colTrade"><col class="colPay"><col class="colBalance"></colgroup><thead><tr class="section"><th colspan="5">${esc(tradeLabel)}/${esc(payLabel)}내역</th></tr><tr><th>일자</th><th>적요</th><th>${esc(tradeLabel)}</th><th>${esc(payLabel)}</th><th>잔액</th></tr></thead><tbody>${lineHtml(row)}
           <tr class="total"><th colspan="2">${esc(monthSlashLabel)} 계</th><td class="num">${krw(tradeAmount)}</td><td class="num">${krw(paidAmount)}</td><td></td></tr>
           <tr class="total"><th colspan="2">누계</th><td class="num">${krw(tradeAmount)}</td><td class="num">${krw(paidAmount)}</td><td class="num">${krw(balance)}</td></tr>
         </tbody></table>
         <div class="stamp">${esc(partnerBalanceMonth)} 말 기준 ${esc(company.company_name)} · ${new Date().toLocaleString("ko-KR")}</div>
       </section>`;
     }).join("");
-    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(modeLabel)} 거래내역서</title><style>
-      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:190mm;min-height:277mm;margin:0 auto;padding:0 0 8mm;break-after:page}.page:last-of-type{break-after:auto}.titleBlock{position:relative;margin-bottom:2mm}.docTitle{text-align:center;font-size:18px;font-weight:900;margin:1mm 0 2mm}.pageNo{position:absolute;right:0;top:1mm;font-size:10px;font-weight:800}.info,.ledger{width:100%;border-collapse:collapse}.info{font-size:10px;margin-bottom:2mm}.info th,.info td{border:1px solid #b8c4d1;padding:3px 5px;height:6mm}.info th{width:23mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger{font-size:9.8px;table-layout:fixed}.ledger th,.ledger td{border:1px solid #d7dfe7;padding:3px 4px;vertical-align:middle;word-break:break-word}.ledger th{height:7mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger td{height:6.6mm}.ledger .section th{background:#f8fafc;font-size:12px}.ledger th:nth-child(1),.ledger td:nth-child(1){width:28mm}.ledger th:nth-child(2),.ledger td:nth-child(2){width:auto}.ledger th:nth-child(3),.ledger td:nth-child(3){width:23mm}.ledger th:nth-child(4),.ledger td:nth-child(4){width:23mm}.ledger th:nth-child(5),.ledger td:nth-child(5){width:29mm}.voucher td{background:#f1f2f4}.line .sale{background:#f3dada}.payment td{background:#fff}.opening td{background:#fff}.left{text-align:left}.center{text-align:center}.num{text-align:right}.sale{background:#f3dada}.pay{background:#eaf2ff}.total th,.total td{background:#f1f2f4;font-weight:900}.stamp{position:absolute;right:0;bottom:0;font-size:10.5px}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}.page{width:auto;margin:0;min-height:277mm}.ledger thead{display:table-header-group}}
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(documentTitle)}</title><style>
+      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:190mm;min-height:277mm;margin:0 auto;padding:0 0 8mm;break-after:page}.page:last-of-type{break-after:auto}.titleBlock{position:relative;margin-bottom:2mm}.docTitle{text-align:center;font-size:18px;font-weight:900;margin:1mm 0 1mm}.docMonth{text-align:center;font-size:12px;font-weight:900;margin-bottom:2mm}.pageNo{position:absolute;right:0;top:1mm;font-size:10px;font-weight:800}.companyLine{display:flex;align-items:center;justify-content:center;gap:6mm;margin:0 auto 2mm;font-size:10.5px;font-weight:800}.companyLine span{display:inline-flex;align-items:center;justify-content:center;gap:2mm;min-width:50mm}.companyLine .divider{min-width:auto;color:#94a3b8}.companyLine strong{font-weight:900}.info,.ledger{width:100%;border-collapse:collapse}.info{font-size:10px;margin-bottom:2mm}.info th,.info td{border:1px solid #b8c4d1;padding:3px 5px;height:6mm}.info th{width:23mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger{font-size:9.8px;table-layout:fixed}.ledger .colDate{width:11.76%}.ledger .colDesc{width:47.06%}.ledger .colTrade{width:11.76%}.ledger .colPay{width:11.76%}.ledger .colBalance{width:17.66%}.ledger th,.ledger td{border:1px solid #d7dfe7;padding:3px 4px;vertical-align:middle;word-break:break-word}.ledger th{height:7mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger td{height:6.6mm}.ledger .section th{background:#f8fafc;font-size:12px}.voucher td{background:#f1f2f4}.line .sale{background:#f3dada}.payment td{background:#fff}.opening td{background:#fff}.left{text-align:left}.center{text-align:center}.num{text-align:right}.sale{background:#f3dada}.pay{background:#eaf2ff}.total th,.total td{background:#f1f2f4;font-weight:900}.stamp{position:absolute;right:0;bottom:0;font-size:10.5px}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}.page{width:auto;margin:0;min-height:277mm}.ledger thead{display:table-header-group}}
     </style></head><body>${pages}<div class="toolbar"><button onclick="window.print()">인쇄/PDF저장</button><button onclick="window.close()">닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\/script></body></html>`;
     popup.document.write(html);
     popup.document.close();
@@ -22208,7 +22210,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
             <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
               {[
                 ["bank", "통장 내역"],
@@ -22272,13 +22274,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             {ledgerFilters.periodMode === "day" ? (
               <>
                 <input
-                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[130px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="date"
                   value={ledgerFilters.fromDay}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromDay: event.target.value || accountingDateValue(0) }))}
                 />
                 <input
-                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[130px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="date"
                   value={ledgerFilters.toDay}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toDay: event.target.value || prev.fromDay || accountingDateValue(0) }))}
@@ -22630,7 +22632,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               title="검토필요 거래"
               actions={<StatusBadge tone="danger">{pendingReviewRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
             />
-            <ReviewQuickGrid
+            <ReviewQuickGridEnhanced
               rows={pendingReviewRows}
               categories={categories}
               categoryById={categoryById}
@@ -23411,6 +23413,129 @@ function JaewookPersonalPaymentModal({
         </div>
       </div>
     </FormModal>
+  );
+}
+
+function ReviewQuickGridEnhanced({
+  rows,
+  categories,
+  categoryById,
+  suggestions,
+  onOpen,
+  onSave,
+  onJaewook,
+}: {
+  rows: Array<Record<string, unknown>>;
+  categories: Array<Record<string, unknown>>;
+  categoryById: Map<string, string>;
+  suggestions?: Record<string, Record<string, unknown>>;
+  onOpen: (row: Record<string, unknown>) => void;
+  onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void | Promise<void>;
+  onJaewook?: (row: Record<string, unknown>) => void;
+}) {
+  const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkLarge, setBulkLarge] = useState("");
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkProfit, setBulkProfit] = useState(true);
+  const [bulkMemo, setBulkMemo] = useState("");
+  const largeOptions = Array.from(new Set(categories.map((category) => String(category.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
+  const expenseLargeOptions = largeOptions.filter((large) => accountingCategoryKind(large) === "expense");
+  const selectedSet = new Set(selectedIds);
+  const selectedRows = rows.filter((row) => selectedSet.has(String(row.id || "")));
+  const allSelected = Boolean(rows.length) && rows.every((row) => selectedSet.has(String(row.id || "")));
+  const bulkMiddleOptions = categories.filter((category) => String(category.category_large || "") === bulkLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
+  const sortValue = (row: Record<string, unknown>, key: string) => {
+    if (key === "date") return accountingRowTime(row);
+    if (key === "amount") return asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+    if (key === "source") return accountingShortSource(row);
+    if (key === "merchant") return `${String(row.merchant_name || row.vendor_name || "")} ${String(row.description || "")}`;
+    if (key === "profit") return row.affects_profit === false ? 0 : 1;
+    return String(row[key] || "").toLowerCase();
+  };
+  const sortedRows = [...rows].sort((a, b) => {
+    const left = sortValue(a, sortState.key);
+    const right = sortValue(b, sortState.key);
+    const diff = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right), "ko-KR", { numeric: true, sensitivity: "base" });
+    return sortState.dir === "asc" ? diff : -diff;
+  });
+  const toggleSort = (key: string) => setSortState((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  const sortMark = (key: string) => sortState.key === key ? (sortState.dir === "asc" ? " ▲" : " ▼") : "";
+  const toggleSelected = (id: string, checked: boolean) => setSelectedIds((prev) => checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id));
+  const toggleAll = (checked: boolean) => setSelectedIds(checked ? rows.map((row) => String(row.id || "")).filter(Boolean) : []);
+
+  async function saveBulkEdit() {
+    if (!selectedRows.length) return;
+    if (!bulkCategoryId) {
+      window.alert("카테고리1/2를 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`${selectedRows.length.toLocaleString("ko-KR")}건 모두 해당 내용으로 확정하고 저장할까요?`)) return;
+    for (const row of selectedRows) {
+      await Promise.resolve(onSave(row, { category_id: bulkCategoryId, affects_profit: bulkProfit, memo: bulkMemo || row.memo }, true));
+    }
+    setSelectedIds([]);
+    setBulkOpen(false);
+  }
+
+  if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full min-w-[1240px] table-fixed text-xs">
+          <thead className="bg-gray-50 font-semibold text-gray-500">
+            <tr>
+              <th className="w-9 px-2 py-2 text-center"><input type="checkbox" checked={allSelected} onChange={(event) => toggleAll(event.target.checked)} /></th>
+              <th className="w-[86px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("date")}>일자{sortMark("date")}</th>
+              <th className="w-[96px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("source")}>출처{sortMark("source")}</th>
+              <th className="px-3 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
+              <th className="w-[110px] px-3 py-2 text-right" onDoubleClick={() => toggleSort("amount")}>금액{sortMark("amount")}</th>
+              <th className="w-[150px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
+              <th className="w-[150px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
+              <th className="w-[64px] px-3 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
+              <th className="w-[180px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
+              <th className="w-[150px] px-3 py-2 text-right">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map((row, index) => {
+              const id = String(row.id || "");
+              const currentCategory = categories.find((category) => String(category.id || "") === String(row.category_id || ""));
+              const selectedLarge = String(currentCategory?.category_large || row.category_large || "");
+              const selectedCategoryId = String(currentCategory?.id || row.category_id || "");
+              const rowLargeOptions = largeOptions.filter((large) => categories.some((category) => String(category.category_large || "") === large && accountingCategoryKind(large) === (String(row.direction || "") === "income" ? "income" : "expense")));
+              const middleOptions = categories.filter((category) => String(category.category_large || "") === selectedLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
+              const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+              const suggestion = suggestions?.[id];
+              const jaewookHaystack = `${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`;
+              const jaewookCandidate = jaewookHaystack.includes("\uAE40\uC7AC\uC6B1") || jaewookHaystack.includes("\uC7AC\uC6B1");
+              return (
+                <tr key={id || index} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
+                  <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedSet.has(id)} onChange={(event) => toggleSelected(id, event.target.checked)} /></td>
+                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
+                  <td className="px-3 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
+                  <td className="px-3 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+                  <td className="px-3 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select>{suggestion && <button type="button" className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100" onClick={() => onSave(row, { category_id: suggestion.category_id || row.category_id, affects_profit: suggestion.affects_profit ?? row.affects_profit, affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow })}>추천 적용</button>}</td>
+                  <td className="px-3 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
+                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} /></td>
+                  <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
+                  <td className="px-3 py-2"><div className="flex justify-end gap-2"><ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, { category_id: selectedCategoryId || row.category_id, affects_profit: row.affects_profit !== false }, true)}>확정</ActionButton></div></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {bulkOpen && (<FormModal title="검토필요 다중 수정" description="선택한 거래를 같은 카테고리로 확정 저장합니다." onClose={() => setBulkOpen(false)} size="md" footer={<><ActionButton type="button" variant="secondary" onClick={() => setBulkOpen(false)}>취소</ActionButton><ActionButton type="button" onClick={() => void saveBulkEdit()}>확정 저장</ActionButton></>}>
+        <div className="grid gap-4 md:grid-cols-2"><FormField label="카테고리1" required><select className={modalSelectClass} value={bulkLarge} onChange={(event) => { setBulkLarge(event.target.value); setBulkCategoryId(""); }}><option value="">선택</option>{expenseLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></FormField><FormField label="카테고리2" required><select className={modalSelectClass} value={bulkCategoryId} onChange={(event) => setBulkCategoryId(event.target.value)} disabled={!bulkLarge}><option value="">{bulkLarge ? "선택" : "카테고리1 먼저 선택"}</option>{bulkMiddleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></FormField><label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-black text-gray-700"><input type="checkbox" checked={bulkProfit} onChange={(event) => setBulkProfit(event.target.checked)} />손익반영</label><FormField label="메모"><input className={modalInputClass} value={bulkMemo} onChange={(event) => setBulkMemo(event.target.value)} placeholder="비워두면 기존 메모 유지" /></FormField></div>
+      </FormModal>)}
+    </div>
   );
 }
 

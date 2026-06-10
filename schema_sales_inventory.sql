@@ -1178,7 +1178,7 @@ values
   (10, 'card', 'merchant_name', 'starts_with', 'FACEBK', null, '마케팅·광고', '메타 광고', '', true, false, null, 'FACEBK 계열 메타 광고'),
   (20, 'card', 'merchant_name', 'equals', '네이버페이_비즈월렛', null, '마케팅·광고', '네이버 광고', '', true, false, null, '네이버 비즈월렛'),
   (30, 'card', 'merchant_name', 'contains', '네이버파이낸셜', null, '기타 출금', '검토필요', '', false, true, '네이버확인', '카드 네이버파이낸셜은 제품 구매/광고/일반구매 혼재'),
-  (50, 'card', 'merchant_name', 'contains', 'KCP(자동과금)', '300000', '기타 출금', '검토필요', '', false, true, 'KCP확인', '반복 확인 전 검토'),
+  (50, 'card', 'merchant_name', 'contains', 'KCP(자동과금)', '300000', '마케팅·광고', '네이버 광고', '', true, false, null, '국민카드 KCP 자동과금 30만원 네이버 광고비'),
   (60, 'card', 'merchant_name', 'contains', 'KCP(결제대행)', null, '기타 출금', '검토필요', '', false, true, 'KCP확인', 'KCP 결제대행은 기본 검토'),
   (61, 'card', 'merchant_amount', 'contains', 'KCP(결제대행)', '44000', '업무 비용', '프로그램/구독료', '', true, false, null, '반복 확인된 프로그램/구독료 금액'),
   (62, 'card', 'merchant_amount', 'contains', 'KCP(결제대행)', '95040', '업무 비용', '프로그램/구독료', '', true, false, null, '반복 확인된 호스팅/구독료 금액'),
