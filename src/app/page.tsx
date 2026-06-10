@@ -8948,13 +8948,27 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     invalidateClientCache("/api/fnos/orders");
   }
 
+  function hasHistorySummaryRows(data: SalesInventorySummary | null | undefined) {
+    return Boolean(
+      data &&
+      ((data.recent_sales?.length || 0) > 0 ||
+        (data.recent_purchases?.length || 0) > 0 ||
+        (data.recent_returns?.length || 0) > 0 ||
+        (data.recent_sales_lines?.length || 0) > 0 ||
+        (data.recent_purchase_lines?.length || 0) > 0 ||
+        (data.recent_return_lines?.length || 0) > 0)
+    );
+  }
+
   function loadSummary(force = false) {
-    const shouldForce = force || section === "history";
+    const summaryUrl = section === "history" ? "/api/dashboard/summary?scope=sales-history" : "/api/dashboard/summary";
+    const cached = readCachedJson<SalesInventorySummary>(summaryUrl, { storageTtl: 60_000 });
+    const emptyHistoryCache = section === "history" && Boolean(cached) && !hasHistorySummaryRows(cached);
+    const shouldForce = force || emptyHistoryCache;
     if (!shouldForce) {
-      const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
       if (cached) setSummary(cached);
     }
-    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000, force: shouldForce })
+    cachedClientJson<SalesInventorySummary>(summaryUrl, { ttl: section === "history" ? 10_000 : 45_000, storageTtl: 60_000, force: shouldForce })
       .then((summaryData) => {
         setSummary(summaryData);
       })

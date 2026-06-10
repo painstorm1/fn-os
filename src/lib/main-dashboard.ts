@@ -182,6 +182,25 @@ function isReturnExchangeRow(row: Row) {
   return /RETURN_EXCHANGE|RETURN|EXCHANGE|return_in|exchange_out|manual-return|manual-exchange|반품|교환/i.test(value);
 }
 
+export async function salesHistorySummary() {
+  const [allSales, purchases] = await Promise.all([
+    optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
+    optionalRows("purchases", { order: "created_at.desc", limit: 1500 }),
+  ]);
+  const returnExchangeRows = allSales.filter(isReturnExchangeRow);
+  const sales = allSales.filter((row) => !isReturnExchangeRow(row));
+  return {
+    sales_inventory_basis: sales.slice(0, 1500),
+    purchase_inventory_basis: purchases.slice(0, 1500),
+    recent_sales: summarizeEntryRows(sales, "sales", 80),
+    recent_returns: summarizeEntryRows(returnExchangeRows, "sales", 100),
+    recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
+    recent_sales_lines: sales.slice(0, 500),
+    recent_return_lines: returnExchangeRows.slice(0, 500),
+    recent_purchase_lines: purchases.slice(0, 500),
+  };
+}
+
 function metricTitle(base: string, date: string, today: string, yesterday: string) {
   if (date === today) return `오늘${base}`;
   if (date === yesterday) return `어제 ${base}`;
