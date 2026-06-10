@@ -19626,7 +19626,7 @@ function AccountingDualLineChart({
                     <span className="rounded bg-slate-50/90 px-1.5 py-0.5">{accountingCompactKrw(tick.amount)}</span>
                   </div>
                 ))}
-                <span className="absolute bottom-0 right-0 rounded bg-slate-50/90 px-1.5 py-0.5 text-[11px] font-black text-slate-400">단위:만원</span>
+                <span className="absolute left-0 top-0 rounded bg-slate-50/90 px-1.5 py-0.5 text-[11px] font-black text-slate-400">단위:만원</span>
               </div>
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
                 <path d="M 8 92 L 92 92" stroke="#e2e8f0" strokeWidth="0.8" />
