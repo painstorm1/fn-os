@@ -8949,11 +8949,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function loadSummary(force = false) {
-    if (!force) {
+    const shouldForce = force || section === "history";
+    if (!shouldForce) {
       const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
       if (cached) setSummary(cached);
     }
-    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000, force })
+    cachedClientJson<DashboardSummary>("/api/dashboard/summary", { ttl: 45_000, storageTtl: 60_000, force: shouldForce })
       .then((summaryData) => {
         setSummary(summaryData);
       })
