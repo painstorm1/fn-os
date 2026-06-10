@@ -13,6 +13,8 @@ export type NormalizedOrderItem = {
 export type NormalizedOrder = {
   channelCode: string;
   channelName: string;
+  customerCode?: string;
+  customerName?: string;
   orderNo: string;
   bundleOrderNo?: string;
   orderDate?: string;

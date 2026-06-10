@@ -6648,6 +6648,35 @@ type SalesWorkspaceSnapshot = {
   directShippingRows: Record<DirectShippingPartner, string[][]>;
 };
 
+type CollectedOnlineOrderItem = {
+  channelProductCode?: string;
+  channelOptionCode?: string;
+  channelProductName?: string;
+  channelOptionName?: string;
+  sku?: string;
+  qty?: number;
+  salesAmount?: number;
+  settlementAmount?: number;
+};
+
+type CollectedOnlineOrder = {
+  channelCode?: string;
+  channelName?: string;
+  customerCode?: string;
+  customerName?: string;
+  orderNo?: string;
+  bundleOrderNo?: string;
+  orderDate?: string;
+  orderStatus?: string;
+  receiverName?: string;
+  phone1?: string;
+  phone2?: string;
+  zipcode?: string;
+  address?: string;
+  deliveryMessage?: string;
+  items?: CollectedOnlineOrderItem[];
+};
+
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
 const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
 const SALES_WORKSPACE_DB_STORE = "files";
@@ -6754,6 +6783,101 @@ function salesWorkspaceDayKey(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function onlineOrderDateKey(value: unknown) {
+  const raw = salesCellText(value);
+  if (!raw) return salesWorkspaceDayKey().replace(/\D/g, "");
+  if (/^\d{8}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10).replace(/\D/g, "");
+  return raw.replace(/\D/g, "").slice(0, 8) || salesWorkspaceDayKey().replace(/\D/g, "");
+}
+
+function onlineOrderMoney(value: unknown) {
+  const amount = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
+  const index = salesSheetHeaders[sheet].indexOf(header);
+  if (index >= 0) row[index] = salesCellText(value);
+}
+
+function appendCollectedOnlineOrdersToSheets(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  orders: CollectedOnlineOrder[],
+) {
+  const nextSheets: Record<SalesSheetName, string[][]> = { ...currentSheets };
+  const currentSalesRows = nextSheets["FN판매입력"].filter(rowHasValue);
+  const currentShippingRows = nextSheets.송장출력용.filter(rowHasValue);
+  const currentInvoiceRows = nextSheets.FN송장입력.filter(rowHasValue);
+  const existingKeys = new Set(
+    currentSalesRows
+      .map((row) => salesRowObject("FN판매입력", row))
+      .map((row) => salesCellText(row.메모)),
+  );
+
+  const saleRows: string[][] = [];
+  const shippingRows: string[][] = [];
+  const invoiceRows: string[][] = [];
+
+  orders.forEach((order) => {
+    const orderNo = salesCellText(order.orderNo);
+    const channelName = salesCellText(order.customerName || order.channelName);
+    const channelCode = salesCellText(order.customerCode || order.channelCode);
+    (order.items || []).forEach((item, itemIndex) => {
+      const itemKey = [channelName, orderNo, salesCellText(item.channelOptionCode || item.channelProductCode || item.sku), itemIndex + 1].join(" ");
+      if (existingKeys.has(itemKey)) return;
+      existingKeys.add(itemKey);
+
+      const qty = onlineOrderMoney(item.qty) || 1;
+      const amount = onlineOrderMoney(item.salesAmount || item.settlementAmount);
+      const unitPrice = qty ? Math.round(amount / qty) : amount;
+      const productCode = salesCellText(item.sku || item.channelProductCode || item.channelOptionCode);
+      const productName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
+
+      const sale = salesSheetHeaders["FN판매입력"].map(() => "");
+      setSalesSheetCell(sale, "FN판매입력", "일자", onlineOrderDateKey(order.orderDate));
+      setSalesSheetCell(sale, "FN판매입력", "거래처코드", channelCode);
+      setSalesSheetCell(sale, "FN판매입력", "거래처명", channelName);
+      setSalesSheetCell(sale, "FN판매입력", "출하창고", "100");
+      setSalesSheetCell(sale, "FN판매입력", "VAT 포함/별도", "포함");
+      setSalesSheetCell(sale, "FN판매입력", "품목코드", productCode);
+      setSalesSheetCell(sale, "FN판매입력", "품목명", productName);
+      setSalesSheetCell(sale, "FN판매입력", "수량", qty);
+      setSalesSheetCell(sale, "FN판매입력", "단가", unitPrice || "");
+      setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
+      setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
+      setSalesSheetCell(sale, "FN판매입력", "메모", itemKey);
+      saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
+
+      const shipping = salesSheetHeaders.송장출력용.map(() => "");
+      setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", productCode || salesCellText(item.channelProductCode));
+      setSalesSheetCell(shipping, "송장출력용", "수취인", order.receiverName);
+      setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", order.phone1);
+      setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", order.phone2);
+      setSalesSheetCell(shipping, "송장출력용", "우편번호", order.zipcode);
+      setSalesSheetCell(shipping, "송장출력용", "주소", order.address);
+      setSalesSheetCell(shipping, "송장출력용", "주문옵션", productName);
+      setSalesSheetCell(shipping, "송장출력용", "수량", qty);
+      setSalesSheetCell(shipping, "송장출력용", "배송요청사항", order.deliveryMessage);
+      setSalesSheetCell(shipping, "송장출력용", "정산예정금액", item.settlementAmount || amount || "");
+      shippingRows.push(shipping);
+
+      const invoice = salesSheetHeaders.FN송장입력.map(() => "");
+      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", productCode || salesCellText(item.channelProductCode));
+      setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
+      setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
+      invoiceRows.push(invoice);
+    });
+  });
+
+  nextSheets["FN판매입력"] = padSalesRows("FN판매입력", [...currentSalesRows, ...saleRows]);
+  nextSheets.송장출력용 = padSalesRows("송장출력용", [...currentShippingRows, ...shippingRows]);
+  nextSheets.FN송장입력 = padSalesRows("FN송장입력", [...currentInvoiceRows, ...invoiceRows]);
+  nextSheets["발주 진행 단계"] = buildOrderProgressRows(nextSheets);
+  return nextSheets;
 }
 
 function openSalesWorkspaceDb(): Promise<IDBDatabase> {
@@ -9439,28 +9563,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (kind === "orders") window.alert("작업 완료됨!");
   }
 
-  function runOrderCollectionFlow() {
+  async function runOrderCollectionFlow() {
     const ok = window.confirm("주문 수집하시겠습니까?");
     if (!ok) return;
-    const channelNames = ["네이버 스마트스토어", "쿠팡", "11번가", "ESM/G마켓/옥션", "카카오톡스토어", "SSG", "롯데ON", "오늘의집", "토스", "현대이지웰", "기타몰"];
-    setCollectionStatuses(channelNames.map((name) => ({ name, status: "waiting", message: "대기" })));
-    setCollectionPopupOpen(true);
-    channelNames.forEach((name, index) => {
-      window.setTimeout(() => {
-        setCollectionStatuses((prev) => prev.map((item) => item.name === name ? {
-          ...item,
-          status: ["네이버 스마트스토어", "쿠팡"].includes(name) ? "running" : "failed",
-          message: ["네이버 스마트스토어", "쿠팡"].includes(name) ? "API 연결 준비 중" : "연동 API 미연결",
-        } : item));
-      }, index * 120);
-      window.setTimeout(() => {
-        setCollectionStatuses((prev) => prev.map((item) => item.name === name && item.status === "running" ? {
-          ...item,
-          status: "done",
-          message: "현재 어댑터 준비됨, 실제 수집 API 연결 예정",
-        } : item));
-      }, index * 120 + 600);
-    });
     if (completedSalesTasks.orderFlow) {
       const retry = window.confirm("이미 주문수집 작업을 실행한 것으로 보입니다. 중복 작업일 수 있는데 계속할까요?");
       if (!retry) {
@@ -9472,8 +9577,51 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       void parseWaitingFiles("orders");
       return;
     }
-    setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-    setMessage("쇼핑몰 API 주문수집 화면을 준비했습니다. 실제 채널 API 저장은 별도 API 연결 후 반영됩니다.");
+    setCollectionStatuses([
+      { name: "네이버 스마트스토어", status: "running", message: "API 수집 중" },
+      { name: "쿠팡", status: "running", message: "API 수집 중" },
+    ]);
+    setCollectionPopupOpen(true);
+    setMessage("쇼핑몰 API 주문을 수집하는 중입니다...");
+    try {
+      const res = await fetch("/api/fnos/online-orders/sync", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
+      setCollectionStatuses(statuses.length
+        ? statuses.map((item) => ({
+            name: salesCellText(item.channel_name) || "쇼핑몰",
+            status: item.ok ? "done" : "failed",
+            message: item.ok ? `${Number(item.count || 0)}건 수집` : salesCellText(item.message || "수집 실패"),
+          }))
+        : [
+            {
+              name: "온라인 발주",
+              status: res.ok && data.ok !== false ? "done" : "failed",
+              message: salesCellText(data.error || data.message || "처리 완료"),
+            },
+          ]);
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "쇼핑몰 API 주문 수집에 실패했습니다.");
+        return;
+      }
+      const orders = Array.isArray(data.orders) ? data.orders as CollectedOnlineOrder[] : [];
+      if (orders.length) {
+        setSheets((prev) => appendCollectedOnlineOrdersToSheets(prev, orders));
+        setSalesGridResetKey((value) => value + 1);
+      }
+      setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
+      setMessage(`쇼핑몰 API 주문 ${orders.length}건을 수집해 온라인 발주 시트에 반영했습니다.`);
+      window.alert("작업 완료");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "쇼핑몰 API 주문 수집 실패";
+      setCollectionStatuses((prev) => prev.map((item) => ({ ...item, status: "failed", message })));
+      setMessage(message);
+    }
   }
 
   function exportAllSheets() {
@@ -10116,7 +10264,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === "F1") runOrderCollectionFlow();
+      if (event.key === "F1") void runOrderCollectionFlow();
       if (event.key === "F2") openInvoiceUpload();
       if (event.key === "F3") void applyFnParcelSheet();
     };
@@ -12308,7 +12456,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={runOrderCollectionFlow}>F1 주문수집</button>
+              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow()}>F1 주문수집</button>
               <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F2 송장 업로드</button>
               <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F3 FN택배시트 반영</button>
               <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>
@@ -12421,6 +12569,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     }`} />
                       <div className="min-w-0">
                         <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
+                        <div className="mt-0.5 truncate text-xs font-semibold text-gray-500">{item.message}</div>
                       </div>
                   </div>
                 ))}
