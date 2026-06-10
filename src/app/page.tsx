@@ -10250,53 +10250,56 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const fmt = new Intl.NumberFormat("ko-KR");
     const esc = htmlEscape;
     const modeLabel = partnerBalanceMode === "sales" ? "미수금" : "미지급금";
-    const tradeLabel = partnerBalanceMode === "sales" ? "판매금액" : "구매금액";
-    const payLabel = partnerBalanceMode === "sales" ? "수금액" : "지급액";
-    const balanceLabel = partnerBalanceMode === "sales" ? "미수 현잔액" : "미지급 현잔액";
+    const tradeLabel = partnerBalanceMode === "sales" ? "판매" : "구매";
+    const payLabel = partnerBalanceMode === "sales" ? "수금" : "지급";
     const monthLabel = partnerBalanceMonth.replace("-", "년 ") + "월";
+    const monthSlashLabel = partnerBalanceMonth.replace("-", "/");
     const krw = (value: unknown) => fmt.format(Math.round(Number(value || 0)));
+    const shortDate = (value: unknown) => String(value || "").replace(/-/g, "/");
     const lineHtml = (row: PartnerBalanceRow) => {
       const details = (row.details || []).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")));
       let running = Math.round(Number(row.previous_balance || 0));
       const parts: string[] = [];
+      parts.push(`<tr class="opening"><td></td><td class="center">이월잔액</td><td></td><td></td><td class="num">${krw(running)}</td></tr>`);
       details.forEach((detail) => {
         const amount = Math.round(Number(detail.amount || 0));
         const payment = Math.round(Number(detail.payment_amount || 0));
         running += amount - payment;
         if (detail.kind === "전표") {
-          parts.push(`<tr class="voucher"><td>${esc(detail.voucher_no || "-")}</td><td>${esc(detail.date || "-")}</td><td>${esc(detail.warehouse || "-")}</td><td colspan="4" class="left">${esc(detail.description || "-")}</td><td class="num">${krw(amount)}</td><td class="left">${esc(detail.memo || "")}</td></tr>`);
+          parts.push(`<tr class="voucher"><td>${esc(shortDate(detail.date))} -${esc(String(detail.voucher_no || "").split("-").pop() || "1")}</td><td class="left">${esc(detail.memo || detail.description || "직송")}</td><td class="num sale">${amount ? krw(amount) : ""}</td><td></td><td class="num">${krw(running)}</td></tr>`);
           (detail.lines || []).forEach((line) => {
-            parts.push(`<tr><td></td><td></td><td>${esc(line.warehouse || detail.warehouse || "-")}</td><td>${esc(line.product_code || "-")}</td><td class="left">${esc(line.product_name || "-")}</td><td class="num">${krw(line.qty || 0)}</td><td class="num">${krw(line.unit_price || 0)}</td><td class="num">${krw(line.amount || 0)}</td><td class="left">${esc(line.memo || "")}</td></tr>`);
+            const qty = Number(line.qty || 0);
+            const unit = Number(line.unit_price || 0);
+            const amountText = Math.round(Number(line.amount || 0)) ? krw(line.amount) : "";
+            parts.push(`<tr class="line"><td></td><td class="left">${esc(line.product_name || "-")} / ${krw(qty)} * ${krw(unit)}</td><td class="num sale">${amountText}</td><td></td><td></td></tr>`);
           });
         } else {
-          parts.push(`<tr class="payment"><td></td><td>${esc(detail.date || "-")}</td><td></td><td colspan="4" class="left">${esc(detail.description || detail.kind || payLabel)}</td><td class="num">-${krw(payment)}</td><td class="left">${esc(detail.memo || "")}</td></tr>`);
+          parts.push(`<tr class="payment"><td>${esc(shortDate(detail.date))}</td><td class="left">${esc(detail.description || detail.kind || payLabel)}</td><td></td><td class="num pay">${payment ? krw(payment) : ""}</td><td class="num">${krw(running)}</td></tr>`);
         }
       });
-      if (!parts.length) return `<tr><td colspan="9" class="empty">해당 월 거래내역이 없습니다.</td></tr>`;
       return parts.join("");
     };
     const pages = selectedPartnerBalanceRows.map((row, index) => {
       const tradeAmount = Math.round(Number(row.trade_amount || 0));
       const paidAmount = Math.round(Number(row.paid_amount || 0));
-      const previous = Math.round(Number(row.previous_balance || 0));
       const balance = Math.round(Number(row.month_end_balance || 0));
       return `<section class="page">
-        <h1>${esc(row.customer)} ${esc(modeLabel)} 거래내역서</h1>
-        <div class="top"><span>${esc(monthLabel)} 거래명세서별 거래내역</span><span>${index + 1} / ${selectedPartnerBalanceRows.length}</span></div>
+        <div class="titleBlock"><div class="docTitle">${esc(row.customer)} ${esc(modeLabel)} 거래내역서</div><div class="pageNo">${index + 1} / ${selectedPartnerBalanceRows.length}</div></div>
         <table class="info"><tbody>
           <tr><th>회사명</th><td>${esc(company.company_name)}</td><th>사업자번호</th><td>${esc(company.business_no)}</td></tr>
           <tr><th>대표자</th><td>${esc(company.representative_name)}</td><th>전화/Fax</th><td>${esc([company.phone, company.fax].filter(Boolean).join(" / "))}</td></tr>
           <tr><th>주소</th><td colspan="3">${esc(company.address)}</td></tr>
           <tr><th>거래처</th><td>${esc(row.customer)}</td><th>거래처코드</th><td>${esc(row.customer_code || "-")}</td></tr>
         </tbody></table>
-        <table class="summary"><tbody><tr><th>전잔액</th><td class="num">${krw(previous)}</td><th>${esc(tradeLabel)}</th><td class="num">${krw(tradeAmount)}</td><th>${esc(payLabel)}</th><td class="num">${krw(paidAmount)}</td><th>${esc(balanceLabel)}</th><td class="num strong">${krw(balance)}</td></tr></tbody></table>
-        <table class="ledger"><thead><tr><th>일자 NO</th><th>일자</th><th>창고</th><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>금액</th><th>메모</th></tr></thead><tbody>${lineHtml(row)}
-          <tr class="total"><th colspan="5">총합</th><td class="num">${krw(row.qty)}</td><td></td><td class="num">${krw(tradeAmount)}</td><td></td></tr>
+        <table class="ledger"><thead><tr class="section"><th colspan="5">${esc(tradeLabel)}/${esc(payLabel)}내역</th></tr><tr><th>일자</th><th>적요</th><th>${esc(tradeLabel)}</th><th>${esc(payLabel)}</th><th>잔액</th></tr></thead><tbody>${lineHtml(row)}
+          <tr class="total"><th colspan="2">${esc(monthSlashLabel)} 계</th><td class="num">${krw(tradeAmount)}</td><td class="num">${krw(paidAmount)}</td><td></td></tr>
+          <tr class="total"><th colspan="2">누계</th><td class="num">${krw(tradeAmount)}</td><td class="num">${krw(paidAmount)}</td><td class="num">${krw(balance)}</td></tr>
         </tbody></table>
+        <div class="stamp">${esc(partnerBalanceMonth)} 말 기준 ${esc(company.company_name)} · ${new Date().toLocaleString("ko-KR")}</div>
       </section>`;
     }).join("");
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(modeLabel)} 거래내역서</title><style>
-      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{width:190mm;margin:0 auto;padding:3mm 0 8mm;break-after:page}.page:last-of-type{break-after:auto}h1{text-align:center;font-size:23px;font-weight:900;margin:1mm 0 5mm}.top{display:flex;justify-content:space-between;margin-bottom:2mm;font-size:11px;font-weight:800}.info,.summary,.ledger{width:100%;border-collapse:collapse}.info,.summary{font-size:10.5px;margin-bottom:2mm}.info th,.info td,.summary th,.summary td{border:1px solid #b8c4d1;padding:4px 5px;height:7mm}.info th,.summary th{background:#edf3f8;text-align:center;font-weight:900}.summary td{font-weight:800}.ledger{font-size:9.2px;table-layout:fixed}.ledger th,.ledger td{border:1px solid #cbd5e1;padding:3px 4px;vertical-align:middle;word-break:break-word}.ledger th{background:#eef2f7;text-align:center;font-weight:900}.ledger tr{break-inside:avoid}.voucher td{background:#f3f4f6;font-weight:900}.payment td{background:#fff7ed}.left{text-align:left}.num{text-align:right}.strong{color:#ff6a00;font-weight:900}.total th,.total td{background:#e5e7eb;font-weight:900}.empty{text-align:center;color:#64748b;padding:10mm}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}.page{width:auto;margin:0;padding:0}.ledger thead{display:table-header-group}}
+      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{position:relative;width:190mm;min-height:277mm;margin:0 auto;padding:0 0 8mm;break-after:page}.page:last-of-type{break-after:auto}.titleBlock{position:relative;margin-bottom:2mm}.docTitle{text-align:center;font-size:18px;font-weight:900;margin:1mm 0 2mm}.pageNo{position:absolute;right:0;top:1mm;font-size:10px;font-weight:800}.info,.ledger{width:100%;border-collapse:collapse}.info{font-size:10px;margin-bottom:2mm}.info th,.info td{border:1px solid #b8c4d1;padding:3px 5px;height:6mm}.info th{width:23mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger{font-size:9.8px;table-layout:fixed}.ledger th,.ledger td{border:1px solid #d7dfe7;padding:3px 4px;vertical-align:middle;word-break:break-word}.ledger th{height:7mm;background:#f4f7fa;text-align:center;font-weight:900}.ledger td{height:6.6mm}.ledger .section th{background:#f8fafc;font-size:12px}.ledger th:nth-child(1),.ledger td:nth-child(1){width:28mm}.ledger th:nth-child(2),.ledger td:nth-child(2){width:auto}.ledger th:nth-child(3),.ledger td:nth-child(3){width:23mm}.ledger th:nth-child(4),.ledger td:nth-child(4){width:23mm}.ledger th:nth-child(5),.ledger td:nth-child(5){width:29mm}.voucher td{background:#f1f2f4}.line .sale{background:#f3dada}.payment td{background:#fff}.opening td{background:#fff}.left{text-align:left}.center{text-align:center}.num{text-align:right}.sale{background:#f3dada}.pay{background:#eaf2ff}.total th,.total td{background:#f1f2f4;font-weight:900}.stamp{position:absolute;right:0;bottom:0;font-size:10.5px}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}.page{width:auto;margin:0;min-height:277mm}.ledger thead{display:table-header-group}}
     </style></head><body>${pages}<div class="toolbar"><button onclick="window.print()">인쇄/PDF저장</button><button onclick="window.close()">닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\/script></body></html>`;
     popup.document.write(html);
     popup.document.close();
