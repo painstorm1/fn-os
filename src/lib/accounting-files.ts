@@ -174,7 +174,7 @@ function cardPaymentDue(sourceType: string, value: unknown) {
 function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceProfile, fileName: string) {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
   const rows: RawRow[] = [];
-  for (let index = profile.firstDataRow; index < matrix.length; index += 1) {
+  for (let index = 0; index < matrix.length; index += 1) {
     const row = matrix[index] || [];
     const expenseDate = normalizeProfileDate(row[profile.columns.date], fileName);
     if (!expenseDate) continue;
@@ -185,6 +185,11 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
     const primaryAmount = profile.columns.amount !== undefined ? row[profile.columns.amount] : hasDeposit ? deposit : withdraw;
     const foreignAmount = profile.columns.foreignAmount !== undefined ? row[profile.columns.foreignAmount] : "";
     const amount = primaryAmount;
+    const amountValue = numberValue(amount);
+    const foreignAmountValue = numberValue(foreignAmount);
+    const hasUsableAmount = amountValue !== 0 || foreignAmountValue !== 0;
+    const hasVendor = clean(row[profile.columns.vendor]) !== "";
+    if (!hasUsableAmount && !hasVendor) continue;
     const direction = hasDeposit ? "입금" : hasWithdraw ? "출금" : "";
     const category = clean(row[profile.columns.category]) || direction;
     const detail = profile.columns.detail !== undefined ? clean(row[profile.columns.detail]) : "";
@@ -247,7 +252,7 @@ export async function parseExpenseFiles(files: File[], sourceType: string, fileS
           source_type: fileSourceType,
           source_file_name: file.name,
           source_sheet_name: sheetName,
-          source_row_no: index + 2,
+          source_row_no: numberValue(row.source_row_no) || index + 2,
           category: clean(pick(row, ["category", "카테고리", "분류"])) || classifyExpense(vendor, description, fileSourceType),
         });
       });

@@ -19777,7 +19777,7 @@ function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
 }
 
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-09-card-panel-income";
+const ACCOUNTING_CACHE_VERSION = "2026-06-10-kb-card-repair";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full";

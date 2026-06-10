@@ -335,6 +335,16 @@ function dedupeKey(parts: Array<unknown>) {
   return parts.map((part) => text(part).replace(/\s+/g, " ")).join("|").toLowerCase();
 }
 
+function transactionFallbackDedupeKey(row: RawRow) {
+  const amount = numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.credit_amount);
+  return dedupeKey([
+    row.source_name || row.card_name || row.account_name || row.source_type,
+    isoDate(row.transaction_date),
+    row.merchant_name || row.description,
+    amount,
+  ]);
+}
+
 function ruleMatches(rule: RawRow, tx: RawRow) {
   const field = text(rule.condition_field || "merchant_name");
   const operator = text(rule.condition_operator || "contains");
@@ -1353,16 +1363,33 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
         limit: keyChunk.length,
       }));
     }
+    const dateKeys = Array.from(new Set(rowsWithBatch.map((row) => isoDate(row.transaction_date)).filter(Boolean)));
+    const existingByDate: RawRow[] = [];
+    for (const dateChunk of chunkRows(dateKeys, 100)) {
+      existingByDate.push(...await optionalRows("accounting_transactions", {
+        transaction_date: `in.(${dateChunk.map((date) => `"${date}"`).join(",")})`,
+        is_active: "eq.true",
+        limit: 5000,
+      }));
+    }
     const existingKeys = new Set(existing.map((row) => text(row.dedupe_key)));
+    const existingFallbackKeys = new Set(existingByDate
+      .filter((row) => !text(row.approval_no))
+      .map(transactionFallbackDedupeKey)
+      .filter(Boolean));
     const freshByKey = new Map<string, RawRow>();
+    const freshFallbackKeys = new Set<string>();
     let uploadDuplicateCount = 0;
     for (const row of rowsWithBatch) {
       const key = text(row.dedupe_key);
-      if (!key || existingKeys.has(key) || freshByKey.has(key)) {
+      const fallbackKey = transactionFallbackDedupeKey(row);
+      const shouldUseFallback = !text(row.approval_no) || existingFallbackKeys.has(fallbackKey);
+      if (!key || existingKeys.has(key) || freshByKey.has(key) || (shouldUseFallback && (existingFallbackKeys.has(fallbackKey) || freshFallbackKeys.has(fallbackKey)))) {
         uploadDuplicateCount += 1;
         continue;
       }
       freshByKey.set(key, row);
+      if (shouldUseFallback) freshFallbackKeys.add(fallbackKey);
     }
     const fresh = Array.from(freshByKey.values());
     const savedChunks = await Promise.all(chunkRows(fresh, 200).map((chunk) => upsertRows<RawRow>("accounting_transactions", chunk, "dedupe_key")));
