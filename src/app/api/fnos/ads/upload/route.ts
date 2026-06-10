@@ -30,10 +30,23 @@ function isValidReportDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function flexibleReportDateFromFileName(fileName: string) {
+  const normalized = fileName.normalize("NFKC");
+  const matches = Array.from(normalized.matchAll(/(20\d{2})\D{0,4}(\d{1,2})\D{0,4}(\d{1,2})/g));
+  for (const match of matches) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  return "";
+}
+
 function reportDateFromFileName(fileName: string, fallbackDate?: string) {
   if (fallbackDate && isValidReportDate(fallbackDate)) return fallbackDate;
   const matches = fileName.match(/20\d{6}/g);
-  if (!matches?.length) return new Date().toISOString().slice(0, 10);
+  if (!matches?.length) return flexibleReportDateFromFileName(fileName) || new Date().toISOString().slice(0, 10);
   if (matches.length >= 2) return ymd(matches[0]);
 
   // Naver files usually contain the download date/time in the filename.
@@ -46,6 +59,7 @@ function reportDateFromFileName(fileName: string, fallbackDate?: string) {
 
 function inferAdChannel(fileName: string, index: number, total: number) {
   const name = fileName.toLowerCase();
+  if ((name.includes("fn에프엔") || name.includes("에프엔")) && name.includes("캠페인") && name.includes("~")) return adChannelOrder[0];
   if (name.includes("광고그룹")) return "네이버GFA";
   if (name.includes("쇼핑검색")) return "네이버쇼핑검색";
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "쿠팡";

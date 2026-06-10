@@ -18284,6 +18284,7 @@ function adUploadResultLabel(result: AdUploadReport | null) {
 
 function inferAdSourceKey(fileName: string): AdSourceKey {
   const name = fileName.toLowerCase();
+  if ((name.includes("fn에프엔") || name.includes("에프엔")) && name.includes("캠페인") && name.includes("~")) return "meta-gfa";
   if (name.includes("광고그룹")) return "naver-gfa";
   if (name.includes("쇼핑검색")) return "naver-shopping";
   if (name.includes("pa_total_campaign") || name.includes("coupang") || name.includes("쿠팡")) return "coupang";
