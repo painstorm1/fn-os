@@ -1320,6 +1320,94 @@ function compactReviewTransaction(row: RawRow) {
   };
 }
 
+function rocketGrowthMonthDate(month: unknown) {
+  const raw = text(month);
+  if (!/^\d{4}-\d{2}$/.test(raw)) return "";
+  return `${raw}-01`;
+}
+
+function rocketGrowthDedupeKey(month: string, item: string) {
+  return `manual|coupang-rocket-growth|${month}|${item}`;
+}
+
+async function categoryByLargeMiddle(categoryLarge: string, categoryMiddle: string) {
+  const categories = await optionalRows("accounting_categories", { is_active: "eq.true", limit: 500 });
+  const normalize = (value: unknown) => text(value).replace(/[·\s/-]/g, "");
+  const category = categories.find((item) => normalize(item.category_large) === normalize(categoryLarge) && normalize(item.category_middle) === normalize(categoryMiddle));
+  if (!category) throw new Error(`${categoryLarge} > ${categoryMiddle} 카테고리가 필요합니다.`);
+  return category;
+}
+
+export async function listRocketGrowthCosts() {
+  const rows = await optionalRows("accounting_transactions", {
+    source_type: "eq.manual",
+    source_name: "eq.쿠팡 로켓그로스",
+    is_active: "eq.true",
+    order: "transaction_date.desc",
+    limit: 200,
+  });
+  return rows.filter((row) => text(row.dedupe_key).startsWith("manual|coupang-rocket-growth|"));
+}
+
+export async function upsertRocketGrowthCosts(row: RawRow) {
+  const month = text(row.month);
+  const transactionDate = rocketGrowthMonthDate(month);
+  if (!transactionDate) throw new Error("기준월이 필요합니다.");
+  const adAmount = numberValue(row.ad_amount ?? row.adAmount);
+  const fulfillmentAmount = numberValue(row.fulfillment_amount ?? row.fulfillmentAmount);
+  if (adAmount < 0 || fulfillmentAmount < 0) throw new Error("금액은 0 이상이어야 합니다.");
+  const [adCategory, fulfillmentCategory] = await Promise.all([
+    categoryByLargeMiddle("마케팅·광고", "쿠팡"),
+    categoryByLargeMiddle("업무 비용", "로켓그로스"),
+  ]);
+  const now = new Date().toISOString();
+  const base = {
+    transaction_date: transactionDate,
+    source_type: "manual",
+    source_name: "쿠팡 로켓그로스",
+    direction: "expense",
+    currency: "KRW",
+    debit_amount: 0,
+    credit_amount: 0,
+    review_status: "confirmed",
+    review_reason: "",
+    affects_profit: false,
+    affects_cashflow: false,
+    affects_card_settlement: false,
+    is_active: true,
+    updated_at: now,
+  };
+  const rows = [
+    {
+      ...base,
+      merchant_name: "쿠팡 로켓그로스 광고비",
+      description: `${month} 쿠팡 로켓그로스 광고비`,
+      amount: adAmount,
+      amount_krw: adAmount,
+      category_id: adCategory.id,
+      category_large: adCategory.category_large,
+      category_middle: adCategory.category_middle,
+      category_small: "",
+      memo: text(row.memo) || null,
+      dedupe_key: rocketGrowthDedupeKey(month, "ad"),
+    },
+    {
+      ...base,
+      merchant_name: "쿠팡 로켓그로스 풀필먼트서비스",
+      description: `${month} 쿠팡 로켓그로스 풀필먼트서비스`,
+      amount: fulfillmentAmount,
+      amount_krw: fulfillmentAmount,
+      category_id: fulfillmentCategory.id,
+      category_large: fulfillmentCategory.category_large,
+      category_middle: fulfillmentCategory.category_middle,
+      category_small: "",
+      memo: text(row.memo) || null,
+      dedupe_key: rocketGrowthDedupeKey(month, "fulfillment"),
+    },
+  ];
+  return upsertRows<RawRow>("accounting_transactions", rows, "dedupe_key");
+}
+
 function cleanBankAccountPayload(row: RawRow) {
   return {
     account_type: text(row.account_type || row.accountType) || "business",
@@ -1590,6 +1678,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     cardAccounts,
     fxRates,
     gaonCardPoints,
+    rocketGrowthCosts,
   ] = await Promise.all([
     optionalRows("accounting_transactions", {
       ...(dateFilter ? { transaction_date: dateFilter } : {}),
@@ -1607,6 +1696,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     dashboardOnly ? Promise.resolve([]) : optionalRows("accounting_card_accounts", { order: "sort_order.asc", limit: 100 }),
     fxRatesMap(),
     readAccountingCardPoint("가온글로벌카드"),
+    dbOnly ? listRocketGrowthCosts() : Promise.resolve([]),
   ]);
   const filtered = rows.filter((row) => {
     const date = isoDate(row.transaction_date);
@@ -1691,6 +1781,11 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const expenseRows = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false);
   const incomeRankPick = (row: RawRow) => text(row.category_middle || row.category_large || row.merchant_name || row.source_name);
   const categoryLarge = group((row) => text(row.category_large));
+  const expenseCategoryMiddle = group((row) => `${text(row.category_large)}|${text(row.category_middle)}`, expenseRows, profitExpenseAmount)
+    .map((row) => {
+      const [parent, label] = text(row.label).split("|");
+      return { ...row, parent, label: label || parent || "기타" };
+    });
   const confirmedRows = dashboardOnly ? [] : filtered.filter((item) => text(item.review_status) === "confirmed");
   const reviewSuggestions = dashboardOnly ? {} : Object.fromEntries(
     filtered
@@ -1740,6 +1835,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       by_vendor: group((row) => text(row.merchant_name)),
       by_income_vendor: group(incomeRankPick, incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
       by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
+      by_expense_category_middle: expenseCategoryMiddle,
       by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
       by_card: group((row) => text(row.card_name || row.source_name)),
       by_month: byMonth,
@@ -1780,6 +1876,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       rules,
       review_queue: reviewQueue,
       review_suggestions: reviewSuggestions,
+      rocket_growth_costs: rocketGrowthCosts,
     };
   }
   return {
@@ -1817,6 +1914,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     by_vendor: group((row) => text(row.merchant_name)),
     by_income_vendor: group(incomeRankPick, incomeRows, (row) => numberValue(row.credit_amount) || numberValue(row.amount_krw ?? row.amount)),
     by_expense_category: group((row) => text(row.category_large), expenseRows, profitExpenseAmount),
+    by_expense_category_middle: expenseCategoryMiddle,
     by_expense_vendor: group((row) => text(row.merchant_name || row.source_name), expenseRows, profitExpenseAmount),
     by_card: group((row) => text(row.card_name || row.source_name)),
     by_month: byMonth,

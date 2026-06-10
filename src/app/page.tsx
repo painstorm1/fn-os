@@ -20357,12 +20357,18 @@ function AccountingCategoryRankChart({
   title,
   periodLabel,
   onShift,
+  onRowClick,
+  backLabel,
+  onBack,
 }: {
   rows: Array<Record<string, unknown>>;
   mode: "income" | "expense";
   title: string;
   periodLabel?: string;
   onShift?: (offset: number) => void;
+  onRowClick?: (row: Record<string, unknown>) => void;
+  backLabel?: string;
+  onBack?: () => void;
 }) {
   const chartRows = accountingTopRowsWithOther(rows);
   const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
@@ -20373,6 +20379,7 @@ function AccountingCategoryRankChart({
   return (
     <Card className="p-4">
       <SectionHeader title={title} description={periodLabel} className="mb-2" actions={<AccountingChartPeriodActions onShift={onShift} previousLabel={`${title} 이전 월`} nextLabel={`${title} 다음 월`} />} />
+      {onBack && <button type="button" className="mb-2 text-xs font-black text-slate-500 hover:text-[#ff6a00]" onClick={onBack}>{backLabel || "← 1카테고리 보기"}</button>}
       {periodLabel && <p className="mb-2 text-xs font-semibold text-slate-500">{periodLabel}</p>}
       <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
@@ -20382,7 +20389,8 @@ function AccountingCategoryRankChart({
             return (
               <div
                 key={`${String(row.label)}-${index}`}
-                className="min-w-0"
+                className={`min-w-0 ${onRowClick ? "cursor-pointer rounded-lg px-1 py-1 hover:bg-white" : ""}`}
+                onClick={() => onRowClick?.(row)}
               >
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate font-bold text-slate-700">{accountingRankLabel(row.label)}</span>
@@ -20434,10 +20442,12 @@ type AccountingSummary = {
   by_vendor?: Array<Record<string, unknown>>;
   by_income_vendor?: Array<Record<string, unknown>>;
   by_expense_category?: Array<Record<string, unknown>>;
+  by_expense_category_middle?: Array<Record<string, unknown>>;
   by_expense_vendor?: Array<Record<string, unknown>>;
   by_card?: Array<Record<string, unknown>>;
   by_month?: Array<Record<string, unknown>>;
   review_suggestions?: Record<string, Record<string, unknown>>;
+  rocket_growth_costs?: Array<Record<string, unknown>>;
 };
 
 type ExpenseUploadItem = {
@@ -20739,6 +20749,16 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [dashboardExpenseMonthOffset, setDashboardExpenseMonthOffset] = useState(0);
   const [dashboardIncomeRankRows, setDashboardIncomeRankRows] = useState<Array<Record<string, unknown>>>([]);
   const [dashboardExpenseRankRows, setDashboardExpenseRankRows] = useState<Array<Record<string, unknown>>>([]);
+  const [dashboardExpenseMiddleRows, setDashboardExpenseMiddleRows] = useState<Array<Record<string, unknown>>>([]);
+  const [dashboardExpenseDrillCategory, setDashboardExpenseDrillCategory] = useState("");
+  const [rocketGrowthModalOpen, setRocketGrowthModalOpen] = useState(false);
+  const [rocketGrowthSaving, setRocketGrowthSaving] = useState(false);
+  const [rocketGrowthDraft, setRocketGrowthDraft] = useState({
+    month: accountingMonthValue(-1),
+    ad_amount: "",
+    fulfillment_amount: "",
+    memo: "",
+  });
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
   const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
     category_large: "",
@@ -21103,6 +21123,30 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     setManual((prev) => ({ ...prev, vendor_name: "", description: "", amount: "", vat_amount: "", total_amount: "", memo: "" }));
     invalidateAccountingCache();
     loadSummary(true);
+  }
+
+  async function saveRocketGrowthCosts(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRocketGrowthSaving(true);
+    try {
+      const res = await fetch("/api/accounting/ledger/rocket-growth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rocketGrowthDraft),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "쿠팡 로켓그로스 비용 저장 실패");
+        return;
+      }
+      setMessage("쿠팡 로켓그로스 비용을 저장했습니다.");
+      setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: "", fulfillment_amount: "", memo: "" }));
+      invalidateAccountingCache();
+      await loadSummary(true);
+      await loadLedgerRows(true);
+    } finally {
+      setRocketGrowthSaving(false);
+    }
   }
 
   async function saveExpenseCategory(event: FormEvent<HTMLFormElement>) {
@@ -21768,13 +21812,20 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }, [activeTab, dashboardIncomePeriod.from, dashboardIncomePeriod.to]);
   useEffect(() => {
     if (activeTab !== "dashboard" || !dashboardExpensePeriod.from || !dashboardExpensePeriod.to) return;
+    setDashboardExpenseDrillCategory("");
     let cancelled = false;
     fetchAccountingSummaryRange("dashboard", { from: dashboardExpensePeriod.from, to: dashboardExpensePeriod.to })
       .then((data) => {
-        if (!cancelled) setDashboardExpenseRankRows(data.by_expense_category || []);
+        if (!cancelled) {
+          setDashboardExpenseRankRows(data.by_expense_category || []);
+          setDashboardExpenseMiddleRows(data.by_expense_category_middle || []);
+        }
       })
       .catch(() => {
-        if (!cancelled) setDashboardExpenseRankRows([]);
+        if (!cancelled) {
+          setDashboardExpenseRankRows([]);
+          setDashboardExpenseMiddleRows([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -21807,6 +21858,21 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   };
   const incomeVendorRows = dashboardIncomeRankRows.length ? dashboardIncomeRankRows : dashboardRankRows("income", dashboardIncomePeriod.from, dashboardIncomePeriod.to);
   const expenseCategoryRows = dashboardExpenseRankRows.length ? dashboardExpenseRankRows : dashboardRankRows("expense", dashboardExpensePeriod.from, dashboardExpensePeriod.to);
+  const expenseMiddleRows = dashboardExpenseDrillCategory
+    ? dashboardExpenseMiddleRows.filter((row) => String(row.parent || "") === dashboardExpenseDrillCategory)
+    : [];
+  const dashboardExpenseChartRows = dashboardExpenseDrillCategory ? expenseMiddleRows : expenseCategoryRows;
+  const rocketGrowthCosts = summary?.rocket_growth_costs || [];
+  const rocketGrowthMonthlyRows = Array.from(rocketGrowthCosts.reduce((map, row) => {
+    const month = String(row.transaction_date || "").slice(0, 7) || "-";
+    const current = map.get(month) || { month, ad_amount: 0, fulfillment_amount: 0, total: 0 };
+    const amount = asNumber(row.amount_krw ?? row.amount);
+    if (String(row.category_middle || "").includes("쿠팡")) current.ad_amount += amount;
+    else current.fulfillment_amount += amount;
+    current.total += amount;
+    map.set(month, current);
+    return map;
+  }, new Map<string, { month: string; ad_amount: number; fulfillment_amount: number; total: number }>()).values()).sort((left, right) => right.month.localeCompare(left.month));
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
   const dashboardTrendPeriodLabel = accountingPeriodLabel(dashboardTrendFromMonth, dashboardTrendToMonth);
   const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
@@ -22433,11 +22499,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onShift={(offset) => setDashboardIncomeMonthOffset((prev) => prev + offset)}
             />
             <AccountingCategoryRankChart
-              rows={expenseCategoryRows}
+              rows={dashboardExpenseChartRows}
               mode="expense"
-              title="비용 비중"
+              title={dashboardExpenseDrillCategory ? `${dashboardExpenseDrillCategory} 세부` : "비용 비중"}
               periodLabel={dashboardExpensePeriodLabel}
               onShift={(offset) => setDashboardExpenseMonthOffset((prev) => prev + offset)}
+              onRowClick={dashboardExpenseDrillCategory ? undefined : (row) => setDashboardExpenseDrillCategory(String(row.label || ""))}
+              onBack={dashboardExpenseDrillCategory ? () => setDashboardExpenseDrillCategory("") : undefined}
             />
           </section>
 
@@ -22923,9 +22991,71 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onOpen={openTransaction}
               onSave={saveReviewQuick}
               onJaewook={(row) => setJaewookModalRow(row)}
+              onOpenRocketGrowth={() => setRocketGrowthModalOpen(true)}
             />
           </div>
         </section>
+      )}
+
+      {rocketGrowthModalOpen && (
+        <FormModal
+          title="쿠팡 로켓그로스 비용 입력"
+          description="월 단위로 광고비와 풀필먼트서비스 비용을 저장합니다. 손익계산에는 반영하지 않습니다."
+          onClose={() => setRocketGrowthModalOpen(false)}
+          size="lg"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setRocketGrowthModalOpen(false)}>닫기</ActionButton>
+              <ActionButton type="submit" form="rocket-growth-cost-form" disabled={rocketGrowthSaving}>{rocketGrowthSaving ? "저장 중" : "저장"}</ActionButton>
+            </>
+          }
+        >
+          <form id="rocket-growth-cost-form" onSubmit={saveRocketGrowthCosts} className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <FormField label="기준월" required>
+                <input className={modalInputClass} type="month" value={rocketGrowthDraft.month} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, month: event.target.value }))} />
+              </FormField>
+              <FormField label="광고비">
+                <input className={`${modalInputClass} text-right`} type="number" min="0" value={rocketGrowthDraft.ad_amount} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: event.target.value }))} placeholder="마케팅·광고 > 쿠팡" />
+              </FormField>
+              <FormField label="풀필먼트서비스">
+                <input className={`${modalInputClass} text-right`} type="number" min="0" value={rocketGrowthDraft.fulfillment_amount} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, fulfillment_amount: event.target.value }))} placeholder="업무 비용 > 로켓그로스" />
+              </FormField>
+              <FormField label="메모" className="md:col-span-3">
+                <input className={modalInputClass} value={rocketGrowthDraft.memo} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="예: 2026년 5월 로켓그로스 정산" />
+              </FormField>
+            </div>
+            <div className="rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
+                <p className="text-sm font-black text-slate-800">월별 입력 내역</p>
+                <p className="text-xs font-bold text-slate-500">손익 미반영 / 자료 반영</p>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-white text-xs font-semibold text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">월</th>
+                      <th className="px-3 py-2 text-right">광고비</th>
+                      <th className="px-3 py-2 text-right">풀필먼트서비스</th>
+                      <th className="px-3 py-2 text-right">합계</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rocketGrowthMonthlyRows.map((row) => (
+                      <tr key={row.month} className="border-t border-gray-100">
+                        <td className="px-3 py-2 font-black text-slate-800">{row.month}</td>
+                        <td className="px-3 py-2 text-right font-bold text-orange-600">{krw(row.ad_amount)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.fulfillment_amount)}</td>
+                        <td className="px-3 py-2 text-right font-black text-slate-950">{krw(row.total)}</td>
+                      </tr>
+                    ))}
+                    {!rocketGrowthMonthlyRows.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="입력 내역 없음" className="min-h-24" /></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </form>
+        </FormModal>
       )}
 
       {categoryModalOpen && (
@@ -23707,6 +23837,7 @@ function ReviewQuickGridEnhanced({
   onOpen,
   onSave,
   onJaewook,
+  onOpenRocketGrowth,
 }: {
   rows: Array<Record<string, unknown>>;
   categories: Array<Record<string, unknown>>;
@@ -23715,6 +23846,7 @@ function ReviewQuickGridEnhanced({
   onOpen: (row: Record<string, unknown>) => void;
   onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void | Promise<void>;
   onJaewook?: (row: Record<string, unknown>) => void;
+  onOpenRocketGrowth?: () => void;
 }) {
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -23766,8 +23898,9 @@ function ReviewQuickGridEnhanced({
 
   return (
     <div className="space-y-2">
-      <div className="-mt-10 mb-2 flex justify-end">
+      <div className="-mt-10 mb-2 flex justify-end gap-2 pr-24">
         <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
+        <ActionButton type="button" className="h-8 px-3 text-xs" onClick={onOpenRocketGrowth}>쿠팡 비용입력</ActionButton>
       </div>
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full min-w-[930px] table-fixed text-xs">
