@@ -1266,6 +1266,46 @@ function suggestReview(row: RawRow, rules: RawRow[], confirmedRows: RawRow[]) {
   };
 }
 
+function compactAccountingTransaction(row: RawRow) {
+  const {
+    raw_json: _rawJson,
+    raw_payload: _rawPayload,
+    raw: _raw,
+    ...rest
+  } = row;
+  return rest;
+}
+
+function compactReviewTransaction(row: RawRow) {
+  return {
+    id: row.id,
+    transaction_date: row.transaction_date,
+    expense_date: row.expense_date,
+    source_name: row.source_name,
+    source_type: row.source_type,
+    card_name: row.card_name,
+    account_name: row.account_name,
+    merchant_name: row.merchant_name,
+    vendor_name: row.vendor_name,
+    description: row.description,
+    debit_amount: row.debit_amount,
+    credit_amount: row.credit_amount,
+    amount: row.amount,
+    amount_krw: row.amount_krw,
+    foreign_amount: row.foreign_amount,
+    currency: row.currency,
+    direction: row.direction,
+    review_status: row.review_status,
+    review_reason: row.review_reason,
+    category_id: row.category_id,
+    category_large: row.category_large,
+    category_middle: row.category_middle,
+    affects_profit: row.affects_profit,
+    affects_cashflow: row.affects_cashflow,
+    memo: row.memo,
+  };
+}
+
 function cleanBankAccountPayload(row: RawRow) {
   return {
     account_type: text(row.account_type || row.accountType) || "business",
@@ -1518,6 +1558,9 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const to = text(range?.to);
   const scope = text(range?.scope);
   const dashboardOnly = scope === "dashboard";
+  const ledgerOnly = scope === "ledger";
+  const fixedOnly = scope === "fixed";
+  const dbOnly = scope === "db";
   const queryFrom = from && to ? addDays(from, -3) : from;
   const dateFilter = queryFrom ? `gte.${queryFrom}` : undefined;
   const [
@@ -1641,6 +1684,24 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       .map((row) => [text(row.id), suggestReview(row, rules, confirmedRows)])
       .filter(([id, suggestion]) => id && suggestion),
   );
+  const commonSummary = {
+    batches,
+    card_settlements: settlements,
+    card_panel_cards: cardPanelCards,
+    card_points: { "가온글로벌카드": gaonCardPoints },
+    fx_rates: fxRates,
+    upcoming_fixed_costs: upcomingFixedCosts,
+    totals: {
+      income_amount: income,
+      expense_amount: expense,
+      net_profit: income - expense,
+      cashflow_amount: cashIn - cashOut,
+      card_settlement_due: pendingCard,
+      fixed_cost_due_amount: fixedCostDueAmount,
+      review_count: reviewQueue.length,
+      transaction_count: filtered.length,
+    },
+  };
   if (dashboardOnly) {
     return {
       scope: "dashboard",
@@ -1670,10 +1731,47 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
       by_month: byMonth,
     };
   }
+  if (ledgerOnly) {
+    return {
+      scope: "ledger",
+      ...commonSummary,
+      categories,
+      bank_accounts: bankAccounts,
+      card_accounts: cardAccounts,
+      by_month: byMonth,
+    };
+  }
+  if (fixedOnly) {
+    return {
+      scope: "fixed",
+      ...commonSummary,
+      categories,
+      fixed_costs: activeFixedCosts,
+      fixed_cost_occurrences: calendarFixedCostOccurrences,
+      loan_occurrences: loanOccurrences,
+      loan_maturity_occurrences: loanMaturityOccurrences,
+      loans: activeLoans,
+      bank_accounts: bankAccounts,
+      card_accounts: cardAccounts,
+    };
+  }
+  if (dbOnly) {
+    const pendingRows = filtered.filter((row) => text(row.review_status) === "pending").slice(0, 300).map(compactReviewTransaction);
+    return {
+      scope: "db",
+      ...commonSummary,
+      transactions: pendingRows,
+      expenses: [],
+      categories,
+      rules,
+      review_queue: reviewQueue,
+      review_suggestions: reviewSuggestions,
+    };
+  }
   return {
     scope: "full",
-    transactions: filtered.slice(0, 300),
-    expenses: filtered.slice(0, 300),
+    transactions: filtered.slice(0, 300).map(compactAccountingTransaction),
+    expenses: [],
     categories,
     rules,
     batches,

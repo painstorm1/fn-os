@@ -20187,7 +20187,7 @@ const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
 const ACCOUNTING_CACHE_VERSION = "2026-06-10-fixed-cost-transfer-repair";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
-type AccountingSummaryScope = "dashboard" | "full";
+type AccountingSummaryScope = "dashboard" | "full" | "ledger" | "fixed" | "db";
 const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
 const ACCOUNTING_LEDGER_SESSION_KEY = "fnos.accounting.ledger.state.v1";
 
@@ -20375,7 +20375,7 @@ function invalidateAccountingCache() {
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const normalizedTab = tab === "bank" || tab === "card" ? "ledger" : tab;
   const activeTab = normalizedTab === "settings" || normalizedTab === "review" ? "db" : accountingTabLabel[normalizedTab] ? normalizedTab : "dashboard";
-  const summaryScope: AccountingSummaryScope = activeTab === "dashboard" ? "dashboard" : "full";
+  const summaryScope: AccountingSummaryScope = activeTab === "dashboard" ? "dashboard" : activeTab === "ledger" ? "ledger" : activeTab === "fixed" ? "fixed" : activeTab === "db" ? "db" : "full";
   const initialSummary = readInitialCachedAccountingSummary(summaryScope);
   const [summary, setSummary] = useState<AccountingSummary | null>(initialSummary);
   const [ledgerRows, setLedgerRows] = useState<Array<Record<string, unknown>>>([]);
@@ -20580,14 +20580,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   });
 
   function loadSummary(force = false) {
-    setLoading(true);
-    const scope = activeTab === "dashboard" ? "dashboard" : "full";
+    const scope: AccountingSummaryScope = activeTab === "dashboard" ? "dashboard" : activeTab === "ledger" ? "ledger" : activeTab === "fixed" ? "fixed" : activeTab === "db" ? "db" : "full";
     const cached = force ? null : readCachedAccountingSummary(scope);
     if (cached && !force) {
       setSummary(cached);
       setLoading(false);
+    } else {
+      setLoading(true);
     }
-    fetchCachedAccountingSummary(scope, force || Boolean(cached))
+    fetchCachedAccountingSummary(scope, force)
       .then((data) => setSummary(data))
       .catch((error) => setSummary({ ok: false, error: error instanceof Error ? error.message : "회계/비용 조회 실패" }))
       .finally(() => setLoading(false));
@@ -23937,7 +23938,7 @@ function AccountingRightPanel() {
       key: endpointCacheKey,
       ttl: ACCOUNTING_CACHE_TTL,
       storageTtl: ACCOUNTING_STORAGE_TTL,
-      force: Boolean(cached),
+      force: false,
     })
       .then((data) => {
         if (alive) setSummary(data);
