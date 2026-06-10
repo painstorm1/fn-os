@@ -1755,6 +1755,7 @@ type PartnerBalanceRow = {
   customer_type?: string;
   count: number;
   qty: number;
+  previous_balance?: number;
   trade_amount: number;
   paid_amount: number;
   balance: number;
@@ -8853,7 +8854,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [partnerBalanceLoading, setPartnerBalanceLoading] = useState(false);
   const [partnerBalanceExpanded, setPartnerBalanceExpanded] = useState("");
   const [partnerPaymentDrafts, setPartnerPaymentDrafts] = useState<Record<string, string>>({});
-  const [partnerOpeningDraft, setPartnerOpeningDraft] = useState({ customer: "", customer_code: "", amount: "", date: entryDateToday() });
+  const [partnerBalanceSearch, setPartnerBalanceSearch] = useState("");
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
@@ -10115,9 +10116,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const historyRows = historyMode === "returns" ? summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
   const historyLineRows = historyMode === "returns" ? summary?.recent_return_lines || summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
   const filteredHistoryRows = filterEntryRows(historyRows, activeHistoryEntryMode, historyFilters, historyLineRows);
-  const partnerBalanceLabel = partnerBalanceMode === "sales" ? "미수금" : "미지급";
   const partnerBalancePaymentLabel = partnerBalanceMode === "sales" ? "수금액" : "지급액";
   const partnerBalanceColumnLabel = partnerBalanceMode === "sales" ? "미수 현잔액" : "미지급 현잔액";
+  const visiblePartnerBalanceRows = partnerBalanceSearch.trim()
+    ? partnerBalanceRows.filter((row) => {
+      const needle = partnerBalanceSearch.trim().toLowerCase();
+      return [row.customer, row.customer_code].some((value) => String(value || "").toLowerCase().includes(needle));
+    })
+    : partnerBalanceRows;
 
   function partnerBalanceCacheKey(mode: SalesPurchaseMode | null, month: string) {
     return mode ? `${mode}:${month}` : "";
@@ -10161,7 +10167,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setPartnerBalanceMode(mode);
     setPartnerBalanceExpanded("");
     setPartnerPaymentDrafts({});
-    setPartnerOpeningDraft((prev) => ({ ...prev, amount: "" }));
     void loadPartnerBalances(mode, partnerBalanceMonth);
   }
 
@@ -10205,42 +10210,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
     setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: "" }));
     setPartnerBalanceRows(data.rows || []);
-    invalidateClientCache("/api/accounting/ledger/transactions");
-    invalidateClientCache("/api/accounting/summary");
-  }
-
-  async function savePartnerOpeningBalance() {
-    if (!partnerBalanceMode) return;
-    const amount = Number(String(partnerOpeningDraft.amount || "").replace(/[^\d.-]/g, ""));
-    if (!partnerOpeningDraft.customer.trim() || !Number.isFinite(amount) || amount <= 0) {
-      window.alert("거래처와 기초잔액을 입력해 주세요.");
-      return;
-    }
-    const res = await fetch("/api/fnos/partner-balances", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        kind: "opening_balance",
-        mode: partnerBalanceMode,
-        month: partnerBalanceMonth,
-        customer_name: partnerOpeningDraft.customer,
-        customer_code: partnerOpeningDraft.customer_code,
-        amount,
-        balance_date: partnerOpeningDraft.date || entryDateToday(),
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      window.alert(data.error || "기초잔액 저장 실패");
-      return;
-    }
-    const cacheKey = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth);
-    partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
-    setPartnerOpeningDraft((prev) => ({ ...prev, customer: "", customer_code: "", amount: "" }));
-    setPartnerBalanceRows(data.rows || []);
-    invalidateClientCache("/api/accounting/ledger/transactions");
-    invalidateClientCache("/api/accounting/summary");
   }
 
   function applyHistorySearch(nextDraft = historyFilterDraft) {
@@ -13071,25 +13040,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           description={`${partnerBalanceMonth} 해당월 거래/결제 내역입니다. 쇼핑몰 속성 거래처는 이 화면에서만 제외됩니다.`}
           onClose={() => setPartnerBalanceMode(null)}
           size="full"
-          className="max-w-[1320px]"
+          className="!max-w-[1040px]"
           footer={<ActionButton type="button" onClick={() => setPartnerBalanceMode(null)}>닫기</ActionButton>}
         >
           <div className="space-y-3">
             <div className="flex flex-nowrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <input className={`${modalInputClass} !w-auto min-w-0 flex-1`} value={partnerBalanceSearch} onChange={(event) => setPartnerBalanceSearch(event.target.value)} placeholder="거래처 검색" />
+              <div className="w-[200px] shrink-0" />
+              <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const current = entryDateToday().slice(0, 7); setPartnerBalanceMonth(current); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, current); }}>이번달</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(-1)}>{"<"}</ActionButton>
-              <input className={`${modalInputClass} min-w-0 flex-1`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
+              <input className={`${modalInputClass} !w-[130px] shrink-0`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
-              <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${partnerBalanceRows.length.toLocaleString("ko-KR")}개 거래처`}</span>
-            </div>
-
-            <div className="flex flex-nowrap items-center gap-2 rounded-lg border border-orange-100 bg-orange-50/50 p-2">
-              <span className="shrink-0 px-2 text-xs font-black text-orange-600">기초잔액</span>
-              <input className={`${modalInputClass} min-w-0 flex-[1.3]`} value={partnerOpeningDraft.customer} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, customer: event.target.value }))} placeholder="거래처명" />
-              <input className={`${modalInputClass} min-w-0 flex-[0.7]`} value={partnerOpeningDraft.customer_code} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, customer_code: event.target.value }))} placeholder="코드" />
-              <input className={`${modalInputClass} min-w-0 flex-1 text-right`} inputMode="numeric" value={partnerOpeningDraft.amount} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, amount: event.target.value.replace(/[^\d,.-]/g, "") }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void savePartnerOpeningBalance(); } }} placeholder={partnerBalanceLabel} />
-              <input className={`${modalInputClass} w-36 shrink-0`} type="date" value={partnerOpeningDraft.date} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, date: event.target.value }))} />
-              <button type="button" data-f4-save="false" className="h-10 shrink-0 rounded-md bg-orange-500 px-3 text-xs font-black text-white hover:bg-orange-600" onClick={() => void savePartnerOpeningBalance()}>저장</button>
+              <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${visiblePartnerBalanceRows.length.toLocaleString("ko-KR")}개`}</span>
             </div>
 
             <div className="max-h-[62vh] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
@@ -13097,24 +13060,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-500">
                   <tr>
                     <th className="w-[18%] px-2 py-2 text-left">거래처</th>
-                    <th className="w-[7%] px-2 py-2 text-right">건수</th>
-                    <th className="w-[8%] px-2 py-2 text-right">수량</th>
-                    <th className="w-[13%] px-2 py-2 text-right">거래금액</th>
+                    <th className="w-[11%] px-2 py-2 text-right">전잔액</th>
+                    <th className="w-[13%] px-2 py-2 text-right">해당월 거래금액</th>
                     <th className="w-[16%] px-2 py-2 text-right">{partnerBalancePaymentLabel}</th>
                     <th className="w-[13%] px-2 py-2 text-right">{partnerBalanceColumnLabel}</th>
-                    <th className="w-[12%] px-2 py-2 text-left">최근일자</th>
+                    <th className="w-[8%] px-2 py-2 text-right">건수</th>
+                    <th className="w-[9%] px-2 py-2 text-left">최근일자</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {partnerBalanceRows.length ? partnerBalanceRows.map((row) => {
+                  {visiblePartnerBalanceRows.length ? visiblePartnerBalanceRows.map((row) => {
                     const expanded = partnerBalanceExpanded === `${partnerBalanceMode}:${row.customer_code || row.customer}`;
                     const rowKey = `${partnerBalanceMode}:${row.customer_code || row.customer}`;
                     return (
                       <Fragment key={rowKey}>
                         <tr key={rowKey} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50" onClick={() => setPartnerBalanceExpanded(expanded ? "" : rowKey)}>
                           <td className="truncate px-2 py-2 font-black text-slate-800" title={row.customer}>{row.customer}</td>
-                          <td className="px-2 py-2 text-right font-bold">{row.count.toLocaleString("ko-KR")}</td>
-                          <td className="px-2 py-2 text-right font-bold">{Math.round(row.qty).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold text-slate-600">{Math.round(row.previous_balance || 0).toLocaleString("ko-KR")}</td>
                           <td className="px-2 py-2 text-right font-bold">{Math.round(row.trade_amount).toLocaleString("ko-KR")}</td>
                           <td className="px-2 py-1">
                             <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
@@ -13130,6 +13092,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                             </div>
                           </td>
                           <td className="px-2 py-2 text-right font-black text-orange-600">{Math.round(row.month_end_balance).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold">{row.count.toLocaleString("ko-KR")}</td>
                           <td className="px-2 py-2 text-slate-500">{row.latest || "-"}</td>
                         </tr>
                         {expanded && (

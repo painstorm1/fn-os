@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FnosDbError } from "@/lib/fnos-db";
-import { createManualPartnerOpeningBalance, createManualPartnerPayment, partnerBalanceSummary } from "@/lib/partner-balances";
+import { createManualPartnerPayment, partnerBalanceSummary } from "@/lib/partner-balances";
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,8 +17,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    if (body.kind === "opening_balance") await createManualPartnerOpeningBalance(body);
-    else await createManualPartnerPayment(body);
+    await createManualPartnerPayment(body);
     const mode = body.mode === "purchases" ? "purchases" : "sales";
     const month = typeof body.month === "string" ? body.month : undefined;
     return NextResponse.json({ ok: true, ...(await partnerBalanceSummary({ mode, month })) });
