@@ -19520,17 +19520,33 @@ function AccountingLineChart({
 }
 
 function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
+  const [activePointKey, setActivePointKey] = useState<string | null>(null);
   const chartRows = rows.slice(-6);
-  const max = Math.max(1, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
-  const linePoints = (key: "income" | "expense") => chartRows.map((row, index) => {
-    const x = chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100;
-    const y = 92 - (asNumber(row[key]) / max) * 76;
-    return `${x},${y}`;
-  }).join(" ");
-  const dot = (row: Record<string, unknown>, index: number, key: "income" | "expense") => ({
-    x: chartRows.length === 1 ? 50 : (index / (chartRows.length - 1)) * 100,
-    y: 92 - (asNumber(row[key]) / max) * 76,
+  const rawMax = Math.max(0, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
+  const axisMax = (() => {
+    if (rawMax <= 0) return 1;
+    const step = rawMax >= 10_000_000 ? 10_000_000 : rawMax >= 1_000_000 ? 1_000_000 : rawMax >= 100_000 ? 100_000 : 10_000;
+    return Math.ceil(rawMax / step) * step;
+  })();
+  const chartPoints = chartRows.map((row, index) => {
+    const x = chartRows.length <= 1 ? 50 : 12 + (index / (chartRows.length - 1)) * 76;
+    const incomeY = 92 - (asNumber(row.income) / axisMax) * 70;
+    const expenseY = 92 - (asNumber(row.expense) / axisMax) * 70;
+    return { row, x, incomeY, expenseY };
   });
+  const linePath = (key: "incomeY" | "expenseY") => chartPoints
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point[key].toFixed(2)}`)
+    .join(" ");
+  const axisTicks = [
+    { y: 22, amount: axisMax },
+    { y: 57, amount: axisMax / 2 },
+    { y: 92, amount: 0 },
+  ];
+  const monthLabel = (value: unknown) => {
+    const text = String(value || "-");
+    const match = text.match(/^(\d{4})-(\d{2})/);
+    return match ? `${Number(match[2])}월` : text;
+  };
   return (
     <Card className="p-4">
       <SectionHeader
@@ -19539,36 +19555,83 @@ function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Arra
         actions={
           <div className="flex items-center gap-3 text-[11px] font-semibold">
             <span className="inline-flex items-center gap-1 text-emerald-600"><i className="h-2 w-2 rounded-full bg-emerald-500" />입금</span>
-            <span className="inline-flex items-center gap-1 text-rose-600"><i className="h-2 w-2 rounded-full bg-rose-500" />비용</span>
+            <span className="inline-flex items-center gap-1 text-[#ff6a00]"><i className="h-2 w-2 rounded-full bg-[#ff6a00]" />비용</span>
           </div>
         }
       />
-      <div className="rounded-xl bg-slate-50 px-3 py-3">
-        <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
-          <line x1="0" y1="92" x2="100" y2="92" stroke="#cbd5e1" strokeWidth="1" />
-          {chartRows.length > 0 && <polyline points={linePoints("income")} fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-          {chartRows.length > 0 && <polyline points={linePoints("expense")} fill="none" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-          {chartRows.map((row, index) => {
-            const income = dot(row, index, "income");
-            const expense = dot(row, index, "expense");
-            return (
-              <g key={`${String(row.label)}-${index}`}>
-                <circle cx={income.x} cy={income.y} r="2.8" fill="#10b981" />
-                <circle cx={expense.x} cy={expense.y} r="2.8" fill="#f43f5e" />
-              </g>
-            );
-          })}
-        </svg>
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
-          {chartRows.slice(-4).map((row, index) => (
-            <div key={`${String(row.label)}-${index}`} className="min-w-0">
-              <p className="truncate font-semibold text-slate-500">{String(row.label || "-")}</p>
-              <p className="truncate font-bold text-emerald-600">{krw(asNumber(row.income))}</p>
-              <p className="truncate font-bold text-rose-600">{krw(asNumber(row.expense))}</p>
+      <div className="rounded-xl bg-slate-50 px-4 py-3">
+        {chartRows.length ? (
+          <>
+            <div className="relative h-44">
+              <div className="pointer-events-none absolute inset-0 z-10">
+                {axisTicks.map((tick) => (
+                  <div
+                    key={`accounting-axis-${tick.y}`}
+                    className="absolute left-0 right-0 flex items-start justify-end text-[11px] font-black leading-none text-slate-400/75"
+                    style={{ top: `calc(${tick.y}% - 14px)` }}
+                  >
+                    <span className="rounded bg-slate-50/90 px-1.5 py-0.5">{krw(tick.amount)}</span>
+                  </div>
+                ))}
+              </div>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
+                <path d="M 8 92 L 92 92" stroke="#e2e8f0" strokeWidth="0.8" />
+                <path d="M 8 57 L 92 57" stroke="#e2e8f0" strokeWidth="0.5" />
+                <path d="M 8 22 L 92 22" stroke="#e2e8f0" strokeWidth="0.5" />
+                {chartPoints.length > 1 && <path d={linePath("incomeY")} fill="none" stroke="#10b981" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+                {chartPoints.length > 1 && <path d={linePath("expenseY")} fill="none" stroke="#ff6a00" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+              </svg>
+              {chartPoints.map(({ row, x, incomeY, expenseY }, index) => {
+                const pointKey = `${String(row.label)}-${index}`;
+                const tooltipTop = Math.max(8, Math.min(incomeY, expenseY) - 8);
+                const tooltipLeft = Math.min(82, Math.max(18, x));
+                const isActive = activePointKey === pointKey;
+                return (
+                  <div key={`accounting-hover-point-${String(row.label)}-${index}`} className="group">
+                    {[
+                      { y: incomeY, color: "bg-emerald-500" },
+                      { y: expenseY, color: "bg-[#ff6a00]" },
+                    ].map((point) => (
+                      <button
+                        key={`${String(row.label)}-${point.color}`}
+                        type="button"
+                        aria-label={`${String(row.label)} 월별 회계 지표`}
+                        onClick={() => setActivePointKey((current) => current === pointKey ? null : pointKey)}
+                        className="absolute z-20 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                        style={{ left: `${x}%`, top: `${point.y}%` }}
+                      >
+                        <span className={`absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${point.color} ring-2 ring-white`} />
+                      </button>
+                    ))}
+                    <div
+                      className={`pointer-events-none absolute z-30 w-44 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-3 text-sm font-black text-slate-800 shadow-xl ${isActive ? "block" : "hidden group-hover:block"}`}
+                      style={{ left: `${tooltipLeft}%`, top: `${tooltipTop}%` }}
+                    >
+                      <p className="whitespace-nowrap text-slate-500">{String(row.label || "-")}</p>
+                      <p className="mt-2 flex justify-between gap-3 whitespace-nowrap text-emerald-600"><span>입금</span><span>{krw(asNumber(row.income))}</span></p>
+                      <p className="mt-1 flex justify-between gap-3 whitespace-nowrap text-[#ff6a00]"><span>비용</span><span>{krw(asNumber(row.expense))}</span></p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-          {!chartRows.length && <div className="col-span-full"><EmptyState title="데이터 없음" className="min-h-24 border-0 bg-white" /></div>}
-        </div>
+            <div className="relative mt-2 h-11">
+              {chartPoints.map(({ row, x }, index) => (
+                <div
+                  key={`accounting-chart-label-${String(row.label)}-${index}`}
+                  className="absolute top-0 min-w-14 -translate-x-1/2 text-center text-[11px]"
+                  style={{ left: `${x}%` }}
+                >
+                  <p className="truncate font-black text-slate-600">{monthLabel(row.label)}</p>
+                  <p className="mt-1 truncate font-black text-emerald-600">{krw(asNumber(row.income))}</p>
+                  <p className="truncate font-black text-[#ff6a00]">{krw(asNumber(row.expense))}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <EmptyState title="데이터 없음" className="min-h-40 border-0 bg-white" />
+        )}
       </div>
     </Card>
   );
@@ -21564,7 +21627,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
       {activeTab === "dashboard" && (
         <>
-          <section className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr_0.95fr]">
+          <section className="grid gap-4 min-[1500px]:grid-cols-[minmax(420px,1.2fr)_minmax(300px,0.9fr)_minmax(300px,0.9fr)]">
             <AccountingDualLineChart rows={monthRows} />
             <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" periodLabel={dashboardPeriodLabel} />
             <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" periodLabel={dashboardPeriodLabel} />
