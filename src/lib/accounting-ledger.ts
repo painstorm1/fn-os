@@ -422,10 +422,22 @@ function ruleMatches(rule: RawRow, tx: RawRow) {
   return target.includes(keyword);
 }
 
+function isNaverAdTransaction(row: RawRow) {
+  const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)} ${text(row.memo)}`;
+  const amount = Math.abs(numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.credit_amount));
+  const sourceText = `${text(row.source_type)} ${text(row.source_name)} ${text(row.card_name)}`;
+  const isExpenseLike = /카드|card/i.test(sourceText) || text(row.direction) === "expense" || numberValue(row.debit_amount) > 0;
+  if (!isExpenseLike) return false;
+  if (/네이버페이[_\s-]*비즈월렛|비즈월렛/i.test(haystack)) return true;
+  if (/네이버파이낸셜|NAVER\s*FINANCIAL/i.test(haystack) && amount >= 50000 && amount % 50000 === 0) return true;
+  return false;
+}
+
 function ambiguousReviewReason(row: RawRow) {
   const haystack = `${text(row.merchant_name)} ${text(row.description)} ${text(row.category)} ${text(row.category_detail)} ${text(row.memo)}`;
   const amount = Math.abs(numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.credit_amount));
   if (/KCP/i.test(haystack) && /자동과금|자동결제/i.test(haystack) && amount === 300000) return "";
+  if (isNaverAdTransaction(row)) return "";
   if (text(row.currency) !== "KRW" && numberValue(row.foreign_amount) > 0 && !numberValue(row.amount_krw)) return "외화환율 확인";
   if (/KCP|케이씨피|인터넷상거래_?4|자동결제_?1/i.test(haystack)) return "KCP확인";
   if (/네이버파이낸셜|비즈월렛|NAVER\s*FINANCIAL/i.test(haystack)) return "네이버확인";
@@ -660,7 +672,7 @@ function manualCategoryPath(row: RawRow) {
   if (/거래처 결제/.test(haystack)) return pair("거래처 결제", vendorAliases[existingSmall] || existingSmall || "기타 구매");
   if (/1688|알리바바|Alibaba|제품구매|수입제품 대금|해외/.test(haystack)) return pair("거래처 결제", "해외 거래처");
   if (/메타|FACEBK/i.test(haystack)) return pair("마케팅·광고", "메타 광고");
-  if (/네이버|비즈월렛|KCP\(자동과금\)/.test(haystack)) return pair("마케팅·광고", "네이버 광고");
+  if (isNaverAdTransaction(row) || /네이버|비즈월렛|KCP\(자동과금\)/.test(haystack)) return pair("마케팅·광고", "네이버 광고");
   if (/브랜드커넥트|체험단|협찬/.test(haystack)) return pair("마케팅·광고", "체험단/협찬");
   if (/박스구매|포장재|박스/.test(haystack)) return pair("업무 비용", "포장재/박스");
   if (/구독료|포토샵|지피티|클로드|OPENAI|ANTHROPIC|CLAUDE|이카운트|고도호스팅|프로그램/.test(haystack)) return pair("업무 비용", "프로그램/구독료");

@@ -34,7 +34,7 @@ const SOURCE_PROFILES: ExpenseSourceProfile[] = [
   {
     match: /국민\s*\(?\s*카드\s*\)?|국민기업카드|승인내역조회/i,
     sourceType: "국민기업카드",
-    firstDataRow: 6,
+    firstDataRow: 1,
     columns: { date: 0, vendor: 6, amount: 10, vat: 11, paymentMethod: 8, approvalNo: 14, category: 24, detail: 25, memo: 26 },
   },
   {
