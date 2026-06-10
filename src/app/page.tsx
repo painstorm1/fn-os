@@ -19546,16 +19546,40 @@ function accountingPeriodLabel(from: string, to: string) {
   return from && to ? `기준 기간 ${from.replace("-", ".")}~${to.replace("-", ".")}` : "기준 기간 없음";
 }
 
+function accountingDatePeriodLabel(from: string, to: string) {
+  return from && to ? `기준 기간 ${from.replace(/-/g, ".")}~${to.replace(/-/g, ".")}` : "기준 기간 없음";
+}
+
+function accountingMonthStartDate(month: string) {
+  return month ? `${month}-01` : "";
+}
+
+function accountingMonthEndDate(month: string) {
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!year || monthIndex < 0) return "";
+  return formatDateKey(new Date(year, monthIndex + 1, 0));
+}
+
 function accountingCompactKrw(value: number) {
   return `₩${Math.round(value / 10000).toLocaleString("ko-KR")}`;
 }
 
-function AccountingChartPeriodActions({ onShift }: { onShift?: (offset: number) => void }) {
+function AccountingChartPeriodActions({
+  onShift,
+  previousLabel = "이전 기간",
+  nextLabel = "다음 기간",
+}: {
+  onShift?: (offset: number) => void;
+  previousLabel?: string;
+  nextLabel?: string;
+}) {
   if (!onShift) return null;
   return (
     <div className="inline-flex items-center overflow-hidden rounded-md border border-slate-200 bg-white">
-      <button type="button" className="h-7 w-8 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(-1)} aria-label="이전 6개월">&lt;</button>
-      <button type="button" className="h-7 w-8 border-l border-slate-200 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(1)} aria-label="다음 6개월">&gt;</button>
+      <button type="button" className="h-7 w-8 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(-1)} aria-label={previousLabel}>&lt;</button>
+      <button type="button" className="h-7 w-8 border-l border-slate-200 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(1)} aria-label={nextLabel}>&gt;</button>
     </div>
   );
 }
@@ -19605,7 +19629,7 @@ function AccountingDualLineChart({
         className="mb-2"
         actions={
           <div className="flex items-center gap-3 text-[11px] font-semibold">
-            <AccountingChartPeriodActions onShift={onShift} />
+            <AccountingChartPeriodActions onShift={onShift} previousLabel="월별추이 이전 6개월" nextLabel="월별추이 다음 6개월" />
             <span className="inline-flex items-center gap-1 text-emerald-600"><i className="h-2 w-2 rounded-full bg-emerald-500" />입금</span>
             <span className="inline-flex items-center gap-1 text-[#ff6a00]"><i className="h-2 w-2 rounded-full bg-[#ff6a00]" />비용</span>
           </div>
@@ -19731,7 +19755,7 @@ function AccountingCategoryRankChart({
     : ["#f97316", "#f43f5e", "#eab308", "#ef4444", "#a855f7", "#94a3b8"];
   return (
     <Card className="p-4">
-      <SectionHeader title={title} description={periodLabel} className="mb-2" actions={<AccountingChartPeriodActions onShift={onShift} />} />
+      <SectionHeader title={title} description={periodLabel} className="mb-2" actions={<AccountingChartPeriodActions onShift={onShift} previousLabel={`${title} 이전 월`} nextLabel={`${title} 다음 월`} />} />
       {periodLabel && <p className="mb-2 text-xs font-semibold text-slate-500">{periodLabel}</p>}
       <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
@@ -20084,7 +20108,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [categorySearch, setCategorySearch] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [categoryBulkOpen, setCategoryBulkOpen] = useState(false);
-  const [dashboardPeriodOffset, setDashboardPeriodOffset] = useState(0);
+  const [dashboardTrendOffset, setDashboardTrendOffset] = useState(0);
+  const [dashboardIncomeMonthOffset, setDashboardIncomeMonthOffset] = useState(0);
+  const [dashboardExpenseMonthOffset, setDashboardExpenseMonthOffset] = useState(0);
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
   const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
     category_large: "",
@@ -21078,12 +21104,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
   const latestDashboardMonth = String(monthRows[monthRows.length - 1]?.label || accountingMonthValue(0));
-  const currentDashboardFromMonth = `${latestDashboardMonth.slice(0, 4)}-01`;
-  const currentDashboardToMonth = latestDashboardMonth;
-  const dashboardFromMonth = accountingAddMonthsToMonth(currentDashboardFromMonth, dashboardPeriodOffset * 6);
-  const dashboardToMonth = accountingAddMonthsToMonth(currentDashboardToMonth, dashboardPeriodOffset * 6);
+  const dashboardToday = accountingDateValue(0);
+  const dashboardCurrentMonth = accountingMonthValue(0);
+  const dashboardTrendToMonth = accountingAddMonthsToMonth(latestDashboardMonth, dashboardTrendOffset * 6);
+  const dashboardTrendFromMonth = accountingAddMonthsToMonth(dashboardTrendToMonth, -5);
   const monthRowByLabel = new Map(monthRows.map((row) => [String(row.label || ""), row]));
-  const dashboardMonthRows = accountingMonthKeysInRange(dashboardFromMonth, dashboardToMonth).map((label) => {
+  const dashboardMonthRows = accountingMonthKeysInRange(dashboardTrendFromMonth, dashboardTrendToMonth).map((label) => {
     const row = monthRowByLabel.get(label);
     return {
       label,
@@ -21092,13 +21118,22 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       count: asNumber(row?.count),
     };
   });
-  const dashboardRowsInPeriod = expenses.filter((row) => {
-    const month = String(row.transaction_date || row.expense_date || "").slice(0, 7);
-    return month >= dashboardFromMonth && month <= dashboardToMonth;
-  });
-  const dashboardRankRows = (mode: "income" | "expense") => {
+  const dashboardMonthPeriod = (offset: number) => {
+    const month = accountingAddMonthsToMonth(latestDashboardMonth, offset);
+    const from = accountingMonthStartDate(month);
+    const monthEnd = accountingMonthEndDate(month);
+    const to = month === dashboardCurrentMonth
+      ? (dashboardToday < from ? monthEnd : dashboardToday > monthEnd ? monthEnd : dashboardToday)
+      : monthEnd;
+    return { month, from, to };
+  };
+  const dashboardIncomePeriod = dashboardMonthPeriod(dashboardIncomeMonthOffset);
+  const dashboardExpensePeriod = dashboardMonthPeriod(dashboardExpenseMonthOffset);
+  const dashboardRankRows = (mode: "income" | "expense", from: string, to: string) => {
     const grouped = new Map<string, { label: string; amount: number; count: number }>();
-    dashboardRowsInPeriod.forEach((row) => {
+    expenses.forEach((row) => {
+      const rowDate = String(row.transaction_date || row.expense_date || "").slice(0, 10);
+      if (!rowDate || rowDate < from || rowDate > to) return;
       const sourceType = String(row.source_type || "");
       const direction = String(row.direction || "");
       const credit = asNumber(row.credit_amount);
@@ -21119,10 +21154,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     });
     return Array.from(grouped.values()).sort((left, right) => right.amount - left.amount);
   };
-  const incomeVendorRows = dashboardRankRows("income");
-  const expenseCategoryRows = dashboardRankRows("expense");
+  const incomeVendorRows = dashboardRankRows("income", dashboardIncomePeriod.from, dashboardIncomePeriod.to);
+  const expenseCategoryRows = dashboardRankRows("expense", dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
-  const dashboardPeriodLabel = accountingPeriodLabel(dashboardFromMonth, dashboardToMonth);
+  const dashboardTrendPeriodLabel = accountingPeriodLabel(dashboardTrendFromMonth, dashboardTrendToMonth);
+  const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
+  const dashboardExpensePeriodLabel = accountingDatePeriodLabel(dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter((row) => String(row.review_status || "") === "pending");
   const largestCategory = categoryRows[0];
@@ -21732,9 +21769,25 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       {activeTab === "dashboard" && (
         <>
           <section className="grid gap-4 min-[1500px]:grid-cols-[minmax(420px,1.2fr)_minmax(300px,0.9fr)_minmax(300px,0.9fr)]">
-            <AccountingDualLineChart rows={dashboardMonthRows} periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
-            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
-            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
+            <AccountingDualLineChart
+              rows={dashboardMonthRows}
+              periodLabel={dashboardTrendPeriodLabel}
+              onShift={(offset) => setDashboardTrendOffset((prev) => prev + offset)}
+            />
+            <AccountingCategoryRankChart
+              rows={incomeVendorRows}
+              mode="income"
+              title="입금 비중"
+              periodLabel={dashboardIncomePeriodLabel}
+              onShift={(offset) => setDashboardIncomeMonthOffset((prev) => prev + offset)}
+            />
+            <AccountingCategoryRankChart
+              rows={expenseCategoryRows}
+              mode="expense"
+              title="비용 비중"
+              periodLabel={dashboardExpensePeriodLabel}
+              onShift={(offset) => setDashboardExpenseMonthOffset((prev) => prev + offset)}
+            />
           </section>
 
           <section>
