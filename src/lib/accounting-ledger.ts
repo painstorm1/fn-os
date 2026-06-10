@@ -332,7 +332,7 @@ function cardPanelStatuses(rows: RawRow[], settlements: RawRow[]) {
     { key: "kb", title: "국민기업카드" },
   ].map((card) => {
     const cycle = cardPanelCycle(card.key, latestDate);
-    const cardRows = rows.filter((row) => accountingCardKey(row.card_name || row.source_name) === card.key && row.affects_card_settlement !== false);
+    const cardRows = rows.filter((row) => accountingCardKey(row.card_name || row.source_name) === card.key && row.affects_card_settlement === true);
     const currentRows = cycle ? cardRows.filter((row) => {
       const date = isoDate(row.transaction_date);
       return date >= cycle.settlement_start && date <= latestDate;
@@ -788,7 +788,7 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
       review_reason: reviewReason || (needsReview ? "미분류" : ""),
       affects_profit: salaryException ? false : isCardPayment || isTransfer ? false : resolvedCategory?.affects_profit ?? historyMatch?.row.affects_profit ?? row.direction === "expense",
       affects_cashflow: isCardPayment || isTransfer ? true : row.source_type === "bank" && resolvedCategory?.affects_cashflow !== false,
-      affects_card_settlement: !isCardPayment && row.source_type === "card" ? true : resolvedCategory?.affects_card_settlement ?? historyMatch?.row.affects_card_settlement ?? false,
+      affects_card_settlement: !isCardPayment && row.source_type === "card",
     } as RawRow;
   });
 }
@@ -816,7 +816,7 @@ async function rebuildCardSettlements() {
   ]);
   const grouped = new Map<string, RawRow>();
   for (const row of cardRows) {
-    if (row.affects_card_settlement === false) continue;
+    if (row.affects_card_settlement !== true) continue;
     const cardName = text(row.card_name || row.source_name);
     const txDate = isoDate(row.transaction_date);
     const cardAccount = findAccountingSourceAccount(cardName, cardAccounts, "card") || undefined;
@@ -872,7 +872,6 @@ function cleanCategoryPayload(row: RawRow) {
     sort_order: numberValue(row.sort_order ?? row.sortOrder),
     affects_profit: row.affects_profit ?? row.affectsProfit ?? true,
     affects_cashflow: row.affects_cashflow ?? row.affectsCashflow ?? true,
-    affects_card_settlement: row.affects_card_settlement ?? row.affectsCardSettlement ?? false,
     default_review_required: row.default_review_required ?? row.defaultReviewRequired ?? false,
     memo: text(row.memo) || null,
     updated_at: new Date().toISOString(),
@@ -1262,7 +1261,6 @@ function suggestReview(row: RawRow, rules: RawRow[], confirmedRows: RawRow[]) {
     direction: previous.direction || row.direction,
     affects_profit: previous.affects_profit,
     affects_cashflow: previous.affects_cashflow,
-    affects_card_settlement: previous.affects_card_settlement,
     memo: previous.memo || null,
     confidence: 0.65,
   };
@@ -1376,7 +1374,7 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
     if (row[key] !== undefined) payload[key] = numberValue(row[key]);
   }
   if (row.currency !== undefined) payload.currency = text(row.currency) || "KRW";
-  for (const key of ["affects_profit", "affects_cashflow", "affects_card_settlement"]) {
+  for (const key of ["affects_profit", "affects_cashflow"]) {
     if (row[key] !== undefined) payload[key] = row[key];
   }
   const saved = await patchRows<RawRow>("accounting_transactions", { id: `eq.${id}` }, payload);

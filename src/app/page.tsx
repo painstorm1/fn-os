@@ -19845,12 +19845,11 @@ type ExpenseUploadItem = {
 };
 
 const ACCOUNTING_AUTO_SOURCE_TYPE = "auto";
-type AccountingCategoryBulkField = "category_large" | "affects_profit" | "affects_cashflow" | "affects_card_settlement";
+type AccountingCategoryBulkField = "category_large" | "affects_profit" | "affects_cashflow";
 const accountingCategoryBulkFields: Array<{ key: AccountingCategoryBulkField; label: string; type?: "text" | "checkbox" }> = [
   { key: "category_large", label: "카테고리 이동" },
   { key: "affects_profit", label: "손익 반영", type: "checkbox" },
   { key: "affects_cashflow", label: "현금흐름 반영", type: "checkbox" },
-  { key: "affects_card_settlement", label: "카드결제예정 반영", type: "checkbox" },
 ];
 const jaewookPersonalPaymentItems = [
   ["재욱 교보 무배당베스트라이프종합보험약관", 37369],
@@ -20090,7 +20089,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     review_reason: "",
     affects_profit: true,
     affects_cashflow: true,
-    affects_card_settlement: false,
     memo: "",
     save_rule: true,
   });
@@ -20124,7 +20122,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     is_active: true,
     affects_profit: true,
     affects_cashflow: true,
-    affects_card_settlement: false,
     sort_order: "0",
     memo: "",
   });
@@ -20146,7 +20143,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     category_large: "",
     affects_profit: true,
     affects_cashflow: true,
-    affects_card_settlement: false,
   });
   const [ruleDraft, setRuleDraft] = useState({
     id: "",
@@ -20456,7 +20452,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   }
 
   function resetCategoryDraft() {
-    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, sort_order: "0", memo: "" });
     setCategoryDirectLarge("");
   }
 
@@ -20481,7 +20477,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       is_active: true,
       affects_profit: row.affects_profit !== false,
       affects_cashflow: row.affects_cashflow !== false,
-      affects_card_settlement: row.affects_card_settlement === true,
       sort_order: String(row.sort_order || 0),
       memo: String(row.memo || ""),
     });
@@ -20523,7 +20518,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return;
     }
     setMessage(categoryDraft.id ? "카테고리를 수정했습니다." : "카테고리를 추가했습니다.");
-    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, sort_order: "0", memo: "" });
     setCategoryEditorOpen(false);
     invalidateAccountingCache();
     loadSummary(true);
@@ -20547,7 +20542,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return;
     }
     setMessage(data.mode === "deactivated" ? "사용 중인 카테고리는 삭제할 수 없습니다." : "카테고리를 삭제했습니다.");
-    if (categoryDraft.id === id) setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, affects_card_settlement: false, sort_order: "0", memo: "" });
+    if (categoryDraft.id === id) setCategoryDraft({ id: "", category_large: "", category_middle: "", category_small: "", is_active: true, affects_profit: true, affects_cashflow: true, sort_order: "0", memo: "" });
     setSelectedCategoryIds((prev) => prev.filter((item) => item !== id));
     invalidateAccountingCache();
     loadSummary(true);
@@ -20624,7 +20619,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           category_middle: "사비출금",
           affects_profit: false,
           affects_cashflow: true,
-          affects_card_settlement: false,
           default_review_required: false,
           memo: "급여 사비출금 예외용 카테고리",
         }),
@@ -20874,7 +20868,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       review_reason: String(row.review_reason || ""),
       affects_profit: row.affects_profit !== false,
       affects_cashflow: row.affects_cashflow !== false,
-      affects_card_settlement: row.affects_card_settlement === true,
       memo: String(row.memo || ""),
       save_rule: true,
     });
@@ -20895,7 +20888,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         review_reason: transactionDraft.review_reason,
         affects_profit: transactionDraft.affects_profit,
         affects_cashflow: transactionDraft.affects_cashflow,
-        affects_card_settlement: transactionDraft.affects_card_settlement,
         memo: transactionDraft.memo,
         review_status: "confirmed",
         create_rule: transactionDraft.save_rule,
@@ -20952,7 +20944,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         review_reason: patch.review_reason ?? row.review_reason,
         affects_profit: patch.affects_profit ?? (categoryChanged && category ? category.affects_profit !== false : row.affects_profit),
         affects_cashflow: patch.affects_cashflow ?? (categoryChanged && category ? category.affects_cashflow !== false : row.affects_cashflow),
-        affects_card_settlement: patch.affects_card_settlement ?? (categoryChanged && category ? category.affects_card_settlement === true : row.affects_card_settlement),
         memo: patch.memo ?? row.memo,
         category_large: category?.category_large,
         category_middle: category?.category_middle,
@@ -22472,7 +22463,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                             <div className="flex justify-center gap-1">
                               {row.affects_profit !== false && <StatusBadge tone="success">손익</StatusBadge>}
                               {row.affects_cashflow !== false && <StatusBadge>현금</StatusBadge>}
-                              {row.affects_card_settlement === true && <StatusBadge tone="orange">카드</StatusBadge>}
                             </div>
                           </td>
                           <td className="px-2 py-2">
@@ -22529,10 +22519,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={categoryDraft.affects_cashflow} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />
                 현금흐름반영
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <input type="checkbox" checked={categoryDraft.affects_card_settlement} onChange={(event) => setCategoryDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />
-                카드결제예정반영
               </label>
             </div>
             <FormField label="메모">
@@ -22889,10 +22875,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <input className={modalInputClass} value={transactionDraft.review_reason} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, review_reason: event.target.value }))} placeholder="KCP확인, 네이버확인 등" />
               </FormField>
             </div>
-            <div className="grid gap-2 rounded-xl bg-gray-50 p-3 md:grid-cols-3">
+            <div className="grid gap-2 rounded-xl bg-gray-50 p-3 md:grid-cols-2">
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_profit} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_profit: event.target.checked }))} />손익 반영</label>
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_cashflow} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_cashflow: event.target.checked }))} />현금흐름 반영</label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={transactionDraft.affects_card_settlement} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, affects_card_settlement: event.target.checked }))} />카드정산 반영</label>
             </div>
             <FormField label="메모">
               <textarea className={modalTextareaClass} value={transactionDraft.memo} onChange={(event) => setTransactionDraft((prev) => ({ ...prev, memo: event.target.value }))} />
@@ -23257,7 +23242,6 @@ function ReviewQuickRow({
                 direction: suggestion.direction || row.direction,
                 affects_profit: suggestion.affects_profit ?? row.affects_profit,
                 affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow,
-                affects_card_settlement: suggestion.affects_card_settlement ?? row.affects_card_settlement,
               });
             }}
           >
