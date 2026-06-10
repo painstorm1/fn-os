@@ -34,6 +34,7 @@ dev-*.log
 # local visual verification artifacts
 *-verify.png
 archive-ai-test-input.png
+김재욱_도장PNG.png
 
 # env files (can opt-in for committing if needed)
 .env*
