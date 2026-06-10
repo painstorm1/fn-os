@@ -240,7 +240,7 @@ function missingColumnName(error: unknown) {
   return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
 }
 
-async function insertRowsWithSchemaFallback(table: "sales" | "purchases", rows: RawRow[]) {
+async function insertRowsWithSchemaFallback(table: string, rows: RawRow[]) {
   let nextRows = rows.map((row) => ({ ...row }));
   const removedColumns = new Set<string>();
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -258,6 +258,23 @@ async function insertRowsWithSchemaFallback(table: "sales" | "purchases", rows: 
     }
   }
   throw new Error(`${table} 저장 가능 컬럼 확인에 실패했습니다.`);
+}
+
+async function patchRowsWithSchemaFallback(table: string, filters: Record<string, QueryValue>, values: RawRow) {
+  let nextValues = { ...values };
+  const removedColumns = new Set<string>();
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      return await patchRows(table, filters, nextValues);
+    } catch (error) {
+      const column = missingColumnName(error);
+      if (!column || removedColumns.has(column) || !(column in nextValues)) throw error;
+      removedColumns.add(column);
+      const { [column]: _removed, ...rest } = nextValues;
+      nextValues = rest;
+    }
+  }
+  throw new Error(`${table} 수정 가능 컬럼 확인에 실패했습니다.`);
 }
 
 function sum(rows: RawRow[], pick: (row: RawRow) => unknown) {
@@ -390,10 +407,10 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
   };
 
   if (current?.id) {
-    await patchRows("inventory_current", { id: `eq.${current.id}` }, values);
+    await patchRowsWithSchemaFallback("inventory_current", { id: `eq.${current.id}` }, values);
     return;
   }
-  await insertRows("inventory_current", values);
+  await insertRowsWithSchemaFallback("inventory_current", [values]);
 }
 
 async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in" | "return_in" | "exchange_out") {
@@ -423,7 +440,7 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
     });
   const movementRows = movementPairs.map((pair) => pair.movement);
   if (!movementRows.length) return 0;
-  const saved = await insertRows<Record<string, unknown>>("inventory_movements", movementRows);
+  const { saved } = await insertRowsWithSchemaFallback("inventory_movements", movementRows);
   await Promise.all(movementPairs.map((pair) => updateCurrentInventory(pair.sourceRow, numberValue(pair.movement.qty))));
   return saved.length;
 }

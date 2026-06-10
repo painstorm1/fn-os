@@ -13608,6 +13608,8 @@ function SalesPurchaseEntryModal({
       invalidateClientCache("/api/dashboard/summary");
       invalidateClientCache("/api/sales/import");
       invalidateClientCache("/api/purchases/import");
+      invalidateClientCache("/api/fnos/products/master");
+      invalidateClientCache("/api/fnos/inventory/history");
       onSaved(rows.map((row, index) => ({
         ...row,
         id: row.source_ref_id || `${mode}-${Date.now()}-${index}`,
