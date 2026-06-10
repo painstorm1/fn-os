@@ -456,10 +456,12 @@ export async function mainDashboardSummary() {
     latestImportDate && { label: "수입관리", date: iso(latestImportDate) },
   ].filter(Boolean);
 
+  const latestAdSpend = sum(latestAdRows, adSpend);
   const adSevenDaySpend = sum(sevenDayAdRows, adSpend);
   const adMonthSpend = sum(monthAdRows, adSpend);
+  const latestAdConversionSales = sum(latestAdRows, adConversionSales);
   const adSevenDayConversionSales = sum(sevenDayAdRows, adConversionSales);
-  const conversionSales = sum(monthAdRows, adConversionSales);
+  const adMonthConversionSales = sum(monthAdRows, adConversionSales);
   const importMonthly = monthlySeries(importOrders, 6, importDate, importAmount)
     .map((group) => {
       const rows = importOrders
@@ -506,14 +508,14 @@ export async function mainDashboardSummary() {
     inquiry_channels: inquiryChannels,
     ad_label: metricTitle("광고비", latestAdDate, today, yesterday),
     ad_latest_date: iso(latestAdDate),
-    ad_latest_spend: sum(latestAdRows, adSpend),
+    ad_latest_spend: latestAdSpend,
     ad_yesterday_spend: sum(yesterdayAdRows, adSpend),
     ad_seven_day_spend: adSevenDaySpend,
     ad_month_spend: adMonthSpend,
     ad_seven_day_roas: adSevenDaySpend ? (adSevenDayConversionSales / adSevenDaySpend) * 100 : 0,
-    ad_month_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
-    ad_conversion_sales: conversionSales,
-    ad_roas: adMonthSpend ? (conversionSales / adMonthSpend) * 100 : 0,
+    ad_month_roas: adMonthSpend ? (adMonthConversionSales / adMonthSpend) * 100 : 0,
+    ad_conversion_sales: latestAdConversionSales,
+    ad_roas: latestAdSpend ? (latestAdConversionSales / latestAdSpend) * 100 : 0,
     ad_daily: dailyAdSeries(adRows, 7, latestAdDate, adDate, adSpend, adConversionSales),
     card_expense_amount: cardRows.length
       ? sum(cardRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount)
