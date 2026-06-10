@@ -23485,23 +23485,23 @@ function ReviewQuickGridEnhanced({
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="-mt-10 mb-2 flex justify-end">
         <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
       </div>
       <div className="overflow-x-auto rounded-xl border border-gray-200">
-        <table className="w-full min-w-[1240px] table-fixed text-xs">
+        <table className="w-full min-w-[930px] table-fixed text-xs">
           <thead className="bg-gray-50 font-semibold text-gray-500">
             <tr>
               <th className="w-9 px-2 py-2 text-center"><input type="checkbox" checked={allSelected} onChange={(event) => toggleAll(event.target.checked)} /></th>
-              <th className="w-[86px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("date")}>일자{sortMark("date")}</th>
-              <th className="w-[96px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("source")}>출처{sortMark("source")}</th>
-              <th className="px-3 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
-              <th className="w-[110px] px-3 py-2 text-right" onDoubleClick={() => toggleSort("amount")}>금액{sortMark("amount")}</th>
-              <th className="w-[150px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
-              <th className="w-[150px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
-              <th className="w-[64px] px-3 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
-              <th className="w-[180px] px-3 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
-              <th className="w-[150px] px-3 py-2 text-right">관리</th>
+              <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("date")}>일자{sortMark("date")}</th>
+              <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("source")}>출처{sortMark("source")}</th>
+              <th className="px-2 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
+              <th className="w-[78px] px-2 py-2 text-right" onDoubleClick={() => toggleSort("amount")}>금액{sortMark("amount")}</th>
+              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
+              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
+              <th className="w-[50px] px-2 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
+              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
+              <th className="w-[92px] px-2 py-2 text-right">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -23513,21 +23513,20 @@ function ReviewQuickGridEnhanced({
               const rowLargeOptions = largeOptions.filter((large) => categories.some((category) => String(category.category_large || "") === large && accountingCategoryKind(large) === (String(row.direction || "") === "income" ? "income" : "expense")));
               const middleOptions = categories.filter((category) => String(category.category_large || "") === selectedLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
               const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
-              const suggestion = suggestions?.[id];
               const jaewookHaystack = `${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`;
               const jaewookCandidate = jaewookHaystack.includes("\uAE40\uC7AC\uC6B1") || jaewookHaystack.includes("\uC7AC\uC6B1");
               return (
                 <tr key={id || index} className={`border-t border-gray-100 ${accountingSourceRowClass(row)} hover:bg-orange-50/80`}>
                   <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedSet.has(id)} onChange={(event) => toggleSelected(id, event.target.checked)} /></td>
-                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
-                  <td className="px-3 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
-                  <td className="px-3 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
-                  <td className="px-3 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select>{suggestion && <button type="button" className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100" onClick={() => onSave(row, { category_id: suggestion.category_id || row.category_id, affects_profit: suggestion.affects_profit ?? row.affects_profit, affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow })}>추천 적용</button>}</td>
-                  <td className="px-3 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} /></td>
-                  <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
-                  <td className="px-3 py-2"><div className="flex justify-end gap-2"><ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 px-3 text-xs" onClick={() => onSave(row, { category_id: selectedCategoryId || row.category_id, affects_profit: row.affects_profit !== false }, true)}>확정</ActionButton></div></td>
+                  <td className="whitespace-nowrap px-2 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
+                  <td className="px-2 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
+                  <td className="max-w-[220px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
+                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
+                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
+                  <td className="px-2 py-2 text-center"><input type="checkbox" checked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} /></td>
+                  <td className="px-2 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
+                  <td className="px-2 py-2"><div className="flex justify-end gap-1"><ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onSave(row, { category_id: selectedCategoryId || row.category_id, affects_profit: row.affects_profit !== false }, true)}>확정</ActionButton></div></td>
                 </tr>
               );
             })}
@@ -23630,10 +23629,6 @@ function ReviewQuickRow({
   const middleOptions = categories
     .filter((category) => String(category.category_large || "").trim() === selectedLarge)
     .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
-  const suggestionCategory = suggestion
-    ? categoryById.get(String(suggestion.category_id || "")) || [suggestion.category_large, suggestion.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ")
-    : "";
-
   function applyLarge(nextLarge: string) {
     setSelectedLarge(nextLarge);
     setSelectedMiddle("");
@@ -23672,26 +23667,6 @@ function ReviewQuickRow({
           <option value="">미지정</option>
           {reviewCategoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
         </select>
-        {suggestion && (
-          <button
-            type="button"
-            className="mt-1 max-w-full truncate rounded-md bg-orange-50 px-2 py-1 text-[11px] font-black text-[#ff6a00] hover:bg-orange-100"
-            title={`추천 적용: ${suggestionCategory || "분류 없음"}`}
-            onClick={() => {
-              setSelectedLarge(String(suggestion.category_large || selectedLarge));
-              setSelectedMiddle(String(suggestion.category_middle || selectedMiddle));
-              setSelectedCategoryId(String(suggestion.category_id || row.category_id || ""));
-              onSave(row, {
-                category_id: suggestion.category_id || row.category_id,
-                direction: suggestion.direction || row.direction,
-                affects_profit: suggestion.affects_profit ?? row.affects_profit,
-                affects_cashflow: suggestion.affects_cashflow ?? row.affects_cashflow,
-              });
-            }}
-          >
-            {String(suggestion.label || "추천")} · {suggestionCategory || "분류 확인"}
-          </button>
-        )}
       </td>
       <td className="px-3 py-2">
         <select
