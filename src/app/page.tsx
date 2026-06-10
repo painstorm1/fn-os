@@ -10130,20 +10130,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const filteredHistoryRows = filterEntryRows(historyRows, activeHistoryEntryMode, historyFilters, historyLineRows);
   const partnerBalancePaymentLabel = partnerBalanceMode === "sales" ? "수금액" : "지급액";
   const partnerBalanceColumnLabel = partnerBalanceMode === "sales" ? "미수 현잔액" : "미지급 현잔액";
-  const visiblePartnerBalanceRows = partnerBalanceSearch.trim()
-    ? partnerBalanceRows.filter((row) => {
-      const needle = partnerBalanceSearch.trim().toLowerCase();
-      return [row.customer, row.customer_code].some((value) => String(value || "").toLowerCase().includes(needle));
-    })
-    : partnerBalanceRows;
-  const visiblePartnerBalanceKeys = visiblePartnerBalanceRows.map((row) => partnerBalanceRowKey(row));
+  const partnerBalanceSearchNeedle = partnerBalanceSearch.trim().toLowerCase();
+  const visiblePartnerBalanceRows = useMemo(() => {
+    if (!partnerBalanceSearchNeedle) return partnerBalanceRows;
+    return partnerBalanceRows.filter((row) => [row.customer, row.customer_code].some((value) => String(value || "").toLowerCase().includes(partnerBalanceSearchNeedle)));
+  }, [partnerBalanceRows, partnerBalanceSearchNeedle]);
+  const visiblePartnerBalanceKeys = useMemo(() => visiblePartnerBalanceRows.map((row) => partnerBalanceRowKey(row)), [visiblePartnerBalanceRows, partnerBalanceMode]);
   const partnerBalanceSelection = useCheckboxColumnSelection({
     keys: visiblePartnerBalanceKeys,
     selectedKeys: selectedPartnerBalanceKeys,
     setSelectedKeys: setSelectedPartnerBalanceKeys,
     enabled: Boolean(partnerBalanceMode),
   });
-  const selectedPartnerBalanceRows = visiblePartnerBalanceRows.filter((row) => selectedPartnerBalanceKeys.includes(partnerBalanceRowKey(row)));
+  const selectedPartnerBalanceKeySet = useMemo(() => new Set(selectedPartnerBalanceKeys), [selectedPartnerBalanceKeys]);
+  const selectedPartnerBalanceRows = useMemo(() => visiblePartnerBalanceRows.filter((row) => selectedPartnerBalanceKeySet.has(partnerBalanceRowKey(row))), [visiblePartnerBalanceRows, selectedPartnerBalanceKeySet, partnerBalanceMode]);
 
   function partnerBalanceCacheKey(mode: SalesPurchaseMode | null, month: string) {
     return mode ? `${mode}:${month}` : "";
@@ -10167,11 +10167,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setPartnerBalanceLoading(false);
       return;
     }
-    setPartnerBalanceLoading(true);
+    const params = new URLSearchParams({ mode, month });
+    const url = `/api/fnos/partner-balances?${params.toString()}`;
+    const cached = readCachedJson<PartnerBalanceSummary>(url, { storageTtl: 5 * 60_000 });
+    if (cached?.rows) {
+      partnerBalanceCacheRef.current[cacheKey] = cached.rows;
+      setPartnerBalanceRows(cached.rows);
+      setSelectedPartnerBalanceKeys([]);
+    }
+    setPartnerBalanceLoading(!cached?.rows);
     try {
-      const params = new URLSearchParams({ mode, month });
-      const data = await fetch(`/api/fnos/partner-balances?${params.toString()}&_=${Date.now()}`, { cache: "no-store", credentials: "include" })
-        .then((res) => res.json()) as PartnerBalanceSummary;
+      const data = await cachedClientJson<PartnerBalanceSummary>(url, {
+        ttl: 30_000,
+        storageTtl: 5 * 60_000,
+        onUpdate: (fresh) => {
+          if (fresh.ok === false) return;
+          partnerBalanceCacheRef.current[cacheKey] = fresh.rows || [];
+          setPartnerBalanceRows(fresh.rows || []);
+        },
+      });
       if (data.ok === false) throw new Error(data.error || "거래처 잔액 조회 실패");
       partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
       setPartnerBalanceRows(data.rows || []);
@@ -10231,6 +10245,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     const cacheKey = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth);
+    invalidateClientCache("/api/fnos/partner-balances");
     partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
     setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: "" }));
     setPartnerBalanceRows(data.rows || []);
@@ -13494,21 +13509,31 @@ function SalesPurchaseEntryModal({
       setEntryPartnerBalance(null);
       return;
     }
+    let cancelled = false;
     const timer = window.setTimeout(() => {
       const customer = customerCode.trim() || customerText.trim();
       if (!customer) return;
-      setEntryPartnerBalanceLoading(true);
       const params = new URLSearchParams({ mode: mode === "purchases" ? "purchases" : "sales", month: (entryDate || entryDateToday()).slice(0, 7), customer });
-      fetch(`/api/fnos/partner-balances?${params.toString()}&_=${Date.now()}`, { cache: "no-store", credentials: "include" })
-        .then((res) => res.json())
+      const url = `/api/fnos/partner-balances?${params.toString()}`;
+      const cached = readCachedJson<PartnerBalanceSummary>(url, { storageTtl: 5 * 60_000 });
+      if (cached?.rows && !cancelled) setEntryPartnerBalance(cached.rows[0] || null);
+      setEntryPartnerBalanceLoading(!cached?.rows);
+      cachedClientJson<PartnerBalanceSummary>(url, { ttl: 30_000, storageTtl: 5 * 60_000 })
         .then((data: PartnerBalanceSummary) => {
           if (data.ok === false) throw new Error(data.error || "잔액 조회 실패");
-          setEntryPartnerBalance((data.rows || [])[0] || null);
+          if (!cancelled) setEntryPartnerBalance((data.rows || [])[0] || null);
         })
-        .catch(() => setEntryPartnerBalance(null))
-        .finally(() => setEntryPartnerBalanceLoading(false));
+        .catch(() => {
+          if (!cancelled) setEntryPartnerBalance(null);
+        })
+        .finally(() => {
+          if (!cancelled) setEntryPartnerBalanceLoading(false);
+        });
     }, 250);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [entryBalanceVisible, mode, entryDate, customerText, customerCode]);
 
   function moveToNextField(target: HTMLElement) {
