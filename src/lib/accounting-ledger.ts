@@ -76,6 +76,55 @@ function sameSourceAndDirection(left: RawRow, right: RawRow) {
   return true;
 }
 
+function bankTransferSide(row: RawRow) {
+  const source = matchText(`${text(row.source_name)} ${text(row.account_name)} ${text(row.raw_json && typeof row.raw_json === "object" ? (row.raw_json as RawRow).source_name : "")}`);
+  const description = matchText(`${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`);
+  const amount = Math.abs(numberValue(row.amount_krw ?? row.amount ?? row.debit_amount ?? row.credit_amount));
+  const date = isoDate(row.transaction_date);
+  const isDebit = numberValue(row.debit_amount) > 0;
+  const isCredit = numberValue(row.credit_amount) > 0;
+  const isKb = /국민|kb/.test(source);
+  const isIbk = /기업|ibk/.test(source);
+  const kbMemo = /에프엔|김재욱/.test(description);
+  const ibkMemo = /김재욱에프엔/.test(description);
+  if (!date || !amount || text(row.source_type) !== "bank") return null;
+  if (!((isKb && kbMemo) || (isIbk && ibkMemo))) return null;
+  if (!isDebit && !isCredit) return null;
+  return { date, amount, isDebit, isCredit, isKb, isIbk };
+}
+
+function markMatchedInternalTransfers(rows: RawRow[]) {
+  const next = rows.map((row) => ({ ...row }));
+  const sides = next.map((row, index) => ({ row, index, side: bankTransferSide(row) })).filter((item) => item.side);
+  const used = new Set<number>();
+  for (const left of sides) {
+    if (used.has(left.index) || !left.side) continue;
+    const right = sides.find((item) => {
+      if (item.index === left.index || used.has(item.index) || !item.side) return false;
+      if (item.side.date !== left.side!.date || item.side.amount !== left.side!.amount) return false;
+      if (item.side.isDebit === left.side!.isDebit || item.side.isCredit === left.side!.isCredit) return false;
+      return (item.side.isKb && left.side!.isIbk) || (item.side.isIbk && left.side!.isKb);
+    });
+    if (!right) continue;
+    for (const item of [left, right]) {
+      const row = next[item.index];
+      const isIncome = numberValue(row.credit_amount) > 0;
+      row.direction = "transfer";
+      row.category_large = isIncome ? "기타 입금" : "기타 출금";
+      row.category_middle = "내부이체";
+      row.category_small = "";
+      row.review_status = "confirmed";
+      row.review_reason = "";
+      row.affects_profit = false;
+      row.affects_cashflow = true;
+      row.affects_card_settlement = false;
+    }
+    used.add(left.index);
+    used.add(right.index);
+  }
+  return next;
+}
+
 function first(row: RawRow, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -463,7 +512,7 @@ function fixedCostKeywords(row: RawRow) {
 function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
   const keywords = fixedCostKeywords(fixedCost);
   const from = addDays(dueDate, -3);
-  const to = addDays(dueDate, 3);
+  const to = addDays(dueDate, 5);
   const sourceHint = text(fixedCost.payment_source || fixedCost.source_account_name || fixedCost.source_card_name);
   const categoryLarge = text(fixedCost.category_large);
   const categoryMiddle = text(fixedCost.category_middle);
@@ -1041,22 +1090,53 @@ export async function deactivateAccountingLoan(id: string) {
 
 function matchingLoanPaymentTransaction(loan: RawRow, transactions: RawRow[], dueDate: string, today: string, expectedAmount: number) {
   if (!expectedAmount) return null;
-  const from = addDays(dueDate, -3);
-  const to = addDays(dueDate, 2);
-  const bankHint = text(loan.bank_name);
   const loanName = text(loan.loan_name);
+  const special = matchingSpecialLoanPaymentTransaction(loanName, transactions, dueDate, today, expectedAmount);
+  if (special) return special;
+  const from = addDays(dueDate, -3);
+  const to = addDays(dueDate, 3);
+  const bankHint = text(loan.bank_name);
+  const tolerance = Math.max(1000, Math.round(expectedAmount * 0.03));
   const candidates = transactions
     .filter((row) => {
       const txDate = isoDate(row.transaction_date);
       if (!txDate || txDate < from || txDate > to || txDate > today) return false;
       if (text(row.source_type) !== "bank") return false;
       if (numberValue(row.debit_amount) <= 0) return false;
-      if (Math.abs(transactionAmount(row) - expectedAmount) > 1) return false;
+      if (Math.abs(transactionAmount(row) - expectedAmount) > tolerance) return false;
       const sourceText = `${text(row.source_name)} ${text(row.account_name)} ${text(row.card_name)}`;
       const descriptionText = `${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`;
-      if (bankHint && !sourceText.includes(bankHint) && !descriptionText.includes(bankHint)) return false;
+      if (bankHint && !sourceText.includes(bankHint) && !descriptionText.includes(bankHint) && !/재민|재욱/.test(loanName)) return false;
       if (loanName && descriptionText.includes(loanName)) return true;
       return true;
+    })
+    .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
+  return candidates[0] || null;
+}
+
+function matchingSpecialLoanPaymentTransaction(loanName: string, transactions: RawRow[], dueDate: string, today: string, expectedAmount: number) {
+  const from = addDays(dueDate, -5);
+  const to = addDays(dueDate, 5);
+  const candidates = transactions
+    .filter((row) => {
+      const txDate = isoDate(row.transaction_date);
+      if (!txDate || txDate < from || txDate > to || txDate > today) return false;
+      if (text(row.source_type) !== "bank" || numberValue(row.debit_amount) <= 0) return false;
+      const amount = transactionAmount(row);
+      const descriptionText = `${text(row.merchant_name)} ${text(row.description)} ${text(row.memo)}`;
+      if (/국민은행 신용_1/.test(loanName)) {
+        return /01391602909175/.test(descriptionText) || Math.abs(amount - expectedAmount) <= 1000;
+      }
+      if (/재민 신한은행 신용|재민 현대해상 약관/.test(loanName)) {
+        return /김재욱/.test(descriptionText) && amount >= 120000 && amount <= 130000;
+      }
+      if (/기업은행 보증서_2/.test(loanName)) {
+        return /이자-32-00033/.test(descriptionText);
+      }
+      if (/재민 경남은행 신용/.test(loanName)) {
+        return /김재욱/.test(descriptionText) && amount >= 200000 && amount <= 250000;
+      }
+      return false;
     })
     .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
   return candidates[0] || null;
@@ -1067,6 +1147,8 @@ function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] 
   const amount = numberValue(row.expected_payment_amount)
     || numberValue(row.expected_principal_amount) + numberValue(row.expected_interest_amount);
   const actualRow = matchingLoanPaymentTransaction(row, transactions, dueDate, today, amount);
+  const combinedPrivateLoanPayment = /재민 신한은행 신용|재민 현대해상 약관/.test(text(row.loan_name)) && actualRow && transactionAmount(actualRow) >= 120000;
+  const actualAmount = actualRow ? (combinedPrivateLoanPayment ? amount : transactionAmount(actualRow)) : null;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
   const paid = Boolean(actualRow);
   return {
@@ -1078,11 +1160,11 @@ function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] 
     category_large: "금융비용",
     category_middle: "대출 원리금",
     expected_amount: amount,
-    last_actual_amount: actualRow ? transactionAmount(actualRow) : null,
+    last_actual_amount: actualAmount,
     last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : null,
     matched_transaction_id: actualRow?.id || null,
     paid,
-    amount: actualRow ? transactionAmount(actualRow) : amount,
+    amount: actualAmount ?? amount,
     due_date: dueDate,
     base_day: row.payment_day,
     days_until: daysUntil,
@@ -1344,7 +1426,7 @@ export async function resolveAccountingReview(row: RawRow) {
 export async function importAccountingLedgerRows(rows: RawRow[], options: { sourceType?: string; sourceFileName?: string; uploadedBy?: string; memo?: string } = {}) {
   const [fxRates, sourceAccounts] = await Promise.all([fxRatesMap(), accountingSourceAccounts()]);
   const normalized = rows.map((row) => normalizeAccountingTransaction({ ...row, source_type: row.source_type || options.sourceType }, fxRates, sourceAccounts));
-  const classified = await classifyAccountingTransactions(normalized);
+  const classified = await classifyAccountingTransactions(markMatchedInternalTransfers(normalized));
   const [batch] = await insertRows<{ id: string }>("accounting_import_batches", {
     source_name: options.sourceType || "자동 분류",
     source_type: options.sourceType || "auto",

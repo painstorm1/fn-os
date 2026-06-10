@@ -19856,7 +19856,7 @@ function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
 }
 
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-10-kb-card-repair";
+const ACCOUNTING_CACHE_VERSION = "2026-06-10-fixed-cost-transfer-repair";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full";
@@ -23439,8 +23439,8 @@ function ExpenseTable({
                     <td className="px-3 py-2" title={sourceTitle}><StatusBadge>{accountingSourceDisplayName(row, "bank", sourceAccounts)}</StatusBadge></td>
                     <td className="px-3 py-2 font-semibold text-gray-800">{accountingShortDate(row.transaction_date || row.expense_date)}</td>
                     <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || row.description || "-")}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingBankDebitAmount(row) ? krw(accountingBankDebitAmount(row)) : "-"}</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-900">{accountingBankCreditAmount(row) ? krw(accountingBankCreditAmount(row)) : "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-red-600">{accountingBankDebitAmount(row) ? krw(accountingBankDebitAmount(row)) : "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-blue-600">{accountingBankCreditAmount(row) ? krw(accountingBankCreditAmount(row)) : "-"}</td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.large}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2 text-center"><AccountingCategoryBadge large={parts.large}>{parts.middle}</AccountingCategoryBadge></td>
                     <td className="px-3 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} onClick={(event) => event.stopPropagation()} onBlur={(event) => onMemoSave?.(row, event.target.value)} /></td>
