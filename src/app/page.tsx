@@ -13159,7 +13159,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     <th className="w-[17%] px-2 py-2 text-left">거래처</th>
                     <th className="w-[11%] px-2 py-2 text-right">전잔액</th>
                     <th className="w-[13%] px-2 py-2 text-right">해당월 거래금액</th>
-                    <th className="w-[16%] px-2 py-2 text-right">{partnerBalancePaymentLabel}</th>
+                    <th className="w-[16%] py-2 pl-[35px] pr-2 text-center">{partnerBalancePaymentLabel}</th>
                     <th className="w-[13%] px-2 py-2 text-right">{partnerBalanceColumnLabel}</th>
                     <th className="w-[8%] px-2 py-2 text-right">건수</th>
                     <th className="w-[9%] px-2 py-2 text-left">최근일자</th>
@@ -13179,7 +13179,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                           <td className="truncate px-2 py-2 font-black text-slate-800" title={row.customer}>{row.customer}</td>
                           <td className="px-2 py-2 text-right font-bold text-slate-600">{Math.round(row.previous_balance || 0).toLocaleString("ko-KR")}</td>
                           <td className="px-2 py-2 text-right font-bold">{Math.round(row.trade_amount).toLocaleString("ko-KR")}</td>
-                          <td className="px-2 py-1">
+                          <td className="py-1 pl-[35px] pr-2">
                             <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
                               <input
                                 className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-right text-xs font-bold outline-orange-400"
