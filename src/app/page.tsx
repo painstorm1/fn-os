@@ -13184,8 +13184,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                               <input
                                 className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-right text-xs font-bold outline-orange-400"
                                 inputMode="numeric"
-                                value={partnerPaymentDrafts[rowKey] ?? ""}
-                                onChange={(event) => setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: event.target.value.replace(/[^\d,.-]/g, "") }))}
+                                value={formatCommaNumber(partnerPaymentDrafts[rowKey] ?? "")}
+                                onChange={(event) => setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: event.target.value.replace(/[^\d.-]/g, "") }))}
                                 onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveManualPartnerPayment(row); } }}
                                 placeholder={row.paid_amount ? Math.round(row.paid_amount).toLocaleString("ko-KR") : partnerBalancePaymentLabel}
                               />
