@@ -10309,6 +10309,112 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     popup.document.close();
   }
 
+  async function downloadPartnerBalanceStatementXls() {
+    if (!selectedPartnerBalanceRows.length) return;
+    const xlsx = await loadXlsxModule();
+    const workbook = xlsx.utils.book_new();
+    const company = getFnDocumentCompanyInfo();
+    const fmt = new Intl.NumberFormat("ko-KR");
+    const tradeLabel = partnerBalanceMode === "sales" ? "판매" : "구매";
+    const payLabel = partnerBalanceMode === "sales" ? "수금" : "지급";
+    const [statementYear, statementMonth] = partnerBalanceMonth.split("-");
+    const monthLabel = `${statementYear}년 ${Number(statementMonth || "0") || ""}월`;
+    const monthSlashLabel = partnerBalanceMonth.replace("-", "/");
+    const statementPhone = "031-767-5455";
+    const statementFax = "031-321-1060";
+    const krwNumber = (value: unknown) => Math.round(Number(value || 0));
+    const shortDate = (value: unknown) => String(value || "").replace(/-/g, "/");
+    const sheetNames = new Set<string>();
+    const safeSheetName = (name: string, index: number) => {
+      const base = String(name || `거래처${index + 1}`).replace(/[\\/?*\[\]:]/g, " ").trim().slice(0, 24) || `거래처${index + 1}`;
+      let candidate = base;
+      let suffix = 1;
+      while (sheetNames.has(candidate)) {
+        const tag = `_${suffix}`;
+        candidate = `${base.slice(0, Math.max(1, 31 - tag.length))}${tag}`;
+        suffix += 1;
+      }
+      sheetNames.add(candidate);
+      return candidate;
+    };
+    selectedPartnerBalanceRows.forEach((row, rowIndex) => {
+      const rows: Array<Array<string | number>> = [
+        [`${row.customer} 거래내역서`, "", "", "", ""],
+        [monthLabel, "", "", "", ""],
+        [],
+        ["회사명", company.company_name, "사업자등록번호", company.business_no, ""],
+        ["대표자", company.representative_name, "전화/Fax", `${statementPhone} / ${statementFax}`, ""],
+        ["주소", company.address, "", "", ""],
+        ["거래처", row.customer, "거래처코드", row.customer_code || "-", ""],
+        [],
+        [`${tradeLabel}/${payLabel}내역`, "", "", "", ""],
+        ["일자", "적요", tradeLabel, payLabel, "잔액"],
+      ];
+      const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+        { s: { r: 3, c: 3 }, e: { r: 3, c: 4 } },
+        { s: { r: 4, c: 3 }, e: { r: 4, c: 4 } },
+        { s: { r: 5, c: 1 }, e: { r: 5, c: 4 } },
+        { s: { r: 6, c: 3 }, e: { r: 6, c: 4 } },
+        { s: { r: 8, c: 0 }, e: { r: 8, c: 4 } },
+      ];
+      let running = krwNumber(row.previous_balance);
+      rows.push(["", "이월잔액", "", "", running]);
+      (row.details || []).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))).forEach((detail) => {
+        const amount = krwNumber(detail.amount);
+        const payment = krwNumber(detail.payment_amount);
+        running += amount - payment;
+        if (detail.kind === "전표") {
+          rows.push([`${shortDate(detail.date)} -${String(detail.voucher_no || "").split("-").pop() || "1"}`, String(detail.memo || detail.description || "직송"), amount || "", "", running]);
+          (detail.lines || []).forEach((line) => {
+            const lineAmount = krwNumber(line.amount);
+            rows.push(["", `${line.product_name || "-"} / ${fmt.format(Number(line.qty || 0))} * ${fmt.format(Number(line.unit_price || 0))}`, lineAmount || "", "", ""]);
+          });
+        } else {
+          rows.push([shortDate(detail.date), String(detail.description || detail.kind || payLabel), "", payment || "", running]);
+        }
+      });
+      const tradeAmount = krwNumber(row.trade_amount);
+      const paidAmount = krwNumber(row.paid_amount);
+      const balance = krwNumber(row.month_end_balance);
+      rows.push([`${monthSlashLabel} 계`, "", tradeAmount, paidAmount, ""]);
+      rows.push(["누계", "", tradeAmount, paidAmount, balance]);
+      const worksheet = xlsx.utils.aoa_to_sheet(rows);
+      worksheet["!merges"] = merges;
+      worksheet["!cols"] = [{ wch: 15 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 22 }];
+      setWorksheetFontSize(xlsx, worksheet, 10);
+      const range = worksheet["!ref"] ? xlsx.utils.decode_range(worksheet["!ref"]) : null;
+      if (range) {
+        for (let r = range.s.r; r <= range.e.r; r += 1) {
+          for (let c = range.s.c; c <= range.e.c; c += 1) {
+            const address = xlsx.utils.encode_cell({ r, c });
+            const cell = worksheet[address] as (CellObject & { s?: Record<string, unknown>; z?: string }) | undefined;
+            if (!cell) continue;
+            const isTitle = r === 0;
+            const isMonth = r === 1;
+            const isInfoLabel = r >= 3 && r <= 6 && (c === 0 || c === 2);
+            const isLedgerTitle = r === 8;
+            const isHeader = r === 9;
+            const isTotal = r >= rows.length - 2;
+            cell.s = {
+              ...(cell.s || {}),
+              alignment: { horizontal: c >= 2 && r >= 10 ? "right" : isTitle || isMonth || isLedgerTitle || isHeader || isInfoLabel ? "center" : "left", vertical: "center", wrapText: true },
+              border: r >= 3 ? { top: { style: "thin", color: { rgb: "D7DFE7" } }, bottom: { style: "thin", color: { rgb: "D7DFE7" } }, left: { style: "thin", color: { rgb: "D7DFE7" } }, right: { style: "thin", color: { rgb: "D7DFE7" } } } : undefined,
+              fill: isInfoLabel || isLedgerTitle || isHeader || isTotal ? { fgColor: { rgb: "F4F7FA" } } : c === 2 && r >= 10 ? { fgColor: { rgb: "F3DADA" } } : c === 3 && r >= 10 ? { fgColor: { rgb: "EAF2FF" } } : undefined,
+              font: { name: "맑은 고딕", sz: isTitle ? 16 : isLedgerTitle ? 12 : 10, bold: isTitle || isMonth || isInfoLabel || isLedgerTitle || isHeader || isTotal },
+            };
+            if (c >= 2 && r >= 10 && typeof cell.v === "number") cell.z = "#,##0";
+          }
+        }
+      }
+      xlsx.utils.book_append_sheet(workbook, worksheet, safeSheetName(row.customer, rowIndex));
+    });
+    const fileBase = selectedPartnerBalanceRows.length === 1 ? `${selectedPartnerBalanceRows[0].customer}_거래내역서_${partnerBalanceMonth}` : `거래처_거래내역서_${partnerBalanceMonth}`;
+    const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+    downloadBlob(`${fileBase}.xlsx`, new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  }
+
   function applyHistorySearch(nextDraft = historyFilterDraft) {
     const customerText = nextDraft.customer.trim();
     if (customerText && customerText !== historyCustomerSelection.label) {
@@ -13149,7 +13255,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <input className={`${modalInputClass} !w-[130px] shrink-0`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
-              <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-orange-500 text-white hover:bg-orange-600" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={openPartnerBalanceStatementPdf}>내역서 PDF</button>
+              <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={() => void downloadPartnerBalanceStatementXls()}>XLS</button>
+              <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-orange-500 text-white hover:bg-orange-600" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={openPartnerBalanceStatementPdf}>PDF</button>
               <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${visiblePartnerBalanceRows.length.toLocaleString("ko-KR")}개`}</span>
             </div>
 
