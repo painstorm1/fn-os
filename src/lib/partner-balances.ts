@@ -195,6 +195,8 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     trade_amount: number;
     paid_amount: number;
     balance: number;
+    month_count: number;
+    month_qty: number;
     month_trade_amount: number;
     month_paid_amount: number;
     month_end_balance: number;
@@ -218,6 +220,8 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
       trade_amount: 0,
       paid_amount: 0,
       balance: 0,
+      month_count: 0,
+      month_qty: 0,
       month_trade_amount: 0,
       month_paid_amount: 0,
       month_end_balance: 0,
@@ -250,7 +254,11 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     target.group.qty += qty;
     target.group.trade_amount += amount;
     target.group.balance += amount;
-    if (date >= monthStart && date <= cutoff) target.group.month_trade_amount += amount;
+    if (date >= monthStart && date <= cutoff) {
+      target.group.month_count += 1;
+      target.group.month_qty += qty;
+      target.group.month_trade_amount += amount;
+    }
     if (date > target.group.latest) target.group.latest = date;
     target.group.details.push({
       source: "자동",
@@ -294,18 +302,26 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
   }
 
   const rows = Array.from(groups.values())
-    .map((row) => ({
-      ...row,
-      month_end_balance: row.balance,
-      details: row.details
+    .map((row) => {
+      const details = row.details
         .filter((detail) => {
           const date = text(detail.date);
           return date >= monthStart && date <= cutoff;
         })
-        .sort((left, right) => text(right.date).localeCompare(text(left.date))),
-    }))
-    .filter((row) => Math.round(row.balance) !== 0 || row.details.length > 0 || row.month_trade_amount || row.month_paid_amount)
-    .sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance) || left.customer.localeCompare(right.customer, "ko-KR"));
+        .sort((left, right) => text(right.date).localeCompare(text(left.date)));
+      return {
+        ...row,
+        count: row.month_count,
+        qty: row.month_qty,
+        trade_amount: row.month_trade_amount,
+        paid_amount: row.month_paid_amount,
+        month_end_balance: row.balance,
+        latest: text(details[0]?.date) || "",
+        details,
+      };
+    })
+    .filter((row) => Math.round(row.month_trade_amount) !== 0 || Math.round(row.month_paid_amount) !== 0)
+    .sort((left, right) => Math.abs(right.month_end_balance) - Math.abs(left.month_end_balance) || left.customer.localeCompare(right.customer, "ko-KR"));
 
   return { mode, month: targetMonth, cutoff, rows };
 }
