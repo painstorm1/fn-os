@@ -22696,12 +22696,24 @@ function accountingRowTime(row: Record<string, unknown>) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function accountingSourceTone(row: Record<string, unknown>) {
+  const source = `${String(row.source_name || "")} ${String(row.source_type || "")} ${String(row.card_name || "")} ${String(row.account_name || "")}`
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()[\]{}<>.,'"`|\\/_-]/g, "");
+  if (/가온|gaon|global|글로벌카드/.test(source)) return "gaon-card";
+  if (/국민기업카드|국민기업|국민카드|kbcard|kb.*card|기업카드/.test(source)) return "kb-card";
+  if (/국민은행|kbbank/.test(source)) return "kb-bank";
+  if (/기업은행|ibk/.test(source)) return "ibk-bank";
+  return "";
+}
+
 function accountingSourceRowClass(row: Record<string, unknown>) {
-  const source = `${String(row.source_name || "")} ${String(row.source_type || "")} ${String(row.card_name || "")} ${String(row.account_name || "")}`;
-  if (/가온|글로벌/.test(source)) return "bg-lime-50/45";
-  if (/국민기업|국민.*카드/.test(source)) return "bg-violet-50/45";
-  if (/국민은행/.test(source)) return "bg-yellow-50/45";
-  if (/기업은행|IBK/i.test(source)) return "bg-blue-50/45";
+  const tone = accountingSourceTone(row);
+  if (tone === "gaon-card") return "bg-emerald-50/70";
+  if (tone === "kb-card") return "bg-violet-50/70";
+  if (tone === "kb-bank") return "bg-yellow-50/55";
+  if (tone === "ibk-bank") return "bg-blue-50/55";
   return "bg-white";
 }
 
