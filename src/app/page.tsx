@@ -19521,9 +19521,58 @@ function AccountingLineChart({
   );
 }
 
-function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Array<Record<string, unknown>>; title?: string }) {
+function accountingMonthValueFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function accountingAddMonthsToMonth(month: string, offset: number) {
+  const [yearText, monthText] = month.split("-");
+  const date = new Date(Number(yearText), Number(monthText) - 1 + offset, 1);
+  return accountingMonthValueFromDate(date);
+}
+
+function accountingMonthKeysInRange(from: string, to: string) {
+  if (!from || !to) return [];
+  const result: string[] = [];
+  let current = from;
+  for (let guard = 0; guard < 36 && current <= to; guard += 1) {
+    result.push(current);
+    current = accountingAddMonthsToMonth(current, 1);
+  }
+  return result;
+}
+
+function accountingPeriodLabel(from: string, to: string) {
+  return from && to ? `기준 기간 ${from.replace("-", ".")}~${to.replace("-", ".")}` : "기준 기간 없음";
+}
+
+function accountingCompactKrw(value: number) {
+  return `₩${Math.round(value / 10000).toLocaleString("ko-KR")}`;
+}
+
+function AccountingChartPeriodActions({ onShift }: { onShift?: (offset: number) => void }) {
+  if (!onShift) return null;
+  return (
+    <div className="inline-flex items-center overflow-hidden rounded-md border border-slate-200 bg-white">
+      <button type="button" className="h-7 w-8 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(-1)} aria-label="이전 6개월">&lt;</button>
+      <button type="button" className="h-7 w-8 border-l border-slate-200 text-sm font-black text-slate-600 hover:bg-orange-50 hover:text-[#ff6a00]" onClick={() => onShift(1)} aria-label="다음 6개월">&gt;</button>
+    </div>
+  );
+}
+
+function AccountingDualLineChart({
+  rows,
+  title = "월별 추이",
+  periodLabel,
+  onShift,
+}: {
+  rows: Array<Record<string, unknown>>;
+  title?: string;
+  periodLabel?: string;
+  onShift?: (offset: number) => void;
+}) {
   const [activePointKey, setActivePointKey] = useState<string | null>(null);
-  const chartRows = rows.slice(-6);
+  const chartRows = rows;
   const rawMax = Math.max(0, ...chartRows.flatMap((row) => [asNumber(row.income), asNumber(row.expense)]));
   const axisMax = (() => {
     if (rawMax <= 0) return 1;
@@ -19556,11 +19605,13 @@ function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Arra
         className="mb-2"
         actions={
           <div className="flex items-center gap-3 text-[11px] font-semibold">
+            <AccountingChartPeriodActions onShift={onShift} />
             <span className="inline-flex items-center gap-1 text-emerald-600"><i className="h-2 w-2 rounded-full bg-emerald-500" />입금</span>
             <span className="inline-flex items-center gap-1 text-[#ff6a00]"><i className="h-2 w-2 rounded-full bg-[#ff6a00]" />비용</span>
           </div>
         }
       />
+      {periodLabel && <p className="mb-2 text-xs font-semibold text-slate-500">{periodLabel}</p>}
       <div className="rounded-xl bg-slate-50 px-4 py-3">
         {chartRows.length ? (
           <>
@@ -19572,9 +19623,10 @@ function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Arra
                     className="absolute left-0 right-0 flex items-start justify-end text-[11px] font-black leading-none text-slate-400/75"
                     style={{ top: `calc(${tick.y}% - 14px)` }}
                   >
-                    <span className="rounded bg-slate-50/90 px-1.5 py-0.5">{krw(tick.amount)}</span>
+                    <span className="rounded bg-slate-50/90 px-1.5 py-0.5">{accountingCompactKrw(tick.amount)}</span>
                   </div>
                 ))}
+                <span className="absolute bottom-0 right-0 rounded bg-slate-50/90 px-1.5 py-0.5 text-[11px] font-black text-slate-400">단위:만원</span>
               </div>
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={`${title} 그래프`}>
                 <path d="M 8 92 L 92 92" stroke="#e2e8f0" strokeWidth="0.8" />
@@ -19625,8 +19677,8 @@ function AccountingDualLineChart({ rows, title = "월별 추이" }: { rows: Arra
                   style={{ left: `${x}%` }}
                 >
                   <p className="truncate font-black text-slate-600">{monthLabel(row.label)}</p>
-                  <p className="mt-1 truncate font-black text-emerald-600">{krw(asNumber(row.income))}</p>
-                  <p className="truncate font-black text-[#ff6a00]">{krw(asNumber(row.expense))}</p>
+                  <p className="mt-1 truncate font-black text-emerald-600">{accountingCompactKrw(asNumber(row.income))}</p>
+                  <p className="truncate font-black text-[#ff6a00]">{accountingCompactKrw(asNumber(row.expense))}</p>
                 </div>
               ))}
             </div>
@@ -19663,11 +19715,13 @@ function AccountingCategoryRankChart({
   mode,
   title,
   periodLabel,
+  onShift,
 }: {
   rows: Array<Record<string, unknown>>;
   mode: "income" | "expense";
   title: string;
   periodLabel?: string;
+  onShift?: (offset: number) => void;
 }) {
   const chartRows = accountingTopRowsWithOther(rows);
   const total = Math.max(1, chartRows.reduce((sum, row) => sum + asNumber(row.amount), 0));
@@ -19677,7 +19731,7 @@ function AccountingCategoryRankChart({
     : ["#f97316", "#f43f5e", "#eab308", "#ef4444", "#a855f7", "#94a3b8"];
   return (
     <Card className="p-4">
-      <SectionHeader title={title} description={periodLabel} className="mb-2" />
+      <SectionHeader title={title} description={periodLabel} className="mb-2" actions={<AccountingChartPeriodActions onShift={onShift} />} />
       {periodLabel && <p className="mb-2 text-xs font-semibold text-slate-500">{periodLabel}</p>}
       <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
           {chartRows.map((row, index) => {
@@ -20027,8 +20081,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [categoryViewMode, setCategoryViewMode] = useState<"compact" | "all">("compact");
   const [categoryKindView, setCategoryKindView] = useState<"income" | "expense">("expense");
   const [selectedCategoryLarge, setSelectedCategoryLarge] = useState("");
+  const [categorySearch, setCategorySearch] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [categoryBulkOpen, setCategoryBulkOpen] = useState(false);
+  const [dashboardPeriodOffset, setDashboardPeriodOffset] = useState(0);
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
   const [categoryBulkDraft, setCategoryBulkDraft] = useState<Record<AccountingCategoryBulkField, string | boolean>>({
     category_large: "",
@@ -20889,7 +20945,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return leftKey.localeCompare(rightKey, "ko-KR", { numeric: true });
   });
   const categoryLargeOptions = Array.from(new Set(sortedCategories.map((row) => String(row.category_large || "").trim()).filter(Boolean)));
-  const visibleKindCategories = sortedCategories.filter((row) => accountingCategoryKind(row.category_large) === categoryKindView);
+  const categorySearchText = categorySearch.trim().toLowerCase();
+  const visibleKindCategories = sortedCategories
+    .filter((row) => accountingCategoryKind(row.category_large) === categoryKindView)
+    .filter((row) => {
+      if (!categorySearchText) return true;
+      return `${String(row.category_large || "")} ${String(row.category_middle || "")} ${String(row.memo || "")}`.toLowerCase().includes(categorySearchText);
+    });
   const managedCategoryLargeOptions = Array.from(new Set(visibleKindCategories.map((row) => String(row.category_large || "").trim()).filter(Boolean)));
   const categoryRowsByLarge = new Map(managedCategoryLargeOptions.map((large) => [large, visibleKindCategories.filter((row) => String(row.category_large || "").trim() === large)]));
   const activeCategoryLarge = selectedCategoryLarge || managedCategoryLargeOptions[0] || "";
@@ -21015,12 +21077,52 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const monthRows = summary?.by_month || [];
   const categoryRows = summary?.by_category || [];
   const vendorRows = summary?.by_vendor || [];
-  const incomeVendorRows = summary?.by_income_vendor || [];
-  const expenseCategoryRows = summary?.by_expense_category || categoryRows;
+  const latestDashboardMonth = String(monthRows[monthRows.length - 1]?.label || accountingMonthValue(0));
+  const currentDashboardFromMonth = `${latestDashboardMonth.slice(0, 4)}-01`;
+  const currentDashboardToMonth = latestDashboardMonth;
+  const dashboardFromMonth = accountingAddMonthsToMonth(currentDashboardFromMonth, dashboardPeriodOffset * 6);
+  const dashboardToMonth = accountingAddMonthsToMonth(currentDashboardToMonth, dashboardPeriodOffset * 6);
+  const monthRowByLabel = new Map(monthRows.map((row) => [String(row.label || ""), row]));
+  const dashboardMonthRows = accountingMonthKeysInRange(dashboardFromMonth, dashboardToMonth).map((label) => {
+    const row = monthRowByLabel.get(label);
+    return {
+      label,
+      income: asNumber(row?.income),
+      expense: asNumber(row?.expense),
+      count: asNumber(row?.count),
+    };
+  });
+  const dashboardRowsInPeriod = expenses.filter((row) => {
+    const month = String(row.transaction_date || row.expense_date || "").slice(0, 7);
+    return month >= dashboardFromMonth && month <= dashboardToMonth;
+  });
+  const dashboardRankRows = (mode: "income" | "expense") => {
+    const grouped = new Map<string, { label: string; amount: number; count: number }>();
+    dashboardRowsInPeriod.forEach((row) => {
+      const sourceType = String(row.source_type || "");
+      const direction = String(row.direction || "");
+      const credit = asNumber(row.credit_amount);
+      const debit = asNumber(row.debit_amount);
+      const amount = asNumber(row.amount_krw ?? row.amount);
+      const isIncome = sourceType === "bank" && (direction === "income" || credit > 0);
+      const isExpense = direction === "expense" || debit > 0 || sourceType === "card";
+      if (row.affects_profit === false) return;
+      if (mode === "income" && !isIncome) return;
+      if (mode === "expense" && !isExpense) return;
+      const label = mode === "income"
+        ? String(row.category_middle || row.category_large || row.merchant_name || row.source_name || "기타 입금")
+        : String(row.category_large || row.category_middle || row.merchant_name || "기타 비용");
+      const current = grouped.get(label) || { label, amount: 0, count: 0 };
+      current.amount += Math.abs(amount || credit || debit);
+      current.count += 1;
+      grouped.set(label, current);
+    });
+    return Array.from(grouped.values()).sort((left, right) => right.amount - left.amount);
+  };
+  const incomeVendorRows = dashboardRankRows("income");
+  const expenseCategoryRows = dashboardRankRows("expense");
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
-  const dashboardPeriodLabel = monthRows.length
-    ? `기준 기간 ${String(monthRows[0]?.label || "").replace("-", ".")}~${String(monthRows[monthRows.length - 1]?.label || "").replace("-", ".")}`
-    : "기준 기간 없음";
+  const dashboardPeriodLabel = accountingPeriodLabel(dashboardFromMonth, dashboardToMonth);
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter((row) => String(row.review_status || "") === "pending");
   const largestCategory = categoryRows[0];
@@ -21630,9 +21732,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       {activeTab === "dashboard" && (
         <>
           <section className="grid gap-4 min-[1500px]:grid-cols-[minmax(420px,1.2fr)_minmax(300px,0.9fr)_minmax(300px,0.9fr)]">
-            <AccountingDualLineChart rows={monthRows} />
-            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" periodLabel={dashboardPeriodLabel} />
-            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" periodLabel={dashboardPeriodLabel} />
+            <AccountingDualLineChart rows={dashboardMonthRows} periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
+            <AccountingCategoryRankChart rows={incomeVendorRows} mode="income" title="입금 비중" periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
+            <AccountingCategoryRankChart rows={expenseCategoryRows} mode="expense" title="비용 비중" periodLabel={dashboardPeriodLabel} onShift={(offset) => setDashboardPeriodOffset((prev) => prev + offset)} />
           </section>
 
           <section>
@@ -22135,18 +22237,29 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           }
         >
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
+                <button type="button" className={`h-9 px-3 ${categoryKindView === "income" ? "bg-emerald-500 text-white" : "text-gray-600 hover:bg-emerald-50"}`} onClick={() => { setCategoryKindView("income"); setSelectedCategoryLarge(""); }}>수입</button>
+                <button type="button" className={`h-9 px-3 ${categoryKindView === "expense" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => { setCategoryKindView("expense"); setSelectedCategoryLarge(""); }}>사용</button>
+              </div>
               <div className="flex items-center gap-2">
                 <ActionButton type="button" onClick={() => openNewCategoryEditor()}>F2 추가</ActionButton>
                 <ActionButton type="button" variant="secondary" disabled={!selectedCategoryIds.length} onClick={() => setCategoryBulkOpen((prev) => !prev)}>
                   수정 {selectedCategoryIds.length ? `${selectedCategoryIds.length}건` : ""}
                 </ActionButton>
+                <input
+                  className="h-9 w-64 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  value={categorySearch}
+                  onChange={(event) => {
+                    setCategorySearch(event.target.value);
+                    setSelectedCategoryLarge("");
+                  }}
+                  placeholder="카테고리명으로 찾기"
+                />
               </div>
-              <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
+              <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs font-black">
                 <button type="button" className={`h-9 px-3 ${categoryViewMode === "compact" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("compact")}>간략보기</button>
                 <button type="button" className={`h-9 px-3 ${categoryViewMode === "all" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => setCategoryViewMode("all")}>전체보기</button>
-                <button type="button" className={`h-9 px-3 ${categoryKindView === "income" ? "bg-emerald-500 text-white" : "text-gray-600 hover:bg-emerald-50"}`} onClick={() => { setCategoryKindView("income"); setSelectedCategoryLarge(""); }}>수입</button>
-                <button type="button" className={`h-9 px-3 ${categoryKindView === "expense" ? "bg-orange-500 text-white" : "text-gray-600 hover:bg-orange-50"}`} onClick={() => { setCategoryKindView("expense"); setSelectedCategoryLarge(""); }}>사용</button>
               </div>
             </div>
 
