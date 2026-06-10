@@ -85,6 +85,23 @@ function entryQty(row: Row) {
   return numberValue(row.qty ?? row.quantity ?? row.order_qty);
 }
 
+function entryProductCode(row: Row) {
+  return text(row.representative_product_code || row.prod_cd || row.product_code || row.sku || row.item_code);
+}
+
+function entryProductName(row: Row) {
+  return text(row.representative_product_name || row.prod_name || row.product_name || row.item_name || row.sku_name || entryProductCode(row) || "-");
+}
+
+function entryWarehouse(row: Row) {
+  return text(row.wh_cd || row.warehouse_code || row.warehouse_name || row.warehouse || "-");
+}
+
+function entryUnitPrice(row: Row) {
+  const qty = entryQty(row);
+  return numberValue(row.unit_price ?? row.price ?? row.sale_price ?? row.purchase_price) || (qty ? entryAmount(row) / qty : 0);
+}
+
 function isReturnExchangeRow(row: Row) {
   const value = text(row.return_exchange_type || row.io_type || row.sale_status || row.source_file_name || row.source_ref_id);
   return /RETURN_EXCHANGE|RETURN|EXCHANGE|return_in|exchange_out|manual-return|manual-exchange|반품|교환/i.test(value);
@@ -109,6 +126,16 @@ function entryGroupKey(row: Row, mode: BalanceMode) {
   const manualMatch = ref.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   if (manualMatch?.[1]) return `manual:${manualMatch[1]}`;
   return `row:${text(row.id || ref || `${mode}-${entryDate(row, mode)}-${entryCustomerName(row, mode)}`)}`;
+}
+
+function entryDisplayNo(row: Row, mode: BalanceMode, groupKey: string) {
+  const raw = text(row.display_no || row.voucher_no || row.slip_no || row.io_no || row.no || row.source_ref_id || groupKey.replace(/^(batch|manual|row):/, ""));
+  const rawDateNo = raw.match(/(\d{4}-\d{2}-\d{2})\|(\d+)/);
+  if (rawDateNo) return `${rawDateNo[1].replace(/\D/g, "").slice(2)}-${rawDateNo[2]}`;
+  if (/^\d{6}-\d+$/.test(raw)) return raw;
+  if (raw && raw.length <= 18 && !raw.includes("|")) return raw;
+  const date = entryDate(row, mode).replace(/\D/g, "").slice(2);
+  return date ? `${date}-1` : `${mode}-1`;
 }
 
 function paymentLinkedType(mode: BalanceMode) {
@@ -241,11 +268,26 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
       source: "자동",
       kind: "전표",
       date,
+      voucher_no: entryDisplayNo(first, mode, entryGroupKey(first, mode)),
+      warehouse: entryWarehouse(first),
       amount,
       payment_amount: 0,
       balance_delta: amount,
       description: `${mode === "sales" ? "판매" : "구매"} ${sorted.length.toLocaleString("ko-KR")}품목`,
       memo: text(first.remarks || first.memo),
+      lines: sorted.map((row) => {
+        const rowQty = entryQty(row) * factor;
+        const rowAmount = entryAmount(row) * factor;
+        return {
+          product_code: entryProductCode(row),
+          product_name: entryProductName(row),
+          warehouse: entryWarehouse(row),
+          qty: rowQty,
+          unit_price: entryUnitPrice(row),
+          amount: rowAmount,
+          memo: text(row.remarks || row.memo),
+        };
+      }),
     });
   });
 

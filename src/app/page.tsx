@@ -1742,11 +1742,22 @@ type PartnerBalanceDetail = {
   source?: string;
   kind?: string;
   date?: string;
+  voucher_no?: string;
+  warehouse?: string;
   amount?: number;
   payment_amount?: number;
   balance_delta?: number;
   description?: string;
   memo?: string;
+  lines?: Array<{
+    product_code?: string;
+    product_name?: string;
+    warehouse?: string;
+    qty?: number;
+    unit_price?: number;
+    amount?: number;
+    memo?: string;
+  }>;
 };
 
 type PartnerBalanceRow = {
@@ -8855,6 +8866,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [partnerBalanceExpanded, setPartnerBalanceExpanded] = useState("");
   const [partnerPaymentDrafts, setPartnerPaymentDrafts] = useState<Record<string, string>>({});
   const [partnerBalanceSearch, setPartnerBalanceSearch] = useState("");
+  const [selectedPartnerBalanceKeys, setSelectedPartnerBalanceKeys] = useState<string[]>([]);
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
@@ -10124,6 +10136,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return [row.customer, row.customer_code].some((value) => String(value || "").toLowerCase().includes(needle));
     })
     : partnerBalanceRows;
+  const visiblePartnerBalanceKeys = visiblePartnerBalanceRows.map((row) => partnerBalanceRowKey(row));
+  const partnerBalanceSelection = useCheckboxColumnSelection({
+    keys: visiblePartnerBalanceKeys,
+    selectedKeys: selectedPartnerBalanceKeys,
+    setSelectedKeys: setSelectedPartnerBalanceKeys,
+    enabled: Boolean(partnerBalanceMode),
+  });
+  const selectedPartnerBalanceRows = visiblePartnerBalanceRows.filter((row) => selectedPartnerBalanceKeys.includes(partnerBalanceRowKey(row)));
 
   function partnerBalanceCacheKey(mode: SalesPurchaseMode | null, month: string) {
     return mode ? `${mode}:${month}` : "";
@@ -10155,9 +10175,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (data.ok === false) throw new Error(data.error || "거래처 잔액 조회 실패");
       partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
       setPartnerBalanceRows(data.rows || []);
+      setSelectedPartnerBalanceKeys([]);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "거래처 잔액 조회 실패");
       setPartnerBalanceRows([]);
+      setSelectedPartnerBalanceKeys([]);
     } finally {
       setPartnerBalanceLoading(false);
     }
@@ -10167,6 +10189,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setPartnerBalanceMode(mode);
     setPartnerBalanceExpanded("");
     setPartnerPaymentDrafts({});
+    setSelectedPartnerBalanceKeys([]);
     void loadPartnerBalances(mode, partnerBalanceMonth);
   }
 
@@ -10176,6 +10199,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
     setPartnerBalanceMonth(nextMonth);
     setPartnerBalanceExpanded("");
+    setSelectedPartnerBalanceKeys([]);
     void loadPartnerBalances(partnerBalanceMode, nextMonth);
   }
 
@@ -10210,6 +10234,72 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
     setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: "" }));
     setPartnerBalanceRows(data.rows || []);
+  }
+
+  function openPartnerBalanceStatementPdf() {
+    if (!partnerBalanceMode || !selectedPartnerBalanceRows.length) {
+      window.alert("내역서를 출력할 거래처를 선택해 주세요.");
+      return;
+    }
+    const popup = window.open("", "_blank", "width=980,height=900");
+    if (!popup) {
+      window.alert("팝업이 차단되었습니다.");
+      return;
+    }
+    const company = getFnDocumentCompanyInfo();
+    const fmt = new Intl.NumberFormat("ko-KR");
+    const esc = htmlEscape;
+    const modeLabel = partnerBalanceMode === "sales" ? "미수금" : "미지급금";
+    const tradeLabel = partnerBalanceMode === "sales" ? "판매금액" : "구매금액";
+    const payLabel = partnerBalanceMode === "sales" ? "수금액" : "지급액";
+    const balanceLabel = partnerBalanceMode === "sales" ? "미수 현잔액" : "미지급 현잔액";
+    const monthLabel = partnerBalanceMonth.replace("-", "년 ") + "월";
+    const krw = (value: unknown) => fmt.format(Math.round(Number(value || 0)));
+    const lineHtml = (row: PartnerBalanceRow) => {
+      const details = (row.details || []).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")));
+      let running = Math.round(Number(row.previous_balance || 0));
+      const parts: string[] = [];
+      details.forEach((detail) => {
+        const amount = Math.round(Number(detail.amount || 0));
+        const payment = Math.round(Number(detail.payment_amount || 0));
+        running += amount - payment;
+        if (detail.kind === "전표") {
+          parts.push(`<tr class="voucher"><td>${esc(detail.voucher_no || "-")}</td><td>${esc(detail.date || "-")}</td><td>${esc(detail.warehouse || "-")}</td><td colspan="4" class="left">${esc(detail.description || "-")}</td><td class="num">${krw(amount)}</td><td class="left">${esc(detail.memo || "")}</td></tr>`);
+          (detail.lines || []).forEach((line) => {
+            parts.push(`<tr><td></td><td></td><td>${esc(line.warehouse || detail.warehouse || "-")}</td><td>${esc(line.product_code || "-")}</td><td class="left">${esc(line.product_name || "-")}</td><td class="num">${krw(line.qty || 0)}</td><td class="num">${krw(line.unit_price || 0)}</td><td class="num">${krw(line.amount || 0)}</td><td class="left">${esc(line.memo || "")}</td></tr>`);
+          });
+        } else {
+          parts.push(`<tr class="payment"><td></td><td>${esc(detail.date || "-")}</td><td></td><td colspan="4" class="left">${esc(detail.description || detail.kind || payLabel)}</td><td class="num">-${krw(payment)}</td><td class="left">${esc(detail.memo || "")}</td></tr>`);
+        }
+      });
+      if (!parts.length) return `<tr><td colspan="9" class="empty">해당 월 거래내역이 없습니다.</td></tr>`;
+      return parts.join("");
+    };
+    const pages = selectedPartnerBalanceRows.map((row, index) => {
+      const tradeAmount = Math.round(Number(row.trade_amount || 0));
+      const paidAmount = Math.round(Number(row.paid_amount || 0));
+      const previous = Math.round(Number(row.previous_balance || 0));
+      const balance = Math.round(Number(row.month_end_balance || 0));
+      return `<section class="page">
+        <h1>${esc(row.customer)} ${esc(modeLabel)} 거래내역서</h1>
+        <div class="top"><span>${esc(monthLabel)} 거래명세서별 거래내역</span><span>${index + 1} / ${selectedPartnerBalanceRows.length}</span></div>
+        <table class="info"><tbody>
+          <tr><th>회사명</th><td>${esc(company.company_name)}</td><th>사업자번호</th><td>${esc(company.business_no)}</td></tr>
+          <tr><th>대표자</th><td>${esc(company.representative_name)}</td><th>전화/Fax</th><td>${esc([company.phone, company.fax].filter(Boolean).join(" / "))}</td></tr>
+          <tr><th>주소</th><td colspan="3">${esc(company.address)}</td></tr>
+          <tr><th>거래처</th><td>${esc(row.customer)}</td><th>거래처코드</th><td>${esc(row.customer_code || "-")}</td></tr>
+        </tbody></table>
+        <table class="summary"><tbody><tr><th>전잔액</th><td class="num">${krw(previous)}</td><th>${esc(tradeLabel)}</th><td class="num">${krw(tradeAmount)}</td><th>${esc(payLabel)}</th><td class="num">${krw(paidAmount)}</td><th>${esc(balanceLabel)}</th><td class="num strong">${krw(balance)}</td></tr></tbody></table>
+        <table class="ledger"><thead><tr><th>일자 NO</th><th>일자</th><th>창고</th><th>품목코드</th><th>품목명[규격명]</th><th>수량</th><th>단가</th><th>금액</th><th>메모</th></tr></thead><tbody>${lineHtml(row)}
+          <tr class="total"><th colspan="5">총합</th><td class="num">${krw(row.qty)}</td><td></td><td class="num">${krw(tradeAmount)}</td><td></td></tr>
+        </tbody></table>
+      </section>`;
+    }).join("");
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(modeLabel)} 거래내역서</title><style>
+      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#111;font-family:Arial,'Malgun Gothic',sans-serif}.page{width:190mm;margin:0 auto;padding:3mm 0 8mm;break-after:page}.page:last-of-type{break-after:auto}h1{text-align:center;font-size:23px;font-weight:900;margin:1mm 0 5mm}.top{display:flex;justify-content:space-between;margin-bottom:2mm;font-size:11px;font-weight:800}.info,.summary,.ledger{width:100%;border-collapse:collapse}.info,.summary{font-size:10.5px;margin-bottom:2mm}.info th,.info td,.summary th,.summary td{border:1px solid #b8c4d1;padding:4px 5px;height:7mm}.info th,.summary th{background:#edf3f8;text-align:center;font-weight:900}.summary td{font-weight:800}.ledger{font-size:9.2px;table-layout:fixed}.ledger th,.ledger td{border:1px solid #cbd5e1;padding:3px 4px;vertical-align:middle;word-break:break-word}.ledger th{background:#eef2f7;text-align:center;font-weight:900}.ledger tr{break-inside:avoid}.voucher td{background:#f3f4f6;font-weight:900}.payment td{background:#fff7ed}.left{text-align:left}.num{text-align:right}.strong{color:#ff6a00;font-weight:900}.total th,.total td{background:#e5e7eb;font-weight:900}.empty{text-align:center;color:#64748b;padding:10mm}.toolbar{position:fixed;left:12px;bottom:12px;display:flex;gap:8px}.toolbar button{height:34px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 12px;font-size:12px;font-weight:900}@media print{.toolbar{display:none}.page{width:auto;margin:0;padding:0}.ledger thead{display:table-header-group}}
+    </style></head><body>${pages}<div class="toolbar"><button onclick="window.print()">인쇄/PDF저장</button><button onclick="window.close()">닫기</button></div><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\/script></body></html>`;
+    popup.document.write(html);
+    popup.document.close();
   }
 
   function applyHistorySearch(nextDraft = historyFilterDraft) {
@@ -13052,6 +13142,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <input className={`${modalInputClass} !w-[130px] shrink-0`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
+              <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-orange-500 text-white hover:bg-orange-600" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={openPartnerBalanceStatementPdf}>내역서 PDF</button>
               <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${visiblePartnerBalanceRows.length.toLocaleString("ko-KR")}개`}</span>
             </div>
 
@@ -13059,7 +13150,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <table className="w-full table-fixed text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-500">
                   <tr>
-                    <th className="w-[18%] px-2 py-2 text-left">거래처</th>
+                    <th className="w-[5%] px-3 py-2 text-center">
+                      <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={partnerBalanceSelection.allSelected} onChange={(event) => partnerBalanceSelection.toggleAll(event.target.checked)} />
+                    </th>
+                    <th className="w-[17%] px-2 py-2 text-left">거래처</th>
                     <th className="w-[11%] px-2 py-2 text-right">전잔액</th>
                     <th className="w-[13%] px-2 py-2 text-right">해당월 거래금액</th>
                     <th className="w-[16%] px-2 py-2 text-right">{partnerBalancePaymentLabel}</th>
@@ -13069,12 +13163,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visiblePartnerBalanceRows.length ? visiblePartnerBalanceRows.map((row) => {
+                  {visiblePartnerBalanceRows.length ? visiblePartnerBalanceRows.map((row, index) => {
                     const expanded = partnerBalanceExpanded === `${partnerBalanceMode}:${row.customer_code || row.customer}`;
                     const rowKey = `${partnerBalanceMode}:${row.customer_code || row.customer}`;
+                    const selected = selectedPartnerBalanceKeys.includes(rowKey);
                     return (
                       <Fragment key={rowKey}>
                         <tr key={rowKey} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50/50" onClick={() => setPartnerBalanceExpanded(expanded ? "" : rowKey)}>
+                          <td className="px-3 py-2 text-center" onClick={(event) => event.stopPropagation()} onMouseEnter={() => partnerBalanceSelection.continueSelection(rowKey, index)}>
+                            <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selected} onMouseDown={(event) => partnerBalanceSelection.beginSelection(rowKey, index, event)} onChange={() => undefined} />
+                          </td>
                           <td className="truncate px-2 py-2 font-black text-slate-800" title={row.customer}>{row.customer}</td>
                           <td className="px-2 py-2 text-right font-bold text-slate-600">{Math.round(row.previous_balance || 0).toLocaleString("ko-KR")}</td>
                           <td className="px-2 py-2 text-right font-bold">{Math.round(row.trade_amount).toLocaleString("ko-KR")}</td>
@@ -13097,7 +13195,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                         </tr>
                         {expanded && (
                           <tr key={`${rowKey}:details`} className="border-b border-slate-100 bg-slate-50">
-                            <td colSpan={7} className="px-3 py-3">
+                            <td colSpan={8} className="px-3 py-3">
                               <div className="grid gap-1">
                                 {(row.details || []).map((detail, index) => (
                                   <div key={`${rowKey}:detail:${index}`} className="grid grid-cols-[64px_82px_1fr_110px_110px_110px] gap-2 rounded bg-white px-2 py-2 text-xs">
@@ -13117,7 +13215,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                       </Fragment>
                     );
                   }) : (
-                    <tr><td colSpan={7} className="px-3 py-8 text-center font-bold text-slate-400">표시할 잔액이 없습니다.</td></tr>
+                    <tr><td colSpan={8} className="px-3 py-8 text-center font-bold text-slate-400">표시할 잔액이 없습니다.</td></tr>
                   )}
                 </tbody>
               </table>
