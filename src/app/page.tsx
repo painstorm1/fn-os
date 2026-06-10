@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
@@ -1736,6 +1736,42 @@ type SalesInventorySummary = {
   sales_inventory_basis?: Array<Record<string, unknown>>;
   purchase_inventory_basis?: Array<Record<string, unknown>>;
   logs?: Array<Record<string, unknown>>;
+};
+
+type PartnerBalanceDetail = {
+  source?: string;
+  kind?: string;
+  date?: string;
+  amount?: number;
+  payment_amount?: number;
+  balance_delta?: number;
+  description?: string;
+  memo?: string;
+};
+
+type PartnerBalanceRow = {
+  customer: string;
+  customer_code?: string;
+  customer_type?: string;
+  count: number;
+  qty: number;
+  trade_amount: number;
+  paid_amount: number;
+  balance: number;
+  month_trade_amount: number;
+  month_paid_amount: number;
+  month_end_balance: number;
+  latest: string;
+  details?: PartnerBalanceDetail[];
+};
+
+type PartnerBalanceSummary = {
+  ok?: boolean;
+  error?: string;
+  mode?: SalesPurchaseMode;
+  month?: string;
+  cutoff?: string;
+  rows?: PartnerBalanceRow[];
 };
 
 function apiUrl(path: string) {
@@ -8812,6 +8848,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [historyMode, setHistoryMode] = useState<SalesHistoryMode>(requestedHistoryMode);
   const [entryModalMode, setEntryModalMode] = useState<SalesHistoryMode | null>(null);
   const [partnerBalanceMode, setPartnerBalanceMode] = useState<SalesPurchaseMode | null>(null);
+  const [partnerBalanceMonth, setPartnerBalanceMonth] = useState(entryDateToday().slice(0, 7));
+  const [partnerBalanceRows, setPartnerBalanceRows] = useState<PartnerBalanceRow[]>([]);
+  const [partnerBalanceLoading, setPartnerBalanceLoading] = useState(false);
+  const [partnerBalanceExpanded, setPartnerBalanceExpanded] = useState("");
+  const [partnerManualDraft, setPartnerManualDraft] = useState({ customer: "", customer_code: "", amount: "", date: entryDateToday(), memo: "" });
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
@@ -10072,30 +10113,72 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const historyRows = historyMode === "returns" ? summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales || [] : summary?.recent_purchases || [];
   const historyLineRows = historyMode === "returns" ? summary?.recent_return_lines || summary?.recent_returns || [] : historyMode === "sales" ? summary?.recent_sales_lines || [] : summary?.recent_purchase_lines || [];
   const filteredHistoryRows = filterEntryRows(historyRows, activeHistoryEntryMode, historyFilters, historyLineRows);
-  const partnerBalanceRows = useMemo(() => {
-    const rows = partnerBalanceMode === "sales"
-      ? summary?.recent_sales_lines || summary?.sales_inventory_basis || summary?.recent_sales || []
-      : summary?.recent_purchase_lines || summary?.purchase_inventory_basis || summary?.recent_purchases || [];
-    const map = new Map<string, { customer: string; count: number; qty: number; amount: number; balance: number; latest: string }>();
-    rows.forEach((row) => {
-      const mode = partnerBalanceMode || activeHistoryEntryMode;
-      const customer = entryRowCustomer(row, mode).trim();
-      if (!customer || customer === "-" || customer === "거래처" || customer === "구매처") return;
-      const current = map.get(customer) || { customer, count: 0, qty: 0, amount: 0, balance: 0, latest: "" };
-      const amount = entryRowAmount(row);
-      const explicitBalance = Number(row.balance_amount ?? row.unpaid_amount ?? row.receivable_amount ?? row.payable_amount ?? row.remaining_amount ?? NaN);
-      current.count += 1;
-      current.qty += entryRowQty(row);
-      current.amount += amount;
-      current.balance += Number.isFinite(explicitBalance) ? explicitBalance : amount;
-      const date = entryRowDate(row);
-      if (date > current.latest) current.latest = date;
-      map.set(customer, current);
+  const partnerBalanceLabel = partnerBalanceMode === "sales" ? "미수금" : "미지급";
+  const partnerBalancePaymentLabel = partnerBalanceMode === "sales" ? "수금액" : "지급액";
+
+  async function loadPartnerBalances(mode = partnerBalanceMode, month = partnerBalanceMonth) {
+    if (!mode) return;
+    setPartnerBalanceLoading(true);
+    try {
+      const params = new URLSearchParams({ mode, month });
+      const data = await fetch(`/api/fnos/partner-balances?${params.toString()}&_=${Date.now()}`, { cache: "no-store", credentials: "include" })
+        .then((res) => res.json()) as PartnerBalanceSummary;
+      if (data.ok === false) throw new Error(data.error || "거래처 잔액 조회 실패");
+      setPartnerBalanceRows(data.rows || []);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "거래처 잔액 조회 실패");
+      setPartnerBalanceRows([]);
+    } finally {
+      setPartnerBalanceLoading(false);
+    }
+  }
+
+  function openPartnerBalance(mode: SalesPurchaseMode) {
+    setPartnerBalanceMode(mode);
+    setPartnerBalanceExpanded("");
+    setPartnerManualDraft({ customer: "", customer_code: "", amount: "", date: entryDateToday(), memo: "" });
+    void loadPartnerBalances(mode, partnerBalanceMonth);
+  }
+
+  function shiftPartnerBalanceMonth(direction: 1 | -1) {
+    const [year, month] = partnerBalanceMonth.split("-").map(Number);
+    const nextDate = new Date(year, month - 1 + direction, 1);
+    const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
+    setPartnerBalanceMonth(nextMonth);
+    void loadPartnerBalances(partnerBalanceMode, nextMonth);
+  }
+
+  async function saveManualPartnerPayment() {
+    if (!partnerBalanceMode) return;
+    const amount = Number(String(partnerManualDraft.amount || "").replace(/[^\d.-]/g, ""));
+    if (!partnerManualDraft.customer.trim() || !Number.isFinite(amount) || amount <= 0) {
+      window.alert("거래처와 결제 금액을 입력해 주세요.");
+      return;
+    }
+    const res = await fetch("/api/fnos/partner-balances", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        mode: partnerBalanceMode,
+        month: partnerBalanceMonth,
+        customer_name: partnerManualDraft.customer,
+        customer_code: partnerManualDraft.customer_code,
+        amount,
+        payment_date: partnerManualDraft.date,
+        memo: partnerManualDraft.memo,
+      }),
     });
-    return Array.from(map.values())
-      .filter((row) => Math.round(row.balance) !== 0)
-      .sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance) || left.customer.localeCompare(right.customer, "ko-KR"));
-  }, [historyMode, partnerBalanceMode, summary]);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "수동 결제 저장 실패");
+      return;
+    }
+    setPartnerManualDraft({ customer: "", customer_code: "", amount: "", date: entryDateToday(), memo: "" });
+    setPartnerBalanceRows(data.rows || []);
+    invalidateClientCache("/api/accounting/ledger/transactions");
+    invalidateClientCache("/api/accounting/summary");
+  }
 
   function applyHistorySearch(nextDraft = historyFilterDraft) {
     const customerText = nextDraft.customer.trim();
@@ -12165,7 +12248,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </button>
             <button
               type="button"
-              onClick={() => { if (historyMode === "sales" || historyMode === "purchases") setPartnerBalanceMode(historyMode); }}
+              onClick={() => { if (historyMode === "sales" || historyMode === "purchases") openPartnerBalance(historyMode); }}
               className="rounded-md border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-black text-orange-600 hover:bg-orange-100"
             >
               {historyMode === "returns" ? "거래처 정산" : historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
@@ -12232,7 +12315,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 {historyMode !== "returns" && (
                   <button
                     type="button"
-                    onClick={() => { if (historyMode === "sales" || historyMode === "purchases") setPartnerBalanceMode(historyMode); }}
+                    onClick={() => { if (historyMode === "sales" || historyMode === "purchases") openPartnerBalance(historyMode); }}
                     className="h-9 rounded-md border border-orange-200 bg-orange-50 px-4 text-sm font-black text-orange-600 hover:bg-orange-100"
                   >
                     {historyMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
@@ -12248,16 +12331,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </>
             )}
             filterBar={(
-              <div className="flex items-center gap-2 whitespace-nowrap pb-1">
-                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
+              <div className="flex max-w-full flex-wrap items-center justify-end gap-2 pb-1">
+                <input className="field-input h-9 !w-[160px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.customer} onChange={(event) => {
                   const value = event.target.value;
                   setHistoryFilterDraft((prev) => ({ ...prev, customer: value }));
                   if (value.trim() !== historyCustomerSelection.label) setHistoryCustomerSelection({ label: "", filter: "" });
                 }} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
-                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
-                <input className="field-input h-9 !w-[200px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
-                <input className="field-input h-9 !w-[150px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
-                <input className="field-input h-9 !w-[150px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <input className="field-input h-9 !w-[140px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
+                <input className="field-input h-9 !w-[160px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
+                <input className="field-input h-9 !w-[132px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
+                <input className="field-input h-9 !w-[132px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
                 <div className="flex shrink-0 gap-1">
                   {[
                     ["오늘", 0],
@@ -12922,38 +13005,95 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {partnerBalanceMode && (
         <FormModal
           title={partnerBalanceMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
-          description={partnerBalanceMode === "sales" ? "판매 거래처별 미수 잔액을 확인합니다." : "구매 거래처별 미지급 잔액을 확인합니다."}
+          description={`${partnerBalanceMonth} 말일 기준 잔액입니다. 쇼핑몰 속성 거래처는 이 화면에서만 제외됩니다.`}
           onClose={() => setPartnerBalanceMode(null)}
-          size="lg"
+          size="full"
+          className="max-w-[1320px]"
           footer={<ActionButton type="button" onClick={() => setPartnerBalanceMode(null)}>닫기</ActionButton>}
         >
-          <div className="max-h-[62vh] overflow-auto">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-500">
-                <tr>
-                  <th className="px-3 py-2 text-left">거래처</th>
-                  <th className="px-3 py-2 text-right">건수</th>
-                  <th className="px-3 py-2 text-right">수량</th>
-                  <th className="px-3 py-2 text-right">거래금액</th>
-                  <th className="px-3 py-2 text-right">{partnerBalanceMode === "sales" ? "미수금" : "미지급"}</th>
-                  <th className="px-3 py-2 text-left">최근일자</th>
-                </tr>
-              </thead>
-              <tbody>
-                {partnerBalanceRows.length ? partnerBalanceRows.map((row) => (
-                  <tr key={row.customer} className="border-b border-slate-100">
-                    <td className="px-3 py-2 font-black text-slate-800">{row.customer}</td>
-                    <td className="px-3 py-2 text-right font-bold">{row.count.toLocaleString("ko-KR")}</td>
-                    <td className="px-3 py-2 text-right font-bold">{row.qty.toLocaleString("ko-KR")}</td>
-                    <td className="px-3 py-2 text-right font-bold">{Math.round(row.amount).toLocaleString("ko-KR")}</td>
-                    <td className="px-3 py-2 text-right font-black text-orange-600">{Math.round(row.balance).toLocaleString("ko-KR")}</td>
-                    <td className="px-3 py-2 text-slate-500">{row.latest || "-"}</td>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(-1)}>{"<"}</ActionButton>
+              <input className={`${modalInputClass} w-40`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
+              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
+              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => void loadPartnerBalances()}>새로고침</ActionButton>
+              <span className="ml-auto text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${partnerBalanceRows.length.toLocaleString("ko-KR")}개 거래처`}</span>
+            </div>
+
+            <div className="grid gap-2 rounded-lg border border-orange-100 bg-orange-50/60 p-3 lg:grid-cols-[1.1fr_120px_150px_1fr_auto]">
+              <input className={modalInputClass} value={partnerManualDraft.customer} onChange={(event) => setPartnerManualDraft((prev) => ({ ...prev, customer: event.target.value }))} placeholder="거래처명" />
+              <input className={modalInputClass} value={partnerManualDraft.customer_code} onChange={(event) => setPartnerManualDraft((prev) => ({ ...prev, customer_code: event.target.value }))} placeholder="코드" />
+              <input className={`${modalInputClass} text-right`} inputMode="numeric" value={partnerManualDraft.amount} onChange={(event) => setPartnerManualDraft((prev) => ({ ...prev, amount: event.target.value.replace(/[^\d,.-]/g, "") }))} placeholder={partnerBalancePaymentLabel} />
+              <input className={modalInputClass} value={partnerManualDraft.memo} onChange={(event) => setPartnerManualDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="메모" />
+              <div className="flex gap-2">
+                <input className={`${modalInputClass} w-36`} type="date" value={partnerManualDraft.date} onChange={(event) => setPartnerManualDraft((prev) => ({ ...prev, date: event.target.value }))} />
+                <ActionButton type="button" className="h-10 whitespace-nowrap px-3 text-xs" onClick={() => void saveManualPartnerPayment()}>수동 결제</ActionButton>
+              </div>
+            </div>
+
+            <div className="max-h-[62vh] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
+              <table className="w-full table-fixed text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-500">
+                  <tr>
+                    <th className="w-[18%] px-2 py-2 text-left">거래처</th>
+                    <th className="w-[7%] px-2 py-2 text-right">건수</th>
+                    <th className="w-[8%] px-2 py-2 text-right">수량</th>
+                    <th className="w-[12%] px-2 py-2 text-right">거래금액</th>
+                    <th className="w-[11%] px-2 py-2 text-right">{partnerBalancePaymentLabel}</th>
+                    <th className="w-[11%] px-2 py-2 text-right">{partnerBalanceLabel} 현잔액</th>
+                    <th className="w-[11%] px-2 py-2 text-right">월거래</th>
+                    <th className="w-[10%] px-2 py-2 text-left">최근일자</th>
+                    <th className="w-[12%] px-2 py-2 text-left">상세</th>
                   </tr>
-                )) : (
-                  <tr><td colSpan={6} className="px-3 py-8 text-center font-bold text-slate-400">표시할 잔액이 없습니다.</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {partnerBalanceRows.length ? partnerBalanceRows.map((row) => {
+                    const expanded = partnerBalanceExpanded === `${partnerBalanceMode}:${row.customer_code || row.customer}`;
+                    const rowKey = `${partnerBalanceMode}:${row.customer_code || row.customer}`;
+                    return (
+                      <Fragment key={rowKey}>
+                        <tr key={rowKey} className="border-b border-slate-100 hover:bg-orange-50/50">
+                          <td className="truncate px-2 py-2 font-black text-slate-800" title={row.customer}>{row.customer}</td>
+                          <td className="px-2 py-2 text-right font-bold">{row.count.toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold">{Math.round(row.qty).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold">{Math.round(row.trade_amount).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold text-blue-600">{Math.round(row.paid_amount).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-black text-orange-600">{Math.round(row.month_end_balance).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-right font-bold text-slate-700">{Math.round(row.month_trade_amount).toLocaleString("ko-KR")}</td>
+                          <td className="px-2 py-2 text-slate-500">{row.latest || "-"}</td>
+                          <td className="px-2 py-2">
+                            <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-600 hover:bg-orange-50" onClick={() => setPartnerBalanceExpanded(expanded ? "" : rowKey)}>
+                              {expanded ? "닫기" : `${row.details?.length || 0}건 보기`}
+                            </button>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr key={`${rowKey}:details`} className="border-b border-slate-100 bg-slate-50">
+                            <td colSpan={9} className="px-3 py-3">
+                              <div className="grid gap-1">
+                                {(row.details || []).map((detail, index) => (
+                                  <div key={`${rowKey}:detail:${index}`} className="grid grid-cols-[64px_82px_1fr_110px_110px_110px] gap-2 rounded bg-white px-2 py-2 text-xs">
+                                    <span className="font-black text-orange-600">{detail.source || "자동"}</span>
+                                    <span className="font-bold text-slate-500">{detail.date || "-"}</span>
+                                    <span className="truncate font-bold text-slate-700" title={detail.description || ""}>{detail.description || "-"}</span>
+                                    <span className="text-right font-bold">{detail.amount ? Math.round(detail.amount).toLocaleString("ko-KR") : "-"}</span>
+                                    <span className="text-right font-bold text-blue-600">{detail.payment_amount ? Math.round(detail.payment_amount).toLocaleString("ko-KR") : "-"}</span>
+                                    <span className="text-right font-black text-slate-900">{Math.round(Number(detail.balance_delta || 0)).toLocaleString("ko-KR")}</span>
+                                  </div>
+                                ))}
+                                {!row.details?.length && <div className="rounded bg-white px-3 py-4 text-center text-xs font-bold text-slate-400">해당월 자동/수동 내역이 없습니다.</div>}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  }) : (
+                    <tr><td colSpan={9} className="px-3 py-8 text-center font-bold text-slate-400">표시할 잔액이 없습니다.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </FormModal>
       )}
@@ -13032,6 +13172,8 @@ function SalesPurchaseEntryModal({
   const [productSearch, setProductSearch] = useState<{ open: boolean; lineIndex: number; query: string; searchedQuery: string; results: FnProduct[]; selectedIndex: number; loading: boolean; error: string }>({ open: false, lineIndex: 0, query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" });
   const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
   const [productSearchSelectedKeys, setProductSearchSelectedKeys] = useState<string[]>([]);
+  const [entryPartnerBalance, setEntryPartnerBalance] = useState<PartnerBalanceRow | null>(null);
+  const [entryPartnerBalanceLoading, setEntryPartnerBalanceLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState("");
   const formRef = useRef<HTMLDivElement | null>(null);
@@ -13091,6 +13233,43 @@ function SalesPurchaseEntryModal({
     if (!needle) return true;
     return [warehouse.warehouse_code, warehouse.warehouse_name].some((value) => String(value || "").toLowerCase().includes(needle));
   }).slice(0, 12);
+  const selectedCustomer = customers.find((customer) => {
+    const code = String(customer.customer_code || customer.cust_code || "").trim();
+    const name = String(customer.customer_name || customer.cust_name || "").trim();
+    return Boolean((customerCode && code === customerCode) || (customerText && name === customerText));
+  });
+  const selectedCustomerIsShopping = /shopping|mall|shop|쇼핑몰/i.test(String(selectedCustomer?.customer_type || selectedCustomer?.customer_type_label || ""));
+  const entryLinesTotal = lines.reduce((sum, line) => sum + lineSupply(line), 0);
+  const originalEntryTotal = (initialDraft?.lines || []).reduce((sum, line) => {
+    const qty = Number(String(line.qty || 0).replace(/[^\d.-]/g, ""));
+    const price = Number(String(line.price || 0).replace(/[^\d.-]/g, ""));
+    return sum + (Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0);
+  }, 0);
+  const entryBalanceVisible = !isReturnExchangeMode && (mode === "sales" || mode === "purchases") && Boolean(customerText.trim() || customerCode.trim()) && !selectedCustomerIsShopping;
+  const entryBeforeBalance = Math.round(Number(entryPartnerBalance?.month_end_balance || 0) - (initialDraft?.replaceGroupKey ? originalEntryTotal : 0));
+  const entryAfterBalance = Math.round(entryBeforeBalance + entryLinesTotal);
+
+  useEffect(() => {
+    if (!entryBalanceVisible) {
+      setEntryPartnerBalance(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const customer = customerCode.trim() || customerText.trim();
+      if (!customer) return;
+      setEntryPartnerBalanceLoading(true);
+      const params = new URLSearchParams({ mode: mode === "purchases" ? "purchases" : "sales", month: (entryDate || entryDateToday()).slice(0, 7), customer });
+      fetch(`/api/fnos/partner-balances?${params.toString()}&_=${Date.now()}`, { cache: "no-store", credentials: "include" })
+        .then((res) => res.json())
+        .then((data: PartnerBalanceSummary) => {
+          if (data.ok === false) throw new Error(data.error || "잔액 조회 실패");
+          setEntryPartnerBalance((data.rows || [])[0] || null);
+        })
+        .catch(() => setEntryPartnerBalance(null))
+        .finally(() => setEntryPartnerBalanceLoading(false));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [entryBalanceVisible, mode, entryDate, customerText, customerCode]);
 
   function moveToNextField(target: HTMLElement) {
     const fields = Array.from(formRef.current?.querySelectorAll<HTMLElement>("input, select, textarea, button[data-entry-focus='true']") || [])
@@ -13808,9 +13987,15 @@ function SalesPurchaseEntryModal({
             </tbody>
           </table>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>
           <ActionButton type="button" variant="secondary" onClick={deleteSelectedLines}>행 삭제</ActionButton>
+          {entryBalanceVisible && (
+            <div className="ml-auto flex min-w-[360px] justify-end gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-black text-slate-700">
+              <span>전잔액: {entryPartnerBalanceLoading ? "계산 중" : `${entryBeforeBalance.toLocaleString("ko-KR")}원`}</span>
+              <span className="text-orange-600">후 잔액: {entryPartnerBalanceLoading ? "계산 중" : `${entryAfterBalance.toLocaleString("ko-KR")}원`}</span>
+            </div>
+          )}
         </div>
 
         {productSearch.open && (
@@ -17994,17 +18179,17 @@ function SalesInventoryTable({
   const isReturnHistory = historyMode === "returns";
   return (
     <>
-      <div className="mb-2 flex items-center gap-3 whitespace-nowrap pb-1">
-        <div className="flex shrink-0 items-center gap-2">{topLeft}</div>
+      <div className="mb-2 flex flex-wrap items-center gap-3 pb-1">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">{topLeft}</div>
         <div className="hidden w-[100px] shrink-0 lg:block" />
-        <div className="ml-auto flex shrink-0 items-center justify-end gap-2">{topRight}</div>
+        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">{topRight}</div>
       </div>
-      <div className="mb-1 flex items-center gap-2 whitespace-nowrap">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
         <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
         <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
-        <div className="ml-auto flex shrink-0 justify-end">{filterBar}</div>
+        <div className="ml-auto flex min-w-0 flex-1 justify-end">{filterBar}</div>
       </div>
       <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
       <div className="fn-table-shell overflow-x-auto">
