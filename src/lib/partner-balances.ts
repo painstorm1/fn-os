@@ -128,6 +128,41 @@ function accountingHaystack(row: Row) {
   ].map(compact).filter(Boolean).join(" ");
 }
 
+function rawJsonValue(row: Row, key: string) {
+  const raw = row.raw_json;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return text((raw as Row)[key]);
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return text((parsed as Row)[key]);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function isOpeningBalanceTransaction(row: Row) {
+  const value = `${row.source_name || ""} ${row.category_middle || ""} ${rawJsonValue(row, "kind")}`.toLowerCase();
+  return value.includes("fn os 기초잔액") || value.includes("opening_balance");
+}
+
+function openingBalanceMode(row: Row): BalanceMode | "" {
+  const mode = rawJsonValue(row, "mode") || text(row.balance_mode);
+  if (mode === "sales" || mode === "purchases") return mode;
+  const category = text(row.category_large);
+  if (category.includes("미지급")) return "purchases";
+  if (category.includes("미수")) return "sales";
+  return "";
+}
+
+function addDays(date: string, days: number) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function lineNo(row: Row) {
   const parsed = numberValue(row.upload_ser_no);
   return parsed > 0 ? parsed : Number.POSITIVE_INFINITY;
@@ -201,6 +236,7 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     month_paid_amount: number;
     month_end_balance: number;
     latest: string;
+    settlement_start_date: string;
     details: Row[];
   }>();
 
@@ -226,6 +262,7 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
       month_paid_amount: 0,
       month_end_balance: 0,
       latest: "",
+      settlement_start_date: "",
       details: [],
     };
     groups.set(key, prev);
@@ -254,6 +291,8 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     target.group.qty += qty;
     target.group.trade_amount += amount;
     target.group.balance += amount;
+    const settlementStart = addDays(date, -3);
+    if (!target.group.settlement_start_date || settlementStart < target.group.settlement_start_date) target.group.settlement_start_date = settlementStart;
     if (date >= monthStart && date <= cutoff) {
       target.group.month_count += 1;
       target.group.month_qty += qty;
@@ -272,14 +311,40 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     });
   });
 
+  for (const tx of transactions) {
+    if (!isOpeningBalanceTransaction(tx) || openingBalanceMode(tx) !== mode) continue;
+    const date = accountingDate(tx);
+    if (!date || date > cutoff) continue;
+    const amount = numberValue(tx.amount_krw ?? tx.amount);
+    if (!amount) continue;
+    const target = groupFor(tx.customer_code, tx.customer_name || tx.merchant_name);
+    if (!target) continue;
+    target.group.balance += amount;
+    if (!target.group.settlement_start_date || date < target.group.settlement_start_date) target.group.settlement_start_date = date;
+    if (date >= monthStart && date <= cutoff) target.group.month_trade_amount += amount;
+    if (date > target.group.latest) target.group.latest = date;
+    target.group.details.push({
+      source: "수동",
+      kind: "기초잔액",
+      date,
+      amount,
+      payment_amount: 0,
+      balance_delta: amount,
+      description: `${mode === "sales" ? "미수금" : "미지급"} 기초잔액`,
+      memo: text(tx.memo),
+    });
+  }
+
   const groupItems = Array.from(groups.values());
   for (const tx of transactions) {
+    if (isOpeningBalanceTransaction(tx)) continue;
     const date = accountingDate(tx);
     if (!date || date > cutoff || !accountingMatchesMode(tx, mode)) continue;
     const amount = accountingAmount(tx, mode);
     if (!amount) continue;
     const haystack = accountingHaystack(tx);
     const target = groupItems.find((item) => {
+      if (item.settlement_start_date && date < item.settlement_start_date) return false;
       const customerRecord = findCustomer(item.customer_code, item.customer);
       const keys = customerRecord?.keys?.length ? customerRecord.keys : [item.customer_code, item.customer].map(compact).filter(Boolean);
       return keys.some((key) => key && haystack.includes(key));
@@ -324,6 +389,45 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     .sort((left, right) => Math.abs(right.month_end_balance) - Math.abs(left.month_end_balance) || left.customer.localeCompare(right.customer, "ko-KR"));
 
   return { mode, month: targetMonth, cutoff, rows };
+}
+
+export async function createManualPartnerOpeningBalance(payload: Row) {
+  const mode = text(payload.mode) === "purchases" ? "purchases" : "sales";
+  const amount = Math.abs(numberValue(payload.amount));
+  const customerName = text(payload.customer_name || payload.customer);
+  if (!customerName || !amount) throw new FnosDbError("거래처와 기초잔액을 입력해 주세요.", 400);
+  const date = isoDate(payload.balance_date || payload.date) || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const isSales = mode === "sales";
+  const row = {
+    source_type: "manual",
+    source_name: "FN OS 기초잔액",
+    balance_mode: mode,
+    transaction_date: date,
+    posting_date: date,
+    description: `${isSales ? "미수금" : "미지급"} 기초잔액 - ${customerName}`,
+    merchant_name: customerName,
+    customer_name: customerName,
+    customer_code: text(payload.customer_code),
+    debit_amount: 0,
+    credit_amount: 0,
+    amount,
+    amount_krw: amount,
+    currency: "KRW",
+    direction: "opening_balance",
+    category_large: isSales ? "미수금" : "미지급",
+    category_middle: "FN OS 기초잔액",
+    category_small: "",
+    review_status: "confirmed",
+    affects_profit: false,
+    affects_cashflow: false,
+    memo: text(payload.memo),
+    raw_json: { ...payload, kind: "opening_balance", mode },
+    dedupe_key: `fnos-opening-partner-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  return insertWithSchemaFallback("accounting_transactions", row);
 }
 
 export async function createManualPartnerPayment(payload: Row) {

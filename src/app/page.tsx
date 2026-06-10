@@ -8853,6 +8853,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [partnerBalanceLoading, setPartnerBalanceLoading] = useState(false);
   const [partnerBalanceExpanded, setPartnerBalanceExpanded] = useState("");
   const [partnerPaymentDrafts, setPartnerPaymentDrafts] = useState<Record<string, string>>({});
+  const [partnerOpeningDraft, setPartnerOpeningDraft] = useState({ customer: "", customer_code: "", amount: "", date: entryDateToday() });
   const [entryPrefill, setEntryPrefill] = useState<SalesPurchaseEntryPrefill | null>(null);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const [entryRows, setEntryRows] = useState<Array<Record<string, string>>>([]);
@@ -10160,6 +10161,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setPartnerBalanceMode(mode);
     setPartnerBalanceExpanded("");
     setPartnerPaymentDrafts({});
+    setPartnerOpeningDraft((prev) => ({ ...prev, amount: "" }));
     void loadPartnerBalances(mode, partnerBalanceMonth);
   }
 
@@ -10202,6 +10204,40 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const cacheKey = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth);
     partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
     setPartnerPaymentDrafts((prev) => ({ ...prev, [rowKey]: "" }));
+    setPartnerBalanceRows(data.rows || []);
+    invalidateClientCache("/api/accounting/ledger/transactions");
+    invalidateClientCache("/api/accounting/summary");
+  }
+
+  async function savePartnerOpeningBalance() {
+    if (!partnerBalanceMode) return;
+    const amount = Number(String(partnerOpeningDraft.amount || "").replace(/[^\d.-]/g, ""));
+    if (!partnerOpeningDraft.customer.trim() || !Number.isFinite(amount) || amount <= 0) {
+      window.alert("거래처와 기초잔액을 입력해 주세요.");
+      return;
+    }
+    const res = await fetch("/api/fnos/partner-balances", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        kind: "opening_balance",
+        mode: partnerBalanceMode,
+        month: partnerBalanceMonth,
+        customer_name: partnerOpeningDraft.customer,
+        customer_code: partnerOpeningDraft.customer_code,
+        amount,
+        balance_date: partnerOpeningDraft.date || entryDateToday(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "기초잔액 저장 실패");
+      return;
+    }
+    const cacheKey = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth);
+    partnerBalanceCacheRef.current[cacheKey] = data.rows || [];
+    setPartnerOpeningDraft((prev) => ({ ...prev, customer: "", customer_code: "", amount: "" }));
     setPartnerBalanceRows(data.rows || []);
     invalidateClientCache("/api/accounting/ledger/transactions");
     invalidateClientCache("/api/accounting/summary");
@@ -13045,6 +13081,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
               <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${partnerBalanceRows.length.toLocaleString("ko-KR")}개 거래처`}</span>
+            </div>
+
+            <div className="flex flex-nowrap items-center gap-2 rounded-lg border border-orange-100 bg-orange-50/50 p-2">
+              <span className="shrink-0 px-2 text-xs font-black text-orange-600">기초잔액</span>
+              <input className={`${modalInputClass} min-w-0 flex-[1.3]`} value={partnerOpeningDraft.customer} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, customer: event.target.value }))} placeholder="거래처명" />
+              <input className={`${modalInputClass} min-w-0 flex-[0.7]`} value={partnerOpeningDraft.customer_code} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, customer_code: event.target.value }))} placeholder="코드" />
+              <input className={`${modalInputClass} min-w-0 flex-1 text-right`} inputMode="numeric" value={partnerOpeningDraft.amount} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, amount: event.target.value.replace(/[^\d,.-]/g, "") }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void savePartnerOpeningBalance(); } }} placeholder={partnerBalanceLabel} />
+              <input className={`${modalInputClass} w-36 shrink-0`} type="date" value={partnerOpeningDraft.date} onChange={(event) => setPartnerOpeningDraft((prev) => ({ ...prev, date: event.target.value }))} />
+              <button type="button" data-f4-save="false" className="h-10 shrink-0 rounded-md bg-orange-500 px-3 text-xs font-black text-white hover:bg-orange-600" onClick={() => void savePartnerOpeningBalance()}>저장</button>
             </div>
 
             <div className="max-h-[62vh] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
