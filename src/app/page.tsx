@@ -18185,11 +18185,13 @@ function SalesInventoryTable({
         <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">{topRight}</div>
       </div>
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
-        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
-        <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
-        <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
-        <div className="ml-auto flex min-w-0 flex-1 justify-end">{filterBar}</div>
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+          <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
+        </div>
+        <div className="ml-auto flex min-w-[760px] flex-1 justify-end max-xl:min-w-0 max-xl:basis-full">{filterBar}</div>
       </div>
       <div className="mb-3 text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}건</div>
       <div className="fn-table-shell overflow-x-auto">
