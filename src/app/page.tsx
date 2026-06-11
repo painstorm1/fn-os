@@ -24529,8 +24529,8 @@ function ReviewQuickGridEnhanced({
               <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
               <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
               <th className="w-[50px] px-2 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
-              <th className="w-[230px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
-              <th className="w-[104px] px-2 py-2 text-right">관리</th>
+              <th className="w-[230px] px-2 py-2 text-center" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
+              <th className="w-[104px] px-2 py-2 text-center">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -24555,7 +24555,7 @@ function ReviewQuickGridEnhanced({
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
                   <td className="px-2 py-2 text-center"><input type="checkbox" checked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} /></td>
-                  <td className="px-2 py-2"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
+                  <td className="py-2 pl-2 pr-3"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
                   <td className="px-2 py-2"><div className="flex justify-end gap-1"><ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onSave(row, { category_id: selectedCategoryId || row.category_id, affects_profit: row.affects_profit !== false }, true)}>확정</ActionButton></div></td>
                 </tr>
               );
