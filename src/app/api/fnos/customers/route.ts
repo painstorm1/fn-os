@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
         email: text(row.email),
         address: text(row.address),
         payment_terms: text(row.payment_terms),
-        balance_reflect: boolValue(row.balance_reflect, normalizeCustomerType(row.customer_type || row.cust_type) === "shopping"),
+        balance_reflect: boolValue(row.balance_reflect, normalizeCustomerType(row.customer_type || row.cust_type) !== "shopping"),
         memo: text(row.memo || row.remarks),
         is_active: boolActive(row.is_active),
       }))
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       email: text(customer.email),
       address: text(customer.address),
       payment_terms: text(customer.payment_terms),
-      balance_reflect: boolValue(customer.balance_reflect, customerType === "shopping"),
+      balance_reflect: boolValue(customer.balance_reflect, customerType !== "shopping"),
       memo: text(customer.memo || customer.remarks),
       is_active: boolActive(customer.is_active),
       updated_at: now,

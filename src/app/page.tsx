@@ -16089,7 +16089,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const customerSelection = useCheckboxColumnSelection({ keys: customerKeys, selectedKeys: selectedCustomerKeys, setSelectedKeys: setSelectedCustomerKeys, enabled: !modalOpen && !customerBulkOpen });
 
   function blankCustomerDraft() {
-    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", fax: "", contact_name: "", phone: "", email: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", balance_reflect: "false", memo: "" };
+    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", fax: "", contact_name: "", phone: "", email: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", balance_reflect: "true", memo: "" };
   }
 
   async function loadCustomers(nextPage = page, nextQuery = query, nextRelation = relationFilter) {
@@ -16175,7 +16175,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       detail_address: "",
       address: customer.address || "",
       payment_terms: customer.payment_terms || "",
-      balance_reflect: String(customer.balance_reflect ?? (normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label) === "shopping")),
+      balance_reflect: String(customer.balance_reflect ?? (normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label) !== "shopping")),
       memo: customer.memo || "",
     };
     setDraft(nextDraft);
@@ -16191,7 +16191,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     setDraft((prev) => {
       if (key === "customer_type") {
         const customerType = normalizeCustomerAttribute(value);
-        return { ...prev, customer_type: customerType, balance_reflect: customerType === "shopping" ? "true" : "false" };
+        return { ...prev, customer_type: customerType, balance_reflect: customerType === "shopping" ? "false" : "true" };
       }
       if (key === "balance_reflect") return { ...prev, balance_reflect: String(value) === "true" ? "true" : "false" };
       if (key === "business_no") return { ...prev, business_no: formatBusinessNoInput(value) };
@@ -18006,7 +18006,7 @@ function CustomerEditModal({
   useEscapeToClose(true, onClose);
   const customerType = normalizeCustomerAttribute(draft.customer_type);
   const businessSameAsCode = Boolean(draft.customer_code && draft.business_no && draft.business_no === formatBusinessNoInput(draft.customer_code));
-  const balanceReflect = String(draft.balance_reflect ?? (customerType === "shopping")) === "true";
+  const balanceReflect = String(draft.balance_reflect ?? (customerType !== "shopping")) === "true";
   const [addressSearchOpen, setAddressSearchOpen] = useState(false);
   const detailAddressInputRef = useRef<HTMLInputElement | null>(null);
 

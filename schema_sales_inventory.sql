@@ -61,7 +61,7 @@ create table if not exists customers (
   address text,
   memo text,
   payment_terms text,
-  balance_reflect boolean default false,
+  balance_reflect boolean default true,
   is_active boolean default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -120,7 +120,7 @@ alter table customers add column if not exists email text;
 alter table customers add column if not exists address text;
 alter table customers add column if not exists memo text;
 alter table customers add column if not exists payment_terms text;
-alter table customers add column if not exists balance_reflect boolean default false;
+alter table customers add column if not exists balance_reflect boolean default true;
 
 create table if not exists products (
   id uuid primary key default gen_random_uuid(),

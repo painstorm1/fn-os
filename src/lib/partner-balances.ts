@@ -62,7 +62,7 @@ function boolValue(value: unknown, fallback = false) {
 }
 
 function balanceReflect(row: Row) {
-  return boolValue(row.balance_reflect, customerType(row) === "shopping");
+  return boolValue(row.balance_reflect, customerType(row) !== "shopping");
 }
 
 function customerKeys(row: Row) {
