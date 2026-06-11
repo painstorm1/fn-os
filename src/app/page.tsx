@@ -20928,7 +20928,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
   const [matchStatusOpen, setMatchStatusOpen] = useState(false);
   const [matchStatusSearch, setMatchStatusSearch] = useState("");
-  const [matchStatusFilters, setMatchStatusFilters] = useState({ from: "", to: "", source: "", status: "", category: "" });
+  const [matchStatusFilters, setMatchStatusFilters] = useState({ source: "", status: "", categoryLarge: "", categoryMiddle: "" });
   const [matchStatusLoading, setMatchStatusLoading] = useState(false);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
@@ -22278,14 +22278,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const matchStatusSourceRows = ledgerRows.length ? ledgerRows : expenses;
   const matchStatusRows = useMemo(() => {
     const groups = new Map<string, { source: string; merchant: string; description: string; count: number; review: number; categories: Map<string, number>; memoExamples: string[] }>();
-    matchStatusSourceRows
-      .filter((row) => {
-        const rowDate = String(row.transaction_date || row.expense_date || "").slice(0, 10);
-        if (matchStatusFilters.from && rowDate < matchStatusFilters.from) return false;
-        if (matchStatusFilters.to && rowDate > matchStatusFilters.to) return false;
-        return true;
-      })
-      .forEach((row) => {
+    matchStatusSourceRows.forEach((row) => {
       const source = accountingShortSource(row);
       const { merchant, description } = accountingMerchantContentParts(row);
       const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "미분류";
@@ -22310,19 +22303,31 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         status: group.review ? "검토필요" : categoriesList.length > 1 ? "섞임" : "일치",
       };
     }).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source, "ko-KR") || a.merchant.localeCompare(b.merchant, "ko-KR"));
-  }, [matchStatusSourceRows, categoryById, matchStatusFilters.from, matchStatusFilters.to]);
+  }, [matchStatusSourceRows, categoryById]);
   const matchStatusSources = useMemo(() => Array.from(new Set(matchStatusRows.map((row) => row.source).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko-KR")), [matchStatusRows]);
-  const matchStatusCategories = useMemo(() => Array.from(new Set(matchStatusRows.flatMap((row) => row.categoryNames).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko-KR")), [matchStatusRows]);
+  const matchStatusCategoryLargeOptions = useMemo(() => Array.from(new Set(matchStatusRows.flatMap((row) => row.categoryNames.map((name) => name.split(" > ")[0] || "").filter(Boolean)))).sort((a, b) => a.localeCompare(b, "ko-KR")), [matchStatusRows]);
+  const matchStatusCategoryMiddleOptions = useMemo(() => {
+    if (!matchStatusFilters.categoryLarge) return [];
+    return Array.from(new Set(matchStatusRows.flatMap((row) => row.categoryNames
+      .map((name) => name.split(" > "))
+      .filter(([large]) => large === matchStatusFilters.categoryLarge)
+      .map(([, middle]) => middle || "-")
+      .filter(Boolean)))).sort((a, b) => a.localeCompare(b, "ko-KR"));
+  }, [matchStatusRows, matchStatusFilters.categoryLarge]);
   const filteredMatchStatusRows = useMemo(() => {
     const keyword = matchStatusSearch.trim().toLowerCase();
     return matchStatusRows.filter((row) => {
       if (matchStatusFilters.source && row.source !== matchStatusFilters.source) return false;
       if (matchStatusFilters.status && row.status !== matchStatusFilters.status) return false;
-      if (matchStatusFilters.category && !row.categoryNames.includes(matchStatusFilters.category)) return false;
+      if (matchStatusFilters.categoryLarge && !row.categoryNames.some((name) => name.split(" > ")[0] === matchStatusFilters.categoryLarge)) return false;
+      if (matchStatusFilters.categoryMiddle && !row.categoryNames.some((name) => {
+        const [large, middle] = name.split(" > ");
+        return large === matchStatusFilters.categoryLarge && (middle || "-") === matchStatusFilters.categoryMiddle;
+      })) return false;
       if (!keyword) return true;
       return `${row.source} ${row.merchant} ${row.description} ${row.categoryLabel} ${row.status}`.toLowerCase().includes(keyword);
     });
-  }, [matchStatusRows, matchStatusSearch, matchStatusFilters.source, matchStatusFilters.status, matchStatusFilters.category]);
+  }, [matchStatusRows, matchStatusSearch, matchStatusFilters.source, matchStatusFilters.status, matchStatusFilters.categoryLarge, matchStatusFilters.categoryMiddle]);
   const reviewSearchText = reviewSearch.trim().toLowerCase();
   const reviewSearchDigits = reviewSearch.replace(/[^0-9]/g, "");
   const filteredReviewRows = reviewSearchText || reviewSearchDigits ? pendingReviewRows.filter((row) => {
@@ -23800,8 +23805,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 onChange={(event) => setMatchStatusSearch(event.target.value)}
                 placeholder="출처/거래처/내용/카테고리 검색"
               />
-              <input className="h-9 w-[135px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-orange-400" type="date" value={matchStatusFilters.from} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, from: event.target.value }))} />
-              <input className="h-9 w-[135px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-orange-400" type="date" value={matchStatusFilters.to} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, to: event.target.value }))} />
               <select className="h-9 w-[130px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.source} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, source: event.target.value }))}>
                 <option value="">출처 전체</option>
                 {matchStatusSources.map((source) => <option key={source} value={source}>{source}</option>)}
@@ -23812,11 +23815,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <option value="섞임">섞임</option>
                 <option value="검토필요">검토필요</option>
               </select>
-              <select className="h-9 min-w-[180px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.category} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, category: event.target.value }))}>
-                <option value="">카테고리 전체</option>
-                {matchStatusCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              <select className="h-9 w-[150px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.categoryLarge} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, categoryLarge: event.target.value, categoryMiddle: "" }))}>
+                <option value="">카테고리1 전체</option>
+                {matchStatusCategoryLargeOptions.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
-              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { setMatchStatusSearch(""); setMatchStatusFilters({ from: "", to: "", source: "", status: "", category: "" }); }}>초기화</ActionButton>
+              <select className="h-9 w-[150px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={matchStatusFilters.categoryMiddle} disabled={!matchStatusFilters.categoryLarge} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, categoryMiddle: event.target.value }))}>
+                <option value="">{matchStatusFilters.categoryLarge ? "카테고리2 전체" : "카테고리1 먼저"}</option>
+                {matchStatusCategoryMiddleOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { setMatchStatusSearch(""); setMatchStatusFilters({ source: "", status: "", categoryLarge: "", categoryMiddle: "" }); }}>초기화</ActionButton>
               <p className="ml-auto text-xs font-bold text-gray-500">
                 {matchStatusLoading ? "전체 거래 불러오는 중" : `표시 ${filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 ${matchStatusRows.length.toLocaleString("ko-KR")}개`}
               </p>
