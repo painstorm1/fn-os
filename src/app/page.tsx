@@ -4184,7 +4184,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
       setPreviewUrl("");
       return;
     }
-    setImageHint("이미지 처리 중...");
+    setImageHint("");
     const dataUrl = await imageFileToDataUrl(nextFile);
     setFile(null);
     setPastedImageDataUrl(dataUrl);
@@ -4203,7 +4203,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
       const pastedFile = imageItem.getAsFile();
       if (pastedFile) {
         const ext = pastedFile.type.split("/")[1] || "png";
-        setImageHint("붙여넣은 이미지 처리 중...");
+        setImageHint("");
         void imageFileToDataUrl(new File([pastedFile], `pasted-product-image.${ext}`, { type: pastedFile.type })).then((dataUrl) => {
           setFile(null);
           setPastedImageDataUrl(dataUrl);
@@ -4625,7 +4625,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
                     disabled={deleting || saving}
                     onClick={deleteProduct}
                   >
-                    {deleting ? "삭제 중..." : "삭제"}
+                    삭제
                   </button>
                 )}
               </div>
@@ -9596,7 +9596,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     setSalesSheetHighlightedRows({});
-    setMessage(`${waitingFiles.length}개 파일을 읽는 중입니다...`);
+    setMessage("");
     const formData = new FormData();
     formData.append("kind", kind);
     if (passwordOverride) formData.append("order_file_password", passwordOverride);
@@ -9659,7 +9659,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       { name: "쿠팡", status: "running", message: "API 수집 중" },
     ]);
     setCollectionPopupOpen(true);
-    setMessage("쇼핑몰 API 주문을 수집하는 중입니다...");
+    setMessage("");
     try {
       const res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
@@ -10009,7 +10009,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 판매 DB에 저장합니다. 계속할까요?`);
       if (!ok) return;
     }
-    setMessage("FN OS 판매 DB에 저장하는 중입니다...");
+    setMessage("");
     try {
       const res = await fetch("/api/sales/import", {
         method: "POST",
@@ -10090,7 +10090,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 구매 DB에 저장합니다. 계속할까요?`);
       if (!ok) return;
     }
-    setMessage("FN OS 구매 DB에 저장하는 중입니다...");
+    setMessage("");
     try {
       const res = await fetch("/api/purchases/import", {
         method: "POST",
@@ -10132,7 +10132,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
 
-    setMessage(`${filesToMatch.length}개 송장파일을 읽어서 기존 시트에 매칭하는 중입니다...`);
+    setMessage("");
     const formData = new FormData();
     formData.append("kind", "invoices");
     if (orderFilePassword) formData.append("order_file_password", orderFilePassword);
@@ -10717,7 +10717,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     popup.document.open();
-    popup.document.write("<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래 분석</title><style>body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif}.loading{height:100vh;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900}</style></head><body><div class='loading'>거래 분석을 여는 중입니다...</div></body></html>");
+    popup.document.write("<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>거래 분석</title><style>body{margin:0;background:#f6f7f9;color:#ff6a00;font-family:Arial,'Malgun Gothic',sans-serif}.loading{height:100vh;display:flex;align-items:center;justify-content:center;font-size:92px;font-weight:1000;animation:pulse 3s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:0}50%{opacity:1}}</style></head><body><div class='loading'>F&amp;</div></body></html>");
     popup.document.close();
     popup.focus();
     let analysisSummary = summary;
@@ -13498,7 +13498,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
               <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={() => void downloadPartnerBalanceStatementXls()}>XLS</button>
               <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-orange-500 text-white hover:bg-orange-600" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={openPartnerBalanceStatementPdf}>PDF</button>
-              <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "계산 중" : `${visiblePartnerBalanceRows.length.toLocaleString("ko-KR")}개`}</span>
+              <span className="shrink-0 text-xs font-black text-slate-500">{partnerBalanceLoading ? "" : `${visiblePartnerBalanceRows.length.toLocaleString("ko-KR")}개`}</span>
             </div>
 
             <div className="max-h-[62vh] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
@@ -14483,8 +14483,8 @@ function SalesPurchaseEntryModal({
           <ActionButton type="button" variant="secondary" onClick={deleteSelectedLines}>행 삭제</ActionButton>
           {entryBalanceVisible && (
             <div className="ml-auto flex min-w-[360px] justify-end gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-black text-slate-700">
-              <span>전잔액: {entryPartnerBalanceLoading ? "계산 중" : `${entryBeforeBalance.toLocaleString("ko-KR")}원`}</span>
-              <span className="text-orange-600">후 잔액: {entryPartnerBalanceLoading ? "계산 중" : `${entryAfterBalance.toLocaleString("ko-KR")}원`}</span>
+              <span>전잔액: {entryPartnerBalanceLoading ? "" : `${entryBeforeBalance.toLocaleString("ko-KR")}원`}</span>
+              <span className="text-orange-600">후 잔액: {entryPartnerBalanceLoading ? "" : `${entryAfterBalance.toLocaleString("ko-KR")}원`}</span>
             </div>
           )}
         </div>
@@ -18801,7 +18801,7 @@ function SalesInventoryTable({
   async function openStatement(targetRows: Array<Record<string, unknown>>, autoPrint = false) {
     const popup = window.open("", "_blank", "width=980,height=900");
     if (!popup) return;
-    popup.document.write("<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>거래명세서</title></head><body>거래명세서를 준비 중입니다.</body></html>");
+    popup.document.write("<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>거래명세서</title><style>body{margin:0;background:#f6f7f9;color:#ff6a00;font-family:Arial,'Malgun Gothic',sans-serif}.loading{height:100vh;display:flex;align-items:center;justify-content:center;font-size:92px;font-weight:1000;animation:pulse 3s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:0}50%{opacity:1}}</style></head><body><div class=\"loading\">F&amp;</div></body></html>");
     popup.document.close();
     const customers = await fetchStatementCustomers();
     popup.document.open();
@@ -21291,7 +21291,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return;
     }
     setParsing(true);
-    setMessage(`${uploadedExpenseFiles.length}개 파일을 읽어 비용 데이터를 생성하는 중입니다.`);
+    setMessage("");
     const form = new FormData();
     form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
     form.append("file_source_types", JSON.stringify(uploadedExpenseFiles.map((item) => item.sourceType)));
@@ -21316,8 +21316,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return;
     }
     setUploading(true);
-    setUploadProgressText(`파일 ${uploadedExpenseFiles.length.toLocaleString("ko-KR")}개를 DB에 저장하는 중입니다.`);
-    setMessage("업로드 파일을 기반으로 비용 데이터를 생성하고 저장하는 중입니다.");
+    setUploadProgressText("");
+    setMessage("");
     try {
       const form = new FormData();
       form.append("source_type", ACCOUNTING_AUTO_SOURCE_TYPE);
@@ -23483,7 +23483,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           footer={
             <>
               <ActionButton type="button" variant="secondary" onClick={() => setRocketGrowthModalOpen(false)}>닫기</ActionButton>
-              <ActionButton type="submit" form="rocket-growth-cost-form" data-f4-save="true" disabled={rocketGrowthSaving}>{rocketGrowthSaving ? "저장 중" : "F4 저장"}</ActionButton>
+              <ActionButton type="submit" form="rocket-growth-cost-form" data-f4-save="true" disabled={rocketGrowthSaving}>F4 저장</ActionButton>
             </>
           }
         >
@@ -23825,7 +23825,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </select>
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { setMatchStatusSearch(""); setMatchStatusFilters({ source: "", status: "", categoryLarge: "", categoryMiddle: "" }); }}>초기화</ActionButton>
               <p className="ml-auto text-xs font-bold text-gray-500">
-                {matchStatusLoading ? "전체 거래 불러오는 중" : `표시 ${filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 ${matchStatusRows.length.toLocaleString("ko-KR")}개`}
+                {matchStatusLoading ? "" : `표시 ${filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 ${matchStatusRows.length.toLocaleString("ko-KR")}개`}
               </p>
             </div>
             <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-200">
@@ -24084,26 +24084,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         >
           <ExpenseTable rows={previewRows} categoryById={categoryById} />
         </SelectionModal>
-      )}
-
-      {uploading && (
-        <FormModal
-          title="DB 저장 중"
-          description="파일을 분석하고 거래/검토/카드정산 데이터를 저장하고 있습니다."
-          onClose={() => undefined}
-          size="sm"
-          footer={<ActionButton type="button" variant="secondary" disabled>처리 중</ActionButton>}
-        >
-          <div className="space-y-3">
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-orange-500" />
-            </div>
-            <p className="text-sm font-bold text-slate-700">{uploadProgressText || "DB 저장을 진행하고 있습니다."}</p>
-            <p className="text-xs font-semibold leading-5 text-slate-500">
-              완료 또는 실패 알림이 뜰 때까지 이 화면을 유지해 주세요. 문제가 생기면 안내 팝업으로 알려드립니다.
-            </p>
-          </div>
-        </FormModal>
       )}
 
       {editingTransaction && (

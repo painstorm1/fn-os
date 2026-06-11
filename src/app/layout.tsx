@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import GlobalBusyOverlay from "./global-busy-overlay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <GlobalBusyOverlay />
+      </body>
     </html>
   );
 }

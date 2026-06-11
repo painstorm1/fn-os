@@ -1038,7 +1038,7 @@ export default function ArchiveWorkspace() {
                 <h2 className="text-base font-black">저장 전 확인</h2>
                 <p className="mt-1 text-sm font-bold text-slate-500">제목은 10자 내외로 자동 생성됩니다. 자료 포인트는 메모가 아니라 참고 유형입니다.</p>
               </div>
-              <ActionButton type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length}>{autoWorking ? "처리 중" : "전체 저장"}</ActionButton>
+              <ActionButton type="button" onClick={saveAutoDrafts} disabled={autoWorking || !autoDrafts.length}>전체 저장</ActionButton>
             </div>
             <div className="mt-4 space-y-3">
               {autoDrafts.map((draft, index) => (
