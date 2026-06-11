@@ -23006,7 +23006,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           footer={
             <>
               <ActionButton type="button" variant="secondary" onClick={() => setRocketGrowthModalOpen(false)}>닫기</ActionButton>
-              <ActionButton type="submit" form="rocket-growth-cost-form" disabled={rocketGrowthSaving}>{rocketGrowthSaving ? "저장 중" : "저장"}</ActionButton>
+              <ActionButton type="submit" form="rocket-growth-cost-form" data-f4-save="true" disabled={rocketGrowthSaving}>{rocketGrowthSaving ? "저장 중" : "F4 저장"}</ActionButton>
             </>
           }
         >
@@ -23016,10 +23016,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <input className={modalInputClass} type="month" value={rocketGrowthDraft.month} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, month: event.target.value }))} />
               </FormField>
               <FormField label="광고비">
-                <input className={`${modalInputClass} text-right`} type="number" min="0" value={rocketGrowthDraft.ad_amount} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: event.target.value }))} placeholder="마케팅·광고 > 쿠팡" />
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.ad_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: formatCommaNumber(event.target.value) }))} placeholder="마케팅·광고 > 쿠팡" />
               </FormField>
               <FormField label="풀필먼트서비스">
-                <input className={`${modalInputClass} text-right`} type="number" min="0" value={rocketGrowthDraft.fulfillment_amount} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, fulfillment_amount: event.target.value }))} placeholder="업무 비용 > 로켓그로스" />
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.fulfillment_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, fulfillment_amount: formatCommaNumber(event.target.value) }))} placeholder="업무 비용 > 로켓그로스" />
               </FormField>
               <FormField label="메모" className="md:col-span-3">
                 <input className={modalInputClass} value={rocketGrowthDraft.memo} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="예: 2026년 5월 로켓그로스 정산" />
