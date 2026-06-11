@@ -54,6 +54,17 @@ function customerType(row: Row) {
   return raw.includes("shopping") || raw.includes("mall") || raw.includes("shop") || raw.includes("쇼핑몰") ? "shopping" : "general";
 }
 
+function boolValue(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const raw = text(value).toLowerCase();
+  if (!raw) return fallback;
+  return ["1", "true", "yes", "y", "on", "반영", "include"].includes(raw);
+}
+
+function balanceReflect(row: Row) {
+  return boolValue(row.balance_reflect, customerType(row) === "shopping");
+}
+
 function customerKeys(row: Row) {
   return [
     customerCode(row),
@@ -173,8 +184,8 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     optionalRows("payment_records", { linked_type: `eq.${paymentLinkedType(mode)}`, order: "payment_date.desc", limit: 5000 }),
   ]);
 
-  const customerRows = customers.map((row) => ({ row, keys: customerKeys(row), name: customerName(row) || customerCode(row), code: customerCode(row), type: customerType(row) }));
-  const customerByKey = new Map<string, { row: Row; keys: string[]; name: string; code: string; type: string }>();
+  const customerRows = customers.map((row) => ({ row, keys: customerKeys(row), name: customerName(row) || customerCode(row), code: customerCode(row), type: customerType(row), balance_reflect: balanceReflect(row) }));
+  const customerByKey = new Map<string, { row: Row; keys: string[]; name: string; code: string; type: string; balance_reflect: boolean }>();
   customerRows.forEach((item) => item.keys.forEach((key) => customerByKey.set(key, item)));
   const findCustomer = (code: unknown, name: unknown) => {
     const candidates = [code, name].map(compact).filter(Boolean);
@@ -211,7 +222,7 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     const display = customerRecord?.name || text(name) || text(code) || "-";
     const key = compact(customerRecord?.code || code || display) || compact(display);
     if (!key || display === "-" || display === "거래처" || display === "구매처") return null;
-    if (customerRecord?.type === "shopping") return null;
+    if (!customerRecord?.balance_reflect) return null;
     if (targetNeedle && ![customerRecord?.code, customerRecord?.name, code, name].map(compact).some((value) => value && (value.includes(targetNeedle) || targetNeedle.includes(value)))) return null;
     const prev = groups.get(key) || {
       customer: display,

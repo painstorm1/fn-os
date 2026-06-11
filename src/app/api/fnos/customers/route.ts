@@ -13,6 +13,35 @@ function boolActive(value: unknown) {
   return !["NO", "N", "FALSE", "0", "미사용", "중단", "DELETED"].includes(next);
 }
 
+function boolValue(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const next = text(value).toLowerCase();
+  if (!next) return fallback;
+  return ["1", "true", "yes", "y", "on", "반영", "include"].includes(next);
+}
+
+function schemaColumnFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/column ['"]?([^'"\s]+)['"]?/i)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+}
+
+async function saveCustomerRows(customer: AnyRecord, values: AnyRecord, createdAt: string) {
+  let next = { ...values };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return text(customer.id)
+        ? await patchRows<AnyRecord>("customers", { id: `eq.${customer.id}` }, next)
+        : await upsertRows<AnyRecord>("customers", { ...next, created_at: createdAt }, "customer_code");
+    } catch (error) {
+      const column = schemaColumnFromError(error);
+      if (!column || !(column in next)) throw error;
+      const { [column]: _removed, ...rest } = next;
+      next = rest;
+    }
+  }
+  throw new FnosDbError("거래처 저장 가능한 컬럼 확인에 실패했습니다.", 500);
+}
+
 function customerCode(row: AnyRecord) {
   return text(row.customer_code || row.cust_code);
 }
@@ -73,6 +102,7 @@ export async function GET(request: NextRequest) {
         email: text(row.email),
         address: text(row.address),
         payment_terms: text(row.payment_terms),
+        balance_reflect: boolValue(row.balance_reflect, normalizeCustomerType(row.customer_type || row.cust_type) === "shopping"),
         memo: text(row.memo || row.remarks),
         is_active: boolActive(row.is_active),
       }))
@@ -120,13 +150,12 @@ export async function POST(request: NextRequest) {
       email: text(customer.email),
       address: text(customer.address),
       payment_terms: text(customer.payment_terms),
+      balance_reflect: boolValue(customer.balance_reflect, customerType === "shopping"),
       memo: text(customer.memo || customer.remarks),
       is_active: boolActive(customer.is_active),
       updated_at: now,
     };
-    const rows = text(customer.id)
-      ? await patchRows<AnyRecord>("customers", { id: `eq.${customer.id}` }, values)
-      : await upsertRows<AnyRecord>("customers", { ...values, created_at: now }, "customer_code");
+    const rows = await saveCustomerRows(customer, values, now);
     return NextResponse.json({ ok: true, customer: rows[0] || null });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

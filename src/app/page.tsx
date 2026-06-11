@@ -1207,6 +1207,7 @@ type FnCustomer = {
   email?: string;
   address?: string;
   payment_terms?: string;
+  balance_reflect?: boolean | string;
   memo?: string;
   is_active?: boolean;
 };
@@ -13479,7 +13480,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       {partnerBalanceMode && (
         <FormModal
           title={partnerBalanceMode === "sales" ? "거래처 미수금" : "거래처 미지급"}
-          description={`${partnerBalanceMonth} 해당월 거래/결제 내역입니다. 쇼핑몰 속성 거래처는 이 화면에서만 제외됩니다.`}
+          description={`${partnerBalanceMonth} 해당월 거래/결제 내역입니다. 거래처정보에서 미수금·미지급 반영을 체크한 거래처만 표시됩니다.`}
           onClose={() => setPartnerBalanceMode(null)}
           size="full"
           className="!max-w-[1040px]"
@@ -16087,7 +16088,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const customerSelection = useCheckboxColumnSelection({ keys: customerKeys, selectedKeys: selectedCustomerKeys, setSelectedKeys: setSelectedCustomerKeys, enabled: !modalOpen && !customerBulkOpen });
 
   function blankCustomerDraft() {
-    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", fax: "", contact_name: "", phone: "", email: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", memo: "" };
+    return { id: "", customer_code: "", customer_name: "", customer_type: "general", business_no: "", fax: "", contact_name: "", phone: "", email: "", postal_code: "", road_address: "", jibun_address: "", detail_address: "", address: "", payment_terms: "", balance_reflect: "false", memo: "" };
   }
 
   async function loadCustomers(nextPage = page, nextQuery = query, nextRelation = relationFilter) {
@@ -16173,6 +16174,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       detail_address: "",
       address: customer.address || "",
       payment_terms: customer.payment_terms || "",
+      balance_reflect: String(customer.balance_reflect ?? (normalizeCustomerAttribute(customer.customer_type || customer.customer_type_label) === "shopping")),
       memo: customer.memo || "",
     };
     setDraft(nextDraft);
@@ -16186,7 +16188,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
   function updateDraft(key: string, value: string) {
     setDraft((prev) => {
-      if (key === "customer_type") return { ...prev, customer_type: normalizeCustomerAttribute(value) };
+      if (key === "customer_type") {
+        const customerType = normalizeCustomerAttribute(value);
+        return { ...prev, customer_type: customerType, balance_reflect: customerType === "shopping" ? "true" : "false" };
+      }
+      if (key === "balance_reflect") return { ...prev, balance_reflect: String(value) === "true" ? "true" : "false" };
       if (key === "business_no") return { ...prev, business_no: formatBusinessNoInput(value) };
       if (key === "phone") return { ...prev, phone: formatKoreanPhone(value) };
       if (key === "fax") return { ...prev, fax: formatKoreanLandline(value) };
@@ -17999,6 +18005,7 @@ function CustomerEditModal({
   useEscapeToClose(true, onClose);
   const customerType = normalizeCustomerAttribute(draft.customer_type);
   const businessSameAsCode = Boolean(draft.customer_code && draft.business_no && draft.business_no === formatBusinessNoInput(draft.customer_code));
+  const balanceReflect = String(draft.balance_reflect ?? (customerType === "shopping")) === "true";
   const [addressSearchOpen, setAddressSearchOpen] = useState(false);
   const detailAddressInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -18056,9 +18063,15 @@ function CustomerEditModal({
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="사업자등록번호">
                 <input className={modalInputClass} inputMode="numeric" value={draft.business_no || ""} onChange={(event) => onChange("business_no", event.target.value)} placeholder="111-11-11111" />
-                <span className="mt-2 flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                  <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
+                <span className="mt-2 flex flex-wrap items-center gap-4 text-[11px] font-bold text-slate-500">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={businessSameAsCode} onChange={(event) => changeBusinessSameAsCode(event.target.checked)} />
                   거래처 코드와 동일
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={balanceReflect} onChange={(event) => onChange("balance_reflect", event.target.checked ? "true" : "false")} />
+                    미수금·미지급 반영
+                  </label>
                 </span>
               </FormField>
               <FormField label="팩스번호"><input className={modalInputClass} inputMode="numeric" value={draft.fax || ""} onChange={(event) => onChange("fax", event.target.value)} placeholder="031-000-0000" /></FormField>
