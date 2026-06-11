@@ -1523,7 +1523,9 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
   }
   const saved = await patchRows<RawRow>("accounting_transactions", { id: `eq.${id}` }, payload);
   if (payload.review_status === "confirmed") {
-    await rememberAccountingRuleFromTransaction({ ...(previous || {}), ...payload, id }, row);
+    if (row.create_rule || row.createRule || row.save_rule || row.saveRule) {
+      await rememberAccountingRuleFromTransaction({ ...(previous || {}), ...payload, id }, row);
+    }
     await patchRows("accounting_review_queue", { transaction_id: `eq.${id}` }, {
       status: "resolved",
       resolved_category_id: category?.id || null,
