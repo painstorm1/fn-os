@@ -20526,7 +20526,7 @@ function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
 }
 
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-10-fixed-cost-transfer-repair";
+const ACCOUNTING_CACHE_VERSION = "2026-06-11-review-category-visibility";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full" | "ledger" | "fixed" | "db";
@@ -21648,7 +21648,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     if (!key) return [];
     return expenses.filter((item) => (
       String(item.id || "") !== id &&
-      String(item.review_status || "") === "pending" &&
+      accountingNeedsReview(item) &&
       accountingReviewPatternKey(item) === key
     ));
   }
@@ -22063,7 +22063,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
   const dashboardExpensePeriodLabel = accountingDatePeriodLabel(dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const reviewSuggestions = summary?.review_suggestions || {};
-  const pendingReviewRows = expenses.filter((row) => String(row.review_status || "") === "pending");
+  const pendingReviewRows = expenses.filter(accountingNeedsReview);
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
   const activeBankAccounts = bankAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
@@ -23906,6 +23906,11 @@ function accountingReviewPatternName(row: Record<string, unknown>) {
 
 function accountingReviewPatternKey(row: Record<string, unknown>) {
   return accountingReviewPatternName(row).replace(/\s+/g, "").toLowerCase();
+}
+
+function accountingNeedsReview(row: Record<string, unknown>) {
+  return String(row.review_status || "") === "pending" ||
+    [row.review_reason, row.category_large, row.category_middle].some((value) => String(value || "").trim() === "검토필요");
 }
 
 function accountingSignedDisplayAmount(row: Record<string, unknown>) {

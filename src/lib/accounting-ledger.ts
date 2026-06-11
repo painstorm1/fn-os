@@ -1338,6 +1338,11 @@ function compactReviewTransaction(row: RawRow) {
   };
 }
 
+function needsAccountingReview(row: RawRow) {
+  return text(row.review_status) === "pending" ||
+    [row.review_reason, row.category_large, row.category_middle].some((value) => text(value) === "검토필요");
+}
+
 function rocketGrowthMonthDate(month: unknown) {
   const raw = text(month);
   if (!/^\d{4}-\d{2}$/.test(raw)) return "";
@@ -1905,7 +1910,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     };
   }
   if (dbOnly) {
-    const pendingRows = filtered.filter((row) => text(row.review_status) === "pending").slice(0, 300).map(compactReviewTransaction);
+    const pendingRows = filtered.filter(needsAccountingReview).slice(0, 300).map(compactReviewTransaction);
     return {
       scope: "db",
       ...commonSummary,
