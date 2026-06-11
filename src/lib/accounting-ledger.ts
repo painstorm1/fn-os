@@ -860,6 +860,22 @@ async function rebuildCardSettlements() {
   return rows;
 }
 
+function touchesCardSettlement(row: RawRow) {
+  return [
+    "transaction_date",
+    "posting_date",
+    "card_name",
+    "source_name",
+    "currency",
+    "amount",
+    "amount_krw",
+    "foreign_amount",
+    "debit_amount",
+    "credit_amount",
+    "affects_card_settlement",
+  ].some((key) => row[key] !== undefined);
+}
+
 async function categoryFor(row: RawRow) {
   const id = text(row.category_id || row.categoryId);
   if (id) {
@@ -1534,7 +1550,7 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
       updated_at: new Date().toISOString(),
     }).catch(() => []);
   }
-  await rebuildCardSettlements();
+  if (touchesCardSettlement(row)) await rebuildCardSettlements();
   return saved;
 }
 

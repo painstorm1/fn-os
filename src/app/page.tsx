@@ -20916,6 +20916,26 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       .catch(() => undefined);
   }
 
+  function patchAccountingRowsLocally(ids: string[], patch: Record<string, unknown>) {
+    const idSet = new Set(ids.filter(Boolean));
+    if (!idSet.size) return;
+    const patchRows = (rows?: Array<Record<string, unknown>>) => (rows || []).map((row) => (
+      idSet.has(String(row.id || "")) ? { ...row, ...patch } : row
+    ));
+    setSummary((prev) => prev ? {
+      ...prev,
+      transactions: patchRows(prev.transactions),
+      expenses: patchRows(prev.expenses),
+    } : prev);
+    setLedgerRows((prev) => patchRows(prev));
+  }
+
+  function refreshAccountingAfterReviewSave() {
+    invalidateAccountingCache();
+    if (activeTab === "ledger") loadLedgerRows(true);
+    if (activeTab !== "db") loadSummary(true);
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
@@ -21563,9 +21583,16 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(transactionDraft.save_rule ? "거래를 확정하고 같은 패턴 규칙을 저장했습니다." : "이 거래만 수정했습니다.");
     setEditingTransaction(null);
-    invalidateAccountingCache();
-    loadLedgerRows(true);
-    loadSummary(true);
+    patchAccountingRowsLocally([String(editingTransaction.id)], {
+      category_id: transactionDraft.category_id,
+      direction: transactionDraft.direction,
+      review_reason: transactionDraft.review_reason,
+      affects_profit: transactionDraft.affects_profit,
+      affects_cashflow: transactionDraft.affects_cashflow,
+      memo: transactionDraft.memo,
+      review_status: "confirmed",
+    });
+    refreshAccountingAfterReviewSave();
   }
 
   function matchingPendingReviewRows(row: Record<string, unknown>) {
@@ -21581,9 +21608,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   async function saveReviewPatternRows(baseRow: Record<string, unknown>, matchingRows: Array<Record<string, unknown>>, patch: Record<string, unknown>) {
     const rows = [baseRow, ...matchingRows];
-    for (const row of rows) {
+    const results = await Promise.all(rows.map(async (row) => {
       const id = String(row.id || "");
-      if (!id) continue;
+      if (!id) return { ok: true };
       const nextCategoryId = String(patch.category_id ?? row.category_id ?? "");
       const category = categories.find((item) => String(item.id || "") === nextCategoryId);
       const payload = {
@@ -21610,20 +21637,31 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok || data.ok === false) {
-        setMessage(data.error || "같은 거래내역 자동저장 실패");
-        return;
-      }
+      return { ok: res.ok && data.ok !== false, error: data.error };
+    }));
+    const failed = results.find((item) => !item.ok);
+    if (failed) {
+      setMessage(failed.error || "같은 거래내역 자동저장 실패");
+      return;
     }
     setMessage(`${rows.length.toLocaleString("ko-KR")}건을 같은 카테고리로 확정하고 자동분류 규칙을 저장했습니다.`);
-    invalidateAccountingCache();
-    loadLedgerRows(true);
-    loadSummary(true);
+    const nextCategoryId = String(patch.category_id ?? baseRow.category_id ?? "");
+    const category = categories.find((item) => String(item.id || "") === nextCategoryId);
+    patchAccountingRowsLocally(rows.map((row) => String(row.id || "")), {
+      ...patch,
+      category_id: nextCategoryId,
+      category_large: category?.category_large,
+      category_middle: category?.category_middle,
+      category_small: "",
+      review_status: "confirmed",
+    });
+    refreshAccountingAfterReviewSave();
   }
 
   async function saveExpenseMemo(row: Record<string, unknown>, memo: string) {
     const id = String(row.id || "");
     if (!id || memo === String(row.memo || "")) return;
+    patchAccountingRowsLocally([id], { memo, review_status: String(row.review_status || "pending") });
     const res = await fetch("/api/accounting/ledger/transactions", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -21635,13 +21673,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
+      patchAccountingRowsLocally([id], row);
       setMessage(data.error || "메모 저장 실패");
       return;
     }
     setMessage("메모를 저장했습니다.");
-    invalidateAccountingCache();
-    loadLedgerRows(true);
-    loadSummary(true);
+    refreshAccountingAfterReviewSave();
   }
 
   async function saveReviewQuick(row: Record<string, unknown>, patch: Record<string, unknown>, confirm = false) {
@@ -21650,6 +21687,18 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     const nextCategoryId = String(patch.category_id ?? row.category_id ?? "");
     const category = categories.find((item) => String(item.id || "") === nextCategoryId);
     const categoryChanged = patch.category_id !== undefined;
+    const localPatch = {
+      category_id: nextCategoryId,
+      direction: patch.direction ?? row.direction,
+      review_reason: patch.review_reason ?? row.review_reason,
+      affects_profit: patch.affects_profit ?? (categoryChanged && category ? category.affects_profit !== false : row.affects_profit),
+      affects_cashflow: patch.affects_cashflow ?? (categoryChanged && category ? category.affects_cashflow !== false : row.affects_cashflow),
+      memo: patch.memo ?? row.memo,
+      category_large: category?.category_large,
+      category_middle: category?.category_middle,
+      category_small: "",
+      review_status: confirm ? "confirmed" : String(row.review_status || "pending"),
+    };
     if (confirm) {
       const samePatternRows = matchingPendingReviewRows(row);
       if (samePatternRows.length) {
@@ -21666,32 +21715,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         }
       }
     }
+    patchAccountingRowsLocally([id], localPatch);
     const res = await fetch("/api/accounting/ledger/transactions", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id,
-        category_id: nextCategoryId,
-        direction: patch.direction ?? row.direction,
-        review_reason: patch.review_reason ?? row.review_reason,
-        affects_profit: patch.affects_profit ?? (categoryChanged && category ? category.affects_profit !== false : row.affects_profit),
-        affects_cashflow: patch.affects_cashflow ?? (categoryChanged && category ? category.affects_cashflow !== false : row.affects_cashflow),
-        memo: patch.memo ?? row.memo,
-        category_large: category?.category_large,
-        category_middle: category?.category_middle,
-        category_small: "",
-        review_status: confirm ? "confirmed" : String(row.review_status || "pending"),
+        ...localPatch,
       }),
     });
     const data = await res.json();
     if (!res.ok || data.ok === false) {
+      patchAccountingRowsLocally([id], row);
       setMessage(data.error || "검토필요 거래 저장 실패");
       return;
     }
     setMessage(confirm ? "검토필요 거래를 확정했습니다." : "검토필요 거래를 수정했습니다.");
-    invalidateAccountingCache();
-    loadLedgerRows(true);
-    loadSummary(true);
+    refreshAccountingAfterReviewSave();
   }
 
   async function saveJaewookPersonalPayment(row: Record<string, unknown>, allocations: Array<{ label: string; amount: number }>) {
