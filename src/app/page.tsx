@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
@@ -23369,23 +23370,22 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           </div>
 
           <div className="space-y-3">
-            <SectionHeader
-              title="검토필요 거래"
-              actions={
-                <div className="flex items-center gap-2">
-                  <input
-                    className="h-8 w-[280px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
-                    value={reviewSearch}
-                    onChange={(event) => setReviewSearch(event.target.value)}
-                    placeholder="거래처/내용·금액 검색"
-                  />
-                  <StatusBadge tone="danger">
-                    {filteredReviewRows.length.toLocaleString("ko-KR")}
-                    {filteredReviewRows.length !== pendingReviewRows.length ? `/${pendingReviewRows.length.toLocaleString("ko-KR")}` : ""}건
-                  </StatusBadge>
-                </div>
-              }
-            />
+            <div className="flex items-center gap-2">
+              <h2 className="shrink-0 text-xl font-black text-gray-900">검토필요 거래</h2>
+              <div id="accounting-review-header-actions" className="flex shrink-0 items-center gap-2" />
+              <div className="ml-auto flex items-center gap-2">
+                <input
+                  className="h-8 w-[280px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
+                  value={reviewSearch}
+                  onChange={(event) => setReviewSearch(event.target.value)}
+                  placeholder="거래처/내용·금액 검색"
+                />
+                <StatusBadge tone="danger">
+                  {filteredReviewRows.length.toLocaleString("ko-KR")}
+                  {filteredReviewRows.length !== pendingReviewRows.length ? `/${pendingReviewRows.length.toLocaleString("ko-KR")}` : ""}건
+                </StatusBadge>
+              </div>
+            </div>
             <ReviewQuickGridEnhanced
               rows={filteredReviewRows}
               categories={categories}
@@ -23395,6 +23395,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onSave={saveReviewQuick}
               onJaewook={(row) => setJaewookModalRow(row)}
               onOpenRocketGrowth={() => setRocketGrowthModalOpen(true)}
+              headerActionTargetId="accounting-review-header-actions"
             />
           </div>
         </section>
@@ -24271,6 +24272,7 @@ function ReviewQuickGridEnhanced({
   onSave,
   onJaewook,
   onOpenRocketGrowth,
+  headerActionTargetId,
 }: {
   rows: Array<Record<string, unknown>>;
   categories: Array<Record<string, unknown>>;
@@ -24280,9 +24282,11 @@ function ReviewQuickGridEnhanced({
   onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void | Promise<void>;
   onJaewook?: (row: Record<string, unknown>) => void;
   onOpenRocketGrowth?: () => void;
+  headerActionTargetId?: string;
 }) {
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [headerActionTarget, setHeaderActionTarget] = useState<HTMLElement | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkLarge, setBulkLarge] = useState("");
   const [bulkCategoryId, setBulkCategoryId] = useState("");
@@ -24294,6 +24298,13 @@ function ReviewQuickGridEnhanced({
   const selectedRows = rows.filter((row) => selectedSet.has(String(row.id || "")));
   const allSelected = Boolean(rows.length) && rows.every((row) => selectedSet.has(String(row.id || "")));
   const bulkMiddleOptions = categories.filter((category) => String(category.category_large || "") === bulkLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
+  useEffect(() => {
+    if (!headerActionTargetId || typeof document === "undefined") {
+      setHeaderActionTarget(null);
+      return;
+    }
+    setHeaderActionTarget(document.getElementById(headerActionTargetId));
+  }, [headerActionTargetId]);
   const sortValue = (row: Record<string, unknown>, key: string) => {
     if (key === "date") return accountingRowTime(row);
     if (key === "amount") return asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
@@ -24327,14 +24338,23 @@ function ReviewQuickGridEnhanced({
     setBulkOpen(false);
   }
 
-  if (!sortedRows.length) return <EmptyState title="검토필요 거래 없음" className="min-h-32" />;
+  const headerActions = (
+    <>
+      <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
+      <ActionButton type="button" className="h-8 px-3 text-xs" onClick={onOpenRocketGrowth}>쿠팡 비용입력</ActionButton>
+    </>
+  );
+
+  if (!sortedRows.length) return (
+    <>
+      {headerActionTarget ? createPortal(headerActions, headerActionTarget) : null}
+      <EmptyState title="검토필요 거래 없음" className="min-h-32" />
+    </>
+  );
 
   return (
     <div className="space-y-2">
-      <div className="-mt-10 mb-2 flex justify-end gap-2 pr-24">
-        <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
-        <ActionButton type="button" className="h-8 px-3 text-xs" onClick={onOpenRocketGrowth}>쿠팡 비용입력</ActionButton>
-      </div>
+      {headerActionTarget ? createPortal(headerActions, headerActionTarget) : <div className="mb-2 flex justify-end gap-2">{headerActions}</div>}
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full min-w-[930px] table-fixed text-xs">
           <thead className="bg-gray-50 font-semibold text-gray-500">
