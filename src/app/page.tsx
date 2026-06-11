@@ -131,7 +131,7 @@ function useCheckboxColumnSelection({
   }
 
   function toggleAll(selected: boolean) {
-    setSelectedKeys(selected ? keys : []);
+    setSelectedKeys((prev) => setKeysSelected(prev, keys, selected));
     keyboardIndexRef.current = selected && keys.length ? 0 : null;
   }
 
@@ -169,6 +169,44 @@ function useCheckboxColumnSelection({
   }, [columns, enabled, keys, selectedKeys]);
 
   return { allSelected, beginSelection, continueSelection, toggleAll };
+}
+
+function useSelectedRowsByKey<Row>(
+  rows: Row[],
+  selectedKeys: string[],
+  getRowKey: (row: Row) => string,
+) {
+  const [rowCache, setRowCache] = useState<Record<string, Row>>({});
+
+  useEffect(() => {
+    setRowCache((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      rows.forEach((row) => {
+        const key = getRowKey(row);
+        if (key && next[key] !== row) {
+          next[key] = row;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [rows, getRowKey]);
+
+  useEffect(() => {
+    setRowCache((prev) => {
+      const selectedSet = new Set(selectedKeys);
+      const next = Object.fromEntries(Object.entries(prev).filter(([key]) => selectedSet.has(key))) as Record<string, Row>;
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [selectedKeys]);
+
+  return useMemo(
+    () => selectedKeys
+      .map((key) => rowCache[key] || rows.find((row) => getRowKey(row) === key))
+      .filter((row): row is Row => Boolean(row)),
+    [getRowKey, rowCache, rows, selectedKeys],
+  );
 }
 
 function SelectionNumberButton({ index, selected, onMouseDown, onMouseEnter }: { index: number; selected: boolean; onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void; onMouseEnter: () => void }) {
@@ -15348,6 +15386,7 @@ function ChannelProductMappingPanel() {
   const storageKey = "fnos-channel-product-mappings";
   const [rows, setRows] = useState<ChannelProductMappingRow[]>([]);
   const [draft, setDraft] = useState<ChannelProductMappingRow>({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -15363,6 +15402,10 @@ function ChannelProductMappingPanel() {
     localStorage.setItem(storageKey, JSON.stringify(nextRows));
   }
 
+  function mappingRowKey(row: ChannelProductMappingRow, index: number) {
+    return `${row.mallName}::${row.mallProductKey}::${row.productCode}::${index}`;
+  }
+
   function addMapping() {
     if (!draft.mallName || !draft.productCode || !draft.mallProductKey) {
       window.alert("쇼핑몰명, 품목코드, 쇼핑몰품목key를 입력해 주세요.");
@@ -15373,7 +15416,19 @@ function ChannelProductMappingPanel() {
       ...rows.filter((row) => !(row.mallName === draft.mallName && row.mallProductKey === draft.mallProductKey)),
     ];
     saveRows(nextRows);
+    setSelectedKeys([]);
     setDraft({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+  }
+
+  function deleteSelectedMappings() {
+    if (!selectedKeys.length) {
+      window.alert("삭제할 연결을 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 연결 ${selectedKeys.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    const selectedSet = new Set(selectedKeys);
+    saveRows(rows.filter((row, index) => !selectedSet.has(mappingRowKey(row, index))));
+    setSelectedKeys([]);
   }
 
   return (
@@ -15386,21 +15441,29 @@ function ChannelProductMappingPanel() {
         <input className={modalInputClass} placeholder="쇼핑몰품목key" value={draft.mallProductKey} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductKey: event.target.value }))} />
         <ActionButton type="button" onClick={addMapping}>등록</ActionButton>
       </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ActionButton type="button" variant="danger" onClick={deleteSelectedMappings}>삭제</ActionButton>
+        <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
+      </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[820px] text-sm">
           <thead className="bg-gray-50 text-xs font-black text-gray-500">
-            <tr><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
+            <tr><th className="w-16 px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.mallName}-${row.mallProductKey}-${index}`} className="border-t border-gray-100">
+            {rows.map((row, index) => {
+              const key = mappingRowKey(row, index);
+              const selected = selectedKeys.includes(key);
+              return (
+              <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key])}>
+                <td className="px-3 py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]); }} onMouseEnter={() => {}} /></td>
                 <td className="px-3 py-2 font-semibold">{row.mallName}</td>
                 <td className="px-3 py-2">{row.productCode}</td>
                 <td className="px-3 py-2">{row.productName}</td>
                 <td className="px-3 py-2">{row.mallProductKey}</td>
-                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={() => saveRows(rows.filter((_, rowIndex) => rowIndex !== index))}>삭제</button></td>
+                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={(event) => { event.stopPropagation(); if (window.confirm("이 연결을 삭제할까요?")) saveRows(rows.filter((_, rowIndex) => rowIndex !== index)); }}>삭제</button></td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
         {!rows.length && <EmptyState title="연결된 쇼핑몰 코드가 없습니다." />}
@@ -15614,6 +15677,18 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     setModalOpen(false);
   }
 
+  function deleteSelectedEmployees() {
+    if (!selectedEmployees.length) {
+      window.alert("삭제할 직원을 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 직원 ${selectedEmployees.length.toLocaleString("ko-KR")}명을 삭제할까요?`)) return;
+    const selectedSet = new Set(selectedKeys);
+    saveEmployees(employees.filter((employee) => !selectedSet.has(employee.id)));
+    setSelectedKeys([]);
+    setPersonnelMessage(`직원 삭제 완료: ${selectedEmployees.length.toLocaleString("ko-KR")}명`);
+  }
+
   function saveBulkEdit() {
     if (!selectedEmployees.length) {
       window.alert("수정할 직원을 먼저 선택해 주세요.");
@@ -15750,6 +15825,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton type="button" variant="secondary" onClick={() => setBulkOpen(true)}>수정</ActionButton>
+            <ActionButton type="button" variant="danger" onClick={deleteSelectedEmployees}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="성명 / 전화번호 / 이메일 검색" />
@@ -16007,7 +16083,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   const customerSelectModeRef = useRef<"select" | "deselect">("select");
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const customerKeys = customers.map((customer) => customer.id || customer.customer_code || customer.cust_code || "").filter(Boolean);
-  const selectedCustomers = customers.filter((customer) => selectedCustomerKeys.includes(customer.id || customer.customer_code || customer.cust_code || ""));
+  const selectedCustomers = useSelectedRowsByKey(customers, selectedCustomerKeys, customerRowKey);
   const customerSelection = useCheckboxColumnSelection({ keys: customerKeys, selectedKeys: selectedCustomerKeys, setSelectedKeys: setSelectedCustomerKeys, enabled: !modalOpen && !customerBulkOpen });
 
   function blankCustomerDraft() {
@@ -16046,7 +16122,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
   useEffect(() => {
     setSelectedCustomerKeys([]);
-  }, [page, query, relationFilter]);
+  }, [query, relationFilter]);
 
   useEffect(() => {
     void loadFnSettingsAttachmentCounts("customer", customers.map(customerRowKey), (counts) => setCustomerFileCounts((prev) => ({ ...prev, ...counts })));
@@ -16316,6 +16392,38 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     await loadCustomers(page, query, relationFilter);
   }
 
+  async function deleteSelectedCustomers() {
+    if (!selectedCustomers.length) {
+      setCustomerMessage("삭제할 거래처를 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 거래처 ${selectedCustomers.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    let deleted = 0;
+    for (const customer of selectedCustomers) {
+      const res = await fetch("/api/fnos/customers", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          id: customer.id || "",
+          customer_code: customer.customer_code || customer.cust_code || "",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setCustomerMessage(data.error || "거래처 삭제 실패");
+        return;
+      }
+      deleted += Number(data.deleted || 0) || 1;
+    }
+    setSelectedCustomerKeys([]);
+    invalidateClientCache("/api/fnos/customers");
+    invalidateClientCache("/api/fnos/sales-channels");
+    invalidateClientCache("/api/dashboard/summary");
+    setCustomerMessage(`거래처 삭제 완료: ${deleted.toLocaleString("ko-KR")}건`);
+    await loadCustomers(page, query, relationFilter);
+  }
+
   async function saveCustomerBulkEdit() {
     if (!selectedCustomers.length) {
       setCustomerMessage("수정할 거래처를 먼저 선택해 주세요.");
@@ -16521,6 +16629,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton type="button" variant="secondary" onClick={() => setCustomerBulkOpen(true)}>수정</ActionButton>
+            <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedCustomers()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedCustomerKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input
@@ -16677,7 +16786,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const usableWarehouses = warehouses.filter(isUsableWarehouse).sort(sortWarehousesByCode);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const productKeys = products.map((product) => product.id || product.product_code || product.sku || "").filter(Boolean);
-  const selectedProducts = products.filter((product) => selectedProductKeys.includes(product.id || product.product_code || product.sku || ""));
+  const selectedProducts = useSelectedRowsByKey(products, selectedProductKeys, productRowKey);
   const productSelection = useCheckboxColumnSelection({ keys: productKeys, selectedKeys: selectedProductKeys, setSelectedKeys: setSelectedProductKeys, enabled: !modalOpen && !productBulkOpen });
 
   function blankDraft() {
@@ -16729,7 +16838,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   useEffect(() => {
     setSelectedProductKeys([]);
-  }, [page, query, relationFilter, searchByCode]);
+  }, [query, relationFilter, searchByCode]);
 
   useEffect(() => {
     function stopSelecting() {
@@ -16882,6 +16991,39 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setProductMessage(`품목 삭제 완료: ${productCode}`);
     setModalOpen(false);
     invalidateClientCache("/api/fnos/products/master");
+    await loadProducts(page, query, relationFilter, searchByCode);
+  }
+
+  async function deleteSelectedProducts() {
+    if (!selectedProducts.length) {
+      setProductMessage("삭제할 품목을 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 품목 ${selectedProducts.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    let deleted = 0;
+    for (const product of selectedProducts) {
+      const res = await fetch("/api/fnos/products/master", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          id: product.id || "",
+          product_code: product.product_code || product.sku || "",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setProductMessage(data.error || "품목 삭제 실패");
+        return;
+      }
+      deleted += Number(data.deleted || 0) || 1;
+    }
+    setSelectedProductKeys([]);
+    invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/products/search");
+    invalidateClientCache("/api/fnos/products");
+    invalidateClientCache("/api/dashboard/summary");
+    setProductMessage(`품목 삭제 완료: ${deleted.toLocaleString("ko-KR")}건`);
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
@@ -17156,6 +17298,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton type="button" variant="secondary" onClick={() => setProductBulkOpen(true)}>수정</ActionButton>
+            <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedProducts()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedProductKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input
@@ -17482,6 +17625,38 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     await loadWarehouses(query);
   }
 
+  async function deleteSelectedWarehouses() {
+    if (!selectedWarehouses.length) {
+      setMessage("삭제할 창고를 먼저 선택해 주세요.");
+      return;
+    }
+    if (!window.confirm(`선택한 창고 ${selectedWarehouses.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
+    let deleted = 0;
+    for (const warehouse of selectedWarehouses) {
+      const res = await fetch("/api/fnos/warehouses", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          id: warehouse.id || "",
+          warehouse_code: warehouse.warehouse_code || "",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "창고 삭제 실패");
+        return;
+      }
+      deleted += Number(data.deleted || 0) || 1;
+    }
+    setSelectedWarehouseKeys([]);
+    invalidateClientCache("/api/fnos/warehouses");
+    invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/dashboard/summary");
+    setMessage(`창고 삭제 완료: ${deleted.toLocaleString("ko-KR")}건`);
+    await loadWarehouses(query);
+  }
+
   async function saveWarehouseBulkEdit() {
     if (!selectedWarehouses.length) {
       setMessage("수정할 창고를 먼저 선택해 주세요.");
@@ -17657,6 +17832,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton type="button" variant="secondary" onClick={() => setWarehouseBulkOpen(true)}>수정</ActionButton>
+            <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedWarehouses()}>삭제</ActionButton>
             <span className="text-xs font-bold text-slate-500">선택 {selectedWarehouseKeys.length.toLocaleString("ko-KR")}개</span>
           </div>
           <input className="field-input w-full max-w-sm rounded-md border border-slate-200 px-3 py-2 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="창고명 / 코드 검색" />
@@ -24124,13 +24300,13 @@ function ReviewQuickGridEnhanced({
               <th className="w-9 px-2 py-2 text-center"><input type="checkbox" checked={allSelected} onChange={(event) => toggleAll(event.target.checked)} /></th>
               <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("date")}>일자{sortMark("date")}</th>
               <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("source")}>출처{sortMark("source")}</th>
-              <th className="px-2 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
+              <th className="w-[340px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
               <th className="w-[78px] px-2 py-2 text-right" onDoubleClick={() => toggleSort("amount")}>금액{sortMark("amount")}</th>
-              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
-              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
+              <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
+              <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
               <th className="w-[50px] px-2 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
-              <th className="w-[118px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
-              <th className="w-[92px] px-2 py-2 text-right">관리</th>
+              <th className="w-[170px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
+              <th className="w-[88px] px-2 py-2 text-right">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -24149,7 +24325,7 @@ function ReviewQuickGridEnhanced({
                   <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedSet.has(id)} onChange={(event) => toggleSelected(id, event.target.checked)} /></td>
                   <td className="whitespace-nowrap px-2 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
                   <td className="px-2 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
-                  <td className="max-w-[220px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
+                  <td className="max-w-[340px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
                   <td className="whitespace-nowrap px-2 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
