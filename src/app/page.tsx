@@ -24517,13 +24517,13 @@ function ReviewQuickGridEnhanced({
               <th className="w-9 px-2 py-2 text-center"><input type="checkbox" checked={allSelected} onChange={(event) => toggleAll(event.target.checked)} /></th>
               <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("date")}>일자{sortMark("date")}</th>
               <th className="w-[78px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("source")}>출처{sortMark("source")}</th>
-              <th className="w-[340px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
+              <th className="w-[270px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("merchant")}>거래처/내용{sortMark("merchant")}</th>
               <th className="w-[78px] px-2 py-2 text-right" onDoubleClick={() => toggleSort("amount")}>금액{sortMark("amount")}</th>
               <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_large")}>카테고리1{sortMark("category_large")}</th>
               <th className="w-[110px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("category_middle")}>카테고리2{sortMark("category_middle")}</th>
               <th className="w-[50px] px-2 py-2 text-center" onDoubleClick={() => toggleSort("profit")}>손익{sortMark("profit")}</th>
-              <th className="w-[170px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
-              <th className="w-[88px] px-2 py-2 text-right">관리</th>
+              <th className="w-[230px] px-2 py-2 text-left" onDoubleClick={() => toggleSort("memo")}>메모{sortMark("memo")}</th>
+              <th className="w-[104px] px-2 py-2 text-right">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -24543,7 +24543,7 @@ function ReviewQuickGridEnhanced({
                   <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedSet.has(id)} onChange={(event) => toggleSelected(id, event.target.checked)} /></td>
                   <td className="whitespace-nowrap px-2 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
                   <td className="px-2 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
-                  <td className="max-w-[340px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{merchantContent.merchant}</p>{merchantContent.description && <p className="mt-0.5 truncate text-gray-500">{merchantContent.description}</p>}</td>
+                  <td className="max-w-[270px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{merchantContent.merchant}</p>{merchantContent.description && <p className="mt-0.5 truncate text-gray-500">{merchantContent.description}</p>}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
