@@ -20801,6 +20801,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     month: accountingMonthValue(-1),
     ad_amount: "",
     fulfillment_amount: "",
+    seller_discount_coupon_amount: "",
+    subscription_service_amount: "",
+    coupang_live_amount: "",
     memo: "",
   });
   const [categoryBulkSelectedFields, setCategoryBulkSelectedFields] = useState<AccountingCategoryBulkField[]>(["category_large"]);
@@ -21204,7 +21207,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         return;
       }
       setMessage("쿠팡 로켓그로스 비용을 저장했습니다.");
-      setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: "", fulfillment_amount: "", memo: "" }));
+      setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: "", fulfillment_amount: "", seller_discount_coupon_amount: "", subscription_service_amount: "", coupang_live_amount: "", memo: "" }));
       invalidateAccountingCache();
       await loadSummary(true);
       await loadLedgerRows(true);
@@ -22035,14 +22038,26 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const rocketGrowthCosts = summary?.rocket_growth_costs || [];
   const rocketGrowthMonthlyRows = Array.from(rocketGrowthCosts.reduce((map, row) => {
     const month = String(row.transaction_date || "").slice(0, 7) || "-";
-    const current = map.get(month) || { month, ad_amount: 0, fulfillment_amount: 0, total: 0 };
+    const current = map.get(month) || { month, ad_amount: 0, fulfillment_amount: 0, seller_discount_coupon_amount: 0, subscription_service_amount: 0, coupang_live_amount: 0, service_total: 0, total: 0 };
     const amount = asNumber(row.amount_krw ?? row.amount);
     if (String(row.category_middle || "").includes("쿠팡")) current.ad_amount += amount;
-    else current.fulfillment_amount += amount;
+    else {
+      const raw = row.raw_json && typeof row.raw_json === "object" && !Array.isArray(row.raw_json) ? row.raw_json as Record<string, unknown> : {};
+      const componentTotal = asNumber(raw.fulfillment_amount) + asNumber(raw.seller_discount_coupon_amount) + asNumber(raw.subscription_service_amount) + asNumber(raw.coupang_live_amount);
+      if (componentTotal > 0) {
+        current.fulfillment_amount += asNumber(raw.fulfillment_amount);
+        current.seller_discount_coupon_amount += asNumber(raw.seller_discount_coupon_amount);
+        current.subscription_service_amount += asNumber(raw.subscription_service_amount);
+        current.coupang_live_amount += asNumber(raw.coupang_live_amount);
+      } else {
+        current.fulfillment_amount += amount;
+      }
+      current.service_total += amount;
+    }
     current.total += amount;
     map.set(month, current);
     return map;
-  }, new Map<string, { month: string; ad_amount: number; fulfillment_amount: number; total: number }>()).values()).sort((left, right) => right.month.localeCompare(left.month));
+  }, new Map<string, { month: string; ad_amount: number; fulfillment_amount: number; seller_discount_coupon_amount: number; subscription_service_amount: number; coupang_live_amount: number; service_total: number; total: number }>()).values()).sort((left, right) => right.month.localeCompare(left.month));
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
   const dashboardTrendPeriodLabel = accountingPeriodLabel(dashboardTrendFromMonth, dashboardTrendToMonth);
   const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
@@ -23191,6 +23206,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               <FormField label="풀필먼트서비스">
                 <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.fulfillment_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, fulfillment_amount: formatCommaNumber(event.target.value) }))} placeholder="업무 비용 > 로켓그로스" />
               </FormField>
+              <FormField label="판매자할인쿠폰">
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.seller_discount_coupon_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, seller_discount_coupon_amount: formatCommaNumber(event.target.value) }))} placeholder="업무 비용 > 로켓그로스" />
+              </FormField>
+              <FormField label="정기결제서비스">
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.subscription_service_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, subscription_service_amount: formatCommaNumber(event.target.value) }))} placeholder="업무 비용 > 로켓그로스" />
+              </FormField>
+              <FormField label="쿠팡라이브">
+                <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.coupang_live_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, coupang_live_amount: formatCommaNumber(event.target.value) }))} placeholder="업무 비용 > 로켓그로스" />
+              </FormField>
               <FormField label="메모" className="md:col-span-3">
                 <input className={modalInputClass} value={rocketGrowthDraft.memo} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="예: 2026년 5월 로켓그로스 정산" />
               </FormField>
@@ -23200,13 +23224,17 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <p className="text-sm font-black text-slate-800">월별 입력 내역</p>
                 <p className="text-xs font-bold text-slate-500">손익 미반영 / 자료 반영</p>
               </div>
-              <div className="max-h-64 overflow-y-auto">
-                <table className="w-full text-sm">
+              <div className="max-h-64 overflow-auto">
+                <table className="w-full min-w-[820px] text-sm">
                   <thead className="bg-white text-xs font-semibold text-gray-500">
                     <tr>
                       <th className="px-3 py-2 text-left">월</th>
                       <th className="px-3 py-2 text-right">광고비</th>
                       <th className="px-3 py-2 text-right">풀필먼트서비스</th>
+                      <th className="px-3 py-2 text-right">판매자할인쿠폰</th>
+                      <th className="px-3 py-2 text-right">정기결제서비스</th>
+                      <th className="px-3 py-2 text-right">쿠팡라이브</th>
+                      <th className="px-3 py-2 text-right">업무비용 합계</th>
                       <th className="px-3 py-2 text-right">합계</th>
                     </tr>
                   </thead>
@@ -23216,10 +23244,14 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                         <td className="px-3 py-2 font-black text-slate-800">{row.month}</td>
                         <td className="px-3 py-2 text-right font-bold text-orange-600">{krw(row.ad_amount)}</td>
                         <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.fulfillment_amount)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.seller_discount_coupon_amount)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.subscription_service_amount)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.coupang_live_amount)}</td>
+                        <td className="px-3 py-2 text-right font-black text-slate-800">{krw(row.service_total)}</td>
                         <td className="px-3 py-2 text-right font-black text-slate-950">{krw(row.total)}</td>
                       </tr>
                     ))}
-                    {!rocketGrowthMonthlyRows.length && <tr><td colSpan={4} className="px-3 py-8"><EmptyState title="입력 내역 없음" className="min-h-24" /></td></tr>}
+                    {!rocketGrowthMonthlyRows.length && <tr><td colSpan={8} className="px-3 py-8"><EmptyState title="입력 내역 없음" className="min-h-24" /></td></tr>}
                   </tbody>
                 </table>
               </div>

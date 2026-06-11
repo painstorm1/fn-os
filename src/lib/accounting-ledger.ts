@@ -1373,7 +1373,11 @@ export async function upsertRocketGrowthCosts(row: RawRow) {
   if (!transactionDate) throw new Error("기준월이 필요합니다.");
   const adAmount = numberValue(row.ad_amount ?? row.adAmount);
   const fulfillmentAmount = numberValue(row.fulfillment_amount ?? row.fulfillmentAmount);
-  if (adAmount < 0 || fulfillmentAmount < 0) throw new Error("금액은 0 이상이어야 합니다.");
+  const sellerDiscountCouponAmount = numberValue(row.seller_discount_coupon_amount ?? row.sellerDiscountCouponAmount);
+  const subscriptionServiceAmount = numberValue(row.subscription_service_amount ?? row.subscriptionServiceAmount);
+  const coupangLiveAmount = numberValue(row.coupang_live_amount ?? row.coupangLiveAmount);
+  const rocketGrowthServiceAmount = fulfillmentAmount + sellerDiscountCouponAmount + subscriptionServiceAmount + coupangLiveAmount;
+  if ([adAmount, fulfillmentAmount, sellerDiscountCouponAmount, subscriptionServiceAmount, coupangLiveAmount].some((amount) => amount < 0)) throw new Error("금액은 0 이상이어야 합니다.");
   const [adCategory, fulfillmentCategory] = await Promise.all([
     categoryByLargeMiddle("마케팅·광고", "쿠팡"),
     categoryByLargeMiddle("업무 비용", "로켓그로스"),
@@ -1407,19 +1411,34 @@ export async function upsertRocketGrowthCosts(row: RawRow) {
       category_middle: adCategory.category_middle,
       category_small: "",
       memo: text(row.memo) || null,
+      raw_json: {
+        source: "manual_rocket_growth",
+        month,
+        item: "ad",
+        ad_amount: adAmount,
+      },
       dedupe_key: rocketGrowthDedupeKey(month, "ad"),
     },
     {
       ...base,
-      merchant_name: "쿠팡 로켓그로스 풀필먼트서비스",
-      description: `${month} 쿠팡 로켓그로스 풀필먼트서비스`,
-      amount: fulfillmentAmount,
-      amount_krw: fulfillmentAmount,
+      merchant_name: "쿠팡 로켓그로스 업무비용",
+      description: `${month} 쿠팡 로켓그로스 업무비용`,
+      amount: rocketGrowthServiceAmount,
+      amount_krw: rocketGrowthServiceAmount,
       category_id: fulfillmentCategory.id,
       category_large: fulfillmentCategory.category_large,
       category_middle: fulfillmentCategory.category_middle,
       category_small: "",
       memo: text(row.memo) || null,
+      raw_json: {
+        source: "manual_rocket_growth",
+        month,
+        item: "rocket_growth_services",
+        fulfillment_amount: fulfillmentAmount,
+        seller_discount_coupon_amount: sellerDiscountCouponAmount,
+        subscription_service_amount: subscriptionServiceAmount,
+        coupang_live_amount: coupangLiveAmount,
+      },
       dedupe_key: rocketGrowthDedupeKey(month, "fulfillment"),
     },
   ];
