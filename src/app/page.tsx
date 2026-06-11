@@ -20720,7 +20720,7 @@ const ACCOUNTING_CACHE_VERSION = "2026-06-11-review-category-visibility";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full" | "ledger" | "fixed" | "db";
-const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=2000";
+const ACCOUNTING_TRANSACTIONS_ENDPOINT = "/api/accounting/ledger/transactions?limit=10000";
 const ACCOUNTING_LEDGER_SESSION_KEY = "fnos.accounting.ledger.state.v1";
 
 function accountingMonthValue(offset = 0) {
@@ -20928,6 +20928,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
   const [matchStatusOpen, setMatchStatusOpen] = useState(false);
   const [matchStatusSearch, setMatchStatusSearch] = useState("");
+  const [matchStatusFilters, setMatchStatusFilters] = useState({ from: "", to: "", source: "", status: "", category: "" });
+  const [matchStatusLoading, setMatchStatusLoading] = useState(false);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
     category_large: "",
@@ -21154,6 +21156,22 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     })
       .then((data) => setLedgerRows(data.transactions || []))
       .catch(() => undefined);
+  }
+
+  function openMatchStatusModal() {
+    setMatchStatusOpen(true);
+    if (ledgerRows.length) return;
+    setMatchStatusLoading(true);
+    const ledgerCacheKey = `${ACCOUNTING_TRANSACTIONS_ENDPOINT}:${ACCOUNTING_CACHE_VERSION}`;
+    cachedClientJson<{ transactions?: Array<Record<string, unknown>> }>(ACCOUNTING_TRANSACTIONS_ENDPOINT, {
+      key: ledgerCacheKey,
+      ttl: ACCOUNTING_CACHE_TTL,
+      storageTtl: ACCOUNTING_STORAGE_TTL,
+      force: false,
+    })
+      .then((data) => setLedgerRows(data.transactions || []))
+      .catch(() => undefined)
+      .finally(() => setMatchStatusLoading(false));
   }
 
   function patchAccountingRowsLocally(ids: string[], patch: Record<string, unknown>) {
@@ -22257,12 +22275,19 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const dashboardExpensePeriodLabel = accountingDatePeriodLabel(dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter(accountingNeedsReview);
+  const matchStatusSourceRows = ledgerRows.length ? ledgerRows : expenses;
   const matchStatusRows = useMemo(() => {
     const groups = new Map<string, { source: string; merchant: string; description: string; count: number; review: number; categories: Map<string, number>; memoExamples: string[] }>();
-    expenses.forEach((row) => {
+    matchStatusSourceRows
+      .filter((row) => {
+        const rowDate = String(row.transaction_date || row.expense_date || "").slice(0, 10);
+        if (matchStatusFilters.from && rowDate < matchStatusFilters.from) return false;
+        if (matchStatusFilters.to && rowDate > matchStatusFilters.to) return false;
+        return true;
+      })
+      .forEach((row) => {
       const source = accountingShortSource(row);
-      const merchant = String(row.merchant_name || row.vendor_name || row.description || "-").trim() || "-";
-      const description = String(row.description || row.review_reason || "").trim();
+      const { merchant, description } = accountingMerchantContentParts(row);
       const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "미분류";
       const key = `${source}\u0001${merchant}\u0001${description}`;
       const group = groups.get(key) || { source, merchant, description, count: 0, review: 0, categories: new Map<string, number>(), memoExamples: [] };
@@ -22281,15 +22306,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return {
         ...group,
         categoryLabel,
+        categoryNames: categoriesList.map(([name]) => name),
         status: group.review ? "검토필요" : categoriesList.length > 1 ? "섞임" : "일치",
       };
     }).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source, "ko-KR") || a.merchant.localeCompare(b.merchant, "ko-KR"));
-  }, [expenses, categoryById]);
+  }, [matchStatusSourceRows, categoryById, matchStatusFilters.from, matchStatusFilters.to]);
+  const matchStatusSources = useMemo(() => Array.from(new Set(matchStatusRows.map((row) => row.source).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko-KR")), [matchStatusRows]);
+  const matchStatusCategories = useMemo(() => Array.from(new Set(matchStatusRows.flatMap((row) => row.categoryNames).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko-KR")), [matchStatusRows]);
   const filteredMatchStatusRows = useMemo(() => {
     const keyword = matchStatusSearch.trim().toLowerCase();
-    if (!keyword) return matchStatusRows;
-    return matchStatusRows.filter((row) => `${row.source} ${row.merchant} ${row.description} ${row.categoryLabel} ${row.status}`.toLowerCase().includes(keyword));
-  }, [matchStatusRows, matchStatusSearch]);
+    return matchStatusRows.filter((row) => {
+      if (matchStatusFilters.source && row.source !== matchStatusFilters.source) return false;
+      if (matchStatusFilters.status && row.status !== matchStatusFilters.status) return false;
+      if (matchStatusFilters.category && !row.categoryNames.includes(matchStatusFilters.category)) return false;
+      if (!keyword) return true;
+      return `${row.source} ${row.merchant} ${row.description} ${row.categoryLabel} ${row.status}`.toLowerCase().includes(keyword);
+    });
+  }, [matchStatusRows, matchStatusSearch, matchStatusFilters.source, matchStatusFilters.status, matchStatusFilters.category]);
   const reviewSearchText = reviewSearch.trim().toLowerCase();
   const reviewSearchDigits = reviewSearch.replace(/[^0-9]/g, "");
   const filteredReviewRows = reviewSearchText || reviewSearchDigits ? pendingReviewRows.filter((row) => {
@@ -23429,7 +23462,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onSave={saveReviewQuick}
               onJaewook={(row) => setJaewookModalRow(row)}
               onOpenRocketGrowth={() => setRocketGrowthModalOpen(true)}
-              onOpenMatchStatus={() => setMatchStatusOpen(true)}
+              onOpenMatchStatus={openMatchStatusModal}
               headerActionTargetId="accounting-review-header-actions"
             />
           </div>
@@ -23754,21 +23787,38 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       {matchStatusOpen && (
         <SelectionModal
           title="거래명 매칭현황"
-          description={`출처 + 거래처/내용 기준 ${matchStatusRows.length.toLocaleString("ko-KR")}개 그룹`}
+          description={`전체 거래 ${matchStatusSourceRows.length.toLocaleString("ko-KR")}건 기준 · 출처 + 거래처/내용 ${matchStatusRows.length.toLocaleString("ko-KR")}개 그룹`}
           onClose={() => setMatchStatusOpen(false)}
           size="full"
           footer={<ActionButton type="button" variant="secondary" onClick={() => setMatchStatusOpen(false)}>닫기</ActionButton>}
         >
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                className="h-9 w-[320px] rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
+                className="h-9 w-[300px] rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
                 value={matchStatusSearch}
                 onChange={(event) => setMatchStatusSearch(event.target.value)}
                 placeholder="출처/거래처/내용/카테고리 검색"
               />
-              <p className="text-xs font-bold text-gray-500">
-                표시 {filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 {matchStatusRows.length.toLocaleString("ko-KR")}개
+              <input className="h-9 w-[135px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-orange-400" type="date" value={matchStatusFilters.from} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, from: event.target.value }))} />
+              <input className="h-9 w-[135px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-orange-400" type="date" value={matchStatusFilters.to} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, to: event.target.value }))} />
+              <select className="h-9 w-[130px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.source} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, source: event.target.value }))}>
+                <option value="">출처 전체</option>
+                {matchStatusSources.map((source) => <option key={source} value={source}>{source}</option>)}
+              </select>
+              <select className="h-9 w-[120px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.status} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, status: event.target.value }))}>
+                <option value="">상태 전체</option>
+                <option value="일치">일치</option>
+                <option value="섞임">섞임</option>
+                <option value="검토필요">검토필요</option>
+              </select>
+              <select className="h-9 min-w-[180px] rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700 outline-orange-400" value={matchStatusFilters.category} onChange={(event) => setMatchStatusFilters((prev) => ({ ...prev, category: event.target.value }))}>
+                <option value="">카테고리 전체</option>
+                {matchStatusCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => { setMatchStatusSearch(""); setMatchStatusFilters({ from: "", to: "", source: "", status: "", category: "" }); }}>초기화</ActionButton>
+              <p className="ml-auto text-xs font-bold text-gray-500">
+                {matchStatusLoading ? "전체 거래 불러오는 중" : `표시 ${filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 ${matchStatusRows.length.toLocaleString("ko-KR")}개`}
               </p>
             </div>
             <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-200">
@@ -23776,8 +23826,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <thead className="sticky top-0 bg-gray-50 font-black text-gray-500">
                   <tr>
                     <th className="w-[120px] px-3 py-2 text-left">출처</th>
-                    <th className="w-[260px] px-3 py-2 text-left">거래처</th>
-                    <th className="w-[260px] px-3 py-2 text-left">내용</th>
+                    <th className="w-[380px] px-3 py-2 text-left">거래처/내용</th>
                     <th className="w-[90px] px-3 py-2 text-right">건수</th>
                     <th className="px-3 py-2 text-left">현재 카테고리</th>
                     <th className="w-[90px] px-3 py-2 text-center">상태</th>
@@ -23787,8 +23836,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   {filteredMatchStatusRows.slice(0, 1000).map((row, index) => (
                     <tr key={`${row.source}-${row.merchant}-${row.description}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/60">
                       <td className="px-3 py-2"><StatusBadge>{row.source}</StatusBadge></td>
-                      <td className="px-3 py-2"><p className="truncate font-black text-gray-900">{row.merchant}</p></td>
-                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-600">{row.description || "-"}</p></td>
+                      <td className="px-3 py-2"><p className="truncate font-black text-gray-900">{row.merchant}</p>{row.description && <p className="mt-0.5 truncate font-semibold text-gray-500">{row.description}</p>}</td>
                       <td className="px-3 py-2 text-right font-black text-gray-900">{row.count.toLocaleString("ko-KR")}건</td>
                       <td className="px-3 py-2"><p className="truncate font-semibold text-gray-700">{row.categoryLabel}</p></td>
                       <td className="px-3 py-2 text-center">
@@ -23798,7 +23846,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   ))}
                   {!filteredMatchStatusRows.length && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-10 text-center text-sm font-black text-gray-500">검색 결과가 없습니다.</td>
+                      <td colSpan={5} className="px-3 py-10 text-center text-sm font-black text-gray-500">검색 결과가 없습니다.</td>
                     </tr>
                   )}
                 </tbody>
@@ -24152,6 +24200,17 @@ function accountingRowTime(row: Record<string, unknown>) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeAccountingDisplayText(value: unknown) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function accountingMerchantContentParts(row: Record<string, unknown>) {
+  const merchant = normalizeAccountingDisplayText(row.merchant_name || row.vendor_name || row.description || "-") || "-";
+  const description = normalizeAccountingDisplayText(row.description || row.review_reason || "");
+  const same = !description || merchant.replace(/\s+/g, "").toLowerCase() === description.replace(/\s+/g, "").toLowerCase();
+  return { merchant, description: same ? "" : description };
+}
+
 function accountingSourceTone(row: Record<string, unknown>) {
   const source = `${String(row.source_name || "")} ${String(row.source_type || "")} ${String(row.card_name || "")} ${String(row.account_name || "")}`
     .toLowerCase()
@@ -24476,6 +24535,7 @@ function ReviewQuickGridEnhanced({
               const rowLargeOptions = largeOptions.filter((large) => categories.some((category) => String(category.category_large || "") === large && accountingCategoryKind(large) === (String(row.direction || "") === "income" ? "income" : "expense")));
               const middleOptions = categories.filter((category) => String(category.category_large || "") === selectedLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
               const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
+              const merchantContent = accountingMerchantContentParts(row);
               const jaewookHaystack = `${String(row.merchant_name || "")} ${String(row.vendor_name || "")} ${String(row.description || "")} ${String(row.memo || "")}`;
               const jaewookCandidate = jaewookHaystack.includes("\uAE40\uC7AC\uC6B1") || jaewookHaystack.includes("\uC7AC\uC6B1");
               return (
@@ -24483,7 +24543,7 @@ function ReviewQuickGridEnhanced({
                   <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedSet.has(id)} onChange={(event) => toggleSelected(id, event.target.checked)} /></td>
                   <td className="whitespace-nowrap px-2 py-2 font-semibold text-gray-800">{accountingReviewDate(row.transaction_date || row.expense_date)}</td>
                   <td className="px-2 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
-                  <td className="max-w-[340px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{String(row.merchant_name || row.vendor_name || "-")}</p><p className="mt-0.5 truncate text-gray-500">{String(row.description || row.review_reason || "-")}</p></td>
+                  <td className="max-w-[340px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{merchantContent.merchant}</p>{merchantContent.description && <p className="mt-0.5 truncate text-gray-500">{merchantContent.description}</p>}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
                   <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
