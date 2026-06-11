@@ -21521,6 +21521,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
 
   async function saveTransactionDraft() {
     if (!editingTransaction?.id) return;
+    const samePatternRows = transactionDraft.save_rule ? matchingPendingReviewRows(editingTransaction) : [];
+    if (samePatternRows.length) {
+      const patternName = accountingReviewPatternName(editingTransaction);
+      const applyAll = window.confirm(`거래내역명이 같은 거래건이 있습니다 (${samePatternRows.length.toLocaleString("ko-KR")}건).\n모두 함께 지정하신 카테고리로 이동하며, 자동저장 하시겠습니까?\n\n거래내역명: ${patternName}`);
+      if (applyAll) {
+        await saveReviewPatternRows(editingTransaction, samePatternRows, {
+          category_id: transactionDraft.category_id,
+          direction: transactionDraft.direction,
+          review_reason: transactionDraft.review_reason,
+          affects_profit: transactionDraft.affects_profit,
+          affects_cashflow: transactionDraft.affects_cashflow,
+          memo: transactionDraft.memo,
+        });
+        setEditingTransaction(null);
+        return;
+      }
+    }
     const endpoint = transactionDraft.save_rule ? "/api/accounting/ledger/review" : "/api/accounting/ledger/transactions";
     const method = transactionDraft.save_rule ? "PATCH" : "PATCH";
     const res = await fetch(endpoint, {
@@ -21546,6 +21563,59 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     }
     setMessage(transactionDraft.save_rule ? "거래를 확정하고 같은 패턴 규칙을 저장했습니다." : "이 거래만 수정했습니다.");
     setEditingTransaction(null);
+    invalidateAccountingCache();
+    loadLedgerRows(true);
+    loadSummary(true);
+  }
+
+  function matchingPendingReviewRows(row: Record<string, unknown>) {
+    const id = String(row.id || "");
+    const key = accountingReviewPatternKey(row);
+    if (!key) return [];
+    return expenses.filter((item) => (
+      String(item.id || "") !== id &&
+      String(item.review_status || "") === "pending" &&
+      accountingReviewPatternKey(item) === key
+    ));
+  }
+
+  async function saveReviewPatternRows(baseRow: Record<string, unknown>, matchingRows: Array<Record<string, unknown>>, patch: Record<string, unknown>) {
+    const rows = [baseRow, ...matchingRows];
+    for (const row of rows) {
+      const id = String(row.id || "");
+      if (!id) continue;
+      const nextCategoryId = String(patch.category_id ?? row.category_id ?? "");
+      const category = categories.find((item) => String(item.id || "") === nextCategoryId);
+      const payload = {
+        id,
+        transaction_id: id,
+        category_id: nextCategoryId,
+        direction: patch.direction ?? row.direction,
+        review_reason: patch.review_reason ?? row.review_reason,
+        affects_profit: patch.affects_profit ?? row.affects_profit,
+        affects_cashflow: patch.affects_cashflow ?? row.affects_cashflow,
+        memo: patch.memo ?? row.memo,
+        category_large: category?.category_large,
+        category_middle: category?.category_middle,
+        category_small: "",
+        review_status: "confirmed",
+        create_rule: true,
+        auto_confirm: true,
+        review_required: false,
+        keyword: accountingReviewPatternName(row),
+      };
+      const res = await fetch("/api/accounting/ledger/review", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        setMessage(data.error || "같은 거래내역 자동저장 실패");
+        return;
+      }
+    }
+    setMessage(`${rows.length.toLocaleString("ko-KR")}건을 같은 카테고리로 확정하고 자동분류 규칙을 저장했습니다.`);
     invalidateAccountingCache();
     loadLedgerRows(true);
     loadSummary(true);
@@ -21580,6 +21650,22 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     const nextCategoryId = String(patch.category_id ?? row.category_id ?? "");
     const category = categories.find((item) => String(item.id || "") === nextCategoryId);
     const categoryChanged = patch.category_id !== undefined;
+    if (confirm) {
+      const samePatternRows = matchingPendingReviewRows(row);
+      if (samePatternRows.length) {
+        const patternName = accountingReviewPatternName(row);
+        const applyAll = window.confirm(`거래내역명이 같은 거래건이 있습니다 (${samePatternRows.length.toLocaleString("ko-KR")}건).\n모두 함께 지정하신 카테고리로 이동하며, 자동저장 하시겠습니까?\n\n거래내역명: ${patternName}`);
+        if (applyAll) {
+          await saveReviewPatternRows(row, samePatternRows, {
+            ...patch,
+            category_id: nextCategoryId,
+            affects_profit: patch.affects_profit ?? (categoryChanged && category ? category.affects_profit !== false : row.affects_profit),
+            affects_cashflow: patch.affects_cashflow ?? (categoryChanged && category ? category.affects_cashflow !== false : row.affects_cashflow),
+          });
+          return;
+        }
+      }
+    }
     const res = await fetch("/api/accounting/ledger/transactions", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -23696,6 +23782,14 @@ function accountingShortSource(row: Record<string, unknown>) {
   if (/기업|IBK/i.test(source)) return "기업은행";
   if (/국민|KB/i.test(source)) return "국민은행";
   return source || "-";
+}
+
+function accountingReviewPatternName(row: Record<string, unknown>) {
+  return String(row.merchant_name || row.vendor_name || row.description || "").replace(/\s+/g, " ").trim();
+}
+
+function accountingReviewPatternKey(row: Record<string, unknown>) {
+  return accountingReviewPatternName(row).replace(/\s+/g, "").toLowerCase();
 }
 
 function accountingSignedDisplayAmount(row: Record<string, unknown>) {

@@ -429,6 +429,8 @@ function isNaverAdTransaction(row: RawRow) {
   const isExpenseLike = /카드|card/i.test(sourceText) || text(row.direction) === "expense" || numberValue(row.debit_amount) > 0;
   if (!isExpenseLike) return false;
   if (/네이버페이[_\s-]*비즈월렛|비즈월렛/i.test(haystack)) return true;
+  const merchantName = text(row.merchant_name || row.description).replace(/\s+/g, "");
+  if (merchantName === "네이버파이낸셜" || /^NAVERFINANCIAL$/i.test(merchantName)) return true;
   if (/네이버파이낸셜|NAVER\s*FINANCIAL/i.test(haystack) && amount >= 50000 && amount % 50000 === 0) return true;
   return false;
 }
