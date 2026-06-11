@@ -7167,11 +7167,48 @@ function applyTableXlsxOptions(xlsx: XlsxModule, worksheet: Record<string, unkno
     };
   });
 
-  const validations = tableXlsxDropdownValidations(xlsx, headers, options);
-  if (validations.length) {
-    (worksheet as Record<string, unknown>)["!dataValidation"] = validations;
-    (worksheet as Record<string, unknown>)["!dataValidations"] = validations;
-  }
+}
+
+function insertWorksheetXmlBeforeClosing(xml: string, insertion: string) {
+  const orderedClosingTags = [
+    "<sheetProtection",
+    "<protectedRanges",
+    "<scenarios",
+    "<autoFilter",
+    "<sortState",
+    "<dataConsolidate",
+    "<customSheetViews",
+    "<mergeCells",
+    "<phoneticPr",
+    "<conditionalFormatting",
+    "<dataValidations",
+    "<hyperlinks",
+    "<printOptions",
+    "<pageMargins",
+    "<pageSetup",
+    "<headerFooter",
+    "<rowBreaks",
+    "<colBreaks",
+    "<customProperties",
+    "<cellWatches",
+    "<ignoredErrors",
+    "<smartTags",
+    "<drawing",
+    "<legacyDrawing",
+    "<legacyDrawingHF",
+    "<picture",
+    "<oleObjects",
+    "<controls",
+    "<webPublishItems",
+    "<tableParts",
+    "<extLst",
+  ];
+  const positions = orderedClosingTags
+    .map((tag) => xml.indexOf(tag))
+    .filter((index) => index >= 0);
+  const insertAt = positions.length ? Math.min(...positions) : xml.indexOf("</worksheet>");
+  if (insertAt < 0) return xml;
+  return `${xml.slice(0, insertAt)}${insertion}${xml.slice(insertAt)}`;
 }
 
 async function injectXlsxDropdownXml(xlsx: XlsxModule, blob: Blob, headers: string[], options?: TableXlsxOptions) {
@@ -7185,7 +7222,7 @@ async function injectXlsxDropdownXml(xlsx: XlsxModule, blob: Blob, headers: stri
   let xml = await file.async("string");
   const validationXml = `<dataValidations count="${validations.length}">${validations.map((validation) => `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${xmlEscape(validation.sqref)}"><formula1>${xmlEscape(validation.formula1)}</formula1></dataValidation>`).join("")}</dataValidations>`;
   xml = xml.replace(/<dataValidations[\s\S]*?<\/dataValidations>/, "");
-  xml = xml.includes("</worksheet>") ? xml.replace("</worksheet>", `${validationXml}</worksheet>`) : xml;
+  xml = insertWorksheetXmlBeforeClosing(xml, validationXml);
   zip.file(sheetPath, xml);
   const output = await zip.generateAsync({ type: "arraybuffer" });
   return new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -15057,8 +15094,8 @@ const masterTabs: Array<{ key: MasterTabKey; label: string; title: string; uploa
     label: "거래처 관리",
     title: "거래처",
     uploadEndpoint: "/api/fnos/customers/upload",
-    templateHeaders: ["거래처코드", "거래처명", "거래처구분", "사업자번호", "담당자", "전화", "결제조건", "사용구분", "메모"],
-    sampleRow: ["CUST001", "샘플거래처", "쇼핑몰/공급처", "000-00-00000", "담당자", "010-0000-0000", "월말결제", "사용", ""],
+    templateHeaders: ["속성", "거래처코드", "거래처명", "사업자등록번호", "팩스번호", "담당자명", "전화번호", "이메일", "주소", "메모"],
+    sampleRow: ["일반", "CUST001", "샘플거래처", "000-00-00000", "031-000-0000", "담당자", "010-0000-0000", "sample@fnos.local", "서울시 샘플구 샘플로 1", ""],
   },
   {
     key: "products",
@@ -16326,14 +16363,19 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }
 
   function downloadCustomerTemplate() {
+    const headers = ["속성", "거래처코드", "거래처명", "사업자등록번호", "팩스번호", "담당자명", "전화번호", "이메일", "주소", "메모"];
     void downloadTableXlsx(
       "FN_OS_거래처_엑셀폼.xlsx",
       "거래처",
-      ["속성", "거래처코드", "거래처명", "사업자번호", "담당자", "전화번호", "주소/Email/기타메모"],
-      [["일반", "CUST001", "샘플거래처", "1111111111", "담당자", "010-0000-0000", "주소: 서울 / Email: sample@fnos.local"]],
+      headers,
+      [
+        ["일반", "CUST001", "샘플거래처", "1111111111", "031-000-0000", "담당자", "010-0000-0000", "sample@fnos.local", "서울시 샘플구 샘플로 1", ""],
+        ["쇼핑몰", "NAVER", "네이버 스마트스토어", "", "", "담당자", "", "", "", "API 정보는 거래처 저장 후 행을 열어 입력"],
+      ],
       {
         requiredHeaders: ["속성", "거래처코드", "거래처명"],
-        dropdowns: { "속성": ["일반", "쇼핑몰", "공급처", "고객"] },
+        dropdowns: { "속성": ["일반", "쇼핑몰"] },
+        noteRows: [["안내", "속성은 일반 또는 쇼핑몰만 선택합니다. 쇼핑몰 API 정보는 거래처 등록 후 해당 행을 열어 입력합니다."]],
       },
     );
   }
@@ -16358,7 +16400,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         customer_code: String(row["거래처코드"] || row["거래처 코드"] || row["코드"] || row["customer_code"] || "").trim(),
         customer_name: String(row["거래처명"] || row["거래처명칭"] || row["상호"] || row["customer_name"] || "").trim(),
         business_no: formatBusinessNoInput(String(row["사업자번호"] || row["사업자등록번호"] || "").trim()),
-        contact_name: String(row["담당자"] || row["연락담당자"] || "").trim(),
+        contact_name: String(row["담당자명"] || row["담당자"] || row["연락담당자"] || "").trim(),
         phone: String(row["전화번호"] || row["전화"] || row["연락처"] || row["휴대폰"] || "").trim(),
         fax: String(row["팩스번호"] || row["팩스"] || row["FAX"] || "").trim(),
         email: String(row["이메일"] || row["Email"] || row["E-mail"] || row["EMAIL"] || "").trim(),
@@ -16409,16 +16451,18 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       return;
     }
     const rows = ((data.customers || []) as FnCustomer[]).map((customer) => [
+      customerAttributeLabel(customer.customer_type || customer.customer_type_label),
       customer.customer_code || customer.cust_code || "",
       customer.customer_name || customer.cust_name || "",
-      customerAttributeLabel(customer.customer_type || customer.customer_type_label),
       customer.business_no || "",
+      customer.fax || "",
       customer.contact_name || "",
       customer.phone || "",
+      customer.email || "",
       customer.address || "",
       customer.memo || "",
     ]);
-    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["거래처코드", "거래처명", "속성", "사업자번호", "담당자", "전화번호", "주소", "주소/Email/기타메모"], rows);
+    void downloadTableXlsx(`FN_OS_거래처_${rows.length}건_${todayMmdd()}.xlsx`, "거래처", ["속성", "거래처코드", "거래처명", "사업자등록번호", "팩스번호", "담당자명", "전화번호", "이메일", "주소", "메모"], rows);
   }
 
   const pageNumbers = Array.from({ length: Math.min(6, pageCount) }, (_, index) => {

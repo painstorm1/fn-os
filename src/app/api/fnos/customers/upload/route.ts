@@ -17,6 +17,18 @@ function boolActive(value: unknown) {
   return !["NO", "N", "FALSE", "0", "미사용", "중단"].includes(next);
 }
 
+function normalizeCustomerType(value: unknown) {
+  const next = String(value || "").trim().toLowerCase();
+  return ["shopping", "mall", "shop", "쇼핑몰"].includes(next) ? "shopping" : "general";
+}
+
+function formatBusinessNo(value: unknown) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits || null;
+  if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
+
 function rowObject(headers: SheetRow, row: SheetRow) {
   const result: RowObject = {};
   headers.forEach((header, index) => {
@@ -67,13 +79,15 @@ export async function POST(request: NextRequest) {
           cust_code: code,
           customer_name: name,
           cust_name: name,
-          business_no: first(row, ["사업자번호", "사업자등록번호", "BUSINESS_NO"]),
+          customer_type: normalizeCustomerType(first(row, ["속성", "거래처속성", "거래처구분", "구분", "customer_type"])),
+          business_no: formatBusinessNo(first(row, ["사업자번호", "사업자등록번호", "BUSINESS_NO"])),
           ceo_name: first(row, ["대표자", "대표자명"]),
-          contact_name: first(row, ["담당자", "연락담당자"]),
+          contact_name: first(row, ["담당자명", "담당자", "연락담당자"]),
           phone: first(row, ["전화", "전화번호", "연락처", "휴대폰", "TEL"]),
           fax: first(row, ["팩스", "팩스번호", "FAX"]),
           email: first(row, ["이메일", "Email", "E-mail", "EMAIL"]),
-          memo: first(row, ["비고", "메모", "적요", "REMARKS"]),
+          address: first(row, ["주소", "거래처주소"]),
+          memo: first(row, ["비고", "메모", "주소/Email/기타메모", "적요", "REMARKS"]),
           search_text: first(row, ["검색창내용", "검색내용"]),
           is_active: boolActive(first(row, ["사용구분", "사용", "상태"])),
           last_synced_at: new Date().toISOString(),
