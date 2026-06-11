@@ -20926,6 +20926,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Record<string, unknown> | null>(null);
+  const [matchStatusOpen, setMatchStatusOpen] = useState(false);
+  const [matchStatusSearch, setMatchStatusSearch] = useState("");
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
     category_large: "",
@@ -22255,6 +22257,39 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const dashboardExpensePeriodLabel = accountingDatePeriodLabel(dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter(accountingNeedsReview);
+  const matchStatusRows = useMemo(() => {
+    const groups = new Map<string, { source: string; merchant: string; description: string; count: number; review: number; categories: Map<string, number>; memoExamples: string[] }>();
+    expenses.forEach((row) => {
+      const source = accountingShortSource(row);
+      const merchant = String(row.merchant_name || row.vendor_name || row.description || "-").trim() || "-";
+      const description = String(row.description || row.review_reason || "").trim();
+      const category = categoryById.get(String(row.category_id || "")) || [row.category_large, row.category_middle].map((part) => String(part || "").trim()).filter(Boolean).join(" > ") || "미분류";
+      const key = `${source}\u0001${merchant}\u0001${description}`;
+      const group = groups.get(key) || { source, merchant, description, count: 0, review: 0, categories: new Map<string, number>(), memoExamples: [] };
+      group.count += 1;
+      if (accountingNeedsReview(row)) group.review += 1;
+      group.categories.set(category, (group.categories.get(category) || 0) + 1);
+      const memo = String(row.memo || "").trim();
+      if (memo && group.memoExamples.length < 2 && !group.memoExamples.includes(memo)) group.memoExamples.push(memo);
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).map((group) => {
+      const categoriesList = Array.from(group.categories.entries()).sort((a, b) => b[1] - a[1]);
+      const categoryLabel = categoriesList.length === 1
+        ? categoriesList[0][0]
+        : categoriesList.slice(0, 3).map(([name, count]) => `${name} ${count.toLocaleString("ko-KR")}건`).join(" / ");
+      return {
+        ...group,
+        categoryLabel,
+        status: group.review ? "검토필요" : categoriesList.length > 1 ? "섞임" : "일치",
+      };
+    }).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source, "ko-KR") || a.merchant.localeCompare(b.merchant, "ko-KR"));
+  }, [expenses, categoryById]);
+  const filteredMatchStatusRows = useMemo(() => {
+    const keyword = matchStatusSearch.trim().toLowerCase();
+    if (!keyword) return matchStatusRows;
+    return matchStatusRows.filter((row) => `${row.source} ${row.merchant} ${row.description} ${row.categoryLabel} ${row.status}`.toLowerCase().includes(keyword));
+  }, [matchStatusRows, matchStatusSearch]);
   const reviewSearchText = reviewSearch.trim().toLowerCase();
   const reviewSearchDigits = reviewSearch.replace(/[^0-9]/g, "");
   const filteredReviewRows = reviewSearchText || reviewSearchDigits ? pendingReviewRows.filter((row) => {
@@ -23306,7 +23341,6 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   </div>
                   <div className="flex gap-1">
                     <ActionButton type="button" variant="secondary" className="h-8 px-2 text-xs" onClick={() => openSalaryExceptionModal()}>추가</ActionButton>
-                    <ActionButton type="button" className="h-8 px-2 text-xs" onClick={() => void saveSalaryExceptionRules()}>기본</ActionButton>
                   </div>
                 </div>
                 <div className="space-y-1 text-[11px] font-bold text-gray-500">
@@ -23395,6 +23429,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               onSave={saveReviewQuick}
               onJaewook={(row) => setJaewookModalRow(row)}
               onOpenRocketGrowth={() => setRocketGrowthModalOpen(true)}
+              onOpenMatchStatus={() => setMatchStatusOpen(true)}
               headerActionTargetId="accounting-review-header-actions"
             />
           </div>
@@ -23714,6 +23749,64 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             </FormField>
           </div>
         </FormModal>
+      )}
+
+      {matchStatusOpen && (
+        <SelectionModal
+          title="거래명 매칭현황"
+          description={`출처 + 거래처/내용 기준 ${matchStatusRows.length.toLocaleString("ko-KR")}개 그룹`}
+          onClose={() => setMatchStatusOpen(false)}
+          size="full"
+          footer={<ActionButton type="button" variant="secondary" onClick={() => setMatchStatusOpen(false)}>닫기</ActionButton>}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <input
+                className="h-9 w-[320px] rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
+                value={matchStatusSearch}
+                onChange={(event) => setMatchStatusSearch(event.target.value)}
+                placeholder="출처/거래처/내용/카테고리 검색"
+              />
+              <p className="text-xs font-bold text-gray-500">
+                표시 {filteredMatchStatusRows.length.toLocaleString("ko-KR")}개 / 전체 {matchStatusRows.length.toLocaleString("ko-KR")}개
+              </p>
+            </div>
+            <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[980px] table-fixed text-xs">
+                <thead className="sticky top-0 bg-gray-50 font-black text-gray-500">
+                  <tr>
+                    <th className="w-[120px] px-3 py-2 text-left">출처</th>
+                    <th className="w-[260px] px-3 py-2 text-left">거래처</th>
+                    <th className="w-[260px] px-3 py-2 text-left">내용</th>
+                    <th className="w-[90px] px-3 py-2 text-right">건수</th>
+                    <th className="px-3 py-2 text-left">현재 카테고리</th>
+                    <th className="w-[90px] px-3 py-2 text-center">상태</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMatchStatusRows.slice(0, 1000).map((row, index) => (
+                    <tr key={`${row.source}-${row.merchant}-${row.description}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2"><StatusBadge>{row.source}</StatusBadge></td>
+                      <td className="px-3 py-2"><p className="truncate font-black text-gray-900">{row.merchant}</p></td>
+                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-600">{row.description || "-"}</p></td>
+                      <td className="px-3 py-2 text-right font-black text-gray-900">{row.count.toLocaleString("ko-KR")}건</td>
+                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-700">{row.categoryLabel}</p></td>
+                      <td className="px-3 py-2 text-center">
+                        <StatusBadge tone={row.status === "일치" ? "success" : row.status === "섞임" ? "warning" : "danger"}>{row.status}</StatusBadge>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredMatchStatusRows.length && (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-10 text-center text-sm font-black text-gray-500">검색 결과가 없습니다.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {filteredMatchStatusRows.length > 1000 && <p className="text-xs font-bold text-gray-500">속도 보호를 위해 상위 1,000개만 표시합니다. 검색어로 좁혀 주세요.</p>}
+          </div>
+        </SelectionModal>
       )}
 
       {fixedCostBulkOpen && (
@@ -24272,6 +24365,7 @@ function ReviewQuickGridEnhanced({
   onSave,
   onJaewook,
   onOpenRocketGrowth,
+  onOpenMatchStatus,
   headerActionTargetId,
 }: {
   rows: Array<Record<string, unknown>>;
@@ -24282,6 +24376,7 @@ function ReviewQuickGridEnhanced({
   onSave: (row: Record<string, unknown>, patch: Record<string, unknown>, confirm?: boolean) => void | Promise<void>;
   onJaewook?: (row: Record<string, unknown>) => void;
   onOpenRocketGrowth?: () => void;
+  onOpenMatchStatus?: () => void;
   headerActionTargetId?: string;
 }) {
   const [sortState, setSortState] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
@@ -24342,6 +24437,7 @@ function ReviewQuickGridEnhanced({
     <>
       <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" disabled={!selectedRows.length} onClick={() => setBulkOpen(true)}>수정 {selectedRows.length ? `${selectedRows.length.toLocaleString("ko-KR")}건` : ""}</ActionButton>
       <ActionButton type="button" className="h-8 px-3 text-xs" onClick={onOpenRocketGrowth}>쿠팡 비용입력</ActionButton>
+      <ActionButton type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={onOpenMatchStatus}>매칭현황</ActionButton>
     </>
   );
 
