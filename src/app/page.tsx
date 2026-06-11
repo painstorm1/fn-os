@@ -20924,6 +20924,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     save_rule: true,
   });
   const [filters, setFilters] = useState({ q: "", category: "", source: "", review: "", from: "", to: "" });
+  const [reviewSearch, setReviewSearch] = useState("");
   const defaultLedgerFilters = {
     q: "",
     source: "",
@@ -22240,6 +22241,21 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const dashboardExpensePeriodLabel = accountingDatePeriodLabel(dashboardExpensePeriod.from, dashboardExpensePeriod.to);
   const reviewSuggestions = summary?.review_suggestions || {};
   const pendingReviewRows = expenses.filter(accountingNeedsReview);
+  const reviewSearchText = reviewSearch.trim().toLowerCase();
+  const reviewSearchDigits = reviewSearch.replace(/[^0-9]/g, "");
+  const filteredReviewRows = reviewSearchText || reviewSearchDigits ? pendingReviewRows.filter((row) => {
+    const amount = String(asNumber(row.amount_krw ?? row.total_amount ?? row.amount));
+    const haystack = [
+      row.merchant_name,
+      row.vendor_name,
+      row.description,
+      row.review_reason,
+      row.memo,
+      amount,
+      krw(asNumber(row.amount_krw ?? row.total_amount ?? row.amount)),
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return (reviewSearchText && haystack.includes(reviewSearchText)) || (reviewSearchDigits && amount.includes(reviewSearchDigits));
+  }) : pendingReviewRows;
   const largestCategory = categoryRows[0];
   const pendingUploadCount = uploadedExpenseFiles.length;
   const activeBankAccounts = bankAccounts.filter((row) => row.list_enabled !== false && row.is_active !== false);
@@ -23342,10 +23358,23 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           <div className="space-y-3">
             <SectionHeader
               title="검토필요 거래"
-              actions={<StatusBadge tone="danger">{pendingReviewRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
+              actions={
+                <div className="flex items-center gap-2">
+                  <input
+                    className="h-8 w-[280px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 outline-orange-400 placeholder:text-gray-400"
+                    value={reviewSearch}
+                    onChange={(event) => setReviewSearch(event.target.value)}
+                    placeholder="거래처/내용·금액 검색"
+                  />
+                  <StatusBadge tone="danger">
+                    {filteredReviewRows.length.toLocaleString("ko-KR")}
+                    {filteredReviewRows.length !== pendingReviewRows.length ? `/${pendingReviewRows.length.toLocaleString("ko-KR")}` : ""}건
+                  </StatusBadge>
+                </div>
+              }
             />
             <ReviewQuickGridEnhanced
-              rows={pendingReviewRows}
+              rows={filteredReviewRows}
               categories={categories}
               categoryById={categoryById}
               suggestions={reviewSuggestions}
