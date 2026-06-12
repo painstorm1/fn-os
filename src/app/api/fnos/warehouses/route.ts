@@ -7,6 +7,11 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function schemaColumnFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/column ['"]?([^'"\s]+)['"]?/i)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+}
+
 function boolActive(value: unknown) {
   const next = String(value || "").trim().toUpperCase();
   if (!next) return true;
@@ -43,6 +48,23 @@ function inventoryWarehouseCode(row: AnyRecord) {
 
 function inventoryProductKey(row: AnyRecord) {
   return text(row.product_id || row.product_code || row.prod_cd || row.sku || row.id);
+}
+
+async function saveWarehouseRows(warehouse: AnyRecord, values: AnyRecord, createdAt: string) {
+  let next = { ...values };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return text(warehouse.id)
+        ? await patchRows<AnyRecord>("warehouses", { id: `eq.${warehouse.id}` }, next)
+        : await upsertRows<AnyRecord>("warehouses", { ...next, created_at: createdAt }, "warehouse_code");
+    } catch (error) {
+      const column = schemaColumnFromError(error);
+      if (!column || !(column in next)) throw error;
+      const { [column]: _removed, ...rest } = next;
+      next = rest;
+    }
+  }
+  throw new FnosDbError("창고 저장 가능한 컬럼 확인에 실패했습니다.", 500);
 }
 
 export async function GET(request: NextRequest) {
@@ -115,9 +137,7 @@ export async function POST(request: NextRequest) {
       is_active: boolActive(warehouse.is_active),
       updated_at: now,
     };
-    const rows = text(warehouse.id)
-      ? await patchRows<AnyRecord>("warehouses", { id: `eq.${warehouse.id}` }, values)
-      : await upsertRows<AnyRecord>("warehouses", { ...values, created_at: now }, "warehouse_code");
+    const rows = await saveWarehouseRows(warehouse, values, now);
     return NextResponse.json({ ok: true, warehouse: rows[0] || null });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

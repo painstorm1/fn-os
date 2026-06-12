@@ -7,6 +7,11 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function schemaColumnFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/column ['"]?([^'"\s]+)['"]?/i)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+}
+
 function numberValue(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -132,6 +137,23 @@ async function importLinkRows() {
 
 async function importProductRows() {
   return selectRows<AnyRecord>("import_erp_products", { order: "id.asc", limit: 5000 }).catch(() => []);
+}
+
+async function saveProductRows(product: AnyRecord, values: AnyRecord, createdAt: string) {
+  let next = { ...values };
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return text(product.id)
+        ? await patchRows<AnyRecord>("products", { id: `eq.${product.id}` }, next)
+        : await upsertRows<AnyRecord>("products", { ...next, created_at: createdAt }, "product_code");
+    } catch (error) {
+      const column = schemaColumnFromError(error);
+      if (!column || !(column in next)) throw error;
+      const { [column]: _removed, ...rest } = next;
+      next = rest;
+    }
+  }
+  throw new FnosDbError("품목 저장 가능한 컬럼 확인에 실패했습니다.", 500);
 }
 
 export async function GET(request: NextRequest) {
@@ -330,13 +352,8 @@ export async function POST(request: NextRequest) {
     };
 
     let saved: AnyRecord | undefined;
-    if (text(product.id)) {
-      const rows = await patchRows<AnyRecord>("products", { id: `eq.${product.id}` }, values);
-      saved = rows[0];
-    } else {
-      const rows = await upsertRows<AnyRecord>("products", { ...values, created_at: now }, "product_code");
-      saved = rows[0];
-    }
+    const rows = await saveProductRows(product, values, now);
+    saved = rows[0];
     if (!saved) {
       const rows = await selectRows<AnyRecord>("products", { product_code: `eq.${code}`, limit: 1 });
       saved = rows[0];

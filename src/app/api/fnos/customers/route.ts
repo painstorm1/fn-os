@@ -22,7 +22,7 @@ function boolValue(value: unknown, fallback = false) {
 
 function schemaColumnFromError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  return message.match(/column ['"]?([^'"\s]+)['"]?/i)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
+  return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/column ['"]?([^'"\s]+)['"]?/i)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
 }
 
 async function saveCustomerRows(customer: AnyRecord, values: AnyRecord, createdAt: string) {
