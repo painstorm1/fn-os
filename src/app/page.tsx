@@ -16626,6 +16626,17 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
           window.alert(credentialData.error || "쇼핑몰 credential 저장 실패");
           return;
         }
+        const verifyRes = await fetch(`/api/fnos/sales-channel-credentials?channel_id=${encodeURIComponent(channelId)}&reveal=true&_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+        const verifyData = await verifyRes.json().catch(() => ({}));
+        const verifiedCredentials = Array.isArray(verifyData.credentials) ? verifyData.credentials as Array<{ key?: string; value?: string; has_value?: boolean; error?: string }> : [];
+        const unreadableKeys = platform.requiredKeys.filter((key) => {
+          const row = verifiedCredentials.find((item) => item.key === key);
+          return !row?.has_value || !String(row.value || "").trim() || Boolean(row.error);
+        });
+        if (!verifyRes.ok || verifyData.ok === false || unreadableKeys.length) {
+          window.alert(`API 정보가 저장됐지만 다시 읽기 검증에 실패했습니다: ${unreadableKeys.map((key) => salesChannelCredentialLabels[key]).join(", ") || "인증값"}`);
+          return;
+        }
         invalidateClientCache("/api/fnos/sales-channel-credentials");
       }
     }
