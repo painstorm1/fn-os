@@ -7,7 +7,7 @@ type AnyRecord = Record<string, unknown>;
 const defaultChannels = [
   ["NAVER", "네이버 스마트스토어", "api", true, "https://sell.smartstore.naver.com/"],
   ["COUPANG", "쿠팡", "api", true, "https://wing.coupang.com/"],
-  ["11ST", "11번가", "excel", false, "https://soffice.11st.co.kr/"],
+  ["ELEVENST", "11번가", "excel", false, "https://soffice.11st.co.kr/"],
   ["ESM", "ESM/G마켓/옥션", "excel", false, "https://www.esmplus.com/"],
   ["KAKAO", "카카오톡스토어", "excel", false, "https://store-sell.kakao.com/"],
   ["SSG", "SSG", "excel", false, "https://partners.ssgadm.com/"],

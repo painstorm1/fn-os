@@ -112,7 +112,7 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
     const secretKey = text(params.secret_key);
     const vendorId = text(params.vendor_id || params.seller_id || params.api_client_id);
     if (!accessKey || !secretKey || !vendorId) {
-      return { ok: false, data: [], error: "쿠팡 Access Key/Secret Key/Vendor ID를 먼저 저장해주세요. Vendor ID는 판매자 ID 또는 API Client ID 칸에 입력할 수 있습니다." };
+      return { ok: false, data: [], error: "쿠팡 Access Key, Secret Key, Vendor ID를 먼저 저장해주세요." };
     }
 
     try {

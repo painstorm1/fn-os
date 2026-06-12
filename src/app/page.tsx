@@ -1260,24 +1260,173 @@ const salesChannelCredentialKeys = [
   "api_client_secret",
   "access_key",
   "secret_key",
+  "vendor_id",
+  "api_key",
+  "auth_code",
+  "master_id",
+  "partner_no",
+  "sub_partner_no",
   "refresh_token",
 ] as const;
 
 const salesChannelCredentialLabels: Record<(typeof salesChannelCredentialKeys)[number], string> = {
-  seller_password: "seller_password",
-  api_client_id: "api_client_id",
-  api_client_secret: "api_client_secret",
-  access_key: "access_key",
-  secret_key: "secret_key",
-  refresh_token: "refresh_token",
+  seller_password: "판매자 비밀번호",
+  api_client_id: "Client ID",
+  api_client_secret: "Client Secret",
+  access_key: "Access Key",
+  secret_key: "Secret Key",
+  vendor_id: "Vendor ID",
+  api_key: "API Key",
+  auth_code: "인증 코드",
+  master_id: "Master ID",
+  partner_no: "거래처 번호",
+  sub_partner_no: "하위 거래처 번호",
+  refresh_token: "Refresh Token",
 };
 
-function blankSalesChannelDraft(customer?: Record<string, string>): SalesChannelDraft {
+type SalesChannelCredentialKey = (typeof salesChannelCredentialKeys)[number];
+type SalesChannelPlatformCode = "NAVER" | "COUPANG" | "ELEVENST" | "ESM" | "SSG" | "LOTTEON" | "KAKAO" | "TODAYHOUSE" | "TOSS" | "EZWEL" | "ETC";
+
+const salesChannelPlatformOptions: Array<{
+  code: SalesChannelPlatformCode;
+  label: string;
+  supported: boolean;
+  requiredKeys: SalesChannelCredentialKey[];
+  optionalKeys?: SalesChannelCredentialKey[];
+  example: string;
+  help: string;
+}> = [
+  {
+    code: "NAVER",
+    label: "네이버 스마트스토어",
+    supported: true,
+    requiredKeys: ["api_client_id", "api_client_secret"],
+    example: "Client ID: commerce_xxxxx / Client Secret: 발급받은 Secret",
+    help: "네이버 커머스API센터 애플리케이션의 Client ID와 Client Secret이 필요합니다. 스토어가 여러 개면 채널코드는 NAVER_FN처럼 구분해서 저장하세요.",
+  },
+  {
+    code: "COUPANG",
+    label: "쿠팡",
+    supported: true,
+    requiredKeys: ["access_key", "secret_key", "vendor_id"],
+    example: "Vendor ID: A00012345 / Access Key: 발급값 / Secret Key: 발급값",
+    help: "쿠팡 Wing OpenAPI 키 발급 화면의 Access Key, Secret Key, Vendor ID가 필요합니다. Vendor ID는 업체코드입니다.",
+  },
+  {
+    code: "ELEVENST",
+    label: "11번가",
+    supported: false,
+    requiredKeys: ["api_key"],
+    example: "API Key: 11번가 OPEN API Center 발급 키",
+    help: "현재 FN OS 자동 주문수집 어댑터는 아직 없습니다. 키는 저장해둘 수 있고, 당장은 엑셀 발주로 처리됩니다.",
+  },
+  {
+    code: "ESM",
+    label: "ESM/G마켓/옥션",
+    supported: false,
+    requiredKeys: ["master_id"],
+    optionalKeys: ["seller_password"],
+    example: "Master ID: ESM Master ID / 판매자 ID: G마켓 또는 옥션 ID",
+    help: "ESM API 관리에서 Master ID와 API 사용 설정이 필요합니다. 현재 FN OS 자동수집 어댑터는 아직 없습니다.",
+  },
+  {
+    code: "SSG",
+    label: "SSG",
+    supported: false,
+    requiredKeys: ["api_key"],
+    example: "API Key: SSG 파트너오피스 API 계정 정보의 인증키",
+    help: "SSG 파트너오피스 API 회원정보/연동업체 설정 후 인증키가 필요합니다. 현재 FN OS 자동수집 어댑터는 아직 없습니다.",
+  },
+  {
+    code: "LOTTEON",
+    label: "롯데ON",
+    supported: false,
+    requiredKeys: ["api_key"],
+    optionalKeys: ["partner_no", "sub_partner_no"],
+    example: "API Key: OpenAPI관리 인증키 / 거래처 번호: 기본정보관리에서 확인",
+    help: "롯데ON 스토어센터 OpenAPI관리의 인증키가 필요합니다. 현재 FN OS 자동수집 어댑터는 아직 없습니다.",
+  },
+  {
+    code: "KAKAO",
+    label: "카카오 톡스토어",
+    supported: false,
+    requiredKeys: ["api_key"],
+    example: "API Key: 카카오쇼핑 판매채널 정보의 API 인증키",
+    help: "카카오쇼핑 Open API는 별도 이용 신청/승인이 필요할 수 있습니다. 현재 FN OS 자동수집 어댑터는 아직 없습니다.",
+  },
+  {
+    code: "TODAYHOUSE",
+    label: "오늘의집",
+    supported: false,
+    requiredKeys: ["auth_code"],
+    example: "인증 코드: 파트너센터 연동관리에서 발급한 코드",
+    help: "오늘의집 Open API는 연동 솔루션 제한이 있을 수 있습니다. 현재 FN OS 자동수집 어댑터는 아직 없습니다.",
+  },
+  {
+    code: "TOSS",
+    label: "토스",
+    supported: false,
+    requiredKeys: ["api_key"],
+    example: "API Key: 토스 판매자/스토어 관리자 발급값",
+    help: "현재 FN OS 자동수집 어댑터는 아직 없습니다. 키는 메모성으로 저장할 수 있습니다.",
+  },
+  {
+    code: "EZWEL",
+    label: "현대이지웰",
+    supported: false,
+    requiredKeys: ["api_key"],
+    example: "API Key: 이지웰 제휴/관리자에서 발급받은 값",
+    help: "현재 FN OS 자동수집 어댑터는 아직 없습니다. 키는 메모성으로 저장할 수 있습니다.",
+  },
+  {
+    code: "ETC",
+    label: "기타/엑셀",
+    supported: false,
+    requiredKeys: [],
+    optionalKeys: ["api_key"],
+    example: "API 수집 없이 엑셀 발주로 관리",
+    help: "자동수집 대상이 아니면 API 값을 비워두고 엑셀 발주로 관리하세요.",
+  },
+];
+
+function inferSalesChannelPlatform(value: unknown): SalesChannelPlatformCode {
+  const textValue = String(value || "").trim().toUpperCase();
+  if (/NAVER|네이버|스마트스토어|SMARTSTORE/.test(textValue)) return "NAVER";
+  if (/COUPANG|쿠팡|WING/.test(textValue)) return "COUPANG";
+  if (/11ST|11번가|ELEVEN/.test(textValue)) return "ELEVENST";
+  if (/ESM|G마켓|지마켓|옥션|GMARKET|AUCTION/.test(textValue)) return "ESM";
+  if (/SSG|신세계/.test(textValue)) return "SSG";
+  if (/LOTTE|롯데/.test(textValue)) return "LOTTEON";
+  if (/KAKAO|카카오|톡스토어/.test(textValue)) return "KAKAO";
+  if (/TODAY|오늘의집|OHOU/.test(textValue)) return "TODAYHOUSE";
+  if (/TOSS|토스/.test(textValue)) return "TOSS";
+  if (/EZWEL|이지웰/.test(textValue)) return "EZWEL";
+  return "ETC";
+}
+
+function salesChannelPlatformConfig(value: unknown) {
+  const platform = inferSalesChannelPlatform(value);
+  return salesChannelPlatformOptions.find((option) => option.code === platform) || salesChannelPlatformOptions[salesChannelPlatformOptions.length - 1];
+}
+
+function defaultSalesChannelCode(customer?: Record<string, string>) {
   const code = String(customer?.customer_code || "").trim().toUpperCase();
+  const name = String(customer?.customer_name || "").trim();
+  const platform = inferSalesChannelPlatform(`${code} ${name}`);
+  if (platform === "NAVER") {
+    if (/N배송|N delivery|NDELIVERY/i.test(name)) return "NAVER_N";
+    if (/펀앤파인|FUN|FF/i.test(name)) return "NAVER_FF";
+    if (/에프엔|FN/i.test(name)) return "NAVER_FN";
+  }
+  if (platform !== "ETC") return platform;
+  return code;
+}
+
+function blankSalesChannelDraft(customer?: Record<string, string>): SalesChannelDraft {
   const name = String(customer?.customer_name || "").trim();
   return {
     id: "",
-    channel_code: code,
+    channel_code: defaultSalesChannelCode(customer),
     channel_name: name,
     seller_id: "",
     seller_site_url: "",
@@ -1290,7 +1439,7 @@ function normalizeSalesChannelDraft(channel: SalesChannelRow | null | undefined,
   return {
     ...blankSalesChannelDraft(customer),
     id: String(channel?.id || ""),
-    channel_code: String(channel?.channel_code || customer?.customer_code || "").trim().toUpperCase(),
+    channel_code: String(channel?.channel_code || defaultSalesChannelCode(customer)).trim().toUpperCase(),
     channel_name: String(channel?.channel_name || customer?.customer_name || "").trim(),
     seller_id: String(channel?.seller_id || ""),
     seller_site_url: String(channel?.seller_site_url || ""),
@@ -16214,9 +16363,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       if (key === "customer_code") {
         const previousCodeBusinessNo = formatBusinessNoInput(prev.customer_code || "");
         const shouldSyncBusinessNo = Boolean(prev.business_no && prev.business_no === previousCodeBusinessNo);
+        const nextCustomer = { ...prev, customer_code: value };
         setChannelDraft((channel) => ({
           ...channel,
-          channel_code: channel.id ? channel.channel_code : value.trim().toUpperCase(),
+          channel_code: channel.id ? channel.channel_code : defaultSalesChannelCode(nextCustomer),
         }));
         return {
           ...prev,
@@ -16225,8 +16375,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         };
       }
       if (key === "customer_name") {
+        const nextCustomer = { ...prev, customer_name: value };
         setChannelDraft((channel) => ({
           ...channel,
+          channel_code: channel.id ? channel.channel_code : defaultSalesChannelCode(nextCustomer),
           channel_name: channel.id ? channel.channel_name : value,
         }));
       }
@@ -16327,6 +16479,14 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       window.alert("속성, 거래처코드, 거래처명은 필수입니다.");
       return;
     }
+    const platform = salesChannelPlatformConfig(`${channelDraft.channel_code || ""} ${channelDraft.channel_name || ""} ${name}`);
+    if (type === "shopping" && channelDraft.api_enabled === "true" && platform.supported) {
+      const missingKeys = platform.requiredKeys.filter((key) => !String(channelCredentials[key] || "").trim() && !credentialMeta[key]?.has_value);
+      if (missingKeys.length) {
+        window.alert(`${platform.label} API 수집에 필요한 값이 비어 있습니다: ${missingKeys.map((key) => salesChannelCredentialLabels[key]).join(", ")}`);
+        return;
+      }
+    }
     const res = await fetch("/api/fnos/customers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -16349,6 +16509,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
         customer_code: code,
         customer_name: name,
         api_enabled: channelDraft.api_enabled === "true",
+        api_status: channelDraft.api_enabled === "true" && platform.supported ? "ready" : channelDraft.api_status,
       };
       const channelRes = await fetch("/api/fnos/sales-channels", {
         method: "POST",
@@ -18023,6 +18184,10 @@ function CustomerEditModal({
   const balanceReflect = String(draft.balance_reflect ?? (customerType !== "shopping")) === "true";
   const [addressSearchOpen, setAddressSearchOpen] = useState(false);
   const detailAddressInputRef = useRef<HTMLInputElement | null>(null);
+  const platformConfig = salesChannelPlatformConfig(`${channelDraft.channel_code || ""} ${channelDraft.channel_name || ""} ${draft.customer_name || ""}`);
+  const visibleCredentialKeys = Array.from(new Set([...(platformConfig.requiredKeys || []), ...(platformConfig.optionalKeys || [])]));
+  const storedCredentialCount = Object.values(credentialMeta).filter((item) => item?.has_value).length;
+  const canRevealCredentials = Boolean(channelDraft.id && storedCredentialCount);
 
   function changeBusinessSameAsCode(checked: boolean) {
     onChange("business_no", checked ? draft.customer_code || "" : "");
@@ -18113,43 +18278,56 @@ function CustomerEditModal({
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold text-orange-700">쇼핑몰 API 정보</div>
-                  <p className="mt-1 text-xs font-medium text-orange-700">주문수집에서 사용할 쇼핑몰 채널과 credential을 연결합니다.</p>
+                  <p className="mt-1 text-xs font-medium text-orange-700">온라인 발주에서 사용할 쇼핑몰 채널과 API 인증값을 저장합니다.</p>
                 </div>
-                <ActionButton type="button" variant="secondary" className="h-8 border-orange-200 px-3 text-xs text-orange-700 hover:bg-orange-50" onClick={onRevealCredentials} disabled={channelLoading}>
-                  {credentialsRevealed ? "가리기" : "보기"}
+                <ActionButton type="button" variant="secondary" className="h-8 border-orange-200 px-3 text-xs text-orange-700 hover:bg-orange-50" onClick={onRevealCredentials} disabled={channelLoading || !canRevealCredentials}>
+                  {credentialsRevealed ? "저장값 숨김" : "저장값 보기"}
                 </ActionButton>
               </div>
+              <div className="mb-3 rounded-lg border border-orange-100 bg-white px-3 py-2 text-xs font-bold leading-relaxed text-slate-600">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded bg-orange-100 px-2 py-1 text-orange-700">{platformConfig.label}</span>
+                  <span className={platformConfig.supported ? "text-emerald-700" : "text-slate-500"}>{platformConfig.supported ? "자동수집 가능" : "자동수집 미구현 · 엑셀/추후 어댑터"}</span>
+                </div>
+                <p className="mt-2">{platformConfig.help}</p>
+                <p className="mt-1 text-slate-500">예시: {platformConfig.example}</p>
+                {!canRevealCredentials && <p className="mt-1 text-orange-700">저장된 API 값이 없거나 아직 채널 저장 전이면 저장값 보기는 비활성화됩니다.</p>}
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField label="channel_code"><input className={modalInputClass} value={channelDraft.channel_code || ""} onChange={(event) => onChannelChange("channel_code", event.target.value)} placeholder="NAVER" /></FormField>
-                <FormField label="channel_name"><input className={modalInputClass} value={channelDraft.channel_name || ""} onChange={(event) => onChannelChange("channel_name", event.target.value)} placeholder="네이버 스마트스토어" /></FormField>
-                <FormField label="seller_id"><input className={modalInputClass} value={channelDraft.seller_id || ""} onChange={(event) => onChannelChange("seller_id", event.target.value)} /></FormField>
-                <FormField label="seller_site_url"><input className={modalInputClass} value={channelDraft.seller_site_url || ""} onChange={(event) => onChannelChange("seller_site_url", event.target.value)} placeholder="https://..." /></FormField>
-                <FormField label="api_enabled">
+                <FormField label="채널 코드">
+                  <input className={modalInputClass} value={channelDraft.channel_code || ""} onChange={(event) => onChannelChange("channel_code", event.target.value)} placeholder="NAVER_FN" />
+                  <p className="mt-1 text-[11px] font-bold text-slate-500">여러 스토어는 NAVER_FN, NAVER_FF처럼 구분합니다.</p>
+                </FormField>
+                <FormField label="채널명"><input className={modalInputClass} value={channelDraft.channel_name || ""} onChange={(event) => onChannelChange("channel_name", event.target.value)} placeholder="네이버_에프엔FN" /></FormField>
+                <FormField label="판매자 ID"><input className={modalInputClass} value={channelDraft.seller_id || ""} onChange={(event) => onChannelChange("seller_id", event.target.value)} placeholder="쇼핑몰 로그인 ID 또는 판매자 ID" /></FormField>
+                <FormField label="판매자 사이트"><input className={modalInputClass} value={channelDraft.seller_site_url || ""} onChange={(event) => onChannelChange("seller_site_url", event.target.value)} placeholder="https://..." /></FormField>
+                <FormField label="API 사용">
                   <select className={modalSelectClass} value={channelDraft.api_enabled || "false"} onChange={(event) => onChannelChange("api_enabled", event.target.value)}>
-                    <option value="false">N</option>
-                    <option value="true">Y</option>
+                    <option value="false">사용 안함</option>
+                    <option value="true">사용</option>
                   </select>
                 </FormField>
-                <FormField label="api_status">
+                <FormField label="상태">
                   <select className={modalSelectClass} value={channelDraft.api_status || "manual"} onChange={(event) => onChannelChange("api_status", event.target.value)}>
-                    <option value="manual">manual</option>
-                    <option value="planned">planned</option>
-                    <option value="ready">ready</option>
-                    <option value="connected">connected</option>
-                    <option value="error">error</option>
+                    <option value="manual">수동/엑셀</option>
+                    <option value="planned">준비중</option>
+                    <option value="ready">입력완료</option>
+                    <option value="connected">연동성공</option>
+                    <option value="error">오류</option>
                   </select>
                 </FormField>
-                {salesChannelCredentialKeys.map((key) => {
+                {visibleCredentialKeys.map((key) => {
                   const meta = credentialMeta[key];
                   const placeholder = meta?.has_value ? meta.hint || "****" : "";
+                  const required = platformConfig.requiredKeys.includes(key);
                   return (
-                    <FormField key={key} label={salesChannelCredentialLabels[key]}>
+                    <FormField key={key} label={`${salesChannelCredentialLabels[key]}${required ? " *" : ""}`}>
                       <input
                         className={modalInputClass}
                         type={credentialsRevealed ? "text" : "password"}
                         value={channelCredentials[key] || ""}
                         onChange={(event) => onCredentialChange(key, event.target.value)}
-                        placeholder={placeholder}
+                        placeholder={placeholder || (required ? "필수 입력" : "선택 입력")}
                       />
                     </FormField>
                   );

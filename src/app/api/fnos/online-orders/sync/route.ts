@@ -25,6 +25,15 @@ function credentialMap(rows: Array<{ key: string; value?: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
 }
 
+function adapterCodeForChannel(channel: AnyRecord) {
+  const code = text(channel.channel_code).toUpperCase();
+  const name = text(channel.channel_name).toUpperCase();
+  const haystack = `${code} ${name}`;
+  if (code === "NAVER" || code.startsWith("NAVER_") || /NAVER|네이버|스마트스토어|SMARTSTORE/.test(haystack)) return "NAVER";
+  if (code === "COUPANG" || code.startsWith("COUPANG_") || /COUPANG|쿠팡|WING/.test(haystack)) return "COUPANG";
+  return code;
+}
+
 async function logSync(row: AnyRecord) {
   await insertRows("api_sync_logs", row).catch(() => null);
 }
@@ -87,7 +96,8 @@ async function persistOrders(channel: AnyRecord, orders: NormalizedOrder[]) {
 
 async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   const channelCode = text(channel.channel_code).toUpperCase();
-  const adapter = adapters[channelCode];
+  const adapterCode = adapterCodeForChannel(channel);
+  const adapter = adapters[adapterCode];
   const startedAt = new Date().toISOString();
   if (!adapter) {
     const message = `${text(channel.channel_name) || channelCode} API 어댑터가 아직 준비되지 않았습니다.`;
@@ -98,7 +108,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   const params = {
     ...credentials,
     ...body,
-    channel_code: channelCode,
+    channel_code: adapterCode,
     channel_name: text(channel.channel_name),
     customer_code: text(channel.customer_code),
     customer_name: text(channel.customer_name),
@@ -161,7 +171,7 @@ export async function POST(request: NextRequest) {
     };
     if (channelCode) query.channel_code = `eq.${channelCode}`;
     const channels = await selectRows<AnyRecord>("sales_channels", query);
-    const activeChannels = channels.filter((channel) => adapters[text(channel.channel_code).toUpperCase()]);
+    const activeChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
     if (!activeChannels.length) {
       return NextResponse.json({
         ok: false,

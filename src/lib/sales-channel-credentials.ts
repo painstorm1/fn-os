@@ -8,6 +8,12 @@ const CREDENTIAL_KEYS = [
   "api_client_secret",
   "access_key",
   "secret_key",
+  "vendor_id",
+  "api_key",
+  "auth_code",
+  "master_id",
+  "partner_no",
+  "sub_partner_no",
   "refresh_token",
 ];
 
