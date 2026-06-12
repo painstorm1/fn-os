@@ -14785,7 +14785,7 @@ function BulkMultiEditModal<Field extends string, Row>({
   getRowSubLabel: (row: Row) => string;
   getCurrentValue: (row: Row, field: Field) => string;
   onClose: () => void;
-  onSave: () => void;
+  onSave: (drafts: Record<string, Partial<Record<Field, string>>>) => void;
 }) {
   const visibleFields = selectedFields.length ? selectedFields : [fields[0]?.key].filter(Boolean) as Field[];
   const activeCommonField = visibleFields.includes(commonField) ? commonField : visibleFields[0];
@@ -14821,6 +14821,20 @@ function BulkMultiEditModal<Field extends string, Row>({
     });
   }
 
+  function saveWithCurrentDrafts() {
+    const next: Record<string, Partial<Record<Field, string>>> = { ...rowDrafts };
+    if (activeCommonField && commonValue !== "") {
+      selectedRowKeys.forEach((key) => {
+        next[key] = {
+          ...(next[key] || {}),
+          [activeCommonField]: commonValue,
+        };
+      });
+    }
+    setRowDrafts(next);
+    onSave(next);
+  }
+
   function toggleField(field: Field, checked: boolean) {
     setSelectedFields((prev) => {
       if (checked) return Array.from(new Set([...prev, field]));
@@ -14850,7 +14864,7 @@ function BulkMultiEditModal<Field extends string, Row>({
         footer={
           <>
             <ActionButton type="button" variant="secondary" onClick={onClose}>닫기</ActionButton>
-            <ActionButton type="button" onClick={onSave}>저장</ActionButton>
+            <ActionButton type="button" onClick={saveWithCurrentDrafts}>저장</ActionButton>
           </>
         }
       >
@@ -15691,14 +15705,14 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
     setPersonnelMessage(`직원 삭제 완료: ${selectedEmployees.length.toLocaleString("ko-KR")}명`);
   }
 
-  function saveBulkEdit() {
+  function saveBulkEdit(nextBulkDrafts = bulkDrafts) {
     if (!selectedEmployees.length) {
       window.alert("수정할 직원을 먼저 선택해 주세요.");
       return;
     }
     const nextEmployees = employees.map((employee) => {
       if (!selectedKeys.includes(employee.id)) return employee;
-      const draftValues = bulkDrafts[employee.id] || {};
+      const draftValues = nextBulkDrafts[employee.id] || {};
       const updates = Object.fromEntries(bulkFields.map((field) => [
         field,
         field === "status"
@@ -15929,7 +15943,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
             return String(employee[field] || "");
           }}
           onClose={() => setBulkOpen(false)}
-          onSave={saveBulkEdit}
+          onSave={(drafts) => saveBulkEdit(drafts)}
         />
       )}
 
@@ -16431,7 +16445,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     await loadCustomers(page, query, relationFilter);
   }
 
-  async function saveCustomerBulkEdit() {
+  async function saveCustomerBulkEdit(nextBulkDrafts = customerBulkDrafts) {
     if (!selectedCustomers.length) {
       setCustomerMessage("수정할 거래처를 먼저 선택해 주세요.");
       return;
@@ -16439,7 +16453,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     let saved = 0;
     for (const customer of selectedCustomers) {
       const key = customerRowKey(customer);
-      const draftValues = customerBulkDrafts[key] || {};
+      const draftValues = nextBulkDrafts[key] || {};
       const updates = Object.fromEntries(customerBulkSelectedFields.map((field) => {
         const rawValue = draftValues[field] ?? String(customer[field as keyof FnCustomer] || "");
         const value = field === "customer_type" ? normalizeCustomerAttribute(rawValue) : field === "business_no" ? formatBusinessNoInput(rawValue) : rawValue;
@@ -16739,7 +16753,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
             return String(customer[field as keyof FnCustomer] || "");
           }}
           onClose={() => setCustomerBulkOpen(false)}
-          onSave={() => void saveCustomerBulkEdit()}
+          onSave={(drafts) => void saveCustomerBulkEdit(drafts)}
         />
       )}
       {modalOpen && (
@@ -17034,7 +17048,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
-  async function saveProductBulkEdit() {
+  async function saveProductBulkEdit(nextBulkDrafts = productBulkDrafts) {
     if (!selectedProducts.length) {
       setProductMessage("수정할 품목을 먼저 선택해 주세요.");
       return;
@@ -17042,7 +17056,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     let saved = 0;
     for (const product of selectedProducts) {
       const key = productRowKey(product);
-      const draftValues = productBulkDrafts[key] || {};
+      const draftValues = nextBulkDrafts[key] || {};
       const productAttribute = productBulkSelectedFields.includes("product_attribute") ? normalizeProductAttribute(draftValues.product_attribute ?? productAttributeOf(product)) : productAttributeOf(product);
       const rawProductName = productBulkSelectedFields.includes("product_name") ? draftValues.product_name ?? String(product.product_name || "") : String(product.product_name || "");
       const productName = productNameWithAttribute(rawProductName, productAttribute);
@@ -17406,7 +17420,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
             return String(product[field as keyof FnProduct] ?? "");
           }}
           onClose={() => setProductBulkOpen(false)}
-          onSave={() => void saveProductBulkEdit()}
+          onSave={(drafts) => void saveProductBulkEdit(drafts)}
         />
       )}
 
@@ -17664,7 +17678,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     await loadWarehouses(query);
   }
 
-  async function saveWarehouseBulkEdit() {
+  async function saveWarehouseBulkEdit(nextBulkDrafts = warehouseBulkDrafts) {
     if (!selectedWarehouses.length) {
       setMessage("수정할 창고를 먼저 선택해 주세요.");
       return;
@@ -17673,7 +17687,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
     for (const warehouse of selectedWarehouses) {
       const memoDraft = parseWarehouseMemo(warehouse.memo);
       const key = warehouseRowKey(warehouse);
-      const draftValues = warehouseBulkDrafts[key] || {};
+      const draftValues = nextBulkDrafts[key] || {};
       const updates = Object.fromEntries(warehouseBulkSelectedFields.map((field) => [
         field,
         field === "warehouse_type" ? normalizeWarehouseAttribute(draftValues[field] ?? warehouse.warehouse_type ?? "general") : draftValues[field] ?? (field === "warehouse_name" ? warehouse.warehouse_name || "" : memoDraft[field] || ""),
@@ -17915,7 +17929,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
             return String(parseWarehouseMemo(warehouse.memo)[field] || "");
           }}
           onClose={() => setWarehouseBulkOpen(false)}
-          onSave={() => void saveWarehouseBulkEdit()}
+          onSave={(drafts) => void saveWarehouseBulkEdit(drafts)}
         />
       )}
 
@@ -22640,7 +22654,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     return String(row[field] || "");
   }
 
-  async function saveFixedCostBulkEdit() {
+  async function saveFixedCostBulkEdit(nextBulkDrafts = fixedCostBulkDrafts) {
     if (!selectedFixedCostRows.length) {
       setMessage("수정할 고정비를 먼저 선택해 주세요.");
       return;
@@ -22653,7 +22667,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     let saved = 0;
     for (const row of selectedFixedCostRows) {
       const key = fixedCostRowKey(row);
-      const draftValues = fixedCostBulkDrafts[key] || {};
+      const draftValues = nextBulkDrafts[key] || {};
       const isLoan = String(row.row_type || "") === "loan";
       const payload: Record<string, unknown> = { id: String(row.loan_id || row.fixed_cost_id || row.id || "") };
       fixedCostBulkSelectedFields.forEach((field) => {
@@ -23891,7 +23905,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             setFixedCostBulkFieldPickerOpen(false);
             setFixedCostBulkOpen(false);
           }}
-          onSave={() => void saveFixedCostBulkEdit()}
+          onSave={(drafts) => void saveFixedCostBulkEdit(drafts)}
         />
       )}
 
@@ -26527,14 +26541,14 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setLocationModalOpen(true);
   }
 
-  function saveLocationBulkEdit() {
+  function saveLocationBulkEdit(nextBulkDrafts = locationBulkDrafts) {
     if (!selectedLocations.length) {
       window.alert("수정할 사무실/창고를 먼저 선택해 주세요.");
       return;
     }
     const nextLocations = locations.map((location) => {
       if (!selectedLocationKeys.includes(location.id)) return location;
-      const draftValues = locationBulkDrafts[location.id] || {};
+      const draftValues = nextBulkDrafts[location.id] || {};
       const updates = Object.fromEntries(locationBulkFields.map((field) => {
         const value = draftValues[field] ?? String(location[field] || "");
         return [
@@ -26731,7 +26745,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
             return String(item[field] || "");
           }}
           onClose={() => setLocationBulkOpen(false)}
-          onSave={saveLocationBulkEdit}
+          onSave={(drafts) => saveLocationBulkEdit(drafts)}
         />
       )}
       {fileTarget && <AccountFileModal accountType={fileTarget.type} accountId={fileTarget.id} title={fileTarget.title} onClose={() => setFileTarget(null)} onChanged={(count) => {
