@@ -276,6 +276,16 @@ function replaceCurrentQueryParam(name: string, value: string) {
   window.history.replaceState(window.history.state, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
 }
 
+function replaceCurrentQueryParams(values: Record<string, string | null | undefined>) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  Object.entries(values).forEach(([name, value]) => {
+    if (value) url.searchParams.set(name, value);
+    else url.searchParams.delete(name);
+  });
+  window.history.replaceState(window.history.state, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+}
+
 const kpis = [
   { label: "오늘 매출", value: "1,284,000원", tone: "text-emerald-600", note: "+12.4%" },
   { label: "광고비", value: "182,500원", tone: "text-sky-600", note: "ROAS 421%" },
@@ -1241,6 +1251,15 @@ type ProductAttribute = "plain" | "set" | "rg";
 type CustomerRelationFilter = "general" | "shopping" | "all";
 type CustomerAttribute = "general" | "shopping";
 type WarehouseAttribute = "general" | "fulfillment";
+
+function isCustomerRelationFilter(value: unknown): value is CustomerRelationFilter {
+  return value === "general" || value === "shopping" || value === "all";
+}
+
+function isProductRelationFilter(value: unknown): value is ProductRelationFilter {
+  return value === "plain" || value === "set" || value === "rg" || value === "import" || value === "all";
+}
+
 type ProductBulkField = "product_attribute" | "product_name" | "cost_price" | "standard_price";
 type InventoryBulkField = "qty" | "transfer" | "risk";
 type FixedCostBulkField = "category_large" | "category_middle" | "fixed_cost_name" | "expected_amount" | "base_day" | "payment_type" | "payment_source" | "loan_name" | "principal_amount" | "expected_payment_amount" | "payment_day" | "bank_name" | "account_holder" | "account_number" | "loan_start_date" | "loan_end_date" | "memo";
@@ -16225,11 +16244,14 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
 
 function CustomerManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
   const pageSize = 20;
-  const initialCustomerEndpoint = `/api/fnos/customers?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: "general" }).toString()}`;
+  const searchParams = useSearchParams();
+  const requestedCustomerRelation = searchParams.get("customerRelation");
+  const initialCustomerRelation = isCustomerRelationFilter(requestedCustomerRelation) ? requestedCustomerRelation : "general";
+  const initialCustomerEndpoint = `/api/fnos/customers?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: initialCustomerRelation }).toString()}`;
   const initialCustomerData = readInitialCachedJson<{ customers?: FnCustomer[]; total?: number; ok?: boolean; error?: string }>(initialCustomerEndpoint, { storageTtl: 5 * 60_000 });
   const [customers, setCustomers] = useState<FnCustomer[]>(initialCustomerData?.customers || []);
   const [query, setQuery] = useState("");
-  const [relationFilter, setRelationFilter] = useState<CustomerRelationFilter>("general");
+  const [relationFilter, setRelationFilter] = useState<CustomerRelationFilter>(initialCustomerRelation);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(Number(initialCustomerData?.total || 0));
   const [loading, setLoading] = useState(!initialCustomerData);
@@ -16291,6 +16313,13 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
     const timer = window.setTimeout(() => void loadCustomers(page, query, relationFilter), 0);
     return () => window.clearTimeout(timer);
   }, [page, query, relationFilter]);
+
+  useEffect(() => {
+    if (isCustomerRelationFilter(requestedCustomerRelation) && requestedCustomerRelation !== relationFilter) {
+      setRelationFilter(requestedCustomerRelation);
+      setPage(1);
+    }
+  }, [requestedCustomerRelation, relationFilter]);
 
   useEffect(() => {
     setSelectedCustomerKeys([]);
@@ -16417,6 +16446,17 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   function toggleCustomerSelected(key: string) {
     if (!key) return;
     setSelectedCustomerKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]);
+  }
+
+  function openCustomerRelation(filter: CustomerRelationFilter) {
+    setRelationFilter(filter);
+    setPage(1);
+    replaceCurrentQueryParams({
+      menu: "sales",
+      salesSection: "master",
+      masterTab: "customers",
+      customerRelation: filter,
+    });
   }
 
   async function loadCustomerChannel(customer: Record<string, string>) {
@@ -16782,8 +16822,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
                 key={filter.key}
                 type="button"
                 onClick={() => {
-                  setRelationFilter(filter.key);
-                  setPage(1);
+                  openCustomerRelation(filter.key);
                 }}
                 className={`font-black underline-offset-4 hover:underline ${relationFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"}`}
               >
@@ -16947,7 +16986,10 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
 function ProductManagementPanel({ setMessage }: { message: string; setMessage: (value: string) => void }) {
   const pageSize = 20;
-  const initialProductEndpoint = `/api/fnos/products/master?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: "plain" }).toString()}`;
+  const searchParams = useSearchParams();
+  const requestedProductRelation = searchParams.get("productRelation");
+  const initialProductRelation = isProductRelationFilter(requestedProductRelation) ? requestedProductRelation : "plain";
+  const initialProductEndpoint = `/api/fnos/products/master?${new URLSearchParams({ page: "1", pageSize: String(pageSize), relation: initialProductRelation }).toString()}`;
   const initialProductData = readInitialCachedJson<{ products?: FnProduct[]; warehouses?: WarehouseOption[]; total?: number; ok?: boolean; error?: string }>(initialProductEndpoint, { storageTtl: 10 * 60_000 });
   const [products, setProducts] = useState<FnProduct[]>(initialProductData?.products || []);
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>(initialProductData?.warehouses || []);
@@ -16961,7 +17003,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [bomRows, setBomRows] = useState<ProductBomRow[]>([]);
   const [importLinks, setImportLinks] = useState<ProductImportLinkRow[]>([]);
-  const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>("plain");
+  const [relationFilter, setRelationFilter] = useState<ProductRelationFilter>(initialProductRelation);
   const [selectedProductKeys, setSelectedProductKeys] = useState<string[]>([]);
   const [productSelecting, setProductSelecting] = useState(false);
   const [productBulkOpen, setProductBulkOpen] = useState(false);
@@ -17024,6 +17066,13 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     }, 0);
     return () => window.clearTimeout(timer);
   }, [page, query, relationFilter, searchByCode]);
+
+  useEffect(() => {
+    if (isProductRelationFilter(requestedProductRelation) && requestedProductRelation !== relationFilter) {
+      setRelationFilter(requestedProductRelation);
+      setPage(1);
+    }
+  }, [requestedProductRelation, relationFilter]);
 
   useEffect(() => {
     setSelectedProductKeys([]);
@@ -17113,6 +17162,17 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   function toggleProductSelected(key: string) {
     if (!key) return;
     setSelectedProductKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]);
+  }
+
+  function openProductRelation(filter: ProductRelationFilter) {
+    setRelationFilter(filter);
+    setPage(1);
+    replaceCurrentQueryParams({
+      menu: "sales",
+      salesSection: "master",
+      masterTab: "products",
+      productRelation: filter,
+    });
   }
 
   async function saveProductDraft() {
@@ -17449,8 +17509,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
                 key={filter.key}
                 type="button"
                 onClick={() => {
-                  setRelationFilter(filter.key);
-                  setPage(1);
+                  openProductRelation(filter.key);
                 }}
                 className={`font-black underline-offset-4 hover:underline ${
                   relationFilter === filter.key ? "text-orange-600 underline" : "text-slate-500"
