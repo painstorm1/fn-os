@@ -37,17 +37,21 @@ function formatKstDateTime(date: Date) {
     kst.getUTCFullYear(),
     pad2(kst.getUTCMonth() + 1),
     pad2(kst.getUTCDate()),
-  ].join("-") + `T${pad2(kst.getUTCHours())}:${pad2(kst.getUTCMinutes())}:${pad2(kst.getUTCSeconds())}${KST_OFFSET}`;
+  ].join("-") + `T${pad2(kst.getUTCHours())}:${pad2(kst.getUTCMinutes())}:${pad2(kst.getUTCSeconds())}.${String(kst.getUTCMilliseconds()).padStart(3, "0")}${KST_OFFSET}`;
 }
 
 function normalizeNaverDateTime(value: unknown, boundary: "start" | "end") {
   const raw = text(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return `${raw}T${boundary === "start" ? "00:00:00" : "23:59:59"}${KST_OFFSET}`;
+    return `${raw}T${boundary === "start" ? "00:00:00.000" : "23:59:59.999"}${KST_OFFSET}`;
   }
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([zZ]|[+-]\d{2}:\d{2})?$/.test(raw)) {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d{1,3})?([zZ]|[+-]\d{2}:\d{2})?$/.test(raw)) {
     const withSeconds = raw.length === 16 ? `${raw}:00` : raw;
-    return /([zZ]|[+-]\d{2}:\d{2})$/.test(withSeconds) ? withSeconds : `${withSeconds}${KST_OFFSET}`;
+    const withMilliseconds = withSeconds.replace(/(T\d{2}:\d{2}:\d{2})(\.\d{1,3})?([zZ]|[+-]\d{2}:\d{2})?$/, (_match, time: string, ms = "", offset = "") => {
+      const normalizedMs = ms ? `.${ms.slice(1).padEnd(3, "0")}` : ".000";
+      return `${time}${normalizedMs}${offset}`;
+    });
+    return /([zZ]|[+-]\d{2}:\d{2})$/.test(withMilliseconds) ? withMilliseconds : `${withMilliseconds}${KST_OFFSET}`;
   }
   const parsed = raw ? new Date(raw) : null;
   if (parsed && Number.isFinite(parsed.getTime())) return formatKstDateTime(parsed);
