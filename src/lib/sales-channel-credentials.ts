@@ -30,15 +30,26 @@ type CredentialRow = {
 function encryptionSecret() {
   return (
     process.env.FN_OS_CREDENTIAL_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.FN_OS_AUTH_TOKEN ||
     process.env.FN_OS_PASSWORD ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     "fnos-local-credential-secret"
   );
 }
 
-function encryptionKey() {
-  return createHash("sha256").update(encryptionSecret()).digest();
+function credentialSecretCandidates() {
+  return Array.from(new Set([
+    encryptionSecret(),
+    process.env.FN_OS_CREDENTIAL_SECRET,
+    process.env.FN_OS_AUTH_TOKEN,
+    process.env.FN_OS_PASSWORD,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    "fnos-local-credential-secret",
+  ].filter((value): value is string => Boolean(value))));
+}
+
+function encryptionKey(secret = encryptionSecret()) {
+  return createHash("sha256").update(secret).digest();
 }
 
 export function encryptCredential(value: string) {
@@ -50,14 +61,26 @@ export function encryptCredential(value: string) {
 }
 
 export function decryptCredential(value: string) {
+  return decryptCredentialWithSecret(value, encryptionSecret());
+}
+
+function decryptCredentialWithSecret(value: string, secret: string) {
   const [version, ivRaw, tagRaw, encryptedRaw] = value.split(":");
   if (version !== "v1" || !ivRaw || !tagRaw || !encryptedRaw) return "";
-  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(ivRaw, "base64"));
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(secret), Buffer.from(ivRaw, "base64"));
   decipher.setAuthTag(Buffer.from(tagRaw, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, "base64")), decipher.final()]).toString("utf8");
 }
 
 export function tryDecryptCredential(value: string) {
+  for (const secret of credentialSecretCandidates()) {
+    try {
+      const decrypted = decryptCredentialWithSecret(value, secret);
+      if (decrypted) return { value: decrypted, error: "" };
+    } catch {
+      // Continue with other known secrets used by older local/prod environments.
+    }
+  }
   try {
     return { value: decryptCredential(value), error: "" };
   } catch {
@@ -90,11 +113,12 @@ export async function credentialSummary(channelIds: string[]) {
   });
   rows.forEach((row) => {
     const list = result.get(row.channel_id) || [];
+    const decrypted = row.credential_value_encrypted ? tryDecryptCredential(row.credential_value_encrypted) : { error: "" };
     list.push({
       key: row.credential_key,
-      hint: row.credential_hint || "",
+      hint: decrypted.error ? "재입력 필요" : row.credential_hint || "",
       is_secret: row.is_secret !== false,
-      has_value: Boolean(row.credential_value_encrypted),
+      has_value: Boolean(row.credential_value_encrypted) && !decrypted.error,
     });
     result.set(row.channel_id, list);
   });
