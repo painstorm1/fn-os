@@ -178,13 +178,16 @@ function useSelectedRowsByKey<Row>(
   getRowKey: (row: Row) => string,
 ) {
   const [rowCache, setRowCache] = useState<Record<string, Row>>({});
+  const getRowKeyRef = useRef(getRowKey);
+
+  getRowKeyRef.current = getRowKey;
 
   useEffect(() => {
     setRowCache((prev) => {
       let changed = false;
       const next = { ...prev };
       rows.forEach((row) => {
-        const key = getRowKey(row);
+        const key = getRowKeyRef.current(row);
         if (key && next[key] !== row) {
           next[key] = row;
           changed = true;
@@ -192,21 +195,23 @@ function useSelectedRowsByKey<Row>(
       });
       return changed ? next : prev;
     });
-  }, [rows, getRowKey]);
+  }, [rows]);
 
   useEffect(() => {
     setRowCache((prev) => {
       const selectedSet = new Set(selectedKeys);
       const next = Object.fromEntries(Object.entries(prev).filter(([key]) => selectedSet.has(key))) as Record<string, Row>;
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      return nextKeys.length === prevKeys.length && nextKeys.every((key) => key in prev) ? prev : next;
     });
   }, [selectedKeys]);
 
   return useMemo(
     () => selectedKeys
-      .map((key) => rowCache[key] || rows.find((row) => getRowKey(row) === key))
+      .map((key) => rowCache[key] || rows.find((row) => getRowKeyRef.current(row) === key))
       .filter((row): row is Row => Boolean(row)),
-    [getRowKey, rowCache, rows, selectedKeys],
+    [rowCache, rows, selectedKeys],
   );
 }
 
