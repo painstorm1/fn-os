@@ -1353,10 +1353,30 @@ function rocketGrowthDedupeKey(month: string, item: string) {
   return `manual|coupang-rocket-growth|${month}|${item}`;
 }
 
-async function categoryByLargeMiddle(categoryLarge: string, categoryMiddle: string) {
+async function categoryByLargeMiddle(categoryLarge: string, categoryMiddle: string, options: { aliases?: string[]; createIfMissing?: boolean; memo?: string } = {}) {
   const categories = await optionalRows("accounting_categories", { is_active: "eq.true", limit: 500 });
   const normalize = (value: unknown) => text(value).replace(/[·\s/-]/g, "");
-  const category = categories.find((item) => normalize(item.category_large) === normalize(categoryLarge) && normalize(item.category_middle) === normalize(categoryMiddle));
+  const middleCandidates = [categoryMiddle, ...(options.aliases || [])].map(normalize).filter(Boolean);
+  const category = categories.find((item) => {
+    if (normalize(item.category_large) !== normalize(categoryLarge)) return false;
+    const itemMiddle = normalize(item.category_middle);
+    return middleCandidates.some((candidate) => itemMiddle === candidate || itemMiddle.includes(candidate) || candidate.includes(itemMiddle));
+  });
+  if (category) return category;
+  if (options.createIfMissing) {
+    const [created] = await upsertRows<RawRow>("accounting_categories", {
+      category_large: categoryLarge,
+      category_middle: categoryMiddle,
+      category_small: "",
+      is_active: true,
+      affects_profit: false,
+      affects_cashflow: false,
+      default_review_required: false,
+      sort_order: 0,
+      memo: options.memo || "쿠팡 로켓그로스 수동 비용 입력용 카테고리",
+    }, "category_large,category_middle,category_small");
+    if (created) return created;
+  }
   if (!category) throw new Error(`${categoryLarge} > ${categoryMiddle} 카테고리가 필요합니다.`);
   return category;
 }
@@ -1384,8 +1404,8 @@ export async function upsertRocketGrowthCosts(row: RawRow) {
   const rocketGrowthServiceAmount = fulfillmentAmount + sellerDiscountCouponAmount + subscriptionServiceAmount + coupangLiveAmount;
   if ([adAmount, fulfillmentAmount, sellerDiscountCouponAmount, subscriptionServiceAmount, coupangLiveAmount].some((amount) => amount < 0)) throw new Error("금액은 0 이상이어야 합니다.");
   const [adCategory, fulfillmentCategory] = await Promise.all([
-    categoryByLargeMiddle("마케팅·광고", "쿠팡"),
-    categoryByLargeMiddle("업무 비용", "로켓그로스"),
+    categoryByLargeMiddle("마케팅·광고", "쿠팡", { aliases: ["쿠팡 광고"], createIfMissing: true }),
+    categoryByLargeMiddle("업무 비용", "쿠팡 로켓그로스", { aliases: ["로켓그로스"], createIfMissing: true }),
   ]);
   const now = new Date().toISOString();
   const base = {
