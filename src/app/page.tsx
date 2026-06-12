@@ -13185,11 +13185,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <table className="w-full table-fixed text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
                     <tr>
-                      <th className="w-[88px] px-1 py-2 text-left">날짜</th>
-                      <th className="w-[120px] px-1 py-2 text-left">품목코드</th>
+                      <th className="w-[76px] px-1 py-2 text-left">날짜</th>
+                      <th className="w-[112px] px-1 py-2 text-left">품목코드</th>
                       <th className="px-2 py-2 text-left">품목명</th>
-                      <th className="w-[105px] px-1 py-2 text-left">출고창고코드</th>
-                      <th className="w-[105px] px-1 py-2 text-left">입고창고코드</th>
+                      <th className="w-[90px] px-1 py-2 text-left">출고창고코드</th>
+                      <th className="w-[90px] px-1 py-2 text-left">입고창고코드</th>
                       <th className="w-[70px] px-1 py-2 text-right">수량</th>
                       <th className="w-[105px] px-1 py-2 text-right">금액</th>
                       <th className="w-[180px] px-2 py-2 text-left">메모</th>
@@ -13215,10 +13215,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <table className="w-full table-fixed text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-500">
                     <tr>
-                      <th className="w-[88px] px-1 py-2 text-left">날짜</th>
-                      <th className="w-[120px] px-1 py-2 text-left">품목코드</th>
+                      <th className="w-[76px] px-1 py-2 text-left">날짜</th>
+                      <th className="w-[112px] px-1 py-2 text-left">품목코드</th>
                       <th className="px-2 py-2 text-left">품목명</th>
-                      <th className="w-[105px] px-1 py-2 text-left">창고코드</th>
+                      <th className="w-[80px] px-1 py-2 text-left">창고코드</th>
                       <th className="w-[95px] px-1 py-2 text-right">변경 전 수량</th>
                       <th className="w-[90px] px-1 py-2 text-right">변경 수량</th>
                       <th className="w-[95px] px-1 py-2 text-right">변경 후 수량</th>
@@ -17213,6 +17213,36 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         qty: draft[`stock_${warehouse.warehouse_code}`],
       }))
       .filter((item) => String(item.qty ?? "").trim() !== "");
+    const existingProduct = products.find((product) => (
+      String(product.id || "") === String(draft.id || "") ||
+      inventoryProductCode(product) === productCode
+    ));
+    const existingInventoryByWarehouse = new Map((existingProduct?.inventory || []).map((stock) => [inventoryWarehouseCode(stock), inventoryQty(stock)]));
+    const unitCost = Number(String(draft.cost_price || existingProduct?.cost_price || 0).replace(/[^\d.-]/g, "")) || 0;
+    const inventoryHistory = inventory
+      .map((item) => {
+        const warehouse = usableWarehouses.find((row) => row.warehouse_code === item.warehouse_code);
+        const beforeQty = Number(existingInventoryByWarehouse.get(item.warehouse_code) || 0);
+        const afterQty = Number(String(item.qty ?? "").replace(/[^\d.-]/g, "")) || 0;
+        const changeQty = afterQty - beforeQty;
+        if (changeQty === 0) return null;
+        return {
+          kind: "manual_adjustment",
+          source_ref_id: `product-master-${Date.now()}-${productCode}-${item.warehouse_code}`,
+          productCode,
+          productName,
+          warehouseCode: item.warehouse_code,
+          warehouseName: warehouse?.warehouse_name || item.warehouse_code,
+          beforeQty,
+          changeQty,
+          afterQty,
+          qty: Math.abs(changeQty),
+          unitCost,
+          amount: Math.abs(changeQty) * unitCost,
+          userMemo: "",
+        };
+      })
+      .filter(Boolean);
     const res = await fetch("/api/fnos/products/master", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -17228,6 +17258,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
           standard_price: draft.standard_price,
         },
         inventory,
+        inventory_history: inventoryHistory,
         bom: bomRows,
       }),
     });
