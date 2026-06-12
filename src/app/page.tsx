@@ -21273,6 +21273,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [dashboardExpenseDrillCategory, setDashboardExpenseDrillCategory] = useState("");
   const [rocketGrowthModalOpen, setRocketGrowthModalOpen] = useState(false);
   const [rocketGrowthSaving, setRocketGrowthSaving] = useState(false);
+  const [rocketGrowthNotice, setRocketGrowthNotice] = useState("");
   const [rocketGrowthDraft, setRocketGrowthDraft] = useState({
     month: accountingMonthValue(-1),
     ad_amount: "",
@@ -21687,6 +21688,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   async function saveRocketGrowthCosts(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setRocketGrowthSaving(true);
+    setRocketGrowthNotice("");
     try {
       const res = await fetch("/api/accounting/ledger/rocket-growth", {
         method: "POST",
@@ -21696,13 +21698,34 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       const data = await res.json();
       if (!res.ok || data.ok === false) {
         setMessage(data.error || "쿠팡 로켓그로스 비용 저장 실패");
+        setRocketGrowthNotice(data.error || "쿠팡 로켓그로스 비용 저장 실패");
         return;
       }
+      const savedRows: Array<Record<string, unknown>> = Array.isArray(data.rows) ? data.rows : [];
       setMessage("쿠팡 로켓그로스 비용을 저장했습니다.");
+      setRocketGrowthNotice("저장 완료. 아래 월별 입력 내역에 반영했습니다.");
+      if (savedRows.length) {
+        setSummary((prev) => {
+          if (!prev) return prev;
+          const savedKeys = new Set(savedRows.map((row) => String(row.dedupe_key || row.id || "")));
+          const currentRows = (prev.rocket_growth_costs || []).filter((row) => !savedKeys.has(String(row.dedupe_key || row.id || "")));
+          return { ...prev, rocket_growth_costs: [...savedRows, ...currentRows] };
+        });
+        setLedgerRows((prev) => {
+          const savedKeys = new Set(savedRows.map((row) => String(row.dedupe_key || row.id || "")));
+          const currentRows = prev.filter((row) => !savedKeys.has(String(row.dedupe_key || row.id || "")));
+          return [...savedRows, ...currentRows];
+        });
+      }
       setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: "", fulfillment_amount: "", seller_discount_coupon_amount: "", subscription_service_amount: "", coupang_live_amount: "", memo: "" }));
       invalidateAccountingCache();
-      await loadSummary(true);
-      await loadLedgerRows(true);
+      loadSummary(true);
+      loadLedgerRows(true);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "쿠팡 로켓그로스 비용 저장 실패";
+      setMessage(messageText);
+      setRocketGrowthNotice(messageText);
+      if (typeof window !== "undefined") window.alert(messageText);
     } finally {
       setRocketGrowthSaving(false);
     }
@@ -22530,11 +22553,12 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const rocketGrowthCosts = summary?.rocket_growth_costs || [];
   const rocketGrowthMonthlyRows = Array.from(rocketGrowthCosts.reduce((map, row) => {
     const month = String(row.transaction_date || "").slice(0, 7) || "-";
-    const current = map.get(month) || { month, ad_amount: 0, fulfillment_amount: 0, seller_discount_coupon_amount: 0, subscription_service_amount: 0, coupang_live_amount: 0, service_total: 0, total: 0 };
+    const current = map.get(month) || { month, ad_amount: 0, fulfillment_amount: 0, seller_discount_coupon_amount: 0, subscription_service_amount: 0, coupang_live_amount: 0, service_total: 0, total: 0, memo: "" };
     const amount = asNumber(row.amount_krw ?? row.amount);
-    if (String(row.category_middle || "").includes("쿠팡")) current.ad_amount += amount;
+    const raw = row.raw_json && typeof row.raw_json === "object" && !Array.isArray(row.raw_json) ? row.raw_json as Record<string, unknown> : {};
+    if (!current.memo && row.memo) current.memo = String(row.memo || "");
+    if (String(raw.item || "") === "ad" || String(row.category_middle || "") === "쿠팡") current.ad_amount += amount;
     else {
-      const raw = row.raw_json && typeof row.raw_json === "object" && !Array.isArray(row.raw_json) ? row.raw_json as Record<string, unknown> : {};
       const componentTotal = asNumber(raw.fulfillment_amount) + asNumber(raw.seller_discount_coupon_amount) + asNumber(raw.subscription_service_amount) + asNumber(raw.coupang_live_amount);
       if (componentTotal > 0) {
         current.fulfillment_amount += asNumber(raw.fulfillment_amount);
@@ -22549,7 +22573,19 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     current.total += amount;
     map.set(month, current);
     return map;
-  }, new Map<string, { month: string; ad_amount: number; fulfillment_amount: number; seller_discount_coupon_amount: number; subscription_service_amount: number; coupang_live_amount: number; service_total: number; total: number }>()).values()).sort((left, right) => right.month.localeCompare(left.month));
+  }, new Map<string, { month: string; ad_amount: number; fulfillment_amount: number; seller_discount_coupon_amount: number; subscription_service_amount: number; coupang_live_amount: number; service_total: number; total: number; memo: string }>()).values()).sort((left, right) => right.month.localeCompare(left.month));
+  function editRocketGrowthMonth(row: { month: string; ad_amount: number; fulfillment_amount: number; seller_discount_coupon_amount: number; subscription_service_amount: number; coupang_live_amount: number; memo?: string }) {
+    setRocketGrowthDraft({
+      month: row.month,
+      ad_amount: String(row.ad_amount || ""),
+      fulfillment_amount: String(row.fulfillment_amount || ""),
+      seller_discount_coupon_amount: String(row.seller_discount_coupon_amount || ""),
+      subscription_service_amount: String(row.subscription_service_amount || ""),
+      coupang_live_amount: String(row.coupang_live_amount || ""),
+      memo: row.memo || "",
+    });
+    setRocketGrowthNotice(`${row.month.slice(2)} 입력값을 불러왔습니다. 수정 후 F4 저장하면 같은 월 값이 갱신됩니다.`);
+  }
   const expenseVendorRows = summary?.by_expense_vendor || vendorRows;
   const dashboardTrendPeriodLabel = accountingPeriodLabel(dashboardTrendFromMonth, dashboardTrendToMonth);
   const dashboardIncomePeriodLabel = accountingDatePeriodLabel(dashboardIncomePeriod.from, dashboardIncomePeriod.to);
@@ -23792,13 +23828,18 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <input className={modalInputClass} value={rocketGrowthDraft.memo} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="예: 2026년 5월 로켓그로스 정산" />
               </FormField>
             </div>
+            {rocketGrowthNotice && (
+              <div className={`rounded-lg border px-3 py-2 text-sm font-bold ${rocketGrowthNotice.includes("실패") || rocketGrowthNotice.includes("필요") || rocketGrowthNotice.includes("오류") ? "border-red-100 bg-red-50 text-red-700" : "border-emerald-100 bg-emerald-50 text-emerald-700"}`}>
+                {rocketGrowthNotice}
+              </div>
+            )}
             <div className="rounded-xl border border-gray-200">
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
                 <p className="text-sm font-black text-slate-800">월별 입력 내역</p>
                 <p className="text-xs font-bold text-slate-500">손익 미반영 / 자료 반영</p>
               </div>
               <div className="max-h-64 overflow-auto">
-                <table className="w-full min-w-[820px] text-sm">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead className="bg-white text-xs font-semibold text-gray-500">
                     <tr>
                       <th className="px-3 py-2 text-left">월</th>
@@ -23813,8 +23854,8 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   </thead>
                   <tbody>
                     {rocketGrowthMonthlyRows.map((row) => (
-                      <tr key={row.month} className="border-t border-gray-100">
-                        <td className="px-3 py-2 font-black text-slate-800">{row.month}</td>
+                      <tr key={row.month} className="cursor-pointer border-t border-gray-100 hover:bg-orange-50/70" onClick={() => editRocketGrowthMonth(row)} title="클릭하면 입력창에 이 월의 금액을 불러옵니다.">
+                        <td className="whitespace-nowrap px-3 py-2 font-black text-slate-800">{row.month.slice(2)}</td>
                         <td className="px-3 py-2 text-right font-bold text-orange-600">{krw(row.ad_amount)}</td>
                         <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.fulfillment_amount)}</td>
                         <td className="px-3 py-2 text-right font-bold text-slate-800">{krw(row.seller_discount_coupon_amount)}</td>
