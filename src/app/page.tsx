@@ -21271,7 +21271,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [matchStatusFilters, setMatchStatusFilters] = useState({ source: "", status: "", categoryLarge: "", categoryMiddle: "" });
   const [matchStatusLoading, setMatchStatusLoading] = useState(false);
   const [matchStatusEditing, setMatchStatusEditing] = useState<Record<string, unknown> | null>(null);
-  const [matchStatusEditDraft, setMatchStatusEditDraft] = useState({ categoryLarge: "", categoryId: "" });
+  const [matchStatusEditDraft, setMatchStatusEditDraft] = useState({ categoryLarge: "", categoryId: "", affectsProfit: true, autoClassify: false, ruleId: "" });
   const [matchStatusSaving, setMatchStatusSaving] = useState(false);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
@@ -22714,12 +22714,36 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     .filter((category) => String(category.category_large || "") === matchStatusEditDraft.categoryLarge)
     .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
 
+  function matchStatusRuleForRows(targetRows: Array<Record<string, unknown>>) {
+    return rules.find((rule) => {
+      if (rule.is_active === false) return false;
+      const keyword = String(rule.keyword || "").replace(/\s+/g, "").toLowerCase();
+      if (!keyword) return false;
+      return targetRows.some((row) => {
+        const patternKey = accountingReviewPatternKey(row);
+        if (!patternKey || keyword !== patternKey) return false;
+        if (rule.source_type && String(rule.source_type || "") !== String(row.source_type || "")) return false;
+        if (rule.source_name && String(rule.source_name || "") !== String(row.source_name || "")) return false;
+        return true;
+      });
+    });
+  }
+
   function openMatchStatusEditor(row: Record<string, unknown>) {
     const firstCategoryName = String((row.categoryNames as string[] | undefined)?.[0] || "");
     const [large, middle] = firstCategoryName.split(" > ");
     const category = categories.find((item) => String(item.category_large || "") === large && String(item.category_middle || "") === (middle || ""));
+    const targetRows = matchStatusTargetRows(row);
+    const firstRow = targetRows[0];
+    const activeRule = matchStatusRuleForRows(targetRows);
     setMatchStatusEditing(row);
-    setMatchStatusEditDraft({ categoryLarge: large || "", categoryId: String(category?.id || "") });
+    setMatchStatusEditDraft({
+      categoryLarge: large || "",
+      categoryId: String(category?.id || ""),
+      affectsProfit: firstRow ? firstRow.affects_profit !== false : category?.affects_profit !== false,
+      autoClassify: Boolean(activeRule),
+      ruleId: String(activeRule?.id || ""),
+    });
   }
 
   function matchStatusTargetRows(group: Record<string, unknown>) {
@@ -22750,7 +22774,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       category_large: category.category_large,
       category_middle: category.category_middle,
       category_small: "",
-      affects_profit: category.affects_profit !== false,
+      affects_profit: matchStatusEditDraft.affectsProfit,
       affects_cashflow: category.affects_cashflow !== false,
     };
     patchAccountingRowsLocally(ids, patch);
@@ -22772,9 +22796,52 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         await loadLedgerRows(true);
         return;
       }
+      const firstRow = targetRows[0];
+      const existingRuleId = matchStatusEditDraft.ruleId;
+      if (matchStatusEditDraft.autoClassify) {
+        const ruleRes = await fetch("/api/accounting/ledger/rules", {
+          method: existingRuleId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: existingRuleId,
+            priority: 50,
+            source_type: firstRow?.source_type,
+            source_name: firstRow?.source_name,
+            condition_field: "merchant_name",
+            condition_operator: "contains",
+            keyword: accountingReviewPatternName(firstRow || matchStatusEditing),
+            direction_condition: firstRow?.direction,
+            category_id: String(category.id || ""),
+            category_large: category.category_large,
+            category_middle: category.category_middle,
+            category_small: "",
+            auto_confirm: true,
+            review_required: false,
+            review_reason: "",
+            is_active: true,
+            memo: "거래명 매칭현황에서 저장한 자동분류 규칙",
+          }),
+        });
+        const ruleData = await ruleRes.json().catch(() => ({}));
+        if (!ruleRes.ok || ruleData.ok === false) {
+          setMessage(ruleData.error || "자동분류 규칙 저장 실패");
+          await loadSummary(true);
+          await loadLedgerRows(true);
+          return;
+        }
+      } else if (existingRuleId) {
+        const ruleRes = await fetch(`/api/accounting/ledger/rules?id=${encodeURIComponent(existingRuleId)}`, { method: "DELETE" });
+        const ruleData = await ruleRes.json().catch(() => ({}));
+        if (!ruleRes.ok || ruleData.ok === false) {
+          setMessage(ruleData.error || "자동분류 규칙 해제 실패");
+          await loadSummary(true);
+          await loadLedgerRows(true);
+          return;
+        }
+      }
       setMessage(`${targetRows.length.toLocaleString("ko-KR")}건의 거래명 매칭을 수정했습니다.`);
       setMatchStatusEditing(null);
-      setMatchStatusEditDraft({ categoryLarge: "", categoryId: "" });
+      setMatchStatusEditDraft({ categoryLarge: "", categoryId: "", affectsProfit: true, autoClassify: false, ruleId: "" });
       invalidateAccountingCache();
       loadSummary(true);
       loadLedgerRows(true);
