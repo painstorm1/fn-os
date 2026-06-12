@@ -21270,6 +21270,9 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const [matchStatusSearch, setMatchStatusSearch] = useState("");
   const [matchStatusFilters, setMatchStatusFilters] = useState({ source: "", status: "", categoryLarge: "", categoryMiddle: "" });
   const [matchStatusLoading, setMatchStatusLoading] = useState(false);
+  const [matchStatusEditing, setMatchStatusEditing] = useState<Record<string, unknown> | null>(null);
+  const [matchStatusEditDraft, setMatchStatusEditDraft] = useState({ categoryLarge: "", categoryId: "" });
+  const [matchStatusSaving, setMatchStatusSaving] = useState(false);
   const [transactionDraft, setTransactionDraft] = useState({
     category_id: "",
     category_large: "",
@@ -22669,12 +22672,15 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     });
     return Array.from(groups.values()).map((group) => {
       const categoriesList = Array.from(group.categories.entries()).sort((a, b) => b[1] - a[1]);
+      const [primaryLarge, primaryMiddle] = String(categoriesList[0]?.[0] || "").split(" > ");
       const categoryLabel = categoriesList.length === 1
         ? categoriesList[0][0]
         : categoriesList.slice(0, 3).map(([name, count]) => `${name} ${count.toLocaleString("ko-KR")}건`).join(" / ");
       return {
         ...group,
         categoryLabel,
+        categoryLargeLabel: categoriesList.length === 1 ? (primaryLarge || "-") : "여러개",
+        categoryMiddleLabel: categoriesList.length === 1 ? (primaryMiddle || "-") : categoryLabel,
         categoryNames: categoriesList.map(([name]) => name),
         status: group.review ? "검토필요" : categoriesList.length > 1 ? "섞임" : "일치",
       };
@@ -22704,6 +22710,78 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
       return `${row.source} ${row.merchant} ${row.description} ${row.categoryLabel} ${row.status}`.toLowerCase().includes(keyword);
     });
   }, [matchStatusRows, matchStatusSearch, matchStatusFilters.source, matchStatusFilters.status, matchStatusFilters.categoryLarge, matchStatusFilters.categoryMiddle]);
+  const matchStatusEditMiddleOptions = categories
+    .filter((category) => String(category.category_large || "") === matchStatusEditDraft.categoryLarge)
+    .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
+
+  function openMatchStatusEditor(row: Record<string, unknown>) {
+    const firstCategoryName = String((row.categoryNames as string[] | undefined)?.[0] || "");
+    const [large, middle] = firstCategoryName.split(" > ");
+    const category = categories.find((item) => String(item.category_large || "") === large && String(item.category_middle || "") === (middle || ""));
+    setMatchStatusEditing(row);
+    setMatchStatusEditDraft({ categoryLarge: large || "", categoryId: String(category?.id || "") });
+  }
+
+  function matchStatusTargetRows(group: Record<string, unknown>) {
+    return matchStatusSourceRows.filter((row) => {
+      const { merchant, description } = accountingMerchantContentParts(row);
+      return accountingShortSource(row) === String(group.source || "")
+        && merchant === String(group.merchant || "")
+        && description === String(group.description || "");
+    });
+  }
+
+  async function saveMatchStatusEdit() {
+    if (!matchStatusEditing || !matchStatusEditDraft.categoryId) {
+      window.alert("카테고리1/2를 모두 선택해 주세요.");
+      return;
+    }
+    const category = categories.find((item) => String(item.id || "") === matchStatusEditDraft.categoryId);
+    if (!category) return;
+    const targetRows = matchStatusTargetRows(matchStatusEditing);
+    if (!targetRows.length) {
+      window.alert("수정할 거래를 찾지 못했습니다.");
+      return;
+    }
+    setMatchStatusSaving(true);
+    const ids = targetRows.map((row) => String(row.id || "")).filter(Boolean);
+    const patch = {
+      category_id: String(category.id || ""),
+      category_large: category.category_large,
+      category_middle: category.category_middle,
+      category_small: "",
+      affects_profit: category.affects_profit !== false,
+      affects_cashflow: category.affects_cashflow !== false,
+    };
+    patchAccountingRowsLocally(ids, patch);
+    try {
+      const results = await Promise.all(targetRows.map(async (row) => {
+        const id = String(row.id || "");
+        if (!id) return { ok: true };
+        const res = await fetch("/api/accounting/ledger/transactions", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, ...patch }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok && data.ok !== false, error: data.error };
+      }));
+      const failed = results.find((item) => !item.ok);
+      if (failed) {
+        setMessage(String(failed.error || "거래명 매칭 수정 실패"));
+        await loadLedgerRows(true);
+        return;
+      }
+      setMessage(`${targetRows.length.toLocaleString("ko-KR")}건의 거래명 매칭을 수정했습니다.`);
+      setMatchStatusEditing(null);
+      setMatchStatusEditDraft({ categoryLarge: "", categoryId: "" });
+      invalidateAccountingCache();
+      loadSummary(true);
+      loadLedgerRows(true);
+    } finally {
+      setMatchStatusSaving(false);
+    }
+  }
   const reviewSearchText = reviewSearch.trim().toLowerCase();
   const reviewSearchDigits = reviewSearch.replace(/[^0-9]/g, "");
   const filteredReviewRows = reviewSearchText || reviewSearchDigits ? pendingReviewRows.filter((row) => {
@@ -24210,23 +24288,27 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </p>
             </div>
             <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-200">
-              <table className="w-full min-w-[980px] table-fixed text-xs">
+              <table className="w-full min-w-[960px] table-fixed text-xs">
                 <thead className="sticky top-0 bg-gray-50 font-black text-gray-500">
                   <tr>
-                    <th className="w-[120px] px-3 py-2 text-left">출처</th>
-                    <th className="w-[380px] px-3 py-2 text-left">거래처/내용</th>
-                    <th className="w-[90px] px-3 py-2 text-right">건수</th>
-                    <th className="px-3 py-2 text-left">현재 카테고리</th>
-                    <th className="w-[90px] px-3 py-2 text-center">상태</th>
+                    <th className="w-[64px] px-3 py-2 text-left">수정</th>
+                    <th className="w-[110px] px-3 py-2 text-left">출처</th>
+                    <th className="w-[260px] px-3 py-2 text-left">거래처/내용</th>
+                    <th className="w-[74px] px-3 py-2 text-right">건수</th>
+                    <th className="w-[150px] px-3 py-2 text-left">카테고리1</th>
+                    <th className="px-3 py-2 text-left">카테고리2</th>
+                    <th className="w-[82px] px-3 py-2 text-center">상태</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredMatchStatusRows.slice(0, 1000).map((row, index) => (
                     <tr key={`${row.source}-${row.merchant}-${row.description}-${index}`} className="border-t border-gray-100 hover:bg-orange-50/60">
+                      <td className="px-3 py-2"><ActionButton type="button" variant="secondary" className="h-7 px-2 text-xs" onClick={() => openMatchStatusEditor(row)}>수정</ActionButton></td>
                       <td className="px-3 py-2"><StatusBadge>{row.source}</StatusBadge></td>
                       <td className="px-3 py-2"><p className="truncate font-black text-gray-900">{row.merchant}</p>{row.description && <p className="mt-0.5 truncate font-semibold text-gray-500">{row.description}</p>}</td>
                       <td className="px-3 py-2 text-right font-black text-gray-900">{row.count.toLocaleString("ko-KR")}건</td>
-                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-700">{row.categoryLabel}</p></td>
+                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-700">{row.categoryLargeLabel}</p></td>
+                      <td className="px-3 py-2"><p className="truncate font-semibold text-gray-700">{row.categoryMiddleLabel}</p></td>
                       <td className="px-3 py-2 text-center">
                         <StatusBadge tone={row.status === "일치" ? "success" : row.status === "섞임" ? "warning" : "danger"}>{row.status}</StatusBadge>
                       </td>
@@ -24234,7 +24316,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                   ))}
                   {!filteredMatchStatusRows.length && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-10 text-center text-sm font-black text-gray-500">검색 결과가 없습니다.</td>
+                      <td colSpan={7} className="px-3 py-10 text-center text-sm font-black text-gray-500">검색 결과가 없습니다.</td>
                     </tr>
                   )}
                 </tbody>
@@ -24243,6 +24325,36 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             {filteredMatchStatusRows.length > 1000 && <p className="text-xs font-bold text-gray-500">속도 보호를 위해 상위 1,000개만 표시합니다. 검색어로 좁혀 주세요.</p>}
           </div>
         </SelectionModal>
+      )}
+
+      {matchStatusEditing && (
+        <FormModal
+          title="거래명 매칭 수정"
+          description={`${String(matchStatusEditing.source || "-")} / ${String(matchStatusEditing.merchant || "-")} ${String(matchStatusEditing.description || "")} · ${matchStatusTargetRows(matchStatusEditing).length.toLocaleString("ko-KR")}건`}
+          onClose={() => setMatchStatusEditing(null)}
+          size="sm"
+          footer={
+            <>
+              <ActionButton type="button" variant="secondary" onClick={() => setMatchStatusEditing(null)}>취소</ActionButton>
+              <ActionButton type="button" onClick={() => void saveMatchStatusEdit()} disabled={matchStatusSaving || !matchStatusEditDraft.categoryId}>저장</ActionButton>
+            </>
+          }
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            <FormField label="카테고리1" required>
+              <select className={modalSelectClass} value={matchStatusEditDraft.categoryLarge} onChange={(event) => setMatchStatusEditDraft({ categoryLarge: event.target.value, categoryId: "" })}>
+                <option value="">선택</option>
+                {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
+              </select>
+            </FormField>
+            <FormField label="카테고리2" required>
+              <select className={modalSelectClass} value={matchStatusEditDraft.categoryId} disabled={!matchStatusEditDraft.categoryLarge} onChange={(event) => setMatchStatusEditDraft((prev) => ({ ...prev, categoryId: event.target.value }))}>
+                <option value="">{matchStatusEditDraft.categoryLarge ? "선택" : "카테고리1 먼저 선택"}</option>
+                {matchStatusEditMiddleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}
+              </select>
+            </FormField>
+          </div>
+        </FormModal>
       )}
 
       {fixedCostBulkOpen && (
@@ -24814,6 +24926,7 @@ function ReviewQuickGridEnhanced({
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [bulkProfit, setBulkProfit] = useState(true);
   const [bulkMemo, setBulkMemo] = useState("");
+  const [rowDrafts, setRowDrafts] = useState<Record<string, { categoryLarge: string; categoryId: string; affectsProfit: boolean }>>({});
   const largeOptions = Array.from(new Set(categories.map((category) => String(category.category_large || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ko-KR"));
   const expenseLargeOptions = largeOptions.filter((large) => accountingCategoryKind(large) === "expense");
   const selectedSet = new Set(selectedIds);
@@ -24898,8 +25011,10 @@ function ReviewQuickGridEnhanced({
             {sortedRows.map((row, index) => {
               const id = String(row.id || "");
               const currentCategory = categories.find((category) => String(category.id || "") === String(row.category_id || ""));
-              const selectedLarge = String(currentCategory?.category_large || row.category_large || "");
-              const selectedCategoryId = String(currentCategory?.id || row.category_id || "");
+              const draft = rowDrafts[id];
+              const selectedLarge = draft?.categoryLarge ?? String(currentCategory?.category_large || row.category_large || "");
+              const selectedCategoryId = draft?.categoryId ?? String(currentCategory?.id || row.category_id || "");
+              const selectedProfit = draft?.affectsProfit ?? row.affects_profit !== false;
               const rowLargeOptions = largeOptions.filter((large) => categories.some((category) => String(category.category_large || "") === large && accountingCategoryKind(large) === (String(row.direction || "") === "income" ? "income" : "expense")));
               const middleOptions = categories.filter((category) => String(category.category_large || "") === selectedLarge).sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
               const amount = asNumber(row.amount_krw ?? row.total_amount ?? row.amount);
@@ -24913,11 +25028,11 @@ function ReviewQuickGridEnhanced({
                   <td className="px-2 py-2"><StatusBadge className="whitespace-nowrap">{accountingShortSource(row)}</StatusBadge></td>
                   <td className="max-w-[270px] px-2 py-2"><p className="truncate font-semibold text-gray-900">{merchantContent.merchant}</p>{merchantContent.description && <p className="mt-0.5 truncate text-gray-500">{merchantContent.description}</p>}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-right font-bold text-gray-900">{krw(amount)}</td>
-                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => { const firstCategory = categories.find((category) => String(category.category_large || "") === event.target.value); if (firstCategory) onSave(row, { category_id: firstCategory.id }); }}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
-                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => onSave(row, { category_id: event.target.value })} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
-                  <td className="px-2 py-2 text-center"><input type="checkbox" checked={row.affects_profit !== false} onChange={(event) => onSave(row, { affects_profit: event.target.checked })} /></td>
+                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400" value={selectedLarge} onChange={(event) => setRowDrafts((prev) => ({ ...prev, [id]: { categoryLarge: event.target.value, categoryId: "", affectsProfit: selectedProfit } }))}><option value="">미지정</option>{rowLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}</select></td>
+                  <td className="px-2 py-2"><select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-orange-400 disabled:bg-gray-100 disabled:text-gray-400" value={selectedCategoryId} onChange={(event) => setRowDrafts((prev) => ({ ...prev, [id]: { categoryLarge: selectedLarge, categoryId: event.target.value, affectsProfit: selectedProfit } }))} disabled={!selectedLarge}><option value="">{selectedLarge ? "2차 선택" : "1차 먼저"}</option>{middleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}</select></td>
+                  <td className="px-2 py-2 text-center"><input type="checkbox" checked={selectedProfit} onChange={(event) => setRowDrafts((prev) => ({ ...prev, [id]: { categoryLarge: selectedLarge, categoryId: selectedCategoryId, affectsProfit: event.target.checked } }))} /></td>
                   <td className="py-2 pl-2 pr-3"><input className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-orange-400" defaultValue={String(row.memo || "")} placeholder={String(row.review_reason || "메모")} onBlur={(event) => onSave(row, { memo: event.target.value })} /></td>
-                  <td className="px-2 py-2"><div className="flex justify-end gap-1"><ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onSave(row, { category_id: selectedCategoryId || row.category_id, affects_profit: row.affects_profit !== false }, true)}>확정</ActionButton></div></td>
+                  <td className="px-2 py-2"><div className="flex justify-end gap-1"><ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onOpen(row)}>상세</ActionButton>{jaewookCandidate && <ActionButton type="button" variant="secondary" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => onJaewook?.(row)}>개인대납</ActionButton>}<ActionButton type="button" className="h-8 shrink-0 whitespace-nowrap px-2 text-xs" onClick={() => { if (!selectedCategoryId) { window.alert("카테고리1/2를 모두 선택한 뒤 확정해 주세요."); return; } void Promise.resolve(onSave(row, { category_id: selectedCategoryId, affects_profit: selectedProfit }, true)).then(() => setRowDrafts((prev) => { const next = { ...prev }; delete next[id]; return next; })); }}>확정</ActionButton></div></td>
                 </tr>
               );
             })}
