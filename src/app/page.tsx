@@ -719,6 +719,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
                 onClick={(event) => {
                   if (activeMenu === "매출/재고") {
                     event.preventDefault();
+                    if (salesSection !== "online") {
+                      goToInternal("/?menu=sales&salesSection=online");
+                      return;
+                    }
                     setSalesOpen((open) => !open);
                     return;
                   }
