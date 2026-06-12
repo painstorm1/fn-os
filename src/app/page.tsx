@@ -23479,7 +23479,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
               {[
                 ["bank", "통장 내역"],
@@ -23543,13 +23543,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             {ledgerFilters.periodMode === "day" ? (
               <>
                 <input
-                  className="h-9 w-[130px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="date"
                   value={ledgerFilters.fromDay}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromDay: event.target.value || accountingDateValue(0) }))}
                 />
                 <input
-                  className="h-9 w-[130px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="date"
                   value={ledgerFilters.toDay}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toDay: event.target.value || prev.fromDay || accountingDateValue(0) }))}
@@ -23558,13 +23558,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             ) : (
               <>
                 <input
-                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="month"
                   value={ledgerFilters.fromMonth}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromMonth: event.target.value || accountingMonthValue(-2) }))}
                 />
                 <input
-                  className="h-9 w-[138px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
+                  className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
                   type="month"
                   value={ledgerFilters.toMonth}
                   onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toMonth: event.target.value || prev.fromMonth || accountingMonthValue(0) }))}
