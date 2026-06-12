@@ -15453,8 +15453,10 @@ function MasterManagementPanel({
   }
 
   useEffect(() => {
-    if (isMasterTabKey(requestedMasterTab) && requestedMasterTab !== activeMasterTab) setActiveMasterTab(requestedMasterTab);
-  }, [requestedMasterTab, activeMasterTab]);
+    if (isMasterTabKey(requestedMasterTab)) {
+      setActiveMasterTab((current) => requestedMasterTab !== current ? requestedMasterTab : current);
+    }
+  }, [requestedMasterTab]);
 
   function openMasterTab(tab: MasterTabKey) {
     setActiveMasterTab(tab);
@@ -16342,11 +16344,14 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   }, [page, query, relationFilter]);
 
   useEffect(() => {
-    if (isCustomerRelationFilter(requestedCustomerRelation) && requestedCustomerRelation !== relationFilter) {
-      setRelationFilter(requestedCustomerRelation);
-      setPage(1);
+    if (isCustomerRelationFilter(requestedCustomerRelation)) {
+      setRelationFilter((current) => {
+        if (requestedCustomerRelation === current) return current;
+        setPage(1);
+        return requestedCustomerRelation;
+      });
     }
-  }, [requestedCustomerRelation, relationFilter]);
+  }, [requestedCustomerRelation]);
 
   useEffect(() => {
     setSelectedCustomerKeys([]);
@@ -17095,11 +17100,14 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }, [page, query, relationFilter, searchByCode]);
 
   useEffect(() => {
-    if (isProductRelationFilter(requestedProductRelation) && requestedProductRelation !== relationFilter) {
-      setRelationFilter(requestedProductRelation);
-      setPage(1);
+    if (isProductRelationFilter(requestedProductRelation)) {
+      setRelationFilter((current) => {
+        if (requestedProductRelation === current) return current;
+        setPage(1);
+        return requestedProductRelation;
+      });
     }
-  }, [requestedProductRelation, relationFilter]);
+  }, [requestedProductRelation]);
 
   useEffect(() => {
     setSelectedProductKeys([]);
