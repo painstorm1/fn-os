@@ -398,6 +398,8 @@ export async function POST(request: NextRequest) {
       }
       const delta = nextQty - prevQty;
       if (delta !== 0 && !inventoryHistory.length) {
+        const resolvedWarehouseCode = whCode || warehouseCode(warehouse || {});
+        const unitCost = numberValue(saved?.cost_price ?? saved?.in_price ?? product.cost_price ?? product.in_price);
         await insertRows("inventory_movements", {
           movement_date: now,
           movement_type: delta > 0 ? "adjustment_plus" : "adjustment_minus",
@@ -405,11 +407,25 @@ export async function POST(request: NextRequest) {
           product_id: productId || null,
           sku: code,
           prod_cd: code,
-          wh_cd: whCode || warehouseCode(warehouse || {}),
+          wh_cd: resolvedWarehouseCode,
           qty: delta,
           source_type: "product_master",
-          source_ref_id: code,
-          memo: "품목관리 재고 직접수정",
+          source_ref_id: `product-master-${code}-${resolvedWarehouseCode}-${Date.now()}`,
+          memo: inventoryHistoryMemo({
+            kind: "manual_adjustment",
+            source: "product_master",
+            productCode: code,
+            productName: name,
+            warehouseCode: resolvedWarehouseCode,
+            warehouseName: warehouseName(warehouse || item),
+            beforeQty: prevQty,
+            changeQty: delta,
+            afterQty: nextQty,
+            qty: Math.abs(delta),
+            unitCost,
+            amount: Math.abs(delta) * unitCost,
+            userMemo: "",
+          }),
           created_at: now,
         }).catch(() => null);
       }

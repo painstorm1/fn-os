@@ -61,10 +61,11 @@ export async function GET(request: NextRequest) {
     if (!hasDbConfig()) return NextResponse.json({ ok: false, error: "Supabase 환경변수가 설정되지 않았습니다." }, { status: 503 });
 
     const limit = Math.min(Number(request.nextUrl.searchParams.get("limit") || 1000) || 1000, 5000);
-    const [movements, products, warehouses] = await Promise.all([
+    const [movements, products, warehouses, currentInventory] = await Promise.all([
       selectRows<AnyRecord>("inventory_movements", { order: "movement_date.desc", limit }).catch(() => []),
       selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 10000 }).catch(() => []),
       selectRows<AnyRecord>("warehouses", { order: "warehouse_name.asc", limit: 2000 }).catch(() => []),
+      selectRows<AnyRecord>("inventory_current", { order: "updated_at.desc", limit: 10000 }).catch(() => []),
     ]);
 
     const productsById = new Map(products.map((row) => [text(row.id), row]));
@@ -79,6 +80,12 @@ export async function GET(request: NextRequest) {
       const code = warehouseCode(row);
       if (code) warehousesByCode.set(code, row);
     });
+    const currentByKey = new Map<string, AnyRecord>();
+    currentInventory.forEach((row) => {
+      const productKey = text(row.product_id) || productCode(row);
+      const whKey = text(row.wh_cd || row.warehouse_code);
+      if (productKey && whKey) currentByKey.set(`${productKey}::${whKey}`, row);
+    });
 
     const rows = movements
       .map((movement) => {
@@ -92,6 +99,15 @@ export async function GET(request: NextRequest) {
         const targetWarehouse = (warehousesByCode.get(text(meta.toWarehouseCode)) || {}) as AnyRecord;
         const qty = Math.abs(numberValue(meta.qty ?? movement.qty));
         const changeQty = numberValue(meta.changeQty ?? movement.qty);
+        const resolvedWarehouseCode = text(meta.warehouseCode || meta.fromWarehouseCode || movement.wh_cd || warehouseCode(warehouse));
+        const productCurrentKey = text(movement.product_id) || text(meta.productCode || movement.prod_cd || movement.sku || productCode(product));
+        const legacyCurrent = currentByKey.get(`${productCurrentKey}::${resolvedWarehouseCode}`);
+        const hasBeforeQty = Object.prototype.hasOwnProperty.call(meta, "beforeQty");
+        const hasAfterQty = Object.prototype.hasOwnProperty.call(meta, "afterQty");
+        const inferredAfterQty = sourceType === "product_master" && legacyCurrent ? numberValue(legacyCurrent.on_hand_qty ?? legacyCurrent.bal_qty) : 0;
+        const canInferLegacyQty = sourceType === "product_master" && Boolean(legacyCurrent);
+        const beforeQty = hasBeforeQty ? numberValue(meta.beforeQty) : (hasAfterQty ? numberValue(meta.afterQty) - changeQty : (canInferLegacyQty ? inferredAfterQty - changeQty : 0));
+        const afterQty = hasAfterQty ? numberValue(meta.afterQty) : (canInferLegacyQty ? inferredAfterQty : 0);
         const unitCost = numberValue(meta.unitCost ?? product?.cost_price ?? product?.in_price);
         return {
           id: text(movement.id || movement.source_ref_id || `${movementType}-${movement.movement_date}`),
@@ -100,15 +116,15 @@ export async function GET(request: NextRequest) {
           date: dateKey(movement.movement_date || movement.created_at),
           product_code: text(meta.productCode || movement.prod_cd || movement.sku || productCode(product)),
           product_name: text(meta.productName || movement.prod_name || productName(product)),
-          warehouse_code: text(meta.warehouseCode || meta.fromWarehouseCode || movement.wh_cd || warehouseCode(warehouse)),
+          warehouse_code: resolvedWarehouseCode,
           warehouse_name: text(meta.warehouseName || meta.fromWarehouseName || warehouseName(warehouse)),
           from_warehouse_code: text(meta.fromWarehouseCode || movement.wh_cd || warehouseCode(warehouse)),
           from_warehouse_name: text(meta.fromWarehouseName || warehouseName(warehouse)),
           to_warehouse_code: text(meta.toWarehouseCode || warehouseCode(targetWarehouse)),
           to_warehouse_name: text(meta.toWarehouseName || warehouseName(targetWarehouse)),
-          before_qty: numberValue(meta.beforeQty),
+          before_qty: beforeQty,
           change_qty: changeQty,
-          after_qty: numberValue(meta.afterQty),
+          after_qty: afterQty,
           qty,
           unit_cost: unitCost,
           amount: numberValue(meta.amount) || Math.abs(qty * unitCost),

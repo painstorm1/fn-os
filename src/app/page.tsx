@@ -12092,6 +12092,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return "";
   }
 
+  function compactInventoryHistoryDate(value: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || "");
+    if (!match) return value || "-";
+    return `${match[1].slice(2)}-${match[2]}-${match[3]}`;
+  }
+
+  function inventoryHistoryNumber(value: unknown, fallback = "-") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed.toLocaleString("ko-KR") : fallback;
+  }
+
   function updateInventoryHistoryMemo(row: InventoryHistoryRow, value: string) {
     setInventoryHistoryMemoDrafts((prev) => {
       const next = { ...prev, [row.id]: value };
@@ -13187,7 +13198,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <tbody>
                     {filteredInventoryHistoryRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-1 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="px-1 py-2 font-bold">{compactInventoryHistoryDate(row.date)}</td>
                         <td className="truncate px-1 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
                         <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
                         <td className="truncate px-1 py-2" title={row.from_warehouse_code}>{row.from_warehouse_code || "-"}</td>
@@ -13217,13 +13228,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <tbody>
                     {filteredInventoryHistoryRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-1 py-2 font-bold">{row.date || "-"}</td>
+                        <td className="px-1 py-2 font-bold">{compactInventoryHistoryDate(row.date)}</td>
                         <td className="truncate px-1 py-2 font-black text-blue-700" title={row.product_code}>{row.product_code || "-"}</td>
                         <td className="truncate px-2 py-2" title={row.product_name}>{row.product_name || "-"}</td>
                         <td className="truncate px-1 py-2" title={row.warehouse_code}>{row.warehouse_code || "-"}</td>
-                        <td className="px-1 py-2 text-right">{row.before_qty ? row.before_qty.toLocaleString("ko-KR") : "-"}</td>
-                        <td className="px-1 py-2 text-right font-black">{row.change_qty ? row.change_qty.toLocaleString("ko-KR") : row.qty.toLocaleString("ko-KR")}</td>
-                        <td className="px-1 py-2 text-right">{row.after_qty ? row.after_qty.toLocaleString("ko-KR") : "-"}</td>
+                        <td className="px-1 py-2 text-right">{inventoryHistoryNumber(row.before_qty)}</td>
+                        <td className="px-1 py-2 text-right font-black">{inventoryHistoryNumber(row.change_qty)}</td>
+                        <td className="px-1 py-2 text-right">{inventoryHistoryNumber(row.after_qty)}</td>
                         <td className="px-2 py-1"><input className="field-input h-8 w-full rounded-md border border-slate-200 px-2 text-xs" value={inventoryHistoryMemoValue(row)} onChange={(event) => updateInventoryHistoryMemo(row, event.target.value)} /></td>
                       </tr>
                     ))}
@@ -17229,6 +17240,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setMessage("");
     setModalOpen(false);
     invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/inventory/history");
     await loadProducts(page, query);
   }
 
