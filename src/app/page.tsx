@@ -1510,7 +1510,14 @@ function compareManagementName(left: unknown, right: unknown) {
   const rightName = String(right || "").trim();
   if (leftName && !rightName) return -1;
   if (!leftName && rightName) return 1;
-  return leftName.localeCompare(rightName, "ko-KR", { numeric: true, sensitivity: "base" });
+  const groupOf = (value: string) => {
+    const first = value.replace(/^[\s"'()[\]{}._-]+/, "").charAt(0);
+    if (!first) return 3;
+    if (/[0-9A-Za-z]/.test(first)) return 0;
+    if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(first)) return 1;
+    return 2;
+  };
+  return groupOf(leftName) - groupOf(rightName) || leftName.localeCompare(rightName, ["en-US", "ko-KR"], { numeric: true, sensitivity: "base" });
 }
 
 function sortRowsByManagementName<T>(rows: T[], getName: (row: T) => unknown, getFallback: (row: T) => unknown = () => "") {
