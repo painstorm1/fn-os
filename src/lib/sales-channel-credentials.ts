@@ -57,6 +57,14 @@ export function decryptCredential(value: string) {
   return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, "base64")), decipher.final()]).toString("utf8");
 }
 
+export function tryDecryptCredential(value: string) {
+  try {
+    return { value: decryptCredential(value), error: "" };
+  } catch {
+    return { value: "", error: "저장된 API 인증값을 현재 서버에서 읽을 수 없습니다. 애플리케이션 ID/시크릿을 다시 저장해주세요." };
+  }
+}
+
 export function credentialHint(value: string) {
   if (!value) return "";
   if (value.length <= 4) return "*".repeat(value.length);
@@ -99,14 +107,18 @@ export async function readChannelCredentials(channelId: string, reveal = false) 
     order: "credential_key.asc",
     limit: 100,
   });
-  return rows.map((row) => ({
-    key: row.credential_key,
-    value: reveal && row.credential_value_encrypted ? decryptCredential(row.credential_value_encrypted) : "",
-    hint: row.credential_hint || "",
-    is_secret: row.is_secret !== false,
-    has_value: Boolean(row.credential_value_encrypted),
-    updated_at: row.updated_at || null,
-  }));
+  return rows.map((row) => {
+    const decrypted = reveal && row.credential_value_encrypted ? tryDecryptCredential(row.credential_value_encrypted) : { value: "", error: "" };
+    return {
+      key: row.credential_key,
+      value: decrypted.value,
+      hint: decrypted.error ? "재입력 필요" : row.credential_hint || "",
+      is_secret: row.is_secret !== false,
+      has_value: Boolean(row.credential_value_encrypted) && !decrypted.error,
+      error: decrypted.error,
+      updated_at: row.updated_at || null,
+    };
+  });
 }
 
 export async function saveChannelCredentials(channelId: string, credentials: unknown) {

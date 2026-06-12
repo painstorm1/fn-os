@@ -21,8 +21,12 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function credentialMap(rows: Array<{ key: string; value?: string }>) {
+function credentialMap(rows: Array<{ key: string; value?: string; error?: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
+}
+
+function credentialReadError(rows: Array<{ error?: string }>) {
+  return rows.find((row) => row.error)?.error || "";
 }
 
 function adapterCodeForChannel(channel: AnyRecord) {
@@ -104,7 +108,12 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
     return { channel, ok: false, orders: [] as NormalizedOrder[], message };
   }
 
-  const credentials = credentialMap(await readChannelCredentials(text(channel.id), true));
+  const credentialRows = await readChannelCredentials(text(channel.id), true);
+  const credentialError = credentialReadError(credentialRows);
+  if (credentialError) {
+    return { channel, ok: false, orders: [] as NormalizedOrder[], message: credentialError };
+  }
+  const credentials = credentialMap(credentialRows);
   const params = {
     ...credentials,
     ...body,
