@@ -286,6 +286,17 @@ function replaceCurrentQueryParams(values: Record<string, string | null | undefi
   window.history.replaceState(window.history.state, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
 }
 
+function replaceMasterQueryParams(values: Record<string, string | null | undefined>) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("menu") !== "sales" || url.searchParams.get("salesSection") !== "master") return;
+  Object.entries(values).forEach(([name, value]) => {
+    if (value) url.searchParams.set(name, value);
+    else url.searchParams.delete(name);
+  });
+  window.history.replaceState(window.history.state, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+}
+
 const kpis = [
   { label: "오늘 매출", value: "1,284,000원", tone: "text-emerald-600", note: "+12.4%" },
   { label: "광고비", value: "182,500원", tone: "text-sky-600", note: "ROAS 421%" },
@@ -15418,11 +15429,12 @@ function MasterManagementPanel({
 
   function rememberMasterTab(tab: MasterTabKey) {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    params.set("menu", "sales");
-    params.set("salesSection", "master");
-    params.set("masterTab", tab);
-    window.history.replaceState(window.history.state, "", `/?${params.toString()}`);
+    replaceMasterQueryParams({
+      masterTab: tab,
+      customerRelation: tab === "customers" ? new URLSearchParams(window.location.search).get("customerRelation") || "general" : null,
+      productRelation: tab === "products" ? new URLSearchParams(window.location.search).get("productRelation") || "plain" : null,
+      productSearchByCode: tab === "products" ? new URLSearchParams(window.location.search).get("productSearchByCode") : null,
+    });
   }
 
   useEffect(() => {
@@ -16451,11 +16463,11 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
   function openCustomerRelation(filter: CustomerRelationFilter) {
     setRelationFilter(filter);
     setPage(1);
-    replaceCurrentQueryParams({
-      menu: "sales",
-      salesSection: "master",
+    replaceMasterQueryParams({
       masterTab: "customers",
       customerRelation: filter,
+      productRelation: null,
+      productSearchByCode: null,
     });
   }
 
@@ -17167,10 +17179,9 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   function openProductRelation(filter: ProductRelationFilter) {
     setRelationFilter(filter);
     setPage(1);
-    replaceCurrentQueryParams({
-      menu: "sales",
-      salesSection: "master",
+    replaceMasterQueryParams({
       masterTab: "products",
+      customerRelation: null,
       productRelation: filter,
     });
   }
