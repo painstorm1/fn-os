@@ -4,6 +4,7 @@ import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelA
 type AnyRecord = Record<string, unknown>;
 
 const NAVER_BASE_URL = "https://api.commerce.naver.com/external";
+const KST_OFFSET = "+09:00";
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -26,6 +27,35 @@ function firstText(...values: unknown[]) {
   return "";
 }
 
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatKstDateTime(date: Date) {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return [
+    kst.getUTCFullYear(),
+    pad2(kst.getUTCMonth() + 1),
+    pad2(kst.getUTCDate()),
+  ].join("-") + `T${pad2(kst.getUTCHours())}:${pad2(kst.getUTCMinutes())}:${pad2(kst.getUTCSeconds())}${KST_OFFSET}`;
+}
+
+function normalizeNaverDateTime(value: unknown, boundary: "start" | "end") {
+  const raw = text(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}T${boundary === "start" ? "00:00:00" : "23:59:59"}${KST_OFFSET}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([zZ]|[+-]\d{2}:\d{2})?$/.test(raw)) {
+    const withSeconds = raw.length === 16 ? `${raw}:00` : raw;
+    return /([zZ]|[+-]\d{2}:\d{2})$/.test(withSeconds) ? withSeconds : `${withSeconds}${KST_OFFSET}`;
+  }
+  const parsed = raw ? new Date(raw) : null;
+  if (parsed && Number.isFinite(parsed.getTime())) return formatKstDateTime(parsed);
+  const fallback = new Date();
+  if (boundary === "start") fallback.setDate(fallback.getDate() - 7);
+  return formatKstDateTime(fallback);
+}
+
 function arrayAt(root: unknown, paths: string[][]) {
   for (const path of paths) {
     let current = root;
@@ -39,7 +69,14 @@ async function readJson(response: Response) {
   const body = await response.text();
   const data = body ? JSON.parse(body) : {};
   if (!response.ok) {
-    const message = firstText(record(data).message, record(data).error, body) || `Naver API ${response.status}`;
+    const dataRecord = record(data);
+    const message = firstText(
+      dataRecord.message,
+      dataRecord.error_description,
+      dataRecord.error,
+      record(dataRecord.data).message,
+      body,
+    ) || `Naver API ${response.status}`;
     throw new Error(message);
   }
   return data;
@@ -144,8 +181,8 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       const token = firstText(tokenData.access_token, tokenData.accessToken, record(tokenData.data).access_token);
       if (!token) throw new Error("네이버 접근 토큰을 받지 못했습니다.");
 
-      const from = text(params.from) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const to = text(params.to) || new Date().toISOString();
+      const from = normalizeNaverDateTime(params.from, "start");
+      const to = normalizeNaverDateTime(params.to, "end");
       const statusUrl = new URL(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/last-changed-statuses`);
       statusUrl.searchParams.set("lastChangedFrom", from);
       statusUrl.searchParams.set("lastChangedTo", to);
