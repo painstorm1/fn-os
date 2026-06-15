@@ -1,9 +1,9 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createAutomationJob } from "@/lib/automation-jobs";
-import type { AutomationJob, AutomationJobType } from "@/lib/automation-jobs-shared";
+import type { AutomationJob } from "@/lib/automation-jobs-shared";
 import { FnosDbError } from "@/lib/fnos-db";
-import { inferSlackAutomationJob, parseSlackCommandPayload } from "@/lib/slack-commands";
+import { buildSlackAutomationJobDraft, parseSlackCommandPayload } from "@/lib/slack-commands";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,66 +42,17 @@ function verifySlackSignature(rawBody: string, timestamp: string | null, signatu
   return expectedBuffer.length === signatureBuffer.length && timingSafeEqual(expectedBuffer, signatureBuffer);
 }
 
-function inferPeriod(text: string) {
-  const normalized = text.toLowerCase();
-  if (/\byesterday\b|어제/.test(normalized)) return "yesterday";
-  if (/\btoday\b|오늘/.test(normalized)) return "today";
-  if (/\btomorrow\b|내일/.test(normalized)) return "tomorrow";
-  return normalized.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]
-    || normalized.match(/\b\d{4}-\d{2}\b/)?.[0]
-    || normalized.match(/\b(last|this|next)\s+(week|month|quarter|year)\b/)?.[0]
-    || "";
-}
-
-function slackJobTitle(jobType: AutomationJobType, text: string, period: string) {
-  if (jobType === "ads_collect") return `광고자료 수집${period ? ` - ${period}` : ""}`;
-  if (jobType === "ads_analyze") return `광고성과 분석${period ? ` - ${period}` : ""}`;
-  if (jobType === "orders_collect") return `주문/발주 수집${period ? ` - ${period}` : ""}`;
-  if (jobType === "invoice_prepare") return `송장 준비${period ? ` - ${period}` : ""}`;
-  if (jobType === "accounting_collect") return `회계자료 수집${period ? ` - ${period}` : ""}`;
-  if (jobType === "content_draft") return "콘텐츠 초안";
-  if (jobType === "sourcing_research") return "소싱 리서치";
-  return text ? `FN OS 보고 - ${text}` : "FN OS 보고";
-}
-
 async function createSlackAutomationJob(rawBody: string) {
   const payload = parseSlackCommandPayload(rawBody);
   if (payload.command && payload.command !== "/fn") throw new FnosDbError("지원하지 않는 Slack command입니다.", 400);
-
-  const inference = inferSlackAutomationJob(payload.text);
-  const period = inferPeriod(payload.text);
-  return createAutomationJob({
-    job_type: inference.jobType,
-    title: slackJobTitle(inference.jobType, payload.text, period),
-    status: inference.approvalRequired ? "waiting_approval" : "queued",
-    requested_by: "slack",
-    assigned_agent: inference.assignedAgent,
-    source: "slack",
-    requested_text: payload.text,
-    input_json: {
-      period,
-      raw_text: payload.text,
-      slack: {
-        command: payload.command,
-        user_id: payload.user_id,
-        user_name: payload.user_name,
-        channel_id: payload.channel_id,
-        channel_name: payload.channel_name,
-        team_id: payload.team_id,
-        team_domain: payload.team_domain,
-        trigger_id: payload.trigger_id,
-      },
-      approval_required: inference.approvalRequired,
-      matched_keywords: inference.matchedKeywords,
-      risk_keywords: inference.riskKeywords,
-    },
-  });
+  return createAutomationJob(buildSlackAutomationJobDraft(payload));
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
     route: "/api/slack/commands",
+    job_intake: "automation_jobs",
     slack_signing_secret_configured: Boolean(process.env.SLACK_SIGNING_SECRET),
   });
 }
