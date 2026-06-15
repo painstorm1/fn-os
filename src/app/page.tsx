@@ -8455,8 +8455,8 @@ function OnlineOrderProgressList({
     "쇼핑몰코드": 96,
     "주문번호": 144,
     "묶음주문번호": 144,
-    "배송방법코드": 112,
-    "송장번호": 128,
+    "배송방법코드": 144,
+    "송장번호": 156,
     "주문상태": 96,
     "수취인": 96,
     "수취인연락처1": 128,
@@ -8507,6 +8507,7 @@ function OnlineOrderProgressList({
   const selectedIndexes = selectedKeys
     .map((key) => visibleRows.find((item) => item.key === key)?.index)
     .filter((index): index is number => typeof index === "number");
+  const frozenProgressHeaders = ["__select", "쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "품목명(ERP)"];
 
   useEffect(() => {
     setSelectedKeys([]);
@@ -8548,10 +8549,14 @@ function OnlineOrderProgressList({
   }
 
   function updateDeliveryCompany(rowIndex: number, value: string) {
-    const applyAll = window.confirm("모든 주문건에 적용하시겠습니까?");
+    const targetIndexes = selectedIndexes.length ? selectedIndexes : [rowIndex];
+    const ok = window.confirm(selectedIndexes.length
+      ? `선택하신 ${targetIndexes.length.toLocaleString("ko-KR")}건에 대해 배송방법코드를 적용하시겠습니까?`
+      : "현재 행 1건에 대해 배송방법코드를 적용하시겠습니까?");
+    if (!ok) return;
+    const targetSet = new Set(targetIndexes);
     onChange(rows.map((row, index) => {
-      if (!applyAll && index !== rowIndex) return row;
-      if (applyAll && !rowHasValue(row)) return row;
+      if (!targetSet.has(index) || !rowHasValue(row)) return row;
       const next = [...row];
       setProgressValue(next, "배송방법코드", value);
       return next;
@@ -8651,6 +8656,15 @@ function OnlineOrderProgressList({
   const renderText = (row: string[], header: string) => progressValue(row, header) || "-";
   const progressColumnWidth = (header: string) => columnWidths[header] ?? progressDefaultColumnWidths[header] ?? 120;
   const progressTableMinWidth = progressTableColumnOrder.reduce((sum, header) => sum + progressColumnWidth(header), progressColumnWidth("__select"));
+  const frozenProgressLeft = useMemo(() => {
+    const next: Record<string, number> = {};
+    let left = 0;
+    frozenProgressHeaders.forEach((header) => {
+      next[header] = left;
+      left += progressColumnWidth(header);
+    });
+    return next;
+  }, [columnWidths]);
 
   function resizeProgressColumn(header: string, event: MouseEvent<HTMLSpanElement>) {
     event.preventDefault();
@@ -8682,8 +8696,12 @@ function OnlineOrderProgressList({
 
   function ProgressHeaderCell({ header, children }: { header: string; children: ReactNode }) {
     const alignClass = numericProgressHeaders.has(header) ? "text-right" : header === "__select" ? "text-center" : "text-left";
+    const frozen = frozenProgressHeaders.includes(header);
     return (
-      <th className={`relative px-2 py-2 ${alignClass}`} style={{ width: progressColumnWidth(header) }}>
+      <th
+        className={`relative px-2 py-2 ${alignClass} ${frozen ? "sticky z-30 bg-slate-50 shadow-[1px_0_0_#e2e8f0]" : ""}`}
+        style={{ width: progressColumnWidth(header), left: frozen ? frozenProgressLeft[header] : undefined }}
+      >
         <div className="truncate pr-2">{children}</div>
         <span
           aria-label={`${header === "__select" ? "선택" : header} 컬럼 너비 조절`}
@@ -8700,10 +8718,20 @@ function OnlineOrderProgressList({
     );
   }
 
+  function frozenProgressCellStyle(header: string) {
+    return frozenProgressHeaders.includes(header) ? { left: frozenProgressLeft[header] } : undefined;
+  }
+
+  function frozenProgressCellClass(header: string, selected: boolean, highlighted: boolean) {
+    if (!frozenProgressHeaders.includes(header)) return "";
+    const background = selected ? "bg-blue-50" : highlighted ? "bg-orange-50" : "bg-white";
+    return `sticky z-20 ${background} shadow-[1px_0_0_#e2e8f0]`;
+  }
+
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="overflow-auto">
-        <table className="w-full table-fixed text-sm" style={{ minWidth: progressTableMinWidth }}>
+        <table className="w-full table-fixed text-xs" style={{ minWidth: progressTableMinWidth }}>
           <colgroup>
             <col style={{ width: progressColumnWidth("__select") }} />
             {progressTableColumnOrder.map((header) => <col key={header} style={{ width: progressColumnWidth(header) }} />)}
@@ -8728,14 +8756,14 @@ function OnlineOrderProgressList({
               const rowNumber = (currentPage - 1) * pageSize + visibleIndex;
               return (
                 <tr key={key} className={`border-b border-slate-100 ${highlightedRowSet.has(index) ? "bg-orange-50" : selected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                  <td className="px-2 py-2 text-center">
+                  <td className={`px-2 py-2 text-center ${frozenProgressCellClass("__select", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("__select")}>
                     <SelectionNumberButton index={rowNumber} selected={selected} onMouseDown={(event) => selection.beginSelection(key, visibleIndex, event)} onMouseEnter={() => selection.continueSelection(key, visibleIndex)} />
                   </td>
-                  <td className="truncate px-2 py-2 font-black text-slate-800">{renderText(row, "쇼핑몰(거래처)")}</td>
-                  <td className="truncate px-2 py-2">{renderText(row, "수집일자")}</td>
-                  <td className="px-2 py-2">
+                  <td className={`truncate px-2 py-2 font-black text-slate-800 ${frozenProgressCellClass("쇼핑몰(거래처)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("쇼핑몰(거래처)")}>{renderText(row, "쇼핑몰(거래처)")}</td>
+                  <td className={`truncate px-2 py-2 ${frozenProgressCellClass("수집일자", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("수집일자")}>{renderText(row, "수집일자")}</td>
+                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목코드(ERP)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("품목코드(ERP)")}>
                     <input
-                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-blue-700 outline-orange-400"
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-blue-700 outline-orange-400"
                       value={progressValue(row, "품목코드(ERP)")}
                       onChange={(event) => updateProgressCell(index, "품목코드(ERP)", event.target.value)}
                       onKeyDown={(event) => {
@@ -8746,9 +8774,9 @@ function OnlineOrderProgressList({
                       placeholder="검색"
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목명(ERP)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("품목명(ERP)")}>
                     <input
-                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm outline-orange-400"
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-orange-400"
                       value={progressValue(row, "품목명(ERP)")}
                       onChange={(event) => updateProgressCell(index, "품목명(ERP)", event.target.value)}
                       onKeyDown={(event) => {
@@ -8767,7 +8795,7 @@ function OnlineOrderProgressList({
                   <td className="truncate px-2 py-2">{renderText(row, "묶음주문번호")}</td>
                   <td className="px-2 py-2">
                     <select
-                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-slate-700 outline-orange-400"
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-slate-700 outline-orange-400"
                       value={progressValue(row, "배송방법코드") || "CJGLS"}
                       onChange={(event) => updateDeliveryCompany(index, event.target.value)}
                     >
@@ -8777,7 +8805,7 @@ function OnlineOrderProgressList({
                   </td>
                   <td className="px-2 py-2">
                     <input
-                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-slate-700 outline-orange-400"
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-slate-700 outline-orange-400"
                       value={formatTrackingNo(progressValue(row, "송장번호"))}
                       onChange={(event) => updateProgressCell(index, "송장번호", formatTrackingNo(event.target.value))}
                       inputMode="numeric"
