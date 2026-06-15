@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CoupangChannelAdapter } from "@/lib/channels/coupang";
 import { NaverChannelAdapter } from "@/lib/channels/naver";
+import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
 import type { ChannelResult, NormalizedOrder, SalesChannelAdapter } from "@/lib/channels/common/types";
 import { createAutomationJob } from "@/lib/automation-jobs";
 import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
@@ -144,7 +145,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   let result: ChannelResult<NormalizedOrder[]>;
   try {
     result = await adapter.collectOrders(params);
-    const orders = result.data || [];
+    const orders = normalizeCollectableOnlineOrders(result.data || []);
     if (result.ok) {
       await persistOrders(channel, orders);
       await patchRows("sales_channels", { id: `eq.${text(channel.id)}` }, {

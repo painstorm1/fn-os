@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { normalizeCollectableOnlineOrders } from "../common/order-status";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -229,10 +230,12 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
         customerCode: text(params.customer_code),
         customerName: text(params.customer_name),
       };
+      const normalizedOrders = detailRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
+      const collectableOrders = normalizeCollectableOnlineOrders(normalizedOrders);
       return {
         ok: true,
-        data: mergeOrders(detailRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo)),
-        message: `네이버 주문 ${detailRows.length}건을 수집했습니다.`,
+        data: mergeOrders(collectableOrders),
+        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "네이버 주문 수집 실패" };
