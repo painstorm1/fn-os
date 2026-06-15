@@ -684,7 +684,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
-
   async function logout() {
     await fetch("/api/login", { method: "DELETE" }).catch(() => null);
     window.location.href = "/login";
@@ -7769,6 +7768,15 @@ type SalesGridRange = { startRow: number; endRow: number; startCol: number; endC
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
+type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string };
+type OrderProductLinkDraft = {
+  rowIndex: number;
+  mallName: string;
+  mallProductCode: string;
+  mallProductKey: string;
+  productCode: string;
+  productName: string;
+};
 type FnOsProductSearchState = {
   open: boolean;
   row: number;
@@ -8022,6 +8030,11 @@ function SalesExcelGrid({
     window.setTimeout(() => gridRef.current?.focus(), 0);
   }
   useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
+  useEffect(() => {
+    if (!productSearch.open || productSearch.loading || !productSearch.searchedQuery.trim()) return;
+    if (productSearch.results.length !== 1) return;
+    selectProductSearchItem(productSearch.results[0]);
+  }, [productSearch.open, productSearch.loading, productSearch.searchedQuery, productSearch.results.length]);
   function addRow() {
     onChange([...rows, headers.map(() => "")]);
   }
@@ -8721,7 +8734,7 @@ function OnlineOrderProgressList({
     function money(value){ const n = Number(String(value ?? '').replace(/[^\\d.-]/g,'')); return Number.isFinite(n) && n ? krw.format(n) : '-'; }
     function renderTabs(){ tabs.innerHTML = options.map(o => '<button class="tab '+(o.value===attribute?'active':'')+'" data-value="'+o.value+'">'+o.label+'</button>').join(''); }
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; }
-    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
+    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); if(results.length===1){ choose(0); } } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
     rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
@@ -10106,7 +10119,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
-  const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string }>>([]);
+  const [collectionPopupTitle, setCollectionPopupTitle] = useState("주문수집");
+  const [collectionStatuses, setCollectionStatuses] = useState<OnlineApiStatusItem[]>([]);
+  const [orderProductLinkOpen, setOrderProductLinkOpen] = useState(false);
+  const [orderProductLinkDrafts, setOrderProductLinkDrafts] = useState<OrderProductLinkDraft[]>([]);
+  const [orderProductSearch, setOrderProductSearch] = useState<FnOsProductSearchState>({
+    open: false,
+    row: -1,
+    col: 0,
+    query: "",
+    searchedQuery: "",
+    results: [],
+    selectedIndex: 0,
+    loading: false,
+    error: "",
+  });
+  const orderProductLinkRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [shippingPreviewTab, setShippingPreviewTab] = useState<"shipping" | DirectShippingPartner>("shipping");
   const isOnlineSection = section === "online";
   const isHistorySection = section === "history";
@@ -10117,6 +10145,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
+  useEscapeToClose(orderProductLinkOpen, () => setOrderProductLinkOpen(false));
+  useEscapeToClose(orderProductSearch.open, () => setOrderProductSearch((prev) => ({ ...prev, open: false })));
   useEscapeToClose(Boolean(inventoryPicker), () => setInventoryPicker(null));
   useEscapeToClose(inventoryHistoryOpen, () => setInventoryHistoryOpen(false));
 
@@ -10611,6 +10641,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function runOrderCollectionFlow() {
     setCollectionPopupOpen(false);
+    setCollectionPopupTitle("주문수집");
     setCollectionStatuses([]);
     const ok = window.confirm("주문 수집하시겠습니까?");
     if (!ok) return;
@@ -11307,9 +11338,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function onlineOrderApiPayload(indexes: number[]) {
     return indexes.map((index) => {
       const row = sheets["발주 진행 단계"][index] || [];
+      const channelName = progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)");
+      const productOrderId = progressValue(row, "쇼핑몰코드") || progressValue(row, "주문번호");
+      const orderNo = progressValue(row, "주문번호");
       return {
-        channelName: progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)"),
-        productOrderId: progressValue(row, "쇼핑몰코드") || progressValue(row, "주문번호"),
+        rowIndex: index,
+        channelName,
+        mallName: channelName,
+        channelCode: progressValue(row, "쇼핑몰코드"),
+        mallProductCode: progressValue(row, "쇼핑몰상품코드"),
+        mallProductKey: progressValue(row, "쇼핑몰품목key"),
+        productOrderId,
+        product_order_id: productOrderId,
+        orderNo,
+        order_no: orderNo,
         deliveryMethod: "DELIVERY",
         deliveryCompanyCode: progressValue(row, "배송방법코드") || "CJGLS",
         trackingNumber: progressValue(row, "송장번호"),
@@ -11318,18 +11360,50 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[]) {
-    const res = await fetch("/api/fnos/online-orders/status", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, rows: onlineOrderApiPayload(indexes) }),
-    });
+    const rows = onlineOrderApiPayload(indexes);
+    const grouped = rows.reduce<Record<string, number>>((acc, row) => {
+      const name = salesCellText(row.channelName) || "쇼핑몰";
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    }, {});
+    const baseStatuses = Object.entries(grouped).map(([name, count]) => ({
+      name,
+      status: "running" as const,
+      message: `${count.toLocaleString("ko-KR")}건 ${action === "confirm" ? "주문확인" : "출고완료"} 처리 중`,
+    }));
+    setCollectionPopupTitle(action === "confirm" ? "주문확인 API 처리" : "출고완료 API 처리");
+    setCollectionStatuses(baseStatuses.length ? baseStatuses : [{ name: "쇼핑몰", status: "running", message: "API 처리 중" }]);
+    setCollectionPopupOpen(true);
+
+    const body = { action, rows };
+    async function postStatus(url: string, extraBody: Record<string, unknown>, localBridge = false) {
+      return fetch(url, {
+        method: "POST",
+        mode: localBridge ? "cors" : "same-origin",
+        credentials: localBridge ? "omit" : "include",
+        headers: { "Content-Type": "application/json", ...(localBridge ? { "X-FNOS-Local-Bridge": "1" } : {}) },
+        fnosSkipBusyOverlay: true,
+        body: JSON.stringify({ ...body, ...extraBody }),
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
+    }
+
+    const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
+    if (!isLocalPage && data.queued) {
+      setCollectionStatuses(baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })));
+      try {
+        res = await postStatus("http://127.0.0.1:3000/api/fnos/online-orders/status", { run_direct: true, use_worker: false }, true);
+        data = await res.json().catch(() => ({}));
+      } catch {
+        throw new Error("로컬 API 브릿지에 연결하지 못했습니다. localhost:3000을 켠 뒤 다시 시도해 주세요.");
+      }
+    }
     if (data.queued && data.job_id) {
       const jobId = salesCellText(data.job_id);
       for (let attempt = 0; attempt < 45; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
-        const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include" });
+        const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean });
         const jobData = await jobRes.json().catch(() => ({}));
         const job = jobData.job || {};
         const status = salesCellText(job.status);
@@ -11338,8 +11412,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           break;
         }
         if (status === "failed" || status === "cancelled") throw new Error(salesCellText(job.error_message) || "온라인 주문 처리 실패");
+        setCollectionStatuses((prev) => (prev.length ? prev : baseStatuses).map((item) => ({
+          ...item,
+          status: status === "queued" ? "skipped" : "running",
+          message: status === "queued" ? "로컬 워커 대기 중입니다." : "사이트 API 처리 중입니다.",
+        })));
       }
       if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해 주세요.");
+    }
+    const results = Array.isArray(data.results) ? data.results as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
+    if (results.length) {
+      setCollectionStatuses(results.map((item) => ({
+        name: salesCellText(item.channel_name) || "쇼핑몰",
+        status: item.ok ? "done" : "failed",
+        message: item.ok ? `${Number(item.count || 0).toLocaleString("ko-KR")}건 처리 완료` : salesCellText(item.message || "처리 실패"),
+      })));
     }
     if (!res.ok || data.ok === false) throw new Error(data.error || data.results?.find((item: { message?: string }) => item.message)?.message || "온라인 주문 처리 실패");
     return data;
@@ -11364,6 +11451,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (status === "주문확인") await callOnlineOrderStatusApi("confirm", eligibleIndexes);
       if (status === "출고완료") await callOnlineOrderStatusApi("dispatch", eligibleIndexes);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
+      setCollectionStatuses((prev) => prev.map((item) => ({ ...item, status: "failed", message })));
       window.alert(error instanceof Error ? error.message : "온라인 주문 처리 실패");
       return;
     }
@@ -11399,6 +11488,110 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSelectedSalesRange(null);
     setSalesGridResetKey((value) => value + 1);
     setMessage(`선택 주문 ${indexes.size}건을 삭제했습니다.`);
+  }
+
+  function openSelectedOrderProductLinks() {
+    const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
+    if (!indexes.length) {
+      window.alert("품목 연결할 주문건을 먼저 선택해 주세요.");
+      return;
+    }
+    const drafts = indexes.map((rowIndex) => {
+      const row = sheets["발주 진행 단계"][rowIndex] || [];
+      return {
+        rowIndex,
+        mallName: progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)"),
+        mallProductCode: progressValue(row, "쇼핑몰상품코드"),
+        mallProductKey: progressValue(row, "쇼핑몰품목key"),
+        productCode: progressValue(row, "품목코드(ERP)"),
+        productName: progressValue(row, "품목명(ERP)"),
+      };
+    });
+    setOrderProductLinkDrafts(drafts);
+    setOrderProductLinkOpen(true);
+  }
+
+  function updateOrderProductLinkDraft(index: number, patch: Partial<OrderProductLinkDraft>) {
+    setOrderProductLinkDrafts((prev) => prev.map((draft, draftIndex) => draftIndex === index ? { ...draft, ...patch } : draft));
+  }
+
+  function focusNextOrderProductLink(index: number) {
+    const next = orderProductLinkRefs.current[index + 1];
+    if (next) {
+      next.focus();
+      next.select();
+    }
+  }
+
+  async function searchOrderProductLinkProducts(query: string) {
+    const keyword = query.trim();
+    if (!keyword) {
+      setOrderProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
+      return;
+    }
+    setOrderProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
+    try {
+      const res = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: keyword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+      if (!res.ok || data.ok === false) {
+        setOrderProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: data.error || "품목검색 실패" }));
+        return;
+      }
+      setOrderProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
+    } catch (error) {
+      setOrderProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
+    }
+  }
+
+  function openOrderProductLinkSearch(index: number, query: string) {
+    setOrderProductSearch({
+      open: true,
+      row: index,
+      col: 0,
+      query,
+      searchedQuery: "",
+      results: [],
+      selectedIndex: 0,
+      loading: false,
+      error: "",
+    });
+    if (query.trim()) void searchOrderProductLinkProducts(query);
+  }
+
+  function applyOrderProductLinkSearchItem(item: FnOsProductSearchItem) {
+    const draftIndex = orderProductSearch.row;
+    if (draftIndex < 0) return;
+    updateOrderProductLinkDraft(draftIndex, {
+      productCode: salesCellText(item.code),
+      productName: salesCellText(item.name),
+    });
+    setOrderProductSearch((prev) => ({ ...prev, open: false }));
+    window.setTimeout(() => focusNextOrderProductLink(draftIndex), 0);
+  }
+  useEffect(() => {
+    if (!orderProductSearch.open || orderProductSearch.loading || !orderProductSearch.searchedQuery.trim()) return;
+    if (orderProductSearch.results.length !== 1) return;
+    applyOrderProductLinkSearchItem(orderProductSearch.results[0]);
+  }, [orderProductSearch.open, orderProductSearch.loading, orderProductSearch.searchedQuery, orderProductSearch.results.length]);
+
+  function saveSelectedOrderProductLinks() {
+    const drafts = orderProductLinkDrafts.filter((draft) => salesCellText(draft.productCode));
+    if (!drafts.length) {
+      window.alert("저장할 품목코드를 입력해 주세요.");
+      return;
+    }
+    drafts.forEach((draft) => {
+      const row = sheets["발주 진행 단계"][draft.rowIndex] || [];
+      syncProgressProductToSales(draft.rowIndex, row, { code: draft.productCode, name: draft.productName });
+    });
+    setOrderProductLinkOpen(false);
+    setMessage(`선택 주문 ${drafts.length.toLocaleString("ko-KR")}건의 품목 연결을 저장했습니다.`);
   }
 
   function syncProgressProductToSales(rowIndex: number, progressRow: string[], item: FnOsProductSearchItem) {
@@ -13017,6 +13210,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return inventoryMatchesTerms(`${inventoryProductCode(product)} ${inventoryProductName(product)}`, needle);
   }).slice(0, 50);
   const inventoryPickerCount = inventoryPicker?.type === "warehouse" ? inventoryWarehousePickerOptions.length : inventoryProductPickerOptions.length;
+  useEffect(() => {
+    if (!inventoryPicker || !inventoryPicker.searchedQuery.trim()) return;
+    if (inventoryPicker.type === "warehouse") {
+      if (inventoryWarehousePickerOptions.length !== 1) return;
+      setInventoryFilters((prev) => ({ ...prev, warehouse: inventoryWarehousePickerOptions[0].warehouse_code }));
+    } else {
+      if (inventoryProductPickerOptions.length !== 1) return;
+      setInventoryFilters((prev) => ({ ...prev, product: inventoryProductCode(inventoryProductPickerOptions[0]) }));
+    }
+    setInventoryPicker(null);
+  }, [inventoryPicker?.searchedQuery, inventoryPicker?.type, inventoryPicker?.attribute, inventoryWarehousePickerOptions.length, inventoryProductPickerOptions.length]);
   const selectedInventoryRows = inventoryListRows.filter((row) => selectedInventoryKeys.includes(row.key));
   const editingInventoryRow = inventoryListRows.find((row) => row.key === inventoryEditKey);
   const filteredInventoryHistoryRows = inventoryHistoryRows.filter((row) => {
@@ -13234,7 +13438,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function openInventoryPicker(type: "warehouse" | "product") {
     inventoryPickerDragModeRef.current = null;
     lastInventoryPickerSelectionIndexRef.current = null;
-    setInventoryPicker({ type, query: type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product, searchedQuery: "", index: 0, selectedKeys: [], attribute: "plain" });
+    const query = type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product;
+    setInventoryPicker({ type, query, searchedQuery: query.trim(), index: 0, selectedKeys: [], attribute: "plain" });
   }
 
   function setInventoryPickerSelected(key: string, selected: boolean) {
@@ -13708,7 +13913,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고대기">출고대기</option>
               <option value="출고완료">출고완료</option>
             </select>
-            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => window.open("/?menu=sales&salesSection=master&masterTab=channelMappings", "fnos-channel-mappings", "width=1500,height=920,noopener=false")}>품목 연결</button>
+            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={openSelectedOrderProductLinks}>품목 연결</button>
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const partner = event.target.value as DirectShippingPartner;
               if (partner) void makeDirectShippingFile(partner);
@@ -13811,9 +14016,142 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
             </div>
           </div>
+          {orderProductLinkOpen && (
+            <FormModal
+              title="품목 연결"
+              onClose={() => setOrderProductLinkOpen(false)}
+              size="xl"
+              footer={
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700" onClick={() => setOrderProductLinkOpen(false)}>닫기</button>
+                  <ActionButton type="button" onClick={saveSelectedOrderProductLinks}>저장</ActionButton>
+                </div>
+              }
+            >
+              <div className="max-h-[62vh] overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[980px] border-collapse text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black text-slate-600">
+                    <tr>
+                      <th className="w-12 border-b border-slate-200 px-2 py-2 text-center">No</th>
+                      <th className="w-36 border-b border-slate-200 px-2 py-2 text-left">쇼핑몰명</th>
+                      <th className="border-b border-slate-200 px-2 py-2 text-left">쇼핑몰품목key</th>
+                      <th className="w-36 border-b border-slate-200 px-2 py-2 text-left">품목코드</th>
+                      <th className="w-56 border-b border-slate-200 px-2 py-2 text-left">품목명</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orderProductLinkDrafts.map((draft, index) => (
+                      <tr key={`${draft.rowIndex}-${draft.mallProductKey}-${index}`} className="border-b border-slate-100">
+                        <td className="px-2 py-2 text-center">
+                          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded bg-blue-600 px-1 text-xs font-black text-white">{index + 1}</span>
+                        </td>
+                        <td className="px-2 py-2 font-bold text-slate-700">{draft.mallName || "-"}</td>
+                        <td className="max-w-[420px] px-2 py-2 text-xs font-semibold text-slate-600">
+                          <div className="truncate" title={draft.mallProductKey || draft.mallProductCode}>{draft.mallProductKey || draft.mallProductCode || "-"}</div>
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            ref={(node) => { orderProductLinkRefs.current[index] = node; }}
+                            className={`${modalInputClass} h-9`}
+                            value={draft.productCode}
+                            onChange={(event) => updateOrderProductLinkDraft(index, { productCode: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              const value = salesCellText(event.currentTarget.value);
+                              if (value) {
+                                focusNextOrderProductLink(index);
+                                return;
+                              }
+                              openOrderProductLinkSearch(index, draft.productName || draft.mallProductKey || draft.mallProductCode);
+                            }}
+                            onDoubleClick={() => openOrderProductLinkSearch(index, draft.productCode || draft.productName || draft.mallProductKey || draft.mallProductCode)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            className={`${modalInputClass} h-9`}
+                            value={draft.productName}
+                            onChange={(event) => updateOrderProductLinkDraft(index, { productName: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                openOrderProductLinkSearch(index, event.currentTarget.value || draft.productCode || draft.mallProductKey || draft.mallProductCode);
+                              }
+                            }}
+                            onDoubleClick={() => openOrderProductLinkSearch(index, draft.productName || draft.productCode || draft.mallProductKey || draft.mallProductCode)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </FormModal>
+          )}
+          {orderProductSearch.open && (
+            <SelectionModal
+              title="품목 검색"
+              description="품목코드나 품목명으로 검색한 뒤 선택해 주세요."
+              onClose={() => setOrderProductSearch((prev) => ({ ...prev, open: false }))}
+              size="lg"
+            >
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    className={modalInputClass}
+                    value={orderProductSearch.query}
+                    onChange={(event) => setOrderProductSearch((prev) => ({ ...prev, query: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void searchOrderProductLinkProducts(orderProductSearch.query);
+                      }
+                    }}
+                    autoFocus
+                  />
+                  <ActionButton type="button" onClick={() => void searchOrderProductLinkProducts(orderProductSearch.query)}>검색</ActionButton>
+                </div>
+                {orderProductSearch.error && <p className="text-sm font-bold text-rose-600">{orderProductSearch.error}</p>}
+                <div className="max-h-[420px] overflow-auto rounded-lg border border-slate-200">
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="sticky top-0 bg-slate-50 text-xs font-black text-slate-600">
+                      <tr>
+                        <th className="w-12 border-b border-slate-200 px-2 py-2 text-center">No</th>
+                        <th className="w-32 border-b border-slate-200 px-2 py-2 text-left">품목코드</th>
+                        <th className="border-b border-slate-200 px-2 py-2 text-left">품목명</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orderProductSearch.results.map((item, index) => (
+                        <tr key={`${item.code}-${index}`} className="cursor-pointer border-b border-slate-100 hover:bg-orange-50" onDoubleClick={() => applyOrderProductLinkSearchItem(item)}>
+                          <td className="px-2 py-2 text-center">{index + 1}</td>
+                          <td className="px-2 py-2 font-black text-blue-700">{item.code}</td>
+                          <td className="px-2 py-2 font-bold text-slate-700">{item.name}</td>
+                        </tr>
+                      ))}
+                      {!orderProductSearch.results.length && !orderProductSearch.loading && (
+                        <tr><td colSpan={3} className="px-3 py-8 text-center text-sm font-bold text-slate-400">검색 결과가 없습니다.</td></tr>
+                      )}
+                      {orderProductSearch.loading && (
+                        <tr><td colSpan={3} className="px-3 py-8 text-center text-sm font-bold text-slate-500">검색 중...</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700" onClick={() => setOrderProductSearch((prev) => ({ ...prev, open: false }))}>닫기</button>
+                  <ActionButton type="button" disabled={!orderProductSearch.results.length} onClick={() => {
+                    const item = orderProductSearch.results[Math.max(0, Math.min(orderProductSearch.selectedIndex, orderProductSearch.results.length - 1))];
+                    if (item) applyOrderProductLinkSearchItem(item);
+                  }}>선택</ActionButton>
+                </div>
+              </div>
+            </SelectionModal>
+          )}
           {collectionPopupOpen && (
             <FormModal
-              title="주문수집"
+              title={collectionPopupTitle}
               onClose={() => setCollectionPopupOpen(false)}
               size="lg"
               footer={<ActionButton type="button" onClick={() => setCollectionPopupOpen(false)}>확인</ActionButton>}
@@ -14353,14 +14691,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 value={inventoryPicker.query}
                 onChange={(event) => setInventoryPicker((prev) => prev ? { ...prev, query: event.target.value, index: 0, selectedKeys: [] } : prev)}
                 onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    moveInventoryPickerSelection(1, event.shiftKey);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    moveInventoryPickerSelection(-1, event.shiftKey);
+                    return;
+                  }
                   if (event.key !== "Enter") return;
                   event.preventDefault();
                   event.stopPropagation();
-                  setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query } : prev);
+                  const options = inventoryPicker.type === "warehouse" ? inventoryWarehousePickerOptions : inventoryProductPickerOptions;
+                  if (inventoryPicker.query.trim() === inventoryPicker.searchedQuery.trim() && options[inventoryPicker.index]) {
+                    applyInventoryPickerSelection();
+                    return;
+                  }
+                  setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query, index: 0, selectedKeys: [] } : prev);
                 }}
                 placeholder={inventoryPicker.type === "warehouse" ? "창고코드 / 창고명 검색" : "품목코드 / 품목명 검색"}
               />
-              <ActionButton type="button" onClick={() => setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query } : prev)}>찾기</ActionButton>
+              <ActionButton type="button" onClick={() => setInventoryPicker((prev) => prev ? { ...prev, searchedQuery: prev.query, index: 0, selectedKeys: [] } : prev)}>찾기</ActionButton>
             </div>
             <div className="max-h-[420px] overflow-y-auto rounded-lg border border-slate-200 bg-white">
               <table className="w-full table-fixed text-sm">
@@ -15183,6 +15538,11 @@ function SalesPurchaseEntryModal({
   function chooseProduct(product: FnProduct) {
     applyProducts([product]);
   }
+  useEffect(() => {
+    if (!productSearch.open || productSearch.loading || !productSearch.searchedQuery.trim()) return;
+    if (productSearch.results.length !== 1 || productSearchSelectedKeys.length) return;
+    chooseProduct(productSearch.results[0]);
+  }, [productSearch.open, productSearch.loading, productSearch.searchedQuery, productSearch.results.length, productSearchSelectedKeys.length]);
 
   function applySelectedProducts() {
     const selectedProducts = productSearch.results.filter((product, index) => productSearchSelectedKeys.includes(productSearchKey(product, index)));
@@ -16702,6 +17062,11 @@ function ChannelProductMappingPanel() {
     setDraft((prev) => ({ ...prev, productCode: salesCellText(item.code), productName: salesCellText(item.name) || prev.productName }));
     setProductSearch((prev) => ({ ...prev, open: false }));
   }
+  useEffect(() => {
+    if (!productSearch.open || productSearch.loading || !productSearch.searchedQuery.trim()) return;
+    if (productSearch.results.length !== 1) return;
+    applyMappingProduct(productSearch.results[0]);
+  }, [productSearch.open, productSearch.loading, productSearch.searchedQuery, productSearch.results.length]);
 
   useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
 
@@ -18952,8 +19317,9 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
   const [warehouseBulkDrafts, setWarehouseBulkDrafts] = useState<Record<string, Partial<Record<WarehouseBulkField, string>>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const warehouseSelectModeRef = useRef<"select" | "deselect">("select");
-  const warehouseKeys = warehouses.map((warehouse) => warehouseRowKey(warehouse)).filter(Boolean);
-  const selectedWarehouses = warehouses.filter((warehouse) => selectedWarehouseKeys.includes(warehouseRowKey(warehouse)));
+  const sortedWarehouses = [...warehouses].sort(sortWarehousesByCode);
+  const warehouseKeys = sortedWarehouses.map((warehouse) => warehouseRowKey(warehouse)).filter(Boolean);
+  const selectedWarehouses = sortedWarehouses.filter((warehouse) => selectedWarehouseKeys.includes(warehouseRowKey(warehouse)));
   const warehouseSelection = useCheckboxColumnSelection({ keys: warehouseKeys, selectedKeys: selectedWarehouseKeys, setSelectedKeys: setSelectedWarehouseKeys, enabled: !modalOpen && !warehouseBulkOpen });
 
   function blankWarehouseDraft() {
@@ -19012,7 +19378,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
       const endpoint = `/api/fnos/warehouses?${params.toString()}`;
       const cached = readCachedJson<{ warehouses?: FnWarehouse[]; total?: number; ok?: boolean; error?: string }>(endpoint, { storageTtl: 10 * 60_000 });
       if (cached) {
-        setWarehouses(sortRowsByManagementName(cached.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
+        setWarehouses([...(cached.warehouses || [])].sort(sortWarehousesByCode));
         setTotal(Number(cached.total || 0));
         setLoading(false);
       }
@@ -19021,7 +19387,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
         setMessage(data.error || "창고 조회 실패");
         return;
       }
-      setWarehouses(sortRowsByManagementName(data.warehouses || [], (warehouse) => warehouse.warehouse_name, (warehouse) => warehouse.warehouse_code));
+      setWarehouses([...(data.warehouses || [])].sort(sortWarehousesByCode));
       setTotal(Number(data.total || 0));
     } finally {
       setLoading(false);
@@ -19373,7 +19739,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
               </tr>
             </thead>
             <tbody>
-              {warehouses.map((warehouse, index) => {
+              {sortedWarehouses.map((warehouse, index) => {
                 const key = warehouseRowKey(warehouse);
                 const selected = selectedWarehouseKeys.includes(key);
                 return (
@@ -19391,7 +19757,7 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
               })}
             </tbody>
           </table>
-          {!warehouses.length && <EmptyState title={loading ? "" : "창고가 없습니다."} />}
+          {!sortedWarehouses.length && <EmptyState title={loading ? "" : "창고가 없습니다."} />}
         </div>
       </Panel>
 
@@ -25606,11 +25972,24 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
               </select>
             </FormField>
             <FormField label="카테고리2" required>
-              <select className={modalSelectClass} value={matchStatusEditDraft.categoryId} disabled={!matchStatusEditDraft.categoryLarge} onChange={(event) => setMatchStatusEditDraft((prev) => ({ ...prev, categoryId: event.target.value }))}>
+              <select className={modalSelectClass} value={matchStatusEditDraft.categoryId} disabled={!matchStatusEditDraft.categoryLarge} onChange={(event) => {
+                const category = categories.find((item) => String(item.id || "") === event.target.value);
+                setMatchStatusEditDraft((prev) => ({ ...prev, categoryId: event.target.value, affectsProfit: category ? category.affects_profit !== false : prev.affectsProfit }));
+              }}>
                 <option value="">{matchStatusEditDraft.categoryLarge ? "선택" : "카테고리1 먼저 선택"}</option>
                 {matchStatusEditMiddleOptions.map((category) => <option key={String(category.id)} value={String(category.id)}>{String(category.category_middle || "-")}</option>)}
               </select>
             </FormField>
+          </div>
+          <div className="grid gap-2 rounded-xl bg-gray-50 p-3 md:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <input type="checkbox" checked={matchStatusEditDraft.affectsProfit} onChange={(event) => setMatchStatusEditDraft((prev) => ({ ...prev, affectsProfit: event.target.checked }))} />
+              손익 반영
+            </label>
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <input type="checkbox" checked={matchStatusEditDraft.autoClassify} onChange={(event) => setMatchStatusEditDraft((prev) => ({ ...prev, autoClassify: event.target.checked }))} />
+              자동분류
+            </label>
           </div>
         </FormModal>
       )}
