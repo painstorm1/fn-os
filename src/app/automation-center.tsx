@@ -18,7 +18,7 @@ import {
 import {
   AUTOMATION_JOB_STATUSES,
   AUTOMATION_JOB_STATUS_LABELS,
-  AUTOMATION_JOB_TYPES,
+  CREATABLE_AUTOMATION_JOB_TYPES,
   AUTOMATION_JOB_TYPE_LABELS,
   type AutomationJob,
   type AutomationLog,
@@ -26,7 +26,7 @@ import {
   type AutomationJobType,
 } from "@/lib/automation-jobs-shared";
 
-type AutomationView = "all" | "orders" | "invoice" | "ads" | "accounting" | "detail" | "logs" | "approval";
+type AutomationJobFilter = "all" | "orders" | "invoice" | "ads" | "accounting";
 
 type CreateDraft = {
   job_type: AutomationJobType;
@@ -49,22 +49,15 @@ type DetailDraft = {
 
 const API_ENDPOINT = "/api/fnos/automation-jobs";
 
-const viewLabels: Record<AutomationView, string> = {
-  all: "전체 작업",
-  orders: "주문 수집",
-  invoice: "송장 파일 생성",
-  ads: "광고자료 수집",
-  accounting: "회계자료 수집",
-  detail: "상세페이지 요청",
-  logs: "작업 로그",
-  approval: "승인 대기",
-};
+const jobFilterOptions: Array<{ value: AutomationJobFilter; label: string }> = [
+  { value: "all", label: "전체 작업" },
+  { value: "orders", label: "주문 수집" },
+  { value: "invoice", label: "송장 파일 생성" },
+  { value: "ads", label: "광고자료 수집" },
+  { value: "accounting", label: "회계자료 수집" },
+];
 
 const summaryStatuses: AutomationJobStatus[] = ["queued", "running", "success", "failed", "waiting_approval"];
-
-function normalizeView(value?: string): AutomationView {
-  return Object.keys(viewLabels).includes(String(value)) ? value as AutomationView : "all";
-}
 
 function parseJsonField(value: string, fallback: unknown) {
   const next = value.trim();
@@ -101,15 +94,12 @@ function statusTone(status: AutomationJobStatus) {
   return "primary" as const;
 }
 
-function jobMatchesView(job: AutomationJob, view: AutomationView) {
-  if (view === "all") return true;
-  if (view === "orders") return ["collect_smartstore_orders", "collect_coupang_orders", "orders_collect"].includes(job.job_type);
-  if (view === "invoice") return ["generate_invoice_file", "invoice_prepare"].includes(job.job_type);
-  if (view === "ads") return ["download_ads_report", "ads_collect", "ads_analyze", "coupang_report_reservation"].includes(job.job_type);
-  if (view === "accounting") return ["download_accounting_report", "accounting_collect"].includes(job.job_type);
-  if (view === "detail") return ["create_detail_page_draft", "content_draft"].includes(job.job_type);
-  if (view === "logs") return Boolean(job.log_text || job.error_message);
-  if (view === "approval") return job.status === "waiting_approval";
+function jobMatchesFilter(job: AutomationJob, filter: AutomationJobFilter) {
+  if (filter === "all") return true;
+  if (filter === "orders") return ["collect_smartstore_orders", "collect_coupang_orders", "orders_collect"].includes(job.job_type);
+  if (filter === "invoice") return ["generate_invoice_file", "invoice_prepare"].includes(job.job_type);
+  if (filter === "ads") return ["download_ads_report", "ads_collect", "ads_analyze", "coupang_report_reservation"].includes(job.job_type);
+  if (filter === "accounting") return ["download_accounting_report", "accounting_collect"].includes(job.job_type);
   return true;
 }
 
@@ -144,13 +134,13 @@ async function readJsonResponse(response: Response) {
   return data;
 }
 
-export default function AutomationCenter({ view = "all" }: { view?: string }) {
-  const activeView = normalizeView(view);
+export default function AutomationCenter() {
   const [jobs, setJobs] = useState<AutomationJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [jobFilter, setJobFilter] = useState<AutomationJobFilter>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() => createInitialDraft());
   const [detailJob, setDetailJob] = useState<AutomationJob | null>(null);
@@ -179,14 +169,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
     return Object.fromEntries(AUTOMATION_JOB_STATUSES.map((status) => [status, jobs.filter((job) => job.status === status).length])) as Record<AutomationJobStatus, number>;
   }, [jobs]);
 
-  const filteredJobs = useMemo(() => jobs.filter((job) => jobMatchesView(job, activeView)), [activeView, jobs]);
-
-  function openCreateModal() {
-    setCreateDraft(createInitialDraft());
-    setError("");
-    setMessage("");
-    setCreateOpen(true);
-  }
+  const filteredJobs = useMemo(() => jobs.filter((job) => jobMatchesFilter(job, jobFilter)), [jobFilter, jobs]);
 
   async function createJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -289,7 +272,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
     <div className="mx-auto max-w-[1500px]">
       <PageHeader
         title="자동화센터"
-        description={<span>{viewLabels[activeView]}</span>}
+        description={<span>에르메스 자동 실행 기록과 상태를 확인합니다.</span>}
         actions={(
           <>
             <ActionButton type="button" variant="secondary" onClick={() => void loadJobs()} disabled={loading || saving}>새로고침</ActionButton>
@@ -319,6 +302,17 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
         <SectionHeader
           title="작업 목록"
           description={<span>{tableRows.length.toLocaleString("ko-KR")}건</span>}
+          actions={(
+            <select
+              className={`${modalSelectClass} h-9 w-52 text-sm`}
+              value={jobFilter}
+              onChange={(event) => setJobFilter(event.target.value as AutomationJobFilter)}
+            >
+              {jobFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
         />
         <div className="overflow-x-auto">
           <table className="min-w-[1120px] w-full table-fixed text-left text-sm">
@@ -380,7 +374,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
                   value={createDraft.job_type}
                   onChange={(event) => setCreateDraft((prev) => ({ ...prev, job_type: event.target.value as AutomationJobType }))}
                 >
-                  {AUTOMATION_JOB_TYPES.map((type) => (
+                  {CREATABLE_AUTOMATION_JOB_TYPES.map((type) => (
                     <option key={type} value={type}>{AUTOMATION_JOB_TYPE_LABELS[type]}</option>
                   ))}
                 </select>

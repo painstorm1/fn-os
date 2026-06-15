@@ -19,6 +19,21 @@ export const AUTOMATION_JOB_TYPES = [
 
 export type AutomationJobType = (typeof AUTOMATION_JOB_TYPES)[number];
 
+export const CREATABLE_AUTOMATION_JOB_TYPES = [
+  "collect_smartstore_orders",
+  "collect_coupang_orders",
+  "online_order_status_update",
+  "generate_invoice_file",
+  "download_ads_report",
+  "download_accounting_report",
+  "ads_collect",
+  "ads_analyze",
+  "coupang_report_reservation",
+  "orders_collect",
+  "invoice_prepare",
+  "accounting_collect",
+] as const satisfies readonly AutomationJobType[];
+
 export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
   online_order_status_update: "온라인 주문 상태 변경",
   collect_smartstore_orders: "스마트스토어 주문 수집",

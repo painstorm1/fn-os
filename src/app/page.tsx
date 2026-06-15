@@ -255,17 +255,6 @@ const accountingSubMenus = [
   { label: "고정비", tab: "fixed" },
 ];
 
-const automationSubMenus = [
-  { label: "전체 작업", view: "all" },
-  { label: "주문 수집", view: "orders" },
-  { label: "송장 파일 생성", view: "invoice" },
-  { label: "광고자료 수집", view: "ads" },
-  { label: "회계자료 수집", view: "accounting" },
-  { label: "상세페이지 요청", view: "detail" },
-  { label: "작업 로그", view: "logs" },
-  { label: "승인 대기", view: "approval" },
-];
-
 const sidebarSubMenuContainerClass = "ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3";
 
 function sidebarSubMenuLinkClass(active: boolean) {
@@ -672,11 +661,10 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab, automationView }: { activeMenu: string; importPath: string; salesSection: string; accountingTab: string; automationView: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { activeMenu: string; importPath: string; salesSection: string; accountingTab: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
   const [accountingOpen, setAccountingOpen] = useState(activeMenu === "회계/비용");
-  const [automationOpen, setAutomationOpen] = useState(activeMenu === "자동화센터");
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -696,11 +684,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab, auto
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
-  useEffect(() => {
-    if (activeMenu !== "자동화센터") return;
-    const timer = window.setTimeout(() => setAutomationOpen(true), 0);
-    return () => window.clearTimeout(timer);
-  }, [activeMenu]);
 
   async function logout() {
     await fetch("/api/login", { method: "DELETE" }).catch(() => null);
@@ -799,19 +782,10 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab, auto
               </Link>
             ) : item === "자동화센터" ? (
               <Link
-                href="/?menu=automation&automationView=all"
+                href="/?menu=automation"
                 onClick={(event) => {
-                  if (activeMenu === "자동화센터") {
-                    event.preventDefault();
-                    if (automationView !== "all") {
-                      goToInternal("/?menu=automation&automationView=all");
-                      return;
-                    }
-                    setAutomationOpen((open) => !open);
-                    return;
-                  }
                   event.preventDefault();
-                  goToInternal("/?menu=automation&automationView=all");
+                  goToInternal("/?menu=automation");
                 }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -881,23 +855,6 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab, auto
                       goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
                     }}
                     className={sidebarSubMenuLinkClass(importPath === sub.path)}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
-              </div>
-            )}
-            {item === "자동화센터" && activeMenu === "자동화센터" && automationOpen && (
-              <div className={sidebarSubMenuContainerClass}>
-                {automationSubMenus.map((sub) => (
-                  <Link
-                    key={sub.view}
-                    href={`/?menu=automation&automationView=${sub.view}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      goToInternal(`/?menu=automation&automationView=${sub.view}`);
-                    }}
-                    className={sidebarSubMenuLinkClass(automationView === sub.view)}
                   >
                     {sub.label}
                   </Link>
@@ -28676,7 +28633,6 @@ function HomeContent() {
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
   const requestedAccountingTab = searchParams.get("accountingTab") || "dashboard";
-  const automationView = searchParams.get("automationView") || "all";
   const normalizedAccountingTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card"
     ? "ledger"
     : requestedAccountingTab === "settings" || requestedAccountingTab === "review"
@@ -28707,7 +28663,7 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} accountingTab={accountingTab} automationView={automationView} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} accountingTab={accountingTab} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
@@ -28720,7 +28676,7 @@ function HomeContent() {
           ) : activeSlug === "ads" ? (
             <AdsAnalysisWorkspace />
           ) : activeSlug === "automation" ? (
-            <AutomationCenter view={automationView} />
+            <AutomationCenter />
           ) : activeSlug === "archive" ? (
             <ArchiveWorkspace />
           ) : activeSlug === "fnSettings" ? (
