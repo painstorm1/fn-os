@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "automation:worker": "node tools/automation-worker.mjs",
+    "local:orders": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/start-local-order-worker.ps1",
+    "local:orders:install": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-local-order-worker-startup.ps1",
     "db:schema": "node tools/apply-sales-inventory-schema.mjs",
     "db:seed:sales-inventory": "node tools/seed-sales-inventory-from-excel.mjs",
     "start": "next start",
