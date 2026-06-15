@@ -59,6 +59,12 @@ function reportDateFromFileName(fileName: string, fallbackDate?: string) {
 
 function inferAdChannel(fileName: string, index: number, total: number) {
   const name = fileName.toLowerCase();
+  const compactName = name.normalize("NFKC").replace(/[\s_-]+/g, "");
+  if (compactName.includes("\uba54\ud0c0gfa")) return adChannelOrder[0];
+  if (compactName.includes("\ub124\uc774\ubc84adv")) return adChannelOrder[2];
+  if (compactName.includes("\ub124\uc774\ubc84gfa")) return adChannelOrder[3];
+  if (compactName.includes("\ub124\uc774\ubc84\uac80\uc0c9\uad11\uace0")) return adChannelOrder[1];
+  if (compactName.includes("\ucfe0\ud321\uad11\uace0")) return adChannelOrder[4];
   if ((name.includes("fn에프엔") || name.includes("에프엔")) && name.includes("캠페인") && name.includes("~")) return adChannelOrder[0];
   if (name.includes("광고그룹")) return "네이버GFA";
   if (name.includes("쇼핑검색")) return "네이버쇼핑검색";

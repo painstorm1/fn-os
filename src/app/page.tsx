@@ -20150,6 +20150,12 @@ function adUploadResultLabel(result: AdUploadReport | null) {
 
 function inferAdSourceKey(fileName: string): AdSourceKey {
   const name = fileName.toLowerCase();
+  const compactName = name.normalize("NFKC").replace(/[\s_-]+/g, "");
+  if (compactName.includes("\uba54\ud0c0gfa")) return "meta-gfa";
+  if (compactName.includes("\ub124\uc774\ubc84adv")) return "naver-adboost";
+  if (compactName.includes("\ub124\uc774\ubc84gfa")) return "naver-gfa";
+  if (compactName.includes("\ub124\uc774\ubc84\uac80\uc0c9\uad11\uace0")) return "naver-shopping";
+  if (compactName.includes("\ucfe0\ud321\uad11\uace0")) return "coupang";
   if ((name.includes("fn에프엔") || name.includes("에프엔")) && name.includes("캠페인") && name.includes("~")) return "meta-gfa";
   if (name.includes("광고그룹")) return "naver-gfa";
   if (name.includes("쇼핑검색")) return "naver-shopping";
