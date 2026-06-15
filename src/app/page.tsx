@@ -8347,6 +8347,7 @@ function OnlineOrderProgressList({
 }) {
   const headers = salesSheetHeaders["발주 진행 단계"];
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
   const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
     open: false,
@@ -8363,16 +8364,26 @@ function OnlineOrderProgressList({
   const visibleRows = useMemo(() => rows
     .map((row, index) => ({ row, index, key: `progress-${index}` }))
     .filter((item) => rowHasValue(item.row)), [rows]);
-  const visibleKeys = visibleRows.map((item) => item.key);
-  const selection = useCheckboxColumnSelection({ keys: visibleKeys, selectedKeys, setSelectedKeys });
+  const pageSize = 30;
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pageKeys = pageRows.map((item) => item.key);
+  const selection = useCheckboxColumnSelection({ keys: pageKeys, selectedKeys, setSelectedKeys });
   const selectedIndexes = selectedKeys
     .map((key) => visibleRows.find((item) => item.key === key)?.index)
     .filter((index): index is number => typeof index === "number");
 
   useEffect(() => {
     setSelectedKeys([]);
+    setPage(1);
     setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: progressIndex("품목코드(ERP)"), query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
   }, [resetKey]);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(Math.max(1, prev), totalPages));
+    setSelectedKeys((prev) => prev.filter((key) => visibleRows.some((item) => item.key === key)));
+  }, [totalPages, visibleRows]);
 
   useEffect(() => {
     if (!onSelectionChange) return;
@@ -8497,12 +8508,13 @@ function OnlineOrderProgressList({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map(({ row, index, key }, visibleIndex) => {
+            {pageRows.map(({ row, index, key }, visibleIndex) => {
               const selected = selectedKeys.includes(key);
+              const rowNumber = (currentPage - 1) * pageSize + visibleIndex;
               return (
                 <tr key={key} className={`border-b border-slate-100 ${highlightedRowSet.has(index) ? "bg-orange-50" : selected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                   <td className="px-2 py-2 text-center">
-                    <SelectionNumberButton index={visibleIndex} selected={selected} onMouseDown={(event) => selection.beginSelection(key, visibleIndex, event)} onMouseEnter={() => selection.continueSelection(key, visibleIndex)} />
+                    <SelectionNumberButton index={rowNumber} selected={selected} onMouseDown={(event) => selection.beginSelection(key, visibleIndex, event)} onMouseEnter={() => selection.continueSelection(key, visibleIndex)} />
                   </td>
                   <td className="truncate px-2 py-2 font-black text-slate-800">{renderText(row, "쇼핑몰(거래처)")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "수집일자")}</td>
@@ -8560,6 +8572,33 @@ function OnlineOrderProgressList({
         </table>
         {!visibleRows.length && <EmptyState title="수집된 주문이 없습니다." />}
       </div>
+      {visibleRows.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
+          <span>
+            {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}-
+            {Math.min(currentPage * pageSize, visibleRows.length).toLocaleString("ko-KR")} /
+            {visibleRows.length.toLocaleString("ko-KR")}건 · 선택 {selectedKeys.length.toLocaleString("ko-KR")}건
+          </span>
+          <div className="flex items-center gap-1">
+            <button type="button" className="h-8 rounded-md border border-slate-300 bg-white px-2 disabled:opacity-40" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>
+              &lt;
+            </button>
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNo) => (
+              <button
+                key={pageNo}
+                type="button"
+                className={`h-8 min-w-8 rounded-md border px-2 ${pageNo === currentPage ? "border-slate-950 bg-slate-950 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+                onClick={() => setPage(pageNo)}
+              >
+                {pageNo}
+              </button>
+            ))}
+            <button type="button" className="h-8 rounded-md border border-slate-300 bg-white px-2 disabled:opacity-40" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>
+              &gt;
+            </button>
+          </div>
+        </div>
+      )}
       {productSearch.open && (
         <SelectionModal
           title="품목검색"
