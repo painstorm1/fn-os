@@ -21,6 +21,7 @@ import {
   AUTOMATION_JOB_TYPES,
   AUTOMATION_JOB_TYPE_LABELS,
   type AutomationJob,
+  type AutomationLog,
   type AutomationJobStatus,
   type AutomationJobType,
 } from "@/lib/automation-jobs-shared";
@@ -154,6 +155,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() => createInitialDraft());
   const [detailJob, setDetailJob] = useState<AutomationJob | null>(null);
   const [detailDraft, setDetailDraft] = useState<DetailDraft | null>(null);
+  const [detailLogs, setDetailLogs] = useState<AutomationLog[]>([]);
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
@@ -219,6 +221,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
       const nextJob = data.job as AutomationJob;
       setDetailJob(nextJob);
       setDetailDraft(detailDraftFromJob(nextJob));
+      setDetailLogs(Array.isArray(data.logs) ? data.logs : []);
     } catch (detailError) {
       setError(detailError instanceof Error ? detailError.message : "자동화 작업 상세 조회 실패");
     }
@@ -235,6 +238,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
     if (detailJob?.id === nextJob.id) {
       setDetailJob(nextJob);
       setDetailDraft(detailDraftFromJob(nextJob));
+      if (Array.isArray(data.logs)) setDetailLogs(data.logs);
     }
     return nextJob;
   }
@@ -415,6 +419,7 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
           onClose={() => {
             setDetailJob(null);
             setDetailDraft(null);
+            setDetailLogs([]);
           }}
           size="xl"
           footer={(
@@ -475,6 +480,27 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
               <FormField label="result_json">
                 <textarea className={`${modalTextareaClass} min-h-44 font-mono text-xs`} value={detailDraft.result_json} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, result_json: event.target.value } : prev)} />
               </FormField>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-black text-slate-600">automation_logs</p>
+                <StatusBadge>{detailLogs.length.toLocaleString("ko-KR")} logs</StatusBadge>
+              </div>
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {detailLogs.map((log) => (
+                  <div key={log.id} className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-2 text-slate-500">
+                      <span className="font-bold text-slate-700">{formatTime(log.created_at)}</span>
+                      <StatusBadge tone={log.level === "error" ? "danger" : log.level === "warn" ? "warning" : "muted"}>{log.level || "info"}</StatusBadge>
+                      <span className="font-semibold">{log.event_type || "log"}</span>
+                      <span>{log.agent_name || "-"}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-slate-800">{log.message || "-"}</p>
+                  </div>
+                ))}
+                {!detailLogs.length && <p className="py-4 text-center text-xs font-semibold text-slate-400">No automation_logs yet.</p>}
+              </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">

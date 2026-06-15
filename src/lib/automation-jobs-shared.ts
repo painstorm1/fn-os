@@ -79,6 +79,17 @@ export type AutomationJob = {
   finished_at: string | null;
 };
 
+export type AutomationLog = {
+  id: string;
+  job_id: string;
+  agent_name: string;
+  level: string;
+  event_type: string;
+  message: string;
+  payload: unknown;
+  created_at: string;
+};
+
 export function isAutomationJobType(value: unknown): value is AutomationJobType {
   return AUTOMATION_JOB_TYPES.includes(value as AutomationJobType);
 }

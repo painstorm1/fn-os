@@ -3,6 +3,7 @@ import {
   AUTOMATION_JOB_STATUS_LABELS,
   AUTOMATION_JOB_TYPE_LABELS,
   type AutomationJob,
+  type AutomationLog,
   type AutomationJobStatus,
   type AutomationJobType,
   isAutomationJobStatus,
@@ -118,6 +119,19 @@ export function normalizeAutomationJob(row: AnyRecord): AutomationJob {
   };
 }
 
+export function normalizeAutomationLog(row: AnyRecord): AutomationLog {
+  return {
+    id: text(row.id),
+    job_id: text(row.job_id),
+    agent_name: text(row.agent_name),
+    level: text(row.level) || "info",
+    event_type: text(row.event_type),
+    message: text(row.message),
+    payload: maybeJsonColumn(row, "payload", {}),
+    created_at: text(row.created_at),
+  };
+}
+
 export async function listAutomationJobs(filters: AutomationJobListFilters = {}) {
   if (!hasDbConfig()) return [];
   const query: Record<string, string | number> = {
@@ -138,6 +152,18 @@ export async function getAutomationJob(id: string) {
   const [job] = await listAutomationJobs({ id: jobId, limit: 1 });
   if (!job) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
   return job;
+}
+
+export async function listAutomationLogs(jobId: string, limit = 500) {
+  if (!hasDbConfig()) return [];
+  const id = text(jobId);
+  if (!id) return [];
+  const rows = await selectRows<AnyRecord>("automation_logs", {
+    job_id: `eq.${id}`,
+    order: "created_at.asc",
+    limit: Math.min(Math.max(Number(limit || 500), 1), 1000),
+  });
+  return rows.map(normalizeAutomationLog);
 }
 
 export async function createAutomationJob(body: AnyRecord) {
@@ -227,7 +253,34 @@ export async function updateAutomationJob(id: string, body: AnyRecord) {
   if (!Object.keys(values).length) return getAutomationJob(jobId);
   const [saved] = await patchRows<AnyRecord>("automation_jobs", { id: `eq.${jobId}` }, values);
   if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
-  return normalizeAutomationJob(saved);
+  const normalized = normalizeAutomationJob(saved);
+  if ("status" in values) {
+    await createAutomationLog({
+      job_id: normalized.id,
+      agent_name: normalized.assigned_agent,
+      event_type: "status_changed",
+      message: `status changed to ${normalized.status}`,
+      payload: { status: normalized.status },
+    }).catch(() => null);
+  }
+  if ("log_text" in values && text(values.log_text)) {
+    await createAutomationLog({
+      job_id: normalized.id,
+      agent_name: normalized.assigned_agent,
+      event_type: "log_text_updated",
+      message: text(values.log_text).slice(-2000),
+    }).catch(() => null);
+  }
+  if ("error_message" in values && text(values.error_message)) {
+    await createAutomationLog({
+      job_id: normalized.id,
+      agent_name: normalized.assigned_agent,
+      level: "error",
+      event_type: "error_updated",
+      message: text(values.error_message),
+    }).catch(() => null);
+  }
+  return normalized;
 }
 
 export async function claimNextAutomationJob(body: AnyRecord = {}) {
