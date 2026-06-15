@@ -168,7 +168,15 @@ export async function createAutomationJob(body: AnyRecord) {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       const [saved] = await insertRows<AnyRecord>("automation_jobs", values);
-      return normalizeAutomationJob(saved);
+      const job = normalizeAutomationJob(saved);
+      await createAutomationLog({
+        job_id: job.id,
+        agent_name: job.assigned_agent,
+        event_type: "created",
+        message: `job created: ${job.job_type}`,
+        payload: { source: job.source, trigger_type: job.trigger_type, requested_text: job.requested_text },
+      }).catch(() => null);
+      return job;
     } catch (error) {
       const column = missingColumnName(error);
       if (!column || !(column in values) || !["assigned_agent", "source", "trigger_type", "requested_text"].includes(column)) throw error;
@@ -244,7 +252,16 @@ export async function claimNextAutomationJob(body: AnyRecord = {}) {
       { id: `eq.${id}`, status: "eq.queued" },
       { status: "running", started_at: now, log_text: nextLog },
     );
-    if (claimed) return normalizeAutomationJob(claimed);
+    if (claimed) {
+      const job = normalizeAutomationJob(claimed);
+      await createAutomationLog({
+        job_id: job.id,
+        agent_name: workerId,
+        event_type: "claimed",
+        message: `claimed by ${workerId}`,
+      }).catch(() => null);
+      return job;
+    }
   }
   return null;
 }
@@ -254,6 +271,69 @@ function appendLog(current: unknown, addition: unknown) {
   if (!next) return text(current);
   const timestamped = `[${new Date().toISOString()}] ${next}`;
   return [text(current), timestamped].filter(Boolean).join("\n");
+}
+
+async function createAutomationLog(body: AnyRecord = {}) {
+  if (!hasDbConfig()) return null;
+  const jobId = nullableText(body.job_id || body.jobId);
+  const message = text(body.message || body.log_text);
+  const payload = jsonValue(body.payload, {}) ?? {};
+  const [saved] = await insertRows<AnyRecord>("automation_logs", {
+    job_id: jobId,
+    agent_name: nullableText(body.agent_name || body.assigned_agent || body.agentName),
+    level: text(body.level) || "info",
+    event_type: nullableText(body.event_type || body.eventType),
+    message,
+    payload,
+    created_at: new Date().toISOString(),
+  });
+  return saved;
+}
+
+function slackContextFromJob(job: AutomationJob) {
+  const input = recordValue(job.input_json);
+  const slack = recordValue(input.slack);
+  const channel = text(slack.channel_id || slack.channel);
+  const threadTs = text(slack.thread_ts || slack.threadTs || slack.message_ts || slack.messageTs || slack.trigger_ts);
+  return {
+    channel,
+    threadTs,
+    responseUrl: text(slack.response_url || slack.responseUrl),
+  };
+}
+
+async function postSlackFollowup(job: AutomationJob, textMessage: string) {
+  const { channel, threadTs, responseUrl } = slackContextFromJob(job);
+  const botToken = process.env.SLACK_BOT_TOKEN || "";
+  if (channel && botToken) {
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${botToken}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        channel,
+        thread_ts: threadTs || undefined,
+        text: textMessage,
+        unfurl_links: false,
+        unfurl_media: false,
+      }),
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.ok === false) throw new Error(`Slack chat.postMessage failed: ${data?.error || response.status}`);
+    return;
+  }
+  if (responseUrl) {
+    const response = await fetch(responseUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ response_type: "ephemeral", text: textMessage }),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Slack response_url failed: ${response.status}`);
+  }
 }
 
 export async function reportAutomationJobStart(body: AnyRecord = {}) {
@@ -275,15 +355,31 @@ export async function reportAutomationJobStart(body: AnyRecord = {}) {
       },
     );
     if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
-    return normalizeAutomationJob(saved);
+    const normalized = normalizeAutomationJob(saved);
+    await createAutomationLog({
+      job_id: normalized.id,
+      agent_name: normalized.assigned_agent,
+      event_type: "started",
+      message: text(body.log_text || "started"),
+      payload: { trigger_type: normalized.trigger_type, source: normalized.source },
+    }).catch(() => null);
+    return normalized;
   }
-  return createAutomationJob({
+  const created = await createAutomationJob({
     ...body,
     status: "running",
     source: text(body.source) || "hermes",
     started_at: now,
     log_text: body.log_text || "started",
   });
+  await createAutomationLog({
+    job_id: created.id,
+    agent_name: created.assigned_agent,
+    event_type: "started",
+    message: text(body.log_text || "started"),
+    payload: { trigger_type: created.trigger_type, source: created.source },
+  }).catch(() => null);
+  return created;
 }
 
 export async function appendAutomationJobLog(body: AnyRecord = {}) {
@@ -296,7 +392,16 @@ export async function appendAutomationJobLog(body: AnyRecord = {}) {
     { log_text: appendLog(job.log_text, body.log_text || body.message) },
   );
   if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
-  return normalizeAutomationJob(saved);
+  const normalized = normalizeAutomationJob(saved);
+  await createAutomationLog({
+    job_id: normalized.id,
+    agent_name: normalized.assigned_agent,
+    level: text(body.level) || "info",
+    event_type: text(body.event_type || "log"),
+    message: text(body.log_text || body.message),
+    payload: body.payload || {},
+  }).catch(() => null);
+  return normalized;
 }
 
 export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
@@ -317,7 +422,25 @@ export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
     },
   );
   if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
-  return normalizeAutomationJob(saved);
+  const normalized = normalizeAutomationJob(saved);
+  await createAutomationLog({
+    job_id: normalized.id,
+    agent_name: normalized.assigned_agent,
+    event_type: "success",
+    message: text(body.log_text || "success"),
+    payload: body.result_json || {},
+  }).catch(() => null);
+  await postSlackFollowup(
+    normalized,
+    `작업 완료.\n작업 ID: ${normalized.id}\n작업: ${normalized.job_type}\n상태: success`,
+  ).catch((error) => createAutomationLog({
+    job_id: normalized.id,
+    agent_name: normalized.assigned_agent,
+    level: "warn",
+    event_type: "slack_followup_failed",
+    message: error instanceof Error ? error.message : "Slack followup failed",
+  }).catch(() => null));
+  return normalized;
 }
 
 export async function reportAutomationJobFail(body: AnyRecord = {}) {
@@ -337,7 +460,26 @@ export async function reportAutomationJobFail(body: AnyRecord = {}) {
     },
   );
   if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
-  return normalizeAutomationJob(saved);
+  const normalized = normalizeAutomationJob(saved);
+  await createAutomationLog({
+    job_id: normalized.id,
+    agent_name: normalized.assigned_agent,
+    level: "error",
+    event_type: "failed",
+    message: text(body.error_message || body.error || "failed"),
+    payload: { screenshot_url: normalized.screenshot_url },
+  }).catch(() => null);
+  await postSlackFollowup(
+    normalized,
+    `작업 실패.\n작업 ID: ${normalized.id}\n작업: ${normalized.job_type}\n상태: failed\n오류: ${normalized.error_message || "-"}`,
+  ).catch((error) => createAutomationLog({
+    job_id: normalized.id,
+    agent_name: normalized.assigned_agent,
+    level: "warn",
+    event_type: "slack_followup_failed",
+    message: error instanceof Error ? error.message : "Slack followup failed",
+  }).catch(() => null));
+  return normalized;
 }
 
 export async function claimNextAutomationJobForAgent(agent: string) {
@@ -369,7 +511,16 @@ export async function claimNextAutomationJobForAgent(agent: string) {
       { id: `eq.${id}`, status: "eq.queued", assigned_agent: `eq.${assignedAgent}` },
       { status: "running", started_at: now, log_text: appendLog(row.log_text, `claimed by ${assignedAgent}`) },
     );
-    if (claimed) return normalizeAutomationJob(claimed);
+    if (claimed) {
+      const job = normalizeAutomationJob(claimed);
+      await createAutomationLog({
+        job_id: job.id,
+        agent_name: assignedAgent,
+        event_type: "claimed",
+        message: `claimed by ${assignedAgent}`,
+      }).catch(() => null);
+      return job;
+    }
   }
   return null;
 }

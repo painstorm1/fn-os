@@ -1565,6 +1565,27 @@ create index if not exists idx_automation_jobs_type_created on automation_jobs(j
 create index if not exists idx_automation_jobs_created on automation_jobs(created_at desc);
 create index if not exists idx_automation_jobs_agent_status_created on automation_jobs(assigned_agent, status, created_at asc);
 
+create table if not exists automation_logs (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid references automation_jobs(id) on delete cascade,
+  agent_name text,
+  level text not null default 'info',
+  event_type text,
+  message text,
+  payload jsonb default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table automation_logs add column if not exists job_id uuid;
+alter table automation_logs add column if not exists agent_name text;
+alter table automation_logs add column if not exists level text default 'info';
+alter table automation_logs add column if not exists event_type text;
+alter table automation_logs add column if not exists message text;
+alter table automation_logs add column if not exists payload jsonb default '{}'::jsonb;
+alter table automation_logs add column if not exists created_at timestamptz default now();
+create index if not exists idx_automation_logs_job_created on automation_logs(job_id, created_at asc);
+create index if not exists idx_automation_logs_created on automation_logs(created_at desc);
+
 create table if not exists automation_agent_heartbeats (
   agent_name text primary key,
   status text,

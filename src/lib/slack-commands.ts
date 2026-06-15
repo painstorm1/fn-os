@@ -184,6 +184,7 @@ export function buildSlackAutomationJobDraft(payload: SlackCommandPayload): Slac
         channel_name: payload.channel_name,
         team_id: payload.team_id,
         team_domain: payload.team_domain,
+        response_url: payload.response_url,
         trigger_id: payload.trigger_id,
       },
       approval_required: inference.approvalRequired,
