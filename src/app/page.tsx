@@ -8337,6 +8337,8 @@ function OnlineOrderProgressList({
   onSelectionChange,
   resetKey = 0,
   highlightedRows = [],
+  page,
+  onPageChange,
 }: {
   rows: string[][];
   onChange: (rows: string[][]) => void;
@@ -8344,10 +8346,12 @@ function OnlineOrderProgressList({
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   resetKey?: number;
   highlightedRows?: number[];
+  page?: number;
+  onPageChange?: (page: number) => void;
 }) {
   const headers = salesSheetHeaders["발주 진행 단계"];
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
+  const [uncontrolledPage, setUncontrolledPage] = useState(1);
   const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
     open: false,
@@ -8366,7 +8370,8 @@ function OnlineOrderProgressList({
     .filter((item) => rowHasValue(item.row)), [rows]);
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
+  const requestedPage = page ?? uncontrolledPage;
+  const currentPage = Math.min(Math.max(1, requestedPage), totalPages);
   const pageRows = visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const pageKeys = pageRows.map((item) => item.key);
   const selection = useCheckboxColumnSelection({ keys: pageKeys, selectedKeys, setSelectedKeys });
@@ -8376,14 +8381,19 @@ function OnlineOrderProgressList({
 
   useEffect(() => {
     setSelectedKeys([]);
-    setPage(1);
+    if (onPageChange) onPageChange(1);
+    else setUncontrolledPage(1);
     setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: progressIndex("품목코드(ERP)"), query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
   }, [resetKey]);
 
   useEffect(() => {
-    setPage((prev) => Math.min(Math.max(1, prev), totalPages));
+    const clampedPage = Math.min(Math.max(1, requestedPage), totalPages);
+    if (clampedPage !== requestedPage) {
+      if (onPageChange) onPageChange(clampedPage);
+      else setUncontrolledPage(clampedPage);
+    }
     setSelectedKeys((prev) => prev.filter((key) => visibleRows.some((item) => item.key === key)));
-  }, [totalPages, visibleRows]);
+  }, [totalPages, visibleRows, requestedPage, onPageChange]);
 
   useEffect(() => {
     if (!onSelectionChange) return;
@@ -8572,33 +8582,6 @@ function OnlineOrderProgressList({
         </table>
         {!visibleRows.length && <EmptyState title="수집된 주문이 없습니다." />}
       </div>
-      {visibleRows.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
-          <span>
-            {((currentPage - 1) * pageSize + 1).toLocaleString("ko-KR")}-
-            {Math.min(currentPage * pageSize, visibleRows.length).toLocaleString("ko-KR")} /
-            {visibleRows.length.toLocaleString("ko-KR")}건 · 선택 {selectedKeys.length.toLocaleString("ko-KR")}건
-          </span>
-          <div className="flex items-center gap-1">
-            <button type="button" className="h-8 rounded-md border border-slate-300 bg-white px-2 disabled:opacity-40" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>
-              &lt;
-            </button>
-            {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNo) => (
-              <button
-                key={pageNo}
-                type="button"
-                className={`h-8 min-w-8 rounded-md border px-2 ${pageNo === currentPage ? "border-slate-950 bg-slate-950 text-white" : "border-slate-300 bg-white text-slate-700"}`}
-                onClick={() => setPage(pageNo)}
-              >
-                {pageNo}
-              </button>
-            ))}
-            <button type="button" className="h-8 rounded-md border border-slate-300 bg-white px-2 disabled:opacity-40" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>
-              &gt;
-            </button>
-          </div>
-        </div>
-      )}
       {productSearch.open && (
         <SelectionModal
           title="품목검색"
@@ -9872,6 +9855,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [orderFilePassword, setOrderFilePassword] = useState("");
   const [selectedSalesRange, setSelectedSalesRange] = useState<SalesGridSelection | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
+  const [orderProgressPage, setOrderProgressPage] = useState(1);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
@@ -13313,6 +13297,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     );
   }
 
+  const orderProgressPageSize = 30;
+  const orderProgressTotalCount = orderProgressRows().length;
+  const orderProgressTotalPages = Math.max(1, Math.ceil(orderProgressTotalCount / orderProgressPageSize));
+  const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);
+  const orderProgressStart = orderProgressTotalCount ? (orderProgressCurrentPage - 1) * orderProgressPageSize + 1 : 0;
+  const orderProgressEnd = Math.min(orderProgressCurrentPage * orderProgressPageSize, orderProgressTotalCount);
+  const orderProgressSelectedCount = selectedSalesRange?.sheet === "발주 진행 단계" ? selectedOrderRowIndexes().length : 0;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -13388,20 +13380,41 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="케이모아">케이모아</option>
             </select>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
+            {orderProgressTotalCount > 0 && (
+              <div className="flex min-w-[320px] flex-1 items-center justify-center gap-2 whitespace-nowrap text-xs font-black text-slate-600">
+                <span>
+                  {orderProgressStart.toLocaleString("ko-KR")}-{orderProgressEnd.toLocaleString("ko-KR")} /
+                  {orderProgressTotalCount.toLocaleString("ko-KR")}건 · 선택 {orderProgressSelectedCount.toLocaleString("ko-KR")}건
+                </span>
+                <button type="button" className="px-1 text-slate-500 disabled:text-slate-300" disabled={orderProgressCurrentPage <= 1} onClick={() => setOrderProgressPage((prev) => Math.max(1, prev - 1))}>&lt;</button>
+                {Array.from({ length: orderProgressTotalPages }, (_, index) => index + 1).map((pageNo) => (
+                  <button
+                    key={pageNo}
+                    type="button"
+                    className={`px-1 ${pageNo === orderProgressCurrentPage ? "text-[#ff6a00]" : "text-slate-600 hover:text-[#ff6a00]"}`}
+                    onClick={() => setOrderProgressPage(pageNo)}
+                  >
+                    {pageNo}
+                  </button>
+                ))}
+                <button type="button" className="px-1 text-slate-500 disabled:text-slate-300" disabled={orderProgressCurrentPage >= orderProgressTotalPages} onClick={() => setOrderProgressPage((prev) => Math.min(orderProgressTotalPages, prev + 1))}>&gt;</button>
+              </div>
+            )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-orange-50" onMouseDown={() => setShippingPreviewTab("shipping")}>송장 엑셀</label>
               <label htmlFor="online-sales-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-blue-300 bg-white px-3 text-sm font-black text-blue-600 hover:bg-blue-50">FN판매입력</label>
               <label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50">FN구매입력</label>
             </div>
           </div>
-          <SalesExcelGrid
-            sheet="발주 진행 단계"
+          <OnlineOrderProgressList
             rows={sheets["발주 진행 단계"]}
             onChange={(rows) => setSheets((prev) => ({ ...prev, "발주 진행 단계": rows }))}
             onProductLinked={syncProgressProductToSales}
             onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
             resetKey={salesGridResetKey}
             highlightedRows={salesSheetHighlightedRows["발주 진행 단계"] || []}
+            page={orderProgressCurrentPage}
+            onPageChange={setOrderProgressPage}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, 송장 엑셀 모달에서 거래처별 직송파일과 함께 내보낼 수 있습니다.
