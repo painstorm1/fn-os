@@ -1573,8 +1573,7 @@ create table if not exists automation_runs (
   title text not null,
   status text not null default 'running',
   requested_by text default 'hermes',
-  slack_channel_id text,
-  slack_thread_ts text,
+  summary text,
   input_json jsonb not null default '{}'::jsonb,
   result_json jsonb not null default '{}'::jsonb,
   error_message text,
@@ -1593,8 +1592,7 @@ alter table automation_runs add column if not exists task_type text;
 alter table automation_runs add column if not exists title text;
 alter table automation_runs add column if not exists status text default 'running';
 alter table automation_runs add column if not exists requested_by text default 'hermes';
-alter table automation_runs add column if not exists slack_channel_id text;
-alter table automation_runs add column if not exists slack_thread_ts text;
+alter table automation_runs add column if not exists summary text;
 alter table automation_runs add column if not exists input_json jsonb default '{}'::jsonb;
 alter table automation_runs add column if not exists result_json jsonb default '{}'::jsonb;
 alter table automation_runs add column if not exists error_message text;

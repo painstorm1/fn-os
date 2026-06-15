@@ -6,7 +6,6 @@
     "dev": "next dev",
     "build": "next build",
     "automation:worker": "node tools/automation-worker.mjs",
-    "slack:agent": "node tools/slack-agent/app.mjs",
     "local:orders": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/start-local-order-worker.ps1",
     "local:orders:install": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-local-order-worker-startup.ps1",
     "db:schema": "node tools/apply-sales-inventory-schema.mjs",
@@ -15,9 +14,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@slack/bolt": "^4.7.3",
     "bcryptjs": "^3.0.3",
-    "dotenv": "^17.4.2",
     "jszip": "^3.10.1",
     "next": "16.2.6",
     "officecrypto-tool": "^0.0.19",

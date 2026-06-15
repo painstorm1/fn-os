@@ -93,14 +93,13 @@ export type AutomationLog = {
 
 export type AutomationRun = {
   id: string;
-  source: "cron" | "slack" | "manual_auto" | string;
+  source: "cron" | "manual_auto" | "agent" | string;
   agent: string;
   task_type: AutomationJobType | string;
   title: string;
   status: "running" | "success" | "failed" | string;
   requested_by: string;
-  slack_channel_id: string;
-  slack_thread_ts: string;
+  summary: string;
   input_json: unknown;
   result_json: unknown;
   error_message: string;

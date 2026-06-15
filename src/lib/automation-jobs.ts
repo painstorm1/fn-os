@@ -153,8 +153,7 @@ export function normalizeAutomationRun(row: AnyRecord): AutomationRun {
     title: text(row.title) || text(row.task_type) || "automation run",
     status,
     requested_by: text(row.requested_by) || "hermes",
-    slack_channel_id: text(row.slack_channel_id),
-    slack_thread_ts: text(row.slack_thread_ts),
+    summary: text(row.summary),
     input_json: maybeJsonColumn(row, "input_json", {}),
     result_json: maybeJsonColumn(row, "result_json", {}),
     error_message: text(row.error_message),
@@ -170,7 +169,6 @@ export function normalizeAutomationRun(row: AnyRecord): AutomationRun {
 function automationRunAsJob(run: AutomationRun): AutomationJob {
   const jobType = isAutomationJobType(run.task_type) ? run.task_type : "fnos_report";
   const status = isAutomationJobStatus(run.status) ? run.status : run.status === "success" ? "success" : run.status === "failed" ? "failed" : "running";
-  const input = recordValue(run.input_json);
   return {
     id: run.id,
     job_type: jobType,
@@ -181,14 +179,7 @@ function automationRunAsJob(run: AutomationRun): AutomationJob {
     source: run.source,
     trigger_type: run.source,
     requested_text: "",
-    input_json: {
-      ...input,
-      slack: {
-        ...recordValue(input.slack),
-        channel_id: run.slack_channel_id || text(recordValue(input.slack).channel_id),
-        thread_ts: run.slack_thread_ts || text(recordValue(input.slack).thread_ts),
-      },
-    },
+    input_json: run.input_json,
     result_json: run.result_json,
     log_text: "",
     error_message: run.error_message,
@@ -305,6 +296,7 @@ export async function updateAutomationRun(id: string, body: AnyRecord) {
   if ("title" in body) values.title = text(body.title);
   if ("status" in body) values.status = normalizeRunStatus(body.status);
   if ("requested_by" in body) values.requested_by = text(body.requested_by) || "hermes";
+  if ("summary" in body) values.summary = text(body.summary);
   if ("input_json" in body) values.input_json = jsonValue(body.input_json, {});
   if ("result_json" in body) values.result_json = jsonValue(body.result_json, {});
   if ("error_message" in body) values.error_message = text(body.error_message);
@@ -328,21 +320,11 @@ export async function updateAutomationRun(id: string, body: AnyRecord) {
   return automationRunAsJob(run);
 }
 
-function runSlackContext(body: AnyRecord) {
-  const input = recordValue(body.input_json);
-  const slack = recordValue(body.slack || input.slack);
-  return {
-    channel: text(body.slack_channel_id || slack.channel_id || slack.channel),
-    threadTs: text(body.slack_thread_ts || slack.thread_ts || slack.threadTs || slack.message_ts || slack.messageTs),
-  };
-}
-
 export async function createAutomationRun(body: AnyRecord = {}) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??", 503);
   const taskType = text(body.task_type || body.job_type);
   if (!taskType) throw new FnosDbError("task_type is required.", 400);
   const now = new Date().toISOString();
-  const slack = runSlackContext(body);
   const values: AnyRecord = {
     source: text(body.source) || text(body.trigger_type) || "cron",
     agent: text(body.agent || body.assigned_agent || body.agent_name) || "hermes",
@@ -350,8 +332,7 @@ export async function createAutomationRun(body: AnyRecord = {}) {
     title: text(body.title) || taskType,
     status: normalizeRunStatus(body.status, "running"),
     requested_by: text(body.requested_by) || "hermes",
-    slack_channel_id: slack.channel || null,
-    slack_thread_ts: slack.threadTs || null,
+    summary: text(body.summary),
     input_json: jsonValue(body.input_json, {}) ?? {},
     result_json: jsonValue(body.result_json, {}) ?? {},
     error_message: text(body.error_message || body.error),
@@ -422,6 +403,7 @@ export async function reportAutomationRunSuccess(body: AnyRecord = {}) {
   const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, {
     status: "success",
     result_json: jsonValue(body.result_json, {}) ?? {},
+    summary: text(body.summary || body.log_text || body.message || "success"),
     result_file_url: nullableText(body.result_file_url),
     screenshot_url: nullableText(body.screenshot_url),
     finished_at: now,
@@ -436,13 +418,6 @@ export async function reportAutomationRunSuccess(body: AnyRecord = {}) {
     message: text(body.log_text || body.message || "success"),
     payload: body.result_json || {},
   }).catch(() => null);
-  await postSlackFollowup(automationRunAsJob(run), `작업 완료.\n작업 ID: ${run.id}\n작업: ${run.task_type}\n상태: success`).catch((error) => createAutomationLog({
-    run_id: run.id,
-    agent_name: run.agent,
-    level: "warn",
-    event_type: "slack_followup_failed",
-    message: error instanceof Error ? error.message : "Slack followup failed",
-  }).catch(() => null));
   return run;
 }
 
@@ -454,6 +429,7 @@ export async function reportAutomationRunFail(body: AnyRecord = {}) {
   const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, {
     status: "failed",
     error_message: errorMessage,
+    summary: text(body.summary || errorMessage),
     screenshot_url: nullableText(body.screenshot_url),
     finished_at: now,
     updated_at: now,
@@ -468,13 +444,6 @@ export async function reportAutomationRunFail(body: AnyRecord = {}) {
     message: text(body.log_text || errorMessage),
     payload: { screenshot_url: run.screenshot_url },
   }).catch(() => null);
-  await postSlackFollowup(automationRunAsJob(run), `작업 실패.\n작업 ID: ${run.id}\n작업: ${run.task_type}\n상태: failed\n오류: ${run.error_message || "-"}`).catch((error) => createAutomationLog({
-    run_id: run.id,
-    agent_name: run.agent,
-    level: "warn",
-    event_type: "slack_followup_failed",
-    message: error instanceof Error ? error.message : "Slack followup failed",
-  }).catch(() => null));
   return run;
 }
 
@@ -669,52 +638,6 @@ async function createAutomationLog(body: AnyRecord = {}) {
   return saved;
 }
 
-function slackContextFromJob(job: AutomationJob) {
-  const input = recordValue(job.input_json);
-  const slack = recordValue(input.slack);
-  const channel = text(slack.channel_id || slack.channel);
-  const threadTs = text(slack.thread_ts || slack.threadTs || slack.message_ts || slack.messageTs || slack.trigger_ts);
-  return {
-    channel,
-    threadTs,
-    responseUrl: text(slack.response_url || slack.responseUrl),
-  };
-}
-
-async function postSlackFollowup(job: AutomationJob, textMessage: string) {
-  const { channel, threadTs, responseUrl } = slackContextFromJob(job);
-  const botToken = process.env.SLACK_BOT_TOKEN || "";
-  if (channel && botToken) {
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${botToken}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({
-        channel,
-        thread_ts: threadTs || undefined,
-        text: textMessage,
-        unfurl_links: false,
-        unfurl_media: false,
-      }),
-      cache: "no-store",
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data?.ok === false) throw new Error(`Slack chat.postMessage failed: ${data?.error || response.status}`);
-    return;
-  }
-  if (responseUrl) {
-    const response = await fetch(responseUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ response_type: "ephemeral", text: textMessage }),
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`Slack response_url failed: ${response.status}`);
-  }
-}
-
 export async function reportAutomationJobStart(body: AnyRecord = {}) {
   const run = await reportAutomationRunStart(body);
   return automationRunAsJob(run);
@@ -815,16 +738,6 @@ export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
     message: text(body.log_text || "success"),
     payload: body.result_json || {},
   }).catch(() => null);
-  await postSlackFollowup(
-    normalized,
-    `작업 완료.\n작업 ID: ${normalized.id}\n작업: ${normalized.job_type}\n상태: success`,
-  ).catch((error) => createAutomationLog({
-    job_id: normalized.id,
-    agent_name: normalized.assigned_agent,
-    level: "warn",
-    event_type: "slack_followup_failed",
-    message: error instanceof Error ? error.message : "Slack followup failed",
-  }).catch(() => null));
   return normalized;
 }
 
@@ -856,16 +769,6 @@ export async function reportAutomationJobFail(body: AnyRecord = {}) {
     message: text(body.error_message || body.error || "failed"),
     payload: { screenshot_url: normalized.screenshot_url },
   }).catch(() => null);
-  await postSlackFollowup(
-    normalized,
-    `작업 실패.\n작업 ID: ${normalized.id}\n작업: ${normalized.job_type}\n상태: failed\n오류: ${normalized.error_message || "-"}`,
-  ).catch((error) => createAutomationLog({
-    job_id: normalized.id,
-    agent_name: normalized.assigned_agent,
-    level: "warn",
-    event_type: "slack_followup_failed",
-    message: error instanceof Error ? error.message : "Slack followup failed",
-  }).catch(() => null));
   return normalized;
 }
 
