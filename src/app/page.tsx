@@ -11363,6 +11363,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!productCode) return;
 
     setSheets((prev) => {
+      const nextProgress = prev["발주 진행 단계"].map((row, index) => {
+        if (index !== rowIndex) return row;
+        const next = [...row];
+        setProgressValue(next, "품목코드(ERP)", productCode);
+        setProgressValue(next, "품목명(ERP)", productName);
+        return next;
+      });
       const nextSales = prev["FN판매입력"].map((row, index) => {
         if (index !== rowIndex) return row;
         const next = [...row];
@@ -11370,7 +11377,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setSalesSheetCell(next, "FN판매입력", "품목명", productName);
         return normalizeSalesEntryRow("FN판매입력", next, "품목코드");
       });
-      return { ...prev, "FN판매입력": nextSales };
+      return { ...prev, "발주 진행 단계": nextProgress, "FN판매입력": nextSales };
     });
 
     void saveSalesChannelProductMapping({
@@ -13656,7 +13663,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고대기">출고대기</option>
               <option value="출고완료">출고완료</option>
             </select>
-            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => goToInternal("/?menu=sales&salesSection=master&masterTab=channelMappings")}>품목 연결</button>
+            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => window.open("/?menu=sales&salesSection=master&masterTab=channelMappings", "fnos-channel-mappings", "width=1500,height=920,noopener=false")}>품목 연결</button>
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const partner = event.target.value as DirectShippingPartner;
               if (partner) void makeDirectShippingFile(partner);
@@ -16535,9 +16542,21 @@ type ChannelProductMappingRow = {
 function ChannelProductMappingPanel() {
   const [rows, setRows] = useState<ChannelProductMappingRow[]>([]);
   const [draft, setDraft] = useState<ChannelProductMappingRow>({ mallName: "", mallCode: "", mallProductCode: "", productCode: "", productName: "", mallProductKey: "" });
+  const [query, setQuery] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [panelMessage, setPanelMessage] = useState("");
+  const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
+    open: false,
+    row: 0,
+    col: 0,
+    query: "",
+    searchedQuery: "",
+    results: [],
+    selectedIndex: 0,
+    loading: false,
+    error: "",
+  });
 
   function mappingFromApi(row: SalesChannelProductMapping): ChannelProductMappingRow {
     return {
@@ -16572,6 +16591,74 @@ function ChannelProductMappingPanel() {
   function mappingRowKey(row: ChannelProductMappingRow, index: number) {
     return row.id || `${row.mallName}::${row.mallProductKey}::${row.productCode}::${index}`;
   }
+
+  const filteredRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((row) => [
+      row.mallName,
+      row.mallCode,
+      row.mallProductCode,
+      row.mallProductKey,
+      row.productCode,
+      row.productName,
+    ].some((value) => salesCellText(value).toLowerCase().includes(needle)));
+  }, [rows, query]);
+
+  function closeMappingWindow() {
+    if (typeof window === "undefined") return;
+    if (window.opener) {
+      window.close();
+      return;
+    }
+    goToInternal("/?menu=sales&salesSection=online");
+  }
+
+  async function searchMappingProducts(nextQuery: string) {
+    const keyword = nextQuery.trim();
+    if (!keyword) {
+      setProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
+      return;
+    }
+    setProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
+    try {
+      const res = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: keyword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.error || "품목검색 실패");
+      const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
+    } catch (error) {
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
+    }
+  }
+
+  function openMappingProductSearch(nextQuery: string) {
+    setProductSearch({
+      open: true,
+      row: 0,
+      col: 0,
+      query: nextQuery,
+      searchedQuery: "",
+      results: [],
+      selectedIndex: 0,
+      loading: false,
+      error: "",
+    });
+    void searchMappingProducts(nextQuery);
+  }
+
+  function applyMappingProduct(item: FnOsProductSearchItem) {
+    if (!item.code) return;
+    setDraft((prev) => ({ ...prev, productCode: salesCellText(item.code), productName: salesCellText(item.name) || prev.productName }));
+    setProductSearch((prev) => ({ ...prev, open: false }));
+  }
+
+  useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
 
   async function addMapping() {
     if (!draft.mallName || !draft.productCode || !draft.mallProductKey) {
@@ -16616,20 +16703,44 @@ function ChannelProductMappingPanel() {
 
   return (
     <Card className="p-4">
-      <SectionHeader title="쇼핑몰 코드연결" description="쇼핑몰상품코드/쇼핑몰품목key와 FN OS 품목코드를 연결합니다." actions={<ActionButton type="button" variant="secondary" onClick={() => void loadMappings()} disabled={loading}>새로고침</ActionButton>} />
+      <SectionHeader
+        title="쇼핑몰 코드연결"
+        description="쇼핑몰상품코드/쇼핑몰품목key와 FN OS 품목코드를 연결합니다."
+        actions={<div className="flex gap-2"><ActionButton type="button" variant="secondary" onClick={() => void loadMappings()} disabled={loading}>새로고침</ActionButton><ActionButton type="button" variant="secondary" onClick={closeMappingWindow}>닫기</ActionButton></div>}
+      />
       {panelMessage && <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{panelMessage}</p>}
-      <div className="mt-4 grid gap-2 lg:grid-cols-[150px_110px_150px_140px_180px_1fr_88px]">
+      <div className="mt-4 grid gap-2 lg:grid-cols-[150px_110px_150px_140px_180px_1fr_104px]">
         <input className={modalInputClass} placeholder="쇼핑몰명" value={draft.mallName} onChange={(event) => setDraft((prev) => ({ ...prev, mallName: event.target.value }))} />
         <input className={modalInputClass} placeholder="쇼핑몰코드" value={draft.mallCode || ""} onChange={(event) => setDraft((prev) => ({ ...prev, mallCode: event.target.value }))} />
         <input className={modalInputClass} placeholder="쇼핑몰상품코드" value={draft.mallProductCode || ""} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductCode: event.target.value }))} />
-        <input className={modalInputClass} placeholder="품목코드" value={draft.productCode} onChange={(event) => setDraft((prev) => ({ ...prev, productCode: event.target.value }))} />
-        <input className={modalInputClass} placeholder="품목명" value={draft.productName} onChange={(event) => setDraft((prev) => ({ ...prev, productName: event.target.value }))} />
+        <input
+          className={modalInputClass}
+          placeholder="품목코드"
+          value={draft.productCode}
+          onChange={(event) => setDraft((prev) => ({ ...prev, productCode: event.target.value }))}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openMappingProductSearch(event.currentTarget.value || draft.productName); } }}
+        />
+        <input
+          className={modalInputClass}
+          placeholder="품목명"
+          value={draft.productName}
+          onChange={(event) => setDraft((prev) => ({ ...prev, productName: event.target.value }))}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openMappingProductSearch(event.currentTarget.value || draft.productCode); } }}
+        />
         <input className={modalInputClass} placeholder="쇼핑몰품목key" value={draft.mallProductKey} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductKey: event.target.value }))} />
-        <ActionButton type="button" onClick={() => void addMapping()}>등록</ActionButton>
+        <ActionButton type="button" onClick={() => void addMapping()}>매칭 적용</ActionButton>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          className={`${modalInputClass} h-9 max-w-[360px]`}
+          placeholder="쇼핑몰/품목코드/품목명/key 검색"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }}
+        />
         <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedMappings()}>삭제</ActionButton>
         <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
+        <span className="text-xs font-bold text-slate-400">표시 {filteredRows.length.toLocaleString("ko-KR")} / 전체 {rows.length.toLocaleString("ko-KR")}</span>
       </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full min-w-[1060px] text-sm">
@@ -16637,11 +16748,11 @@ function ChannelProductMappingPanel() {
             <tr><th className="w-16 px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => {
+            {filteredRows.map((row, index) => {
               const key = mappingRowKey(row, index);
               const selected = selectedKeys.includes(key);
               return (
-              <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key])}>
+              <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setDraft(row)}>
                 <td className="px-3 py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]); }} onMouseEnter={() => {}} /></td>
                 <td className="px-3 py-2 font-semibold">{row.mallName}</td>
                 <td className="px-3 py-2">{row.mallCode || "-"}</td>
@@ -16654,8 +16765,74 @@ function ChannelProductMappingPanel() {
             );})}
           </tbody>
         </table>
-        {!rows.length && <EmptyState title={loading ? "연결 목록을 불러오는 중입니다." : "연결된 쇼핑몰 코드가 없습니다."} />}
+        {!filteredRows.length && <EmptyState title={loading ? "연결 목록을 불러오는 중입니다." : query ? "검색 결과가 없습니다." : "연결된 쇼핑몰 코드가 없습니다."} />}
       </div>
+      {productSearch.open && (
+        <SelectionModal title="품목검색" onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))} size="lg">
+          <div
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setProductSearch((prev) => ({ ...prev, open: false }));
+                return;
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(Math.max(0, prev.results.length - 1), prev.selectedIndex + 1) }));
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) }));
+                return;
+              }
+              if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) {
+                event.preventDefault();
+                applyMappingProduct(productSearch.results[productSearch.selectedIndex]);
+              }
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                className={modalInputClass}
+                value={productSearch.query}
+                onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const keyword = event.currentTarget.value.trim();
+                    if (productSearch.results.length && keyword === productSearch.searchedQuery && productSearch.results[productSearch.selectedIndex]) applyMappingProduct(productSearch.results[productSearch.selectedIndex]);
+                    else void searchMappingProducts(keyword);
+                  }
+                }}
+              />
+              <ActionButton type="button" onClick={() => void searchMappingProducts(productSearch.query)} disabled={productSearch.loading}>찾기</ActionButton>
+              <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
+            </div>
+            {productSearch.error && <p className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{productSearch.error}</p>}
+            <div className="mt-3 max-h-[420px] overflow-auto rounded-lg border border-slate-200">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-xs font-black text-slate-500">
+                  <tr><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">규격</th><th className="px-3 py-2 text-right">출고가</th><th className="px-3 py-2 text-center">적용</th></tr>
+                </thead>
+                <tbody>
+                  {productSearch.results.map((item, index) => (
+                    <tr key={`${item.code}-${index}`} className={`cursor-pointer border-t border-slate-100 ${productSearch.selectedIndex === index ? "bg-orange-50" : "hover:bg-slate-50"}`} onClick={() => setProductSearch((prev) => ({ ...prev, selectedIndex: index }))} onDoubleClick={() => applyMappingProduct(item)}>
+                      <td className="px-3 py-2 font-black text-blue-600">{item.code}</td>
+                      <td className="px-3 py-2 font-bold">{item.name}</td>
+                      <td className="px-3 py-2">{item.size || "-"}</td>
+                      <td className="px-3 py-2 text-right">{item.outPrice || "-"}</td>
+                      <td className="px-3 py-2 text-center"><button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs font-black text-slate-600" onClick={(event) => { event.stopPropagation(); applyMappingProduct(item); }}>적용</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!productSearch.loading && !productSearch.results.length && <EmptyState title="검색 결과가 없습니다." />}
+            </div>
+          </div>
+        </SelectionModal>
+      )}
     </Card>
   );
 }
