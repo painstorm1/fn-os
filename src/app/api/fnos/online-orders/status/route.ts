@@ -7,9 +7,30 @@ import { readChannelCredentials } from "@/lib/sales-channel-credentials";
 
 type AnyRecord = Record<string, unknown>;
 
+const localBridgeCorsHeaders = {
+  "Access-Control-Allow-Origin": "https://fn-os.vercel.app",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
+};
+
 const adapters: Record<string, SalesChannelAdapter> = {
   NAVER: new NaverChannelAdapter(),
 };
+
+
+function jsonResponse(body: AnyRecord, init?: ResponseInit) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      ...localBridgeCorsHeaders,
+      ...(init?.headers || {}),
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: localBridgeCorsHeaders });
+}
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -76,13 +97,13 @@ function rowProductOrderId(row: AnyRecord) {
 export async function POST(request: NextRequest) {
   try {
     if (!hasDbConfig()) {
-      return NextResponse.json({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
+      return jsonResponse({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
     }
     const body = await request.json().catch(() => ({})) as AnyRecord;
     const action = text(body.action);
     const rows = Array.isArray(body.rows) ? body.rows.map((row) => row as AnyRecord) : [];
-    if (!["confirm", "dispatch"].includes(action)) return NextResponse.json({ ok: false, error: "지원하지 않는 주문 처리입니다." }, { status: 400 });
-    if (!rows.length) return NextResponse.json({ ok: false, error: "처리할 주문이 없습니다." }, { status: 400 });
+    if (!["confirm", "dispatch"].includes(action)) return jsonResponse({ ok: false, error: "지원하지 않는 주문 처리입니다." }, { status: 400 });
+    if (!rows.length) return jsonResponse({ ok: false, error: "처리할 주문이 없습니다." }, { status: 400 });
 
     if (shouldQueueForLocalWorker(body)) {
       const job = await createAutomationJob({
@@ -95,7 +116,7 @@ export async function POST(request: NextRequest) {
           use_worker: false,
         },
       });
-      return NextResponse.json({ ok: true, queued: true, job_id: job.id, results: [] });
+      return jsonResponse({ ok: true, queued: true, job_id: job.id, results: [] });
     }
 
     const channels = await selectRows<AnyRecord>("sales_channels", {
@@ -145,10 +166,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!results.length) return NextResponse.json({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
-    return NextResponse.json({ ok: results.some((result) => result.ok), results });
+    if (!results.length) return jsonResponse({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
+    return jsonResponse({ ok: results.some((result) => result.ok), results });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 처리 실패" }, { status });
+    return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 처리 실패" }, { status });
   }
 }
