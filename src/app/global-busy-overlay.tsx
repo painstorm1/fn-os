@@ -9,6 +9,10 @@ type BusyState = {
   patched: boolean;
 };
 
+type FnosRequestInit = RequestInit & {
+  fnosSkipBusyOverlay?: boolean;
+};
+
 declare global {
   interface Window {
     __fnosBusyState?: BusyState;
@@ -42,11 +46,13 @@ function installFetchBusyTracker() {
   if (state.patched || typeof window.fetch !== "function") return;
   state.originalFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
-    setBusyDelta(1);
+    const init = args[1] as FnosRequestInit | undefined;
+    const skipBusyOverlay = Boolean(init?.fnosSkipBusyOverlay);
+    if (!skipBusyOverlay) setBusyDelta(1);
     try {
       return await state.originalFetch!(...args);
     } finally {
-      setBusyDelta(-1);
+      if (!skipBusyOverlay) setBusyDelta(-1);
     }
   };
   state.patched = true;

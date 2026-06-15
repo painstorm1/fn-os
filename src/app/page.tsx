@@ -9939,8 +9939,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ from: today, to: today }),
-      });
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; message?: string }> : [];
       setCollectionStatuses(statuses.length
