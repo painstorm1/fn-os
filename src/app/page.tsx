@@ -8462,52 +8462,11 @@ function OnlineOrderProgressList({
     }));
   }
 
-  async function searchFnOsProducts(query: string, attributeFilter = productSearchAttribute) {
-    const keyword = query.trim();
-    if (!keyword) {
-      setProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
-      return;
-    }
-    setProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
-    try {
-      const res = await fetch("/api/fnos/quick-lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ query: keyword, productAttribute: attributeFilter }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: data.error || "품목검색 실패" }));
-        return;
-      }
-      const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
-      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
-    } catch (error) {
-      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
-    }
-  }
-
-  function openProductSearch(rowIndex: number, query: string) {
-    setProductSearch({
-      open: true,
-      row: rowIndex,
-      col: progressIndex("품목코드(ERP)"),
-      query,
-      searchedQuery: "",
-      results: [],
-      selectedIndex: 0,
-      loading: Boolean(query.trim()),
-      error: "",
-    });
-    if (query.trim()) void searchFnOsProducts(query);
-  }
-
-  function selectProductSearchItem(item: FnOsProductSearchItem) {
+  function linkProductToProgressRow(rowIndex: number, item: FnOsProductSearchItem) {
     if (!item.code) return;
     let linkedRow: string[] | null = null;
     const nextRows = rows.map((row, index) => {
-      if (index !== productSearch.row) return row;
+      if (index !== rowIndex) return row;
       const next = [...row];
       setProgressValue(next, "품목코드(ERP)", item.code || "");
       setProgressValue(next, "품목명(ERP)", item.name || "");
@@ -8515,11 +8474,83 @@ function OnlineOrderProgressList({
       return next;
     });
     onChange(nextRows);
-    if (linkedRow) onProductLinked?.(productSearch.row, linkedRow, item);
-    setProductSearch((prev) => ({ ...prev, open: false }));
+    if (linkedRow) onProductLinked?.(rowIndex, linkedRow, item);
   }
 
-  useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
+  function openProductSearch(rowIndex: number, query: string) {
+    const popupToken = `fnos-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const popup = window.open("", "fnos-product-link-popup", "width=1040,height=760,left=120,top=80,resizable=yes,scrollbars=yes");
+    if (!popup) {
+      window.alert("팝업이 차단되었습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.");
+      return;
+    }
+    const openerWindow = window as Window & {
+      __fnosSelectOnlineOrderProduct?: (payload: { token?: string; item?: FnOsProductSearchItem }) => void;
+    };
+    openerWindow.__fnosSelectOnlineOrderProduct = (payload) => {
+      if (payload?.token !== popupToken || !payload.item) return;
+      linkProductToProgressRow(rowIndex, payload.item);
+    };
+    const searchOptions = productSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
+    const initialQuery = salesCellText(query);
+    popup.document.open();
+    popup.document.write(`<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>품목코드 연동</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif;font-size:14px}
+    .wrap{padding:18px}.head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
+    h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+    .tab{border:0;border-radius:7px;background:transparent;color:#475569;font-weight:900;padding:8px 11px;cursor:pointer}.tab.active{background:#ff6a00;color:white}
+    .search{display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
+    button.primary{height:38px;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}
+    button.secondary{height:36px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#334155;font-weight:900;padding:0 14px;cursor:pointer}
+    .panel{background:white;border:1px solid #dbe3ee;border-radius:10px;overflow:hidden}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
+    table{width:100%;border-collapse:collapse;table-layout:fixed} th{background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}
+    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr:hover,tr.active{background:#fff7ed}
+    .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{width:52px;text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head"><div><h1>품목코드 연동</h1><p class="hint">뒤의 발주 자료를 보면서 이 창에서 FN OS 품목을 검색해 선택합니다.</p></div><button class="secondary" id="closeBtn">닫기</button></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button></div>
+    <div class="panel"><table><thead><tr><th class="pick">선택</th><th style="width:150px">품목코드</th><th>품목명</th><th class="num" style="width:120px">입고단가</th><th class="num" style="width:120px">출고단가</th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
+  </div>
+  <script>
+    const token = ${JSON.stringify(popupToken)};
+    const origin = ${JSON.stringify(window.location.origin)};
+    const options = ${JSON.stringify(searchOptions)};
+    let attribute = ${JSON.stringify(productSearchAttribute)};
+    let results = [];
+    let selectedIndex = 0;
+    const tabs = document.getElementById('tabs');
+    const query = document.getElementById('query');
+    const rows = document.getElementById('rows');
+    const status = document.getElementById('status');
+    const krw = new Intl.NumberFormat('ko-KR', { style:'currency', currency:'KRW', maximumFractionDigits:0 });
+    function money(value){ const n = Number(String(value ?? '').replace(/[^\\d.-]/g,'')); return Number.isFinite(n) && n ? krw.format(n) : '-'; }
+    function renderTabs(){ tabs.innerHTML = options.map(o => '<button class="tab '+(o.value===attribute?'active':'')+'" data-value="'+o.value+'">'+o.label+'</button>').join(''); }
+    function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; }
+    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
+    function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
+    tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
+    rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(e.target.closest('button') && tr) choose(Number(tr.dataset.index || 0)); });
+    document.getElementById('searchBtn').addEventListener('click', search);
+    document.getElementById('closeBtn').addEventListener('click', () => window.close());
+    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
+    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(query.value.trim()) search();
+  </script>
+</body>
+</html>`);
+    popup.document.close();
+  }
 
   const renderText = (row: string[], header: string) => progressValue(row, header) || "-";
 
@@ -8648,102 +8679,6 @@ function OnlineOrderProgressList({
         </table>
         {!visibleRows.length && <EmptyState title="수집된 주문이 없습니다." />}
       </div>
-      {productSearch.open && (
-        <SelectionModal
-          title="품목검색"
-          onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))}
-          size="lg"
-          footer={
-            <div className="flex w-full flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1 text-sm font-black" aria-label="품목 속성 검색">
-                {productSearchAttributeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => {
-                      const next = option.value;
-                      setProductSearchAttribute(next);
-                      if (productSearch.query.trim()) void searchFnOsProducts(productSearch.query, next);
-                    }}
-                    className={`rounded-md px-2.5 py-1.5 ${productSearchAttribute === option.value ? "bg-orange-500 text-white" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"}`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
-            </div>
-          }
-        >
-          <div onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(Math.max(0, prev.results.length - 1), prev.selectedIndex + 1) }));
-            }
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) }));
-            }
-            if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) {
-              event.preventDefault();
-              selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
-            }
-          }}>
-            <div className="mb-3 flex gap-2 [&_button]:w-20 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:px-0">
-              <input
-                autoFocus
-                className={`${modalInputClass} min-w-0 flex-[0_1_78%]`}
-                value={productSearch.query}
-                onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (productSearch.results.length && productSearch.query.trim() === productSearch.searchedQuery && productSearch.results[productSearch.selectedIndex]) {
-                    selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
-                    return;
-                  }
-                  void searchFnOsProducts(productSearch.query);
-                }}
-                placeholder="품목명 또는 품목코드"
-              />
-              <ActionButton type="button" onClick={() => void searchFnOsProducts(productSearch.query)}>찾기</ActionButton>
-            </div>
-            <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full table-fixed text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="w-10 py-2">선택</th>
-                    <th className="w-24 py-2 text-left">품목코드</th>
-                    <th className="w-[300px] py-2 text-left">품목명</th>
-                    <th className="w-24 py-2 pr-3 text-right">입고단가</th>
-                    <th className="w-24 py-2 pr-4 text-right">출고단가</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productSearch.results.map((item, index) => {
-                    const selected = productSearch.selectedIndex === index;
-                    return (
-                      <tr key={`${item.code || "item"}-${index}`} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseEnter={() => setProductSearch((prev) => ({ ...prev, selectedIndex: index }))} onDoubleClick={() => selectProductSearchItem(item)}>
-                        <td className="py-2 text-center">
-                          <button type="button" className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`} onClick={() => selectProductSearchItem(item)}>
-                            {index + 1}
-                          </button>
-                        </td>
-                        <td className="truncate py-2 pr-2 font-black text-blue-700">{item.code || "-"}</td>
-                        <td className="truncate py-2 pr-2">{item.name || "-"}</td>
-                        <td className="py-2 pr-3 text-right font-semibold text-slate-700">{item.inPrice ? krw(Number(String(item.inPrice).replace(/[^\d.-]/g, ""))) : "-"}</td>
-                        <td className="py-2 pr-4 text-right font-semibold text-slate-700">{item.outPrice ? krw(Number(String(item.outPrice).replace(/[^\d.-]/g, ""))) : "-"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {!productSearch.loading && !productSearch.results.length && <EmptyState title={productSearch.error || "검색 결과가 없습니다."} />}
-            </div>
-          </div>
-        </SelectionModal>
-      )}
     </div>
   );
 }
