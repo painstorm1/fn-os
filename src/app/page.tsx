@@ -6989,6 +6989,17 @@ type CollectedOnlineOrder = {
   items?: CollectedOnlineOrderItem[];
 };
 
+type SalesChannelProductMapping = {
+  id?: string;
+  channel_name?: string;
+  channel_code?: string;
+  mall_product_code?: string;
+  mall_product_key?: string;
+  mall_product_name?: string;
+  product_code?: string;
+  product_name?: string;
+};
+
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
 const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
 const SALES_WORKSPACE_DB_STORE = "files";
@@ -7033,6 +7044,56 @@ function makeShoppingProductKey(productCode: string, optionText: string) {
   return `${salesCellText(productCode)}${salesCellText(optionText).replace(/\s+/g, " ")}`.trim();
 }
 
+function mappingText(value: unknown) {
+  return salesCellText(value).toLowerCase();
+}
+
+function salesChannelMappingKey(channelName: unknown, mallProductKey: unknown) {
+  return `${mappingText(channelName)}::${mappingText(mallProductKey)}`;
+}
+
+function findSalesChannelMapping(
+  mappings: SalesChannelProductMapping[],
+  channelName: unknown,
+  channelCode: unknown,
+  mallProductCode: unknown,
+  mallProductKey: unknown,
+) {
+  const channelNameText = mappingText(channelName);
+  const channelCodeText = mappingText(channelCode);
+  const productCodeText = mappingText(mallProductCode);
+  const productKeyText = mappingText(mallProductKey);
+  return mappings.find((mapping) => (
+    mappingText(mapping.channel_name) === channelNameText &&
+    mappingText(mapping.mall_product_key) === productKeyText
+  )) || mappings.find((mapping) => (
+    mappingText(mapping.channel_code) === channelCodeText &&
+    mappingText(mapping.mall_product_code) === productCodeText &&
+    productCodeText
+  )) || mappings.find((mapping) => (
+    mappingText(mapping.mall_product_key) === productKeyText && productKeyText
+  ));
+}
+
+async function loadSalesChannelProductMappings() {
+  const res = await fetch("/api/fnos/sales-channel-product-mappings?limit=5000", { cache: "no-store", credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || "쇼핑몰 코드연결 조회 실패");
+  return Array.isArray(data.mappings) ? data.mappings as SalesChannelProductMapping[] : [];
+}
+
+async function saveSalesChannelProductMapping(mapping: SalesChannelProductMapping) {
+  const res = await fetch("/api/fnos/sales-channel-product-mappings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(mapping),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || "쇼핑몰 코드연결 저장 실패");
+  return data.mapping as SalesChannelProductMapping;
+}
+
 function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
   const shippingRows = sheets.송장출력용.filter(rowHasValue);
   const invoiceRows = sheets.FN송장입력.filter(rowHasValue);
@@ -7044,13 +7105,14 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
     const sale = salesRows[index] ? salesRowObject("FN판매입력", salesRows[index]) : {};
     const productCode = salesCellText(sale.품목코드);
     const optionText = salesCellText(shipping.주문옵션);
+    const mallProductCode = salesCellText(shipping.쇼핑몰코드);
     const progress = salesSheetHeaders["발주 진행 단계"].map(() => "");
     setProgressValue(progress, "쇼핑몰(거래처)", salesCellText(sale.거래처명 || codeParts.mallAlias));
     setProgressValue(progress, "수집일자", salesCellText(sale.일자) || salesWorkspaceDayKey().replace(/\D/g, ""));
     setProgressValue(progress, "품목코드(ERP)", productCode);
-    setProgressValue(progress, "쇼핑몰상품코드", productCode || salesCellText(shipping.쇼핑몰코드));
-    setProgressValue(progress, "품목명(ERP)", salesCellText(sale.품목명) || optionText);
-    setProgressValue(progress, "쇼핑몰품목key", makeShoppingProductKey(productCode || salesCellText(shipping.쇼핑몰코드), optionText));
+    setProgressValue(progress, "쇼핑몰상품코드", mallProductCode);
+    setProgressValue(progress, "품목명(ERP)", salesCellText(sale.품목명));
+    setProgressValue(progress, "쇼핑몰품목key", makeShoppingProductKey(mallProductCode, optionText));
     setProgressValue(progress, "쇼핑몰명", salesCellText(sale.거래처명 || codeParts.mallAlias));
     setProgressValue(progress, "쇼핑몰코드", salesCellText(invoice.쇼핑몰코드 || shipping.쇼핑몰코드));
     setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
@@ -7119,6 +7181,7 @@ function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string,
 function appendCollectedOnlineOrdersToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
   orders: CollectedOnlineOrder[],
+  mappings: SalesChannelProductMapping[] = [],
 ) {
   const nextSheets: Record<SalesSheetName, string[][]> = { ...currentSheets };
   const currentSalesRows = nextSheets["FN판매입력"].filter(rowHasValue);
@@ -7146,8 +7209,12 @@ function appendCollectedOnlineOrdersToSheets(
       const qty = onlineOrderMoney(item.qty) || 1;
       const amount = onlineOrderMoney(item.salesAmount || item.settlementAmount);
       const unitPrice = qty ? Math.round(amount / qty) : amount;
-      const productCode = salesCellText(item.sku || item.channelProductCode || item.channelOptionCode);
-      const productName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
+      const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
+      const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
+      const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
+      const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
+      const productCode = salesCellText(mapping?.product_code);
+      const productName = salesCellText(mapping?.product_name);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
       setSalesSheetCell(sale, "FN판매입력", "일자", onlineOrderDateKey(order.orderDate));
@@ -7165,20 +7232,20 @@ function appendCollectedOnlineOrdersToSheets(
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
-      setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", productCode || salesCellText(item.channelProductCode));
+      setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", mallProductCode);
       setSalesSheetCell(shipping, "송장출력용", "수취인", order.receiverName);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", order.phone1);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", order.phone2);
       setSalesSheetCell(shipping, "송장출력용", "우편번호", order.zipcode);
       setSalesSheetCell(shipping, "송장출력용", "주소", order.address);
-      setSalesSheetCell(shipping, "송장출력용", "주문옵션", productName);
+      setSalesSheetCell(shipping, "송장출력용", "주문옵션", mallProductName);
       setSalesSheetCell(shipping, "송장출력용", "수량", qty);
       setSalesSheetCell(shipping, "송장출력용", "배송요청사항", order.deliveryMessage);
       setSalesSheetCell(shipping, "송장출력용", "정산예정금액", item.settlementAmount || amount || "");
       shippingRows.push(shipping);
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");
-      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", productCode || salesCellText(item.channelProductCode));
+      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", mallProductCode);
       setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
       invoiceRows.push(invoice);
@@ -7615,7 +7682,36 @@ function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
 }
 
 function measureSalesColumn(sheet: SalesSheetName, header: string, rows: string[][], colIndex: number) {
-  if (sheet === "발주 진행 단계") return 100;
+  if (sheet === "발주 진행 단계") {
+    const progressWidths: Record<string, number> = {
+      "쇼핑몰(거래처)": 110,
+      수집일자: 88,
+      "품목코드(ERP)": 132,
+      쇼핑몰상품코드: 118,
+      "품목명(ERP)": 190,
+      쇼핑몰품목key: 230,
+      쇼핑몰명: 116,
+      쇼핑몰코드: 90,
+      주문번호: 130,
+      묶음주문번호: 130,
+      배송방법코드: 100,
+      송장번호: 120,
+      주문상태: 88,
+      수취인: 92,
+      수취인연락처1: 120,
+      수취인연락처2: 120,
+      우편번호: 90,
+      주소: 260,
+      수량: 72,
+      배송요청사항: 180,
+      정산예정금액: 110,
+      배송방법: 86,
+      배송비금액: 98,
+      배송비: 78,
+      직송거래처: 100,
+    };
+    return progressWidths[header] || 100;
+  }
   if (sheet === "송장출력용" && header !== "주문옵션") return 95;
   const longest = [header, ...rows.map((row) => row[colIndex] || "")].reduce((max, value) => Math.max(max, String(value).length), 0);
   return Math.min(Math.max(90, longest * 9 + 28), sheet === "송장출력용" ? 520 : 360);
@@ -7636,6 +7732,7 @@ function SalesExcelGrid({
   sheet,
   rows,
   onChange,
+  onProductLinked,
   onSelectionChange,
   resetKey = 0,
   highlightedRows = [],
@@ -7643,6 +7740,7 @@ function SalesExcelGrid({
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
+  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   resetKey?: number;
   highlightedRows?: number[];
@@ -7657,7 +7755,7 @@ function SalesExcelGrid({
   const rowDragCleanupRef = useRef<(() => void) | null>(null);
   const [editing, setEditing] = useState<SalesGridCell | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(() => headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
-  const defaultRowHeight = sheet === "발주 진행 단계" ? 72 : 30;
+  const defaultRowHeight = sheet === "발주 진행 단계" ? 42 : 30;
   const [rowHeights, setRowHeights] = useState<number[]>(() => rows.map(() => defaultRowHeight));
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
@@ -7684,7 +7782,7 @@ function SalesExcelGrid({
     setSortState(null);
     setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: productCodeCol, query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
     setColWidths(headers.map((header, index) => measureSalesColumn(sheet, header, rows, index)));
-    setRowHeights(rows.map(() => (sheet === "발주 진행 단계" ? 72 : 30)));
+    setRowHeights(rows.map(() => (sheet === "발주 진행 단계" ? 42 : 30)));
   }, [sheet, resetKey]);
 
   useEffect(() => {
@@ -7772,14 +7870,19 @@ function SalesExcelGrid({
   }
   function selectProductSearchItem(item: FnOsProductSearchItem) {
     if (!item.code) return;
-    onChange(rows.map((row, rowIndex) => {
+    let linkedRow: string[] | null = null;
+    const nextRows = rows.map((row, rowIndex) => {
       if (rowIndex !== productSearch.row) return row;
-      return row.map((cell, colIndex) => {
+      const nextRow = row.map((cell, colIndex) => {
         if (colIndex === productSearch.col) return item.code || cell;
         if (headers[colIndex] === "품목명" || headers[colIndex] === "품목명(ERP)") return item.name || cell;
         return cell;
       });
-    }));
+      linkedRow = nextRow;
+      return nextRow;
+    });
+    onChange(nextRows);
+    if (linkedRow) onProductLinked?.(productSearch.row, linkedRow, item);
     setProductSearch((prev) => ({ ...prev, open: false }));
     setEditing(null);
     setAnchor({ row: productSearch.row, col: productSearch.col });
@@ -9963,7 +10066,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       const orders = Array.isArray(data.orders) ? data.orders as CollectedOnlineOrder[] : [];
       if (orders.length) {
-        setSheets((prev) => appendCollectedOnlineOrdersToSheets(prev, orders));
+        const mappings = await loadSalesChannelProductMappings().catch((error) => {
+          setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 조회 실패");
+          return [] as SalesChannelProductMapping[];
+        });
+        setSheets((prev) => appendCollectedOnlineOrdersToSheets(prev, orders, mappings));
         setSalesGridResetKey((value) => value + 1);
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
@@ -10583,6 +10690,38 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSelectedSalesRange(null);
     setSalesGridResetKey((value) => value + 1);
     setMessage(`선택 주문 ${indexes.size}건을 삭제했습니다.`);
+  }
+
+  function syncProgressProductToSales(rowIndex: number, progressRow: string[], item: FnOsProductSearchItem) {
+    const progress = salesRowObject("발주 진행 단계", progressRow);
+    const productCode = salesCellText(item.code || progress["품목코드(ERP)"]);
+    const productName = salesCellText(item.name || progress["품목명(ERP)"]);
+    if (!productCode) return;
+
+    setSheets((prev) => {
+      const nextSales = prev["FN판매입력"].map((row, index) => {
+        if (index !== rowIndex) return row;
+        const next = [...row];
+        setSalesSheetCell(next, "FN판매입력", "품목코드", productCode);
+        setSalesSheetCell(next, "FN판매입력", "품목명", productName);
+        return normalizeSalesEntryRow("FN판매입력", next, "품목코드");
+      });
+      return { ...prev, "FN판매입력": nextSales };
+    });
+
+    void saveSalesChannelProductMapping({
+      channel_name: progress.쇼핑몰명 || progress["쇼핑몰(거래처)"],
+      channel_code: progress.쇼핑몰코드,
+      mall_product_code: progress.쇼핑몰상품코드,
+      mall_product_key: progress.쇼핑몰품목key,
+      mall_product_name: progress.쇼핑몰품목key,
+      product_code: productCode,
+      product_name: productName,
+    }).then(() => {
+      setMessage(`${progress.쇼핑몰명 || progress["쇼핑몰(거래처)"] || "쇼핑몰"} 품목 연결을 저장했습니다.`);
+    }).catch((error) => {
+      setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 저장 실패");
+    });
   }
 
   function resetSalesWorkspace() {
@@ -12837,7 +12976,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고대기">출고대기</option>
               <option value="출고완료">출고완료</option>
             </select>
-            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => window.alert("품목 연결 DB 저장은 쇼핑몰품목key 매핑 테이블 확정 후 연결됩니다. 현재는 품목코드(ERP) 셀에서 Enter로 품목검색을 사용할 수 있습니다.")}>품목 연결</button>
+            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={() => goToInternal("/?menu=sales&salesSection=master&masterTab=channelMappings")}>품목 연결</button>
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const partner = event.target.value as DirectShippingPartner;
               if (partner) void makeDirectShippingFile(partner);
@@ -12858,6 +12997,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             sheet="발주 진행 단계"
             rows={sheets["발주 진행 단계"]}
             onChange={(rows) => setSheets((prev) => ({ ...prev, "발주 진행 단계": rows }))}
+            onProductLinked={syncProgressProductToSales}
             onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
             resetKey={salesGridResetKey}
             highlightedRows={salesSheetHighlightedRows["발주 진행 단계"] || []}
@@ -15681,79 +15821,118 @@ function PersonnelAuthModal({
 }
 
 type ChannelProductMappingRow = {
+  id?: string;
   mallName: string;
+  mallCode?: string;
+  mallProductCode?: string;
   productCode: string;
   productName: string;
   mallProductKey: string;
 };
 
 function ChannelProductMappingPanel() {
-  const storageKey = "fnos-channel-product-mappings";
   const [rows, setRows] = useState<ChannelProductMappingRow[]>([]);
-  const [draft, setDraft] = useState<ChannelProductMappingRow>({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+  const [draft, setDraft] = useState<ChannelProductMappingRow>({ mallName: "", mallCode: "", mallProductCode: "", productCode: "", productName: "", mallProductKey: "" });
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [panelMessage, setPanelMessage] = useState("");
+
+  function mappingFromApi(row: SalesChannelProductMapping): ChannelProductMappingRow {
+    return {
+      id: row.id,
+      mallName: salesCellText(row.channel_name),
+      mallCode: salesCellText(row.channel_code),
+      mallProductCode: salesCellText(row.mall_product_code),
+      productCode: salesCellText(row.product_code),
+      productName: salesCellText(row.product_name),
+      mallProductKey: salesCellText(row.mall_product_key),
+    };
+  }
+
+  async function loadMappings() {
+    setLoading(true);
+    try {
+      const mappings = await loadSalesChannelProductMappings();
+      setRows(mappings.map(mappingFromApi));
+      setPanelMessage("");
+    } catch (error) {
+      setRows([]);
+      setPanelMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 조회 실패");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || "[]") as ChannelProductMappingRow[];
-      setRows(Array.isArray(saved) ? saved : []);
-    } catch {
-      setRows([]);
-    }
+    void loadMappings();
   }, []);
 
-  function saveRows(nextRows: ChannelProductMappingRow[]) {
-    setRows(nextRows);
-    localStorage.setItem(storageKey, JSON.stringify(nextRows));
-  }
-
   function mappingRowKey(row: ChannelProductMappingRow, index: number) {
-    return `${row.mallName}::${row.mallProductKey}::${row.productCode}::${index}`;
+    return row.id || `${row.mallName}::${row.mallProductKey}::${row.productCode}::${index}`;
   }
 
-  function addMapping() {
+  async function addMapping() {
     if (!draft.mallName || !draft.productCode || !draft.mallProductKey) {
       window.alert("쇼핑몰명, 품목코드, 쇼핑몰품목key를 입력해 주세요.");
       return;
     }
-    const nextRows = [
-      draft,
-      ...rows.filter((row) => !(row.mallName === draft.mallName && row.mallProductKey === draft.mallProductKey)),
-    ];
-    saveRows(nextRows);
-    setSelectedKeys([]);
-    setDraft({ mallName: "", productCode: "", productName: "", mallProductKey: "" });
+    try {
+      await saveSalesChannelProductMapping({
+        channel_name: draft.mallName,
+        channel_code: draft.mallCode,
+        mall_product_code: draft.mallProductCode,
+        mall_product_key: draft.mallProductKey,
+        product_code: draft.productCode,
+        product_name: draft.productName,
+      });
+      setSelectedKeys([]);
+      setDraft({ mallName: "", mallCode: "", mallProductCode: "", productCode: "", productName: "", mallProductKey: "" });
+      await loadMappings();
+      setPanelMessage("쇼핑몰 코드연결을 저장했습니다.");
+    } catch (error) {
+      setPanelMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 저장 실패");
+    }
   }
 
-  function deleteSelectedMappings() {
+  async function deleteSelectedMappings() {
     if (!selectedKeys.length) {
       window.alert("삭제할 연결을 먼저 선택해 주세요.");
       return;
     }
     if (!window.confirm(`선택한 연결 ${selectedKeys.length.toLocaleString("ko-KR")}개를 삭제할까요?`)) return;
-    const selectedSet = new Set(selectedKeys);
-    saveRows(rows.filter((row, index) => !selectedSet.has(mappingRowKey(row, index))));
-    setSelectedKeys([]);
+    try {
+      const selectedSet = new Set(selectedKeys);
+      const targets = rows.filter((row, index) => selectedSet.has(mappingRowKey(row, index))).filter((row) => row.id);
+      await Promise.all(targets.map((row) => fetch(`/api/fnos/sales-channel-product-mappings?id=${encodeURIComponent(String(row.id))}`, { method: "DELETE", credentials: "include" })));
+      setSelectedKeys([]);
+      await loadMappings();
+      setPanelMessage(`선택한 연결 ${targets.length.toLocaleString("ko-KR")}개를 삭제했습니다.`);
+    } catch (error) {
+      setPanelMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 삭제 실패");
+    }
   }
 
   return (
     <Card className="p-4">
-      <SectionHeader title="쇼핑몰 코드연결" description="쇼핑몰품목key와 FN OS 품목코드를 연결합니다. 운영 DB 저장은 매핑 테이블 확정 후 연결합니다." />
-      <div className="mt-4 grid gap-2 lg:grid-cols-[160px_140px_180px_1fr_88px]">
+      <SectionHeader title="쇼핑몰 코드연결" description="쇼핑몰상품코드/쇼핑몰품목key와 FN OS 품목코드를 연결합니다." actions={<ActionButton type="button" variant="secondary" onClick={() => void loadMappings()} disabled={loading}>새로고침</ActionButton>} />
+      {panelMessage && <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{panelMessage}</p>}
+      <div className="mt-4 grid gap-2 lg:grid-cols-[150px_110px_150px_140px_180px_1fr_88px]">
         <input className={modalInputClass} placeholder="쇼핑몰명" value={draft.mallName} onChange={(event) => setDraft((prev) => ({ ...prev, mallName: event.target.value }))} />
+        <input className={modalInputClass} placeholder="쇼핑몰코드" value={draft.mallCode || ""} onChange={(event) => setDraft((prev) => ({ ...prev, mallCode: event.target.value }))} />
+        <input className={modalInputClass} placeholder="쇼핑몰상품코드" value={draft.mallProductCode || ""} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductCode: event.target.value }))} />
         <input className={modalInputClass} placeholder="품목코드" value={draft.productCode} onChange={(event) => setDraft((prev) => ({ ...prev, productCode: event.target.value }))} />
         <input className={modalInputClass} placeholder="품목명" value={draft.productName} onChange={(event) => setDraft((prev) => ({ ...prev, productName: event.target.value }))} />
         <input className={modalInputClass} placeholder="쇼핑몰품목key" value={draft.mallProductKey} onChange={(event) => setDraft((prev) => ({ ...prev, mallProductKey: event.target.value }))} />
-        <ActionButton type="button" onClick={addMapping}>등록</ActionButton>
+        <ActionButton type="button" onClick={() => void addMapping()}>등록</ActionButton>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <ActionButton type="button" variant="danger" onClick={deleteSelectedMappings}>삭제</ActionButton>
+        <ActionButton type="button" variant="danger" onClick={() => void deleteSelectedMappings()}>삭제</ActionButton>
         <span className="text-xs font-bold text-slate-500">선택 {selectedKeys.length.toLocaleString("ko-KR")}개</span>
       </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-        <table className="w-full min-w-[820px] text-sm">
+        <table className="w-full min-w-[1060px] text-sm">
           <thead className="bg-gray-50 text-xs font-black text-gray-500">
-            <tr><th className="w-16 px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
+            <tr><th className="w-16 px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
           </thead>
           <tbody>
             {rows.map((row, index) => {
@@ -15763,15 +15942,17 @@ function ChannelProductMappingPanel() {
               <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key])}>
                 <td className="px-3 py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]); }} onMouseEnter={() => {}} /></td>
                 <td className="px-3 py-2 font-semibold">{row.mallName}</td>
+                <td className="px-3 py-2">{row.mallCode || "-"}</td>
+                <td className="px-3 py-2">{row.mallProductCode || "-"}</td>
                 <td className="px-3 py-2">{row.productCode}</td>
                 <td className="px-3 py-2">{row.productName}</td>
                 <td className="px-3 py-2">{row.mallProductKey}</td>
-                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={(event) => { event.stopPropagation(); if (window.confirm("이 연결을 삭제할까요?")) saveRows(rows.filter((_, rowIndex) => rowIndex !== index)); }}>삭제</button></td>
+                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={async (event) => { event.stopPropagation(); if (!row.id || !window.confirm("이 연결을 삭제할까요?")) return; await fetch(`/api/fnos/sales-channel-product-mappings?id=${encodeURIComponent(String(row.id))}`, { method: "DELETE", credentials: "include" }); await loadMappings(); }}>삭제</button></td>
               </tr>
             );})}
           </tbody>
         </table>
-        {!rows.length && <EmptyState title="연결된 쇼핑몰 코드가 없습니다." />}
+        {!rows.length && <EmptyState title={loading ? "연결 목록을 불러오는 중입니다." : "연결된 쇼핑몰 코드가 없습니다."} />}
       </div>
     </Card>
   );

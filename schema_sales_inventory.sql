@@ -598,6 +598,33 @@ alter table ad_product_mappings add column if not exists sku text;
 alter table ad_product_mappings add column if not exists mapping_status text default 'UNMAPPED';
 alter table ad_product_mappings add column if not exists updated_at timestamptz default now();
 
+create table if not exists sales_channel_product_mappings (
+  id uuid primary key default gen_random_uuid(),
+  channel_name text,
+  channel_code text,
+  mall_product_code text,
+  mall_product_key text not null,
+  mall_product_name text,
+  fn_product_id uuid references products(id) on delete set null,
+  product_code text not null,
+  product_name text,
+  source_type text default 'online_orders',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (channel_name, mall_product_key)
+);
+
+alter table sales_channel_product_mappings add column if not exists channel_name text;
+alter table sales_channel_product_mappings add column if not exists channel_code text;
+alter table sales_channel_product_mappings add column if not exists mall_product_code text;
+alter table sales_channel_product_mappings add column if not exists mall_product_key text;
+alter table sales_channel_product_mappings add column if not exists mall_product_name text;
+alter table sales_channel_product_mappings add column if not exists fn_product_id uuid;
+alter table sales_channel_product_mappings add column if not exists product_code text;
+alter table sales_channel_product_mappings add column if not exists product_name text;
+alter table sales_channel_product_mappings add column if not exists source_type text default 'online_orders';
+alter table sales_channel_product_mappings add column if not exists updated_at timestamptz default now();
+
 create table if not exists expense_entries (
   id uuid primary key default gen_random_uuid(),
   expense_date date not null,
@@ -1598,6 +1625,9 @@ create index if not exists idx_ad_reports_sku on ad_reports(sku);
 create index if not exists idx_ad_reports_product_code on ad_reports(product_code);
 create index if not exists idx_ad_product_mappings_channel_code on ad_product_mappings(channel, external_product_code);
 create index if not exists idx_ad_product_mappings_sku on ad_product_mappings(sku);
+create index if not exists idx_sales_channel_product_mappings_key on sales_channel_product_mappings(channel_name, mall_product_key);
+create index if not exists idx_sales_channel_product_mappings_code on sales_channel_product_mappings(channel_code, mall_product_code);
+create index if not exists idx_sales_channel_product_mappings_product on sales_channel_product_mappings(product_code);
 create index if not exists idx_expense_date on expense_entries(expense_date desc);
 create index if not exists idx_expenses_date on expenses(expense_date desc);
 create index if not exists idx_expenses_category on expenses(category_id);
