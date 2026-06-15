@@ -1,6 +1,7 @@
 export const AUTOMATION_JOB_TYPES = [
   "collect_smartstore_orders",
   "collect_coupang_orders",
+  "online_order_status_update",
   "generate_invoice_file",
   "download_ads_report",
   "download_accounting_report",
@@ -18,6 +19,7 @@ export const AUTOMATION_JOB_TYPES = [
 export type AutomationJobType = (typeof AUTOMATION_JOB_TYPES)[number];
 
 export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
+  online_order_status_update: "온라인 주문 상태 변경",
   collect_smartstore_orders: "스마트스토어 주문 수집",
   collect_coupang_orders: "쿠팡 주문 수집",
   generate_invoice_file: "송장 파일 생성",

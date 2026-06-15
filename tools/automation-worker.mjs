@@ -121,6 +121,29 @@ async function runStubHandler(job) {
     };
   }
 
+  if (job.job_type === "online_order_status_update") {
+    const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/status", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        worker_direct: true,
+        use_worker: false,
+      }),
+    });
+    const ok = data.ok !== false;
+    return {
+      status: ok ? "success" : "failed",
+      result_json: {
+        ...data,
+        worker_id: workerId,
+        execution_origin: executionOrigin,
+        handled_at: now(),
+      },
+      log_text: appendLog(job, `online order status update ${ok ? "completed" : "failed"} via ${executionOrigin}`),
+      error_message: ok ? "" : text(data.error || data.message || "Online order status update failed."),
+    };
+  }
+
   const dryRun = input.dry_run === true || input.mode === "hello";
   const result = {
     worker_id: workerId,

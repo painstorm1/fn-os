@@ -38,6 +38,8 @@ export type ChannelResult<T> = {
 
 export interface SalesChannelAdapter {
   collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>>;
+  confirmOrders?(params: Record<string, unknown>): Promise<ChannelResult<unknown>>;
+  dispatchOrders?(params: Record<string, unknown>): Promise<ChannelResult<unknown>>;
   uploadTracking?(params: Record<string, unknown>): Promise<ChannelResult<unknown>>;
   fetchProducts?(params: Record<string, unknown>): Promise<ChannelResult<unknown>>;
 }

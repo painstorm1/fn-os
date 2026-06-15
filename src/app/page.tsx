@@ -7117,7 +7117,7 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
     setProgressValue(progress, "쇼핑몰코드", salesCellText(invoice.쇼핑몰코드 || shipping.쇼핑몰코드));
     setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
     setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
-    setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드));
+    setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || "CJGLS");
     setProgressValue(progress, "송장번호", salesCellText(shipping.송장번호 || invoice.송장번호));
     setProgressValue(progress, "주문상태", salesCellText(invoice.송장번호 || shipping.송장번호) ? "출고대기" : "신규주문");
     setProgressValue(progress, "수취인", salesCellText(shipping.수취인));
@@ -7245,9 +7245,10 @@ function appendCollectedOnlineOrdersToSheets(
       shippingRows.push(shipping);
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");
-      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", mallProductCode);
+      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", salesCellText(item.channelOptionCode || mallProductCode));
       setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
+      setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", "CJGLS");
       invoiceRows.push(invoice);
     });
   });
@@ -8339,6 +8340,7 @@ function OnlineOrderProgressList({
   highlightedRows = [],
   page,
   onPageChange,
+  statusFilter = "전체",
 }: {
   rows: string[][];
   onChange: (rows: string[][]) => void;
@@ -8348,6 +8350,7 @@ function OnlineOrderProgressList({
   highlightedRows?: number[];
   page?: number;
   onPageChange?: (page: number) => void;
+  statusFilter?: string;
 }) {
   const headers = salesSheetHeaders["발주 진행 단계"];
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -8367,7 +8370,13 @@ function OnlineOrderProgressList({
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const visibleRows = useMemo(() => rows
     .map((row, index) => ({ row, index, key: `progress-${index}` }))
-    .filter((item) => rowHasValue(item.row)), [rows]);
+    .filter((item) => rowHasValue(item.row))
+    .filter((item) => {
+      if (!statusFilter || statusFilter === "전체") return true;
+      const status = progressValue(item.row, "주문상태");
+      if (statusFilter === "신규주문") return !status || status === "신규주문";
+      return status === statusFilter;
+    }), [rows, statusFilter]);
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
   const requestedPage = page ?? uncontrolledPage;
@@ -8410,6 +8419,21 @@ function OnlineOrderProgressList({
       if (index !== rowIndex) return row;
       const next = [...row];
       setProgressValue(next, header, value);
+      return next;
+    }));
+  }
+
+  function formatTrackingNo(value: string) {
+    return value.replace(/\D/g, "").slice(0, 12).replace(/(\d{4})(?=\d)/g, "$1-");
+  }
+
+  function updateDeliveryCompany(rowIndex: number, value: string) {
+    const applyAll = window.confirm("모든 주문건에 적용하시겠습니까?");
+    onChange(rows.map((row, index) => {
+      if (!applyAll && index !== rowIndex) return row;
+      if (applyAll && !rowHasValue(row)) return row;
+      const next = [...row];
+      setProgressValue(next, "배송방법코드", value);
       return next;
     }));
   }
@@ -8560,8 +8584,26 @@ function OnlineOrderProgressList({
                   <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰코드")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "주문번호")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "묶음주문번호")}</td>
-                  <td className="truncate px-2 py-2">{renderText(row, "배송방법코드")}</td>
-                  <td className="truncate px-2 py-2">{renderText(row, "송장번호")}</td>
+                  <td className="px-2 py-2">
+                    <select
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-slate-700 outline-orange-400"
+                      value={progressValue(row, "배송방법코드") || "CJGLS"}
+                      onChange={(event) => updateDeliveryCompany(index, event.target.value)}
+                    >
+                      <option value="CJGLS">CJ대한통운</option>
+                      <option value="HYUNDAI">롯데택배</option>
+                    </select>
+                  </td>
+                  <td className="px-2 py-2">
+                    <input
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-slate-700 outline-orange-400"
+                      value={formatTrackingNo(progressValue(row, "송장번호"))}
+                      onChange={(event) => updateProgressCell(index, "송장번호", formatTrackingNo(event.target.value))}
+                      inputMode="numeric"
+                      maxLength={14}
+                      placeholder="0000-0000-0000"
+                    />
+                  </td>
                   <td className="truncate px-2 py-2 font-black text-blue-700">{renderText(row, "주문상태")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "수취인")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "수취인연락처1")}</td>
@@ -9856,6 +9898,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [selectedSalesRange, setSelectedSalesRange] = useState<SalesGridSelection | null>(null);
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [orderProgressPage, setOrderProgressPage] = useState(1);
+  const [orderProgressStatusFilter, setOrderProgressStatusFilter] = useState("전체");
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
@@ -10391,12 +10434,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("");
     try {
       const today = formatDateKey(new Date());
+      const maxLookupFrom = new Date();
+      maxLookupFrom.setMonth(maxLookupFrom.getMonth() - 3);
       const res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         fnosSkipBusyOverlay: true,
-        body: JSON.stringify({ from: today, to: today }),
+        body: JSON.stringify({ from: formatDateKey(maxLookupFrom), to: today }),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
       if (data.queued && data.job_id) {
@@ -11025,6 +11070,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return sheets["발주 진행 단계"].filter(rowHasValue);
   }
 
+  function filteredOrderProgressRows() {
+    const rows = orderProgressRows();
+    if (!orderProgressStatusFilter || orderProgressStatusFilter === "전체") return rows;
+    return rows.filter((row) => {
+      const status = progressValue(row, "주문상태");
+      if (orderProgressStatusFilter === "신규주문") return !status || status === "신규주문";
+      return status === orderProgressStatusFilter;
+    });
+  }
+
   function orderStatusCount(label: string) {
     const rows = orderProgressRows();
     if (label === "전체") return rows.length;
@@ -11032,7 +11087,48 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return rows.filter((row) => progressValue(row, "주문상태") === label).length;
   }
 
-  function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
+  function onlineOrderApiPayload(indexes: number[]) {
+    return indexes.map((index) => {
+      const row = sheets["발주 진행 단계"][index] || [];
+      return {
+        channelName: progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)"),
+        productOrderId: progressValue(row, "쇼핑몰코드") || progressValue(row, "주문번호"),
+        deliveryMethod: "DELIVERY",
+        deliveryCompanyCode: progressValue(row, "배송방법코드") || "CJGLS",
+        trackingNumber: progressValue(row, "송장번호"),
+      };
+    });
+  }
+
+  async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[]) {
+    const res = await fetch("/api/fnos/online-orders/status", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, rows: onlineOrderApiPayload(indexes) }),
+    });
+    let data = await res.json().catch(() => ({}));
+    if (data.queued && data.job_id) {
+      const jobId = salesCellText(data.job_id);
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
+        const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include" });
+        const jobData = await jobRes.json().catch(() => ({}));
+        const job = jobData.job || {};
+        const status = salesCellText(job.status);
+        if (status === "success") {
+          data = job.result_json || {};
+          break;
+        }
+        if (status === "failed" || status === "cancelled") throw new Error(salesCellText(job.error_message) || "온라인 주문 처리 실패");
+      }
+      if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해 주세요.");
+    }
+    if (!res.ok || data.ok === false) throw new Error(data.error || data.results?.find((item: { message?: string }) => item.message)?.message || "온라인 주문 처리 실패");
+    return data;
+  }
+
+  async function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
     const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
     if (!indexes.length) {
       window.alert("선택값이 없습니다.");
@@ -11041,8 +11137,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const eligibleIndexes = status === "출고완료"
       ? indexes.filter((index) => salesCellText(progressValue(sheets["발주 진행 단계"][index], "송장번호")) && !salesCellText(progressValue(sheets["발주 진행 단계"][index], "직송거래처")))
       : indexes;
+    if (!eligibleIndexes.length) {
+      window.alert(status === "출고완료" ? "송장번호가 입력된 선택 주문이 없습니다." : "처리할 주문이 없습니다.");
+      return;
+    }
     const ok = window.confirm(`${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`);
     if (!ok) return;
+    try {
+      if (status === "주문확인") await callOnlineOrderStatusApi("confirm", eligibleIndexes);
+      if (status === "출고완료") await callOnlineOrderStatusApi("dispatch", eligibleIndexes);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "온라인 주문 처리 실패");
+      return;
+    }
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
@@ -11053,7 +11160,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
       return next;
     });
-    setMessage(`${status} 처리 준비 완료: ${eligibleIndexes.length}건. 쇼핑몰 상태 변경 API는 채널별 연결 후 이 단계에서 호출합니다.`);
+    setMessage(`${status} 처리 완료: ${eligibleIndexes.length}건`);
   }
 
   function deleteSelectedOrderRows() {
@@ -13298,7 +13405,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   const orderProgressPageSize = 30;
-  const orderProgressTotalCount = orderProgressRows().length;
+  const orderProgressTotalCount = filteredOrderProgressRows().length;
   const orderProgressTotalPages = Math.max(1, Math.ceil(orderProgressTotalCount / orderProgressPageSize));
   const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);
   const orderProgressStart = orderProgressTotalCount ? (orderProgressCurrentPage - 1) * orderProgressPageSize + 1 : 0;
@@ -13344,8 +13451,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
               {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
-                <button key={label} type="button" className="h-12 min-w-20 rounded-md border border-slate-200 bg-white px-3 text-center text-xs font-black text-slate-700 hover:border-orange-200 hover:bg-orange-50">
-                  <span className="block text-sm text-blue-600">{orderStatusCount(label)}</span>
+                <button
+                  key={label}
+                  type="button"
+                  className={`h-12 min-w-20 rounded-md border px-3 text-center text-xs font-black hover:border-orange-200 hover:bg-orange-50 ${orderProgressStatusFilter === label ? "border-[#ff6a00] bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-700"}`}
+                  onClick={() => {
+                    setOrderProgressStatusFilter(label);
+                    setOrderProgressPage(1);
+                  }}
+                >
+                  <span className={`block text-sm ${orderProgressStatusFilter === label ? "text-[#ff6a00]" : "text-blue-600"}`}>{orderStatusCount(label)}</span>
                   {label}
                 </button>
               ))}
@@ -13361,7 +13476,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
-              if (status) changeSelectedOrderStatus(status);
+              if (status) void changeSelectedOrderStatus(status);
               event.currentTarget.value = "";
             }}>
               <option value="">진행 상태</option>
@@ -13415,6 +13530,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             highlightedRows={salesSheetHighlightedRows["발주 진행 단계"] || []}
             page={orderProgressCurrentPage}
             onPageChange={setOrderProgressPage}
+            statusFilter={orderProgressStatusFilter}
           />
           <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
             참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, 송장 엑셀 모달에서 거래처별 직송파일과 함께 내보낼 수 있습니다.

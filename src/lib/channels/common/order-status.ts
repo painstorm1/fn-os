@@ -36,6 +36,9 @@ const excludedStatusPatterns = [
 ];
 
 const newOrderStatusPatterns = [
+  "NOTYET",
+  "NOTYETPLACE",
+  "NOTYETPLACEORDER",
   "PAYED",
   "PAID",
   "PAYMENTCOMPLETED",
@@ -50,6 +53,7 @@ const newOrderStatusPatterns = [
 ];
 
 const confirmedOrderStatusPatterns = [
+  "PLACEORDEROK",
   "PLACEPRODUCTORDER",
   "PLACEORDER",
   "ORDERCONFIRMED",
@@ -67,12 +71,15 @@ const confirmedOrderStatusPatterns = [
   "출고대기",
 ];
 
+const exactNewStatuses = new Set(["NOTYET", "NOTYETPLACE", "NOTYETPLACEORDER"]);
+const exactConfirmedStatuses = new Set(["OK", "PLACEORDEROK"]);
+
 export function collectableOnlineOrderStage(status: unknown): CollectableOnlineOrderStage | "" {
   const compact = compactStatus(status);
   if (!compact) return "";
   if (includesAny(compact, excludedStatusPatterns)) return "";
-  if (includesAny(compact, confirmedOrderStatusPatterns)) return "주문확인";
-  if (includesAny(compact, newOrderStatusPatterns)) return "신규주문";
+  if (exactConfirmedStatuses.has(compact) || includesAny(compact, confirmedOrderStatusPatterns)) return "주문확인";
+  if (exactNewStatuses.has(compact) || includesAny(compact, newOrderStatusPatterns)) return "신규주문";
   return "";
 }
 

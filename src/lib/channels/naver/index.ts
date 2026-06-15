@@ -123,14 +123,14 @@ function normalizeDetail(
     qty,
     salesAmount: salesAmount || undefined,
     settlementAmount: numberValue(productOrder.settlementExpectAmount || productOrder.expectedSettlementAmount) || undefined,
-    raw: row,
+    raw: { ...row, productOrder: { ...productOrder, productOrderStatus: firstText(productOrder.placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus) } },
   };
   return {
     ...base,
     orderNo: orderNo || productOrderId,
     bundleOrderNo: firstText(order.orderId, row.orderId),
     orderDate: naverOrderDate(order, productOrder),
-    orderStatus: firstText(productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus),
+    orderStatus: firstText(productOrder.placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus, row.placeOrderStatus, row.productOrderStatus),
     receiverName: firstText(address.name, address.receiverName, delivery.receiverName),
     phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1),
     phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2),
@@ -158,6 +158,34 @@ function mergeOrders(orders: NormalizedOrder[]) {
     if (!existing.address) existing.address = order.address;
   });
   return Array.from(byOrder.values());
+}
+
+async function issueNaverToken(params: Record<string, unknown>) {
+  const clientId = text(params.api_client_id || params.client_id);
+  const clientSecret = text(params.api_client_secret || params.client_secret);
+  if (!clientId || !clientSecret) throw new Error("네이버 API Client ID/Secret을 먼저 저장해 주세요.");
+  const timestamp = Date.now();
+  const clientSecretSign = Buffer.from(bcrypt.hashSync(`${clientId}_${timestamp}`, clientSecret), "utf8").toString("base64");
+  const tokenBody = new URLSearchParams({
+    client_id: clientId,
+    timestamp: String(timestamp),
+    client_secret_sign: clientSecretSign,
+    grant_type: "client_credentials",
+    type: "SELF",
+  });
+  const tokenData = record(await readJson(await fetch(`${NAVER_BASE_URL}/v1/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: tokenBody,
+  })));
+  const token = firstText(tokenData.access_token, tokenData.accessToken, record(tokenData.data).access_token);
+  if (!token) throw new Error("네이버 접근 토큰을 받지 못했습니다.");
+  return token;
+}
+
+function productOrderIdsFromParams(params: Record<string, unknown>) {
+  const raw = params.productOrderIds || params.product_order_ids || [];
+  return (Array.isArray(raw) ? raw : [raw]).map((value) => text(value)).filter(Boolean).slice(0, 30);
 }
 
 export class NaverChannelAdapter implements SalesChannelAdapter {
@@ -239,6 +267,55 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "네이버 주문 수집 실패" };
+    }
+  }
+
+  async confirmOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    try {
+      const productOrderIds = productOrderIdsFromParams(params);
+      if (!productOrderIds.length) return { ok: false, data: null, error: "발주확인할 상품주문번호가 없습니다." };
+      const token = await issueNaverToken(params);
+      const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/confirm`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ productOrderIds }),
+      }));
+      return { ok: true, data, message: `네이버 발주확인 ${productOrderIds.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발주확인 실패" };
+    }
+  }
+
+  async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    try {
+      const rawRows = Array.isArray(params.dispatchProductOrders) ? params.dispatchProductOrders : [];
+      const dispatchProductOrders = rawRows
+        .map((row) => record(row))
+        .map((row) => ({
+          productOrderId: text(row.productOrderId || row.product_order_id),
+          deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
+          deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
+          trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
+          dispatchDate: text(row.dispatchDate || row.dispatch_date) || formatKstDateTime(new Date()),
+        }))
+        .filter((row) => row.productOrderId && row.trackingNumber)
+        .slice(0, 30);
+      if (!dispatchProductOrders.length) return { ok: false, data: null, error: "발송처리할 상품주문번호/송장번호가 없습니다." };
+      const token = await issueNaverToken(params);
+      const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/dispatch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dispatchProductOrders }),
+      }));
+      return { ok: true, data, message: `네이버 발송처리 ${dispatchProductOrders.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발송처리 실패" };
     }
   }
 }
