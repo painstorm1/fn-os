@@ -9851,6 +9851,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function runOrderCollectionFlow() {
+    setCollectionPopupOpen(false);
+    setCollectionStatuses([]);
     const ok = window.confirm("주문 수집하시겠습니까?");
     if (!ok) return;
     if (completedSalesTasks.orderFlow) {
@@ -9865,17 +9867,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     setCollectionStatuses([
-      { name: "네이버 스마트스토어", status: "running", message: "API 수집 중" },
-      { name: "쿠팡", status: "running", message: "API 수집 중" },
+      { name: "온라인 발주", status: "running", message: "API 수집 중" },
     ]);
     setCollectionPopupOpen(true);
     setMessage("");
     try {
+      const today = formatDateKey(new Date());
       const res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ from: today, to: today }),
       });
       const data = await res.json().catch(() => ({}));
       const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; message?: string }> : [];
