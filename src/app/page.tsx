@@ -7152,6 +7152,41 @@ function applyProgressTrackingToShipping(currentSheets: Record<SalesSheetName, s
   return { ...currentSheets, 송장출력용: nextShipping };
 }
 
+function shippingRowsForExcelExport(currentSheets: Record<SalesSheetName, string[][]>) {
+  const progressRows = currentSheets["발주 진행 단계"];
+  const shippingCodeIndex = salesSheetHeaders.송장출력용.indexOf("쇼핑몰코드");
+  const optionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
+  const qtyIndex = salesSheetHeaders.송장출력용.indexOf("수량");
+  const settlementIndex = salesSheetHeaders.송장출력용.indexOf("정산예정금액");
+  const counters = new Map<string, number>();
+  const mmdd = todayMmdd();
+  const runCode = onlineOrderRunCode();
+
+  return currentSheets.송장출력용.map((row, index) => {
+    if (!rowHasValue(row)) return row;
+    const next = [...row];
+    const progress = progressRows[index] || [];
+    const channelName = progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)");
+    const channelCode = progressValue(progress, "쇼핑몰코드");
+    const alias = onlineOrderChannelAlias(channelName, channelCode);
+    const countKey = `${mmdd}-${alias}`;
+    const sequence = (counters.get(countKey) || 0) + 1;
+    counters.set(countKey, sequence);
+
+    if (shippingCodeIndex >= 0) next[shippingCodeIndex] = `${countKey}-${runCode}${String(sequence).padStart(3, "0")}`;
+    if (optionIndex >= 0) {
+      next[optionIndex] = onlineOrderShippingOptionName(
+        progressValue(progress, "품목명(ERP)"),
+        row[optionIndex],
+        qtyIndex >= 0 ? row[qtyIndex] : progressValue(progress, "수량"),
+      );
+    }
+    if (qtyIndex >= 0) next[qtyIndex] = "1";
+    if (settlementIndex >= 0) next[settlementIndex] = onlineOrderSettlementExportAmount(row[settlementIndex], alias, channelName);
+    return next;
+  });
+}
+
 function salesWorkspaceDayKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -7171,6 +7206,54 @@ function onlineOrderDateKey(value: unknown) {
 function onlineOrderMoney(value: unknown) {
   const amount = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function onlineOrderRunCode(date = new Date()) {
+  return date.getHours() < 12 ? "A" : "P";
+}
+
+function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
+  const name = salesCellText(channelName).toLowerCase();
+  const code = salesCellText(channelCode).toUpperCase();
+  if (name.includes("쿠팡") || code.includes("COUPANG")) return "C";
+  if (name.includes("g마켓") || name.includes("지마켓") || name.includes("gmarket")) return "G";
+  if (name.includes("옥션") || name.includes("auction")) return "A";
+  if (name.includes("롯데") || code.includes("LOTTE")) return "L";
+  if (name.includes("신세계") || name.includes("ssg") || code.includes("SSG")) return "S";
+  if (name.includes("11번가") || name.includes("11st")) return "11";
+  if (name.includes("카카오") || name.includes("톡딜")) return "K";
+  if (name.includes("토스") || code.includes("TOSS")) return "T";
+  if (name.includes("현대") || name.includes("이지웰")) return "Z";
+  if (name.includes("오늘의집") || name.includes("오늘")) return "O";
+  if (name.includes("펀앤파인")) return "FF";
+  if (name.includes("에프엔") || name.includes("fn")) return "FN";
+  const codeAlias: Record<string, string> = {
+    "00001": "FN",
+    "00002": "FF",
+    "00003": "11",
+    "00004": "C",
+    "00005": "G",
+    "00006": "A",
+    "00007": "K",
+    "00008": "S",
+    "00009": "L",
+  };
+  return codeAlias[code] || code || "FN";
+}
+
+function onlineOrderSettlementExportAmount(value: unknown, alias: string, channelName: unknown) {
+  const amount = salesMoneyValue(value);
+  if (!amount) return salesCellText(value);
+  const name = salesCellText(channelName);
+  const shouldDeduct = ["C", "T", "S", "L", "K"].includes(alias)
+    || /쿠팡|토스|신세계|롯데|카카오|톡딜/i.test(name);
+  return shouldDeduct ? Math.round(amount * 0.88).toLocaleString("ko-KR") : Math.round(amount).toLocaleString("ko-KR");
+}
+
+function onlineOrderShippingOptionName(productName: unknown, fallback: unknown, qty: unknown) {
+  const name = salesCellText(productName) || salesCellText(fallback);
+  const quantity = Math.max(1, Math.round(salesQuantityValue(qty)) || 1);
+  return quantity > 1 && name ? `${name}-★${quantity}개` : name;
 }
 
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
@@ -10640,9 +10723,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
         .filter((index) => index >= 0),
     );
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
     void downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, {
       "발주 진행 단계": exportSheets["발주 진행 단계"],
-      송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
+      송장출력용: shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
       "FN판매입력": exportSheets["FN판매입력"],
       "FN구매입력": exportSheets["FN구매입력"],
     });
@@ -10667,7 +10751,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
         .filter((index) => index >= 0),
     );
-    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)) });
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)) });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
@@ -10690,9 +10775,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
         .filter((index) => index >= 0),
     );
-    if (hasSalesRows(exportSheets.송장출력용)) {
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    if (hasSalesRows(shippingRows)) {
       void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, {
-        송장출력용: exportSheets.송장출력용.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
+        송장출력용: shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
       });
     }
     if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
@@ -11126,7 +11212,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function applyFnParcelSheet() {
     const exportSheets = applyProgressTrackingToShipping(sheets);
-    const shippingRows = exportSheets.송장출력용.filter((row) => row.some((cell) => String(cell || "").trim()));
+    const shippingRows = shippingRowsForExcelExport(exportSheets).filter((row) => row.some((cell) => String(cell || "").trim()));
     if (!shippingRows.length) {
       window.alert("FN_택배시트에 반영할 송장출력용 데이터가 없습니다.");
       return;
