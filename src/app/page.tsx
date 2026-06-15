@@ -7697,6 +7697,12 @@ type FnOsProductSearchState = {
   error: string;
 };
 
+const onlineOrderWarehouseOptions = [
+  { code: "100", label: "100 (에프엔 본사창고)" },
+  { code: "101", label: "101 (쿠팡/로켓)" },
+  { code: "102", label: "102 (네이버/N배송)" },
+];
+
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
   return {
     startRow: Math.min(a.row, b.row),
@@ -7787,6 +7793,11 @@ function SalesExcelGrid({
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
   const productCodeCol = headers.includes("품목코드(ERP)") ? headers.indexOf("품목코드(ERP)") : headers.indexOf("품목코드");
+  const warehouseHeader = sheet === "FN판매입력" ? "출하창고" : sheet === "FN구매입력" ? "입고창고" : "";
+  const warehouseCol = warehouseHeader ? headers.indexOf(warehouseHeader) : -1;
+  const isOnlineOrderWarehouseCell = (colIndex: number) => warehouseCol >= 0 && colIndex === warehouseCol;
+  const selectableRowIndexes = rows.map((row, index) => rowHasValue(row) ? index : -1).filter((index) => index >= 0);
+  const selectableRowSet = useMemo(() => new Set(selectableRowIndexes), [selectableRowIndexes.join("|")]);
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
     open: false,
     row: 0,
@@ -7846,6 +7857,18 @@ function SalesExcelGrid({
 
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     const changedHeader = headers[colIndex];
+    if (isOnlineOrderWarehouseCell(colIndex)) {
+      const targetRows = selectedRows.length && selectedRows.includes(rowIndex)
+        ? selectedRows.filter((index) => rowHasValue(rows[index] || []))
+        : [rowIndex];
+      const targetSet = new Set(targetRows);
+      onChange(rows.map((row, r) => {
+        if (!targetSet.has(r)) return row;
+        const nextRow = row.map((cell, c) => c === colIndex ? value : cell);
+        return normalizeSalesEntryRow(sheet, nextRow, changedHeader);
+      }));
+      return;
+    }
     onChange(rows.map((row, r) => {
       if (r !== rowIndex) return row;
       const nextRow = row.map((cell, c) => c === colIndex ? value : cell);
@@ -8010,7 +8033,7 @@ function SalesExcelGrid({
     window.addEventListener("mouseup", onPointerUp);
   }
   function toggleAllRows() {
-    const selectableRows = rows.map((_, index) => index);
+    const selectableRows = selectableRowIndexes;
     const allSelected = selectableRows.length > 0 && selectableRows.every((rowIndex) => selectedRows.includes(rowIndex));
     const nextRows = allSelected ? [] : selectableRows;
     setSelectedRows(nextRows);
@@ -8025,7 +8048,7 @@ function SalesExcelGrid({
     gridRef.current?.focus();
   }
   function isSelected(row: number, col: number) {
-    return selectedRows.includes(row) || (row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
+    return selectedRows.includes(row) || (selectableRowSet.has(row) && row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
   }
   function copyRange(event: ClipboardEvent<HTMLDivElement>) {
     const text = selectedRows.length
@@ -8126,9 +8149,9 @@ function SalesExcelGrid({
                 <button
                   type="button"
                   onClick={toggleAllRows}
-                  className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-black ${rows.length > 0 && rows.every((_, rowIndex) => selectedRows.includes(rowIndex)) ? "border-blue-600 bg-blue-600 text-white" : selectedRows.length ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-300 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50"}`}
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-black ${selectableRowIndexes.length > 0 && selectableRowIndexes.every((rowIndex) => selectedRows.includes(rowIndex)) ? "border-blue-600 bg-blue-600 text-white" : selectedRows.length ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-300 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50"}`}
                   aria-label="전체 행 선택"
-                  aria-pressed={rows.length > 0 && rows.every((_, rowIndex) => selectedRows.includes(rowIndex))}
+                  aria-pressed={selectableRowIndexes.length > 0 && selectableRowIndexes.every((rowIndex) => selectedRows.includes(rowIndex))}
                 >
                   {selectedRows.length ? "✓" : ""}
                 </button>
@@ -8205,6 +8228,9 @@ function SalesExcelGrid({
                         return;
                       }
                       selectCell(rowIndex, colIndex, event.shiftKey);
+                      if (isOnlineOrderWarehouseCell(colIndex)) {
+                        setEditing({ row: rowIndex, col: colIndex });
+                      }
                       setSelecting(true);
                     }}
                     onMouseEnter={() => {
@@ -8213,7 +8239,20 @@ function SalesExcelGrid({
                     onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
                     className={`border p-0 align-middle ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
                   >
-                    {editing?.row === rowIndex && editing?.col === colIndex ? (
+                    {editing?.row === rowIndex && editing?.col === colIndex && isOnlineOrderWarehouseCell(colIndex) ? (
+                      <select
+                        autoFocus
+                        value={row[colIndex] || "100"}
+                        onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
+                        onBlur={() => setEditing(null)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === "Escape") setEditing(null);
+                        }}
+                        className="h-full w-full bg-white px-2 text-xs font-black outline-orange-400"
+                      >
+                        {onlineOrderWarehouseOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+                      </select>
+                    ) : editing?.row === rowIndex && editing?.col === colIndex ? (
                       <input
                         autoFocus
                         value={row[colIndex] || ""}
@@ -8377,6 +8416,63 @@ function OnlineOrderProgressList({
   statusFilter?: string;
 }) {
   const headers = salesSheetHeaders["발주 진행 단계"];
+  const progressTableColumnOrder = [
+    "쇼핑몰(거래처)",
+    "수집일자",
+    "품목코드(ERP)",
+    "품목명(ERP)",
+    "쇼핑몰상품코드",
+    "쇼핑몰품목key",
+    "쇼핑몰명",
+    "쇼핑몰코드",
+    "주문번호",
+    "묶음주문번호",
+    "배송방법코드",
+    "송장번호",
+    "주문상태",
+    "수취인",
+    "수취인연락처1",
+    "수취인연락처2",
+    "우편번호",
+    "주소",
+    "수량",
+    "배송요청사항",
+    "정산예정금액",
+    "배송방법",
+    "배송비금액",
+    "배송비",
+    "직송거래처",
+  ];
+  const progressDefaultColumnWidths: Record<string, number> = {
+    "__select": 48,
+    "쇼핑몰(거래처)": 144,
+    "수집일자": 96,
+    "품목코드(ERP)": 144,
+    "품목명(ERP)": 208,
+    "쇼핑몰상품코드": 128,
+    "쇼핑몰품목key": 256,
+    "쇼핑몰명": 112,
+    "쇼핑몰코드": 96,
+    "주문번호": 144,
+    "묶음주문번호": 144,
+    "배송방법코드": 112,
+    "송장번호": 128,
+    "주문상태": 96,
+    "수취인": 96,
+    "수취인연락처1": 128,
+    "수취인연락처2": 128,
+    "우편번호": 96,
+    "주소": 288,
+    "수량": 64,
+    "배송요청사항": 192,
+    "정산예정금액": 112,
+    "배송방법": 96,
+    "배송비금액": 112,
+    "배송비": 80,
+    "직송거래처": 112,
+  };
+  const numericProgressHeaders = new Set(["수량", "정산예정금액", "배송비금액", "배송비"]);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [uncontrolledPage, setUncontrolledPage] = useState(1);
   const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
@@ -8553,14 +8649,68 @@ function OnlineOrderProgressList({
   }
 
   const renderText = (row: string[], header: string) => progressValue(row, header) || "-";
+  const progressColumnWidth = (header: string) => columnWidths[header] ?? progressDefaultColumnWidths[header] ?? 120;
+  const progressTableMinWidth = progressTableColumnOrder.reduce((sum, header) => sum + progressColumnWidth(header), progressColumnWidth("__select"));
+
+  function resizeProgressColumn(header: string, event: MouseEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = progressColumnWidth(header);
+    const handleMove = (moveEvent: globalThis.MouseEvent) => {
+      const nextWidth = Math.min(900, Math.max(header === "__select" ? 44 : 64, startWidth + moveEvent.clientX - startX));
+      setColumnWidths((prev) => ({ ...prev, [header]: nextWidth }));
+    };
+    const handleUp = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp, { once: true });
+  }
+
+  function autoFitProgressColumn(header: string) {
+    if (header === "__select") {
+      setColumnWidths((prev) => ({ ...prev, [header]: progressDefaultColumnWidths[header] }));
+      return;
+    }
+    const values = pageRows.map(({ row }) => progressValue(row, header));
+    const longest = Math.max(Array.from(header).length, ...values.map((value) => Array.from(salesCellText(value)).length));
+    const nextWidth = Math.min(900, Math.max(progressDefaultColumnWidths[header] ?? 120, Math.ceil(longest * 8.8) + 34));
+    setColumnWidths((prev) => ({ ...prev, [header]: nextWidth }));
+  }
+
+  function ProgressHeaderCell({ header, children }: { header: string; children: ReactNode }) {
+    const alignClass = numericProgressHeaders.has(header) ? "text-right" : header === "__select" ? "text-center" : "text-left";
+    return (
+      <th className={`relative px-2 py-2 ${alignClass}`} style={{ width: progressColumnWidth(header) }}>
+        <div className="truncate pr-2">{children}</div>
+        <span
+          aria-label={`${header === "__select" ? "선택" : header} 컬럼 너비 조절`}
+          className="absolute right-0 top-0 h-full w-2 cursor-col-resize select-none border-r border-slate-200 hover:border-orange-400 hover:bg-orange-100/70"
+          role="separator"
+          onMouseDown={(event) => resizeProgressColumn(header, event)}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            autoFitProgressColumn(header);
+          }}
+        />
+      </th>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="overflow-auto">
-        <table className="w-full min-w-[2200px] table-fixed text-sm">
+        <table className="w-full table-fixed text-sm" style={{ minWidth: progressTableMinWidth }}>
+          <colgroup>
+            <col style={{ width: progressColumnWidth("__select") }} />
+            {progressTableColumnOrder.map((header) => <col key={header} style={{ width: progressColumnWidth(header) }} />)}
+          </colgroup>
           <thead className="bg-slate-50 text-xs font-black text-slate-500">
             <tr className="border-b border-slate-200">
-              <th className="w-12 px-2 py-2 text-center">
+              <ProgressHeaderCell header="__select">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 accent-blue-600"
@@ -8568,32 +8718,8 @@ function OnlineOrderProgressList({
                   onChange={(event) => selection.toggleAll(event.target.checked)}
                   aria-label="발주 진행 단계 전체 선택"
                 />
-              </th>
-              <th className="w-36 px-2 py-2 text-left">쇼핑몰(거래처)</th>
-              <th className="w-24 px-2 py-2 text-left">수집일자</th>
-              <th className="w-36 px-2 py-2 text-left">품목코드(ERP)</th>
-              <th className="w-52 px-2 py-2 text-left">품목명(ERP)</th>
-              <th className="w-32 px-2 py-2 text-left">쇼핑몰상품코드</th>
-              <th className="w-64 px-2 py-2 text-left">쇼핑몰품목key</th>
-              <th className="w-28 px-2 py-2 text-left">쇼핑몰명</th>
-              <th className="w-24 px-2 py-2 text-left">쇼핑몰코드</th>
-              <th className="w-36 px-2 py-2 text-left">주문번호</th>
-              <th className="w-36 px-2 py-2 text-left">묶음주문번호</th>
-              <th className="w-28 px-2 py-2 text-left">배송방법코드</th>
-              <th className="w-32 px-2 py-2 text-left">송장번호</th>
-              <th className="w-24 px-2 py-2 text-left">주문상태</th>
-              <th className="w-24 px-2 py-2 text-left">수취인</th>
-              <th className="w-32 px-2 py-2 text-left">수취인연락처1</th>
-              <th className="w-32 px-2 py-2 text-left">수취인연락처2</th>
-              <th className="w-24 px-2 py-2 text-left">우편번호</th>
-              <th className="w-72 px-2 py-2 text-left">주소</th>
-              <th className="w-16 px-2 py-2 text-right">수량</th>
-              <th className="w-48 px-2 py-2 text-left">배송요청사항</th>
-              <th className="w-28 px-2 py-2 text-right">정산예정금액</th>
-              <th className="w-24 px-2 py-2 text-left">배송방법</th>
-              <th className="w-28 px-2 py-2 text-right">배송비금액</th>
-              <th className="w-20 px-2 py-2 text-right">배송비</th>
-              <th className="w-28 px-2 py-2 text-left">직송거래처</th>
+              </ProgressHeaderCell>
+              {progressTableColumnOrder.map((header) => <ProgressHeaderCell key={header} header={header}>{header}</ProgressHeaderCell>)}
             </tr>
           </thead>
           <tbody>
