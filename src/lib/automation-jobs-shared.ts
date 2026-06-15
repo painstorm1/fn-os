@@ -5,6 +5,14 @@ export const AUTOMATION_JOB_TYPES = [
   "download_ads_report",
   "download_accounting_report",
   "create_detail_page_draft",
+  "ads_collect",
+  "ads_analyze",
+  "orders_collect",
+  "invoice_prepare",
+  "fnos_report",
+  "content_draft",
+  "accounting_collect",
+  "sourcing_research",
 ] as const;
 
 export type AutomationJobType = (typeof AUTOMATION_JOB_TYPES)[number];
@@ -16,6 +24,14 @@ export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
   download_ads_report: "광고자료 다운로드",
   download_accounting_report: "회계자료 다운로드",
   create_detail_page_draft: "상세페이지 초안 생성",
+  ads_collect: "광고자료 수집",
+  ads_analyze: "광고성과 분석",
+  orders_collect: "주문/발주 수집",
+  invoice_prepare: "송장 준비",
+  fnos_report: "FN OS 보고",
+  content_draft: "콘텐츠 초안",
+  accounting_collect: "회계자료 수집",
+  sourcing_research: "소싱 리서치",
 };
 
 export const AUTOMATION_JOB_STATUSES = [

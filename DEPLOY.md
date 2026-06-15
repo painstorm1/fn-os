@@ -11,6 +11,8 @@ FN_OS_API_KEY=vba-or-local-tool-api-key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 DATABASE_URL=postgresql://...
+SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
+SLACK_SIGNING_SECRET=your-slack-signing-secret
 ```
 
 `DATABASE_URL`은 스키마 적용 도구(`npm run db:schema`)에서 사용한다. 운영 API 조회/저장은 `SUPABASE_URL`과 `SUPABASE_SERVICE_ROLE_KEY`를 사용한다.

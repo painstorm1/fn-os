@@ -1444,7 +1444,15 @@ create table if not exists automation_jobs (
     'generate_invoice_file',
     'download_ads_report',
     'download_accounting_report',
-    'create_detail_page_draft'
+    'create_detail_page_draft',
+    'ads_collect',
+    'ads_analyze',
+    'orders_collect',
+    'invoice_prepare',
+    'fnos_report',
+    'content_draft',
+    'accounting_collect',
+    'sourcing_research'
   )),
   constraint automation_jobs_status_check check (status in (
     'queued',
@@ -1469,6 +1477,24 @@ alter table automation_jobs add column if not exists screenshot_url text;
 alter table automation_jobs add column if not exists created_at timestamptz default now();
 alter table automation_jobs add column if not exists started_at timestamptz;
 alter table automation_jobs add column if not exists finished_at timestamptz;
+
+alter table automation_jobs drop constraint if exists automation_jobs_type_check;
+alter table automation_jobs add constraint automation_jobs_type_check check (job_type in (
+  'collect_smartstore_orders',
+  'collect_coupang_orders',
+  'generate_invoice_file',
+  'download_ads_report',
+  'download_accounting_report',
+  'create_detail_page_draft',
+  'ads_collect',
+  'ads_analyze',
+  'orders_collect',
+  'invoice_prepare',
+  'fnos_report',
+  'content_draft',
+  'accounting_collect',
+  'sourcing_research'
+));
 
 insert into archive_categories (category_name, sort_order) values
   ('영어', 1),
