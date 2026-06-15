@@ -1396,6 +1396,53 @@ alter table ai_snapshots add column if not exists generated_at timestamptz defau
 alter table ai_snapshots add column if not exists payload jsonb;
 alter table ai_snapshots add column if not exists summary jsonb;
 
+create table if not exists automation_jobs (
+  id uuid primary key default gen_random_uuid(),
+  job_type text not null,
+  title text not null,
+  status text not null default 'queued',
+  requested_by text not null default 'manual',
+  input_json jsonb not null default '{}'::jsonb,
+  result_json jsonb not null default '{}'::jsonb,
+  error_message text,
+  log_text text,
+  result_file_url text,
+  screenshot_url text,
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  finished_at timestamptz,
+  constraint automation_jobs_type_check check (job_type in (
+    'collect_smartstore_orders',
+    'collect_coupang_orders',
+    'generate_invoice_file',
+    'download_ads_report',
+    'download_accounting_report',
+    'create_detail_page_draft'
+  )),
+  constraint automation_jobs_status_check check (status in (
+    'queued',
+    'running',
+    'success',
+    'failed',
+    'waiting_approval',
+    'cancelled'
+  ))
+);
+
+alter table automation_jobs add column if not exists job_type text;
+alter table automation_jobs add column if not exists title text;
+alter table automation_jobs add column if not exists status text default 'queued';
+alter table automation_jobs add column if not exists requested_by text default 'manual';
+alter table automation_jobs add column if not exists input_json jsonb default '{}'::jsonb;
+alter table automation_jobs add column if not exists result_json jsonb default '{}'::jsonb;
+alter table automation_jobs add column if not exists error_message text;
+alter table automation_jobs add column if not exists log_text text;
+alter table automation_jobs add column if not exists result_file_url text;
+alter table automation_jobs add column if not exists screenshot_url text;
+alter table automation_jobs add column if not exists created_at timestamptz default now();
+alter table automation_jobs add column if not exists started_at timestamptz;
+alter table automation_jobs add column if not exists finished_at timestamptz;
+
 insert into archive_categories (category_name, sort_order) values
   ('영어', 1),
   ('포토샵', 2),
@@ -1448,6 +1495,9 @@ create index if not exists idx_inventory_synced_at on inventory_snapshots(synced
 create unique index if not exists idx_ai_snapshots_key on ai_snapshots(snapshot_key);
 create index if not exists idx_ai_snapshots_period on ai_snapshots(period_from desc, period_to desc);
 create index if not exists idx_ai_snapshots_generated_at on ai_snapshots(generated_at desc);
+create index if not exists idx_automation_jobs_status_created on automation_jobs(status, created_at asc);
+create index if not exists idx_automation_jobs_type_created on automation_jobs(job_type, created_at desc);
+create index if not exists idx_automation_jobs_created on automation_jobs(created_at desc);
 create index if not exists idx_bom_parent on product_boms(parent_product_id);
 create index if not exists idx_bom_items_bom on product_bom_items(bom_id);
 create index if not exists idx_orders_date on orders(order_date desc);
