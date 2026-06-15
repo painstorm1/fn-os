@@ -12,6 +12,13 @@ const app = new App({
   ignoreSelf: true,
 });
 
+function debugLog(label, payload = {}) {
+  console.log(
+    `[FN OS Slack Agent] ${new Date().toISOString()} ${label}`,
+    JSON.stringify(payload),
+  );
+}
+
 function slackContext(event) {
   return {
     channel_id: event.channel,
@@ -22,7 +29,28 @@ function slackContext(event) {
   };
 }
 
+app.use(async ({ body, next }) => {
+  const event = body?.event;
+  debugLog("event received", {
+    type: event?.type,
+    subtype: event?.subtype,
+    channel: event?.channel,
+    channel_type: event?.channel_type,
+    user: event?.user,
+    ts: event?.ts,
+  });
+  await next();
+});
+
 async function enqueueFromSlack({ client, event, logger, text }) {
+  debugLog("enqueue requested", {
+    channel: event.channel,
+    channel_type: event.channel_type,
+    user: event.user,
+    ts: event.ts,
+    text,
+  });
+
   const parsed = parseHermesCommand(text);
   if (!parsed.requested_text) {
     await client.chat.postMessage({
@@ -46,6 +74,12 @@ async function enqueueFromSlack({ client, event, logger, text }) {
   });
 
   logger.info(`Created FN OS automation job ${job.id} from Slack event ${event.ts}`);
+  debugLog("automation job created", {
+    job_id: job.id,
+    job_type: job.job_type,
+    assigned_agent: job.assigned_agent || parsed.assigned_agent,
+    status: job.status,
+  });
   await client.chat.postMessage({
     channel: event.channel,
     thread_ts: event.thread_ts || event.ts,
@@ -60,10 +94,20 @@ async function enqueueFromSlack({ client, event, logger, text }) {
 }
 
 app.event("app_mention", async ({ client, event, logger }) => {
+  debugLog("app_mention received", {
+    channel: event.channel,
+    user: event.user,
+    ts: event.ts,
+    text: event.text,
+  });
+
   try {
     const text = String(event.text || "").replace(/<@[A-Z0-9]+>/g, "").trim();
     await enqueueFromSlack({ client, event, logger, text });
   } catch (error) {
+    debugLog("app_mention failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
     logger.error(error);
     await client.chat.postMessage({
       channel: event.channel,
@@ -74,11 +118,45 @@ app.event("app_mention", async ({ client, event, logger }) => {
 });
 
 app.message(async ({ client, event, logger }) => {
-  if (event.subtype || event.bot_id) return;
-  if (event.channel_type !== "im") return;
+  debugLog("message event received", {
+    subtype: event.subtype,
+    bot_id: event.bot_id,
+    channel: event.channel,
+    channel_type: event.channel_type,
+    user: event.user,
+    ts: event.ts,
+    text: event.text,
+  });
+
+  if (event.subtype || event.bot_id) {
+    debugLog("message ignored", {
+      reason: event.subtype ? "subtype" : "bot_id",
+      subtype: event.subtype,
+      bot_id: event.bot_id,
+    });
+    return;
+  }
+  if (event.channel_type !== "im") {
+    debugLog("message ignored", {
+      reason: "not_im",
+      channel_type: event.channel_type,
+    });
+    return;
+  }
+
+  debugLog("message.im received", {
+    channel: event.channel,
+    user: event.user,
+    ts: event.ts,
+    text: event.text,
+  });
+
   try {
     await enqueueFromSlack({ client, event, logger, text: event.text || "" });
   } catch (error) {
+    debugLog("message.im failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
     logger.error(error);
     await client.chat.postMessage({
       channel: event.channel,
@@ -88,5 +166,12 @@ app.message(async ({ client, event, logger }) => {
   }
 });
 
+debugLog("socket mode starting", {
+  has_bot_token: Boolean(process.env.SLACK_BOT_TOKEN),
+  has_app_token: Boolean(process.env.SLACK_APP_TOKEN),
+  fnos_api_base: process.env.FNOS_AUTOMATION_API_BASE || "https://fn-os.vercel.app",
+});
+
 await app.start();
+debugLog("socket mode connected");
 app.logger.info("FN OS Hermes Slack Agent is running");
