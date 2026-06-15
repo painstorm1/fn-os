@@ -6926,6 +6926,7 @@ type CollectedOnlineOrderItem = {
   qty?: number;
   salesAmount?: number;
   settlementAmount?: number;
+  raw?: unknown;
 };
 
 type CollectedOnlineOrder = {
@@ -6944,6 +6945,7 @@ type CollectedOnlineOrder = {
   address?: string;
   deliveryMessage?: string;
   items?: CollectedOnlineOrderItem[];
+  raw?: unknown;
 };
 
 type SalesChannelProductMapping = {
@@ -7213,6 +7215,41 @@ function onlineOrderShippingOptionName(productName: unknown, fallback: unknown, 
   return quantity > 1 && name ? `${name}-★${quantity}개` : name;
 }
 
+function onlineOrderRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function onlineOrderFirstDeepText(root: unknown, keys: string[], maxDepth = 5): string {
+  const seen = new Set<unknown>();
+  function visit(value: unknown, depth: number): string {
+    if (!value || depth > maxDepth || seen.has(value)) return "";
+    if (typeof value !== "object") return "";
+    seen.add(value);
+    const record = onlineOrderRecord(value);
+    for (const key of keys) {
+      const direct = salesCellText(record[key]);
+      if (direct) return direct;
+    }
+    for (const child of Object.values(record)) {
+      if (Array.isArray(child)) {
+        for (const item of child) {
+          const found = visit(item, depth + 1);
+          if (found) return found;
+        }
+        continue;
+      }
+      const found = visit(child, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  return visit(root, 0);
+}
+
+function onlineOrderFallbackText(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem, keys: string[]) {
+  return onlineOrderFirstDeepText(order.raw, keys) || onlineOrderFirstDeepText(item.raw, keys);
+}
+
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
   const index = salesSheetHeaders[sheet].indexOf(header);
   if (index >= 0) row[index] = salesCellText(value);
@@ -7255,6 +7292,13 @@ function appendCollectedOnlineOrdersToSheets(
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
+      const receiverName = salesCellText(order.receiverName) || onlineOrderFallbackText(order, item, ["receiverName", "receiver_name", "recipientName", "recipient", "shipToName"]);
+      const phone1 = salesCellText(order.phone1) || onlineOrderFallbackText(order, item, ["phone1", "tel1", "receiverPhoneNumber1", "receiverTelNo1", "receiverMobile", "safeNumber", "mobile"]);
+      const phone2 = salesCellText(order.phone2) || onlineOrderFallbackText(order, item, ["phone2", "tel2", "receiverPhoneNumber2", "receiverTelNo2", "receiverPhone", "phone"]);
+      const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
+      const baseAddress = salesCellText(order.address) || onlineOrderFallbackText(order, item, ["address", "baseAddress", "address1", "receiverAddress", "shippingAddress"]);
+      const detailAddress = onlineOrderFallbackText(order, item, ["detailedAddress", "address2", "receiverDetailAddress", "detailAddress"]);
+      const deliveryMessage = salesCellText(order.deliveryMessage) || onlineOrderFallbackText(order, item, ["deliveryMessage", "shippingMemo", "parcelPrintMessage"]);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
       setSalesSheetCell(sale, "FN판매입력", "일자", onlineOrderDateKey(order.orderDate));
@@ -7273,14 +7317,14 @@ function appendCollectedOnlineOrdersToSheets(
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
       setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", mallProductCode);
-      setSalesSheetCell(shipping, "송장출력용", "수취인", order.receiverName);
-      setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", order.phone1);
-      setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", order.phone2);
-      setSalesSheetCell(shipping, "송장출력용", "우편번호", order.zipcode);
-      setSalesSheetCell(shipping, "송장출력용", "주소", order.address);
+      setSalesSheetCell(shipping, "송장출력용", "수취인", receiverName);
+      setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", phone1);
+      setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", phone2);
+      setSalesSheetCell(shipping, "송장출력용", "우편번호", zipcode);
+      setSalesSheetCell(shipping, "송장출력용", "주소", [baseAddress, detailAddress].filter(Boolean).join(" "));
       setSalesSheetCell(shipping, "송장출력용", "주문옵션", mallProductName);
       setSalesSheetCell(shipping, "송장출력용", "수량", qty);
-      setSalesSheetCell(shipping, "송장출력용", "배송요청사항", order.deliveryMessage);
+      setSalesSheetCell(shipping, "송장출력용", "배송요청사항", deliveryMessage);
       setSalesSheetCell(shipping, "송장출력용", "정산예정금액", item.settlementAmount || amount || "");
       shippingRows.push(shipping);
 
@@ -10100,6 +10144,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
   const purchaseSupplyTotal = salesPurchaseAmountTotal(sheets["FN구매입력"]);
+  const shippingPreviewRows = useMemo(() => shippingRowsForExcelExport(applyProgressTrackingToShipping(sheets)).filter((row) => rowHasValue(row)), [sheets]);
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -13726,7 +13771,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   {directShippingRows.JB.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일</button>}
                   {directShippingRows.케이모아.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일</button>}
                 </div>
-                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={sheets.송장출력용} onChange={(rows) => setSheets((prev) => ({ ...prev, 송장출력용: rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} />}
+                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={(rows) => setSheets((prev) => ({ ...prev, 송장출력용: rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} />}
                 {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} />}
                 {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} />}
               </div>

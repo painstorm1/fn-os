@@ -28,6 +28,33 @@ function firstText(...values: unknown[]) {
   return "";
 }
 
+function firstDeepText(root: unknown, keys: string[], maxDepth = 5) {
+  const seen = new Set<unknown>();
+  function visit(value: unknown, depth: number): string {
+    if (!value || depth > maxDepth || seen.has(value)) return "";
+    if (typeof value !== "object") return "";
+    seen.add(value);
+    const nextRecord = record(value);
+    for (const key of keys) {
+      const direct = text(nextRecord[key]);
+      if (direct) return direct;
+    }
+    for (const child of Object.values(nextRecord)) {
+      if (Array.isArray(child)) {
+        for (const item of child) {
+          const found = visit(item, depth + 1);
+          if (found) return found;
+        }
+        continue;
+      }
+      const found = visit(child, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  return visit(root, 0);
+}
+
 function pad2(value: number) {
   return String(value).padStart(2, "0");
 }
@@ -104,8 +131,8 @@ function normalizeDetail(
   const content = record(row.content);
   const order = record(row.order || content.order);
   const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
-  const delivery = record(row.delivery || content.delivery || row.shippingAddress || row.receiver);
-  const address = record(row.shippingAddress || row.receiverAddress || delivery.address);
+  const delivery = record(row.delivery || content.delivery || productOrder.delivery || row.shippingAddress || row.receiver);
+  const address = record(row.shippingAddress || row.receiverAddress || productOrder.shippingAddress || productOrder.receiverAddress || delivery.address || delivery.shippingAddress || delivery.receiverAddress);
   const productOrderId = firstText(productOrder.productOrderId, productOrder.productOrderNo, row.productOrderId);
   const orderNo = firstText(order.orderId, productOrder.orderId, row.orderId, productOrderId);
   const qty = numberValue(productOrder.quantity || productOrder.productOrderQuantity || row.quantity) || 1;
@@ -132,11 +159,11 @@ function normalizeDetail(
     bundleOrderNo: firstText(order.orderId, row.orderId),
     orderDate: naverOrderDate(order, productOrder),
     orderStatus: firstText(productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus, productOrder.placeOrderStatus, row.placeOrderStatus),
-    receiverName: firstText(address.name, address.receiverName, delivery.receiverName),
-    phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1),
-    phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2),
-    zipcode: firstText(address.zipCode, address.zipcode, delivery.zipCode),
-    address: [firstText(address.baseAddress, address.address1, delivery.baseAddress), firstText(address.detailedAddress, address.address2, delivery.detailedAddress)]
+    receiverName: firstText(address.name, address.receiverName, delivery.receiverName, firstDeepText(row, ["receiverName", "recipientName", "shipToName"])),
+    phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1, firstDeepText(row, ["receiverPhoneNumber1", "receiverTelNo1", "tel1", "phone1", "mobile"])),
+    phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2, firstDeepText(row, ["receiverPhoneNumber2", "receiverTelNo2", "tel2", "phone2", "phone"])),
+    zipcode: firstText(address.zipCode, address.zipcode, delivery.zipCode, firstDeepText(row, ["zipCode", "zipcode", "postCode"])),
+    address: [firstText(address.baseAddress, address.address1, delivery.baseAddress, firstDeepText(row, ["baseAddress", "address1", "receiverAddress"])), firstText(address.detailedAddress, address.address2, delivery.detailedAddress, firstDeepText(row, ["detailedAddress", "address2", "receiverDetailAddress"]))]
       .filter(Boolean)
       .join(" "),
     deliveryMessage: firstText(delivery.deliveryMessage, address.deliveryMessage, productOrder.shippingMemo),
