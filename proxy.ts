@@ -16,9 +16,10 @@ export function proxy(request: NextRequest) {
   const isLoginApi = pathname === "/api/login";
   const isApi = pathname.startsWith("/api/");
   const isAutomationJobApi = pathname.startsWith("/api/fnos/automation-jobs");
+  const isSlackCommandApi = pathname === "/api/slack/commands";
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
-  if (isLoginPage || isLoginApi || isAutomationJobApi || isPublicAsset) {
+  if (isLoginPage || isLoginApi || isAutomationJobApi || isSlackCommandApi || isPublicAsset) {
     return NextResponse.next();
   }
 
