@@ -1539,9 +1539,26 @@ function onlyDigits(value: unknown) {
   return String(value || "").replace(/[^\d]/g, "");
 }
 
-function formatCommaNumber(value: unknown) {
-  const digits = onlyDigits(value);
-  return digits ? Number(digits).toLocaleString("ko-KR") : "";
+function normalizeCommaNumberInput(value: unknown, options: { decimal?: boolean; negative?: boolean } = {}) {
+  const text = String(value ?? "").replace(/,/g, "").trim();
+  const sign = options.negative && text.startsWith("-") ? "-" : "";
+  const body = text.replace(/[^\d.]/g, "");
+  if (!options.decimal) return `${sign}${body.replace(/[^\d]/g, "")}`;
+  const hasDot = body.includes(".");
+  const [integer = "", ...fractionParts] = body.split(".");
+  const fraction = fractionParts.join("").replace(/[^\d]/g, "");
+  return `${sign}${integer.replace(/[^\d]/g, "")}${hasDot ? `.${fraction}` : ""}`;
+}
+
+function formatCommaNumber(value: unknown, options: { decimal?: boolean; negative?: boolean } = {}) {
+  const normalized = normalizeCommaNumberInput(value, options);
+  if (!normalized || normalized === "-") return "";
+  const sign = normalized.startsWith("-") ? "-" : "";
+  const unsigned = sign ? normalized.slice(1) : normalized;
+  const [integerRaw, fraction] = unsigned.split(".");
+  const integer = integerRaw ? Number(integerRaw).toLocaleString("ko-KR") : "";
+  if (options.decimal && unsigned.includes(".")) return `${sign}${integer}${integer || fraction ? "." : ""}${fraction ?? ""}`;
+  return integer ? `${sign}${integer}` : "";
 }
 
 function compareManagementName(left: unknown, right: unknown) {
@@ -3425,7 +3442,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             <div className="grid gap-3 md:grid-cols-4">
               {(["shipping_cost", "customs_duty", "vat", "customs_fee", "inspection_fee", "domestic_shipping_cost", "other_cost"] as const).map((key) => (
                 <Field key={key} label={{ shipping_cost: "배대지 배송비", customs_duty: "관세", vat: "부가세", customs_fee: "통관수수료", inspection_fee: "식검비", domestic_shipping_cost: "국내배송비", other_cost: "기타비용" }[key]}>
-                  <input className="field-input text-right" type="number" value={costs[key]} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))} />
+                  <input className="field-input text-right" inputMode="numeric" value={formatCommaNumber(costs[key])} onChange={(e) => setCosts((prev) => ({ ...prev, [key]: normalizeCommaNumberInput(e.target.value) }))} />
                 </Field>
               ))}
             </div>
@@ -3452,7 +3469,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
           <div className="grid grid-cols-2 gap-2">
             <Field label="제작기간">
               <div className="grid grid-cols-[1fr_30px]">
-                <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(e) => setProductionDays(e.target.value)} placeholder="7" />
+                <input className="field-input rounded-r-none px-3 py-2 text-right" inputMode="numeric" value={formatCommaNumber(productionDays)} onChange={(e) => setProductionDays(normalizeCommaNumberInput(e.target.value))} placeholder="7" />
                 <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
               </div>
             </Field>
@@ -3465,8 +3482,8 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
             </Field>
             {isTT ? (
               <>
-                <Field label="1차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(e) => setActualPayment1(e.target.value)} /></Field>
-                <Field label="2차 결제"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(e) => setActualPayment2(e.target.value)} /></Field>
+                <Field label="1차 결제"><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment1, { decimal: true })} onChange={(e) => setActualPayment1(normalizeCommaNumberInput(e.target.value, { decimal: true }))} /></Field>
+                <Field label="2차 결제"><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment2, { decimal: true })} onChange={(e) => setActualPayment2(normalizeCommaNumberInput(e.target.value, { decimal: true }))} /></Field>
                 <div className="col-span-2 rounded-md bg-slate-50 px-3 py-2">
                   <p className="text-xs font-black text-slate-500">최종 결제</p>
                   <p className="mt-1 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p>
@@ -3474,7 +3491,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
               </>
             ) : (
               <div className="col-span-2">
-                <Field label="실 결제금액"><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment} onChange={(e) => setActualPayment(e.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+                <Field label="실 결제금액"><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment, { decimal: true })} onChange={(e) => setActualPayment(normalizeCommaNumberInput(e.target.value, { decimal: true }))} placeholder="비우면 제품 라인 기준" /></Field>
               </div>
             )}
           </div>
@@ -3671,11 +3688,11 @@ function CostMarginGrid({ orderId, grid, materialOnlyRows = [] }: { orderId: num
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right">{krw(unitExtraCost)}</td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right">{krw(row.material_unit_cost || 0)}</td>
                   <td className="truncate border-r border-slate-200 px-1.5 py-2 text-right font-black text-orange-600">{krw(row.estimated_unit_cost || 0)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.coupang} onChange={(e) => update(row.order_item_id, "coupang", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" inputMode="numeric" value={formatCommaNumber(price.coupang)} onChange={(e) => update(row.order_item_id, "coupang", normalizeCommaNumberInput(e.target.value))} /></td>
                   <td className="whitespace-nowrap border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(cp)}>{formatMargin(cp)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverFree} onChange={(e) => update(row.order_item_id, "naverFree", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" inputMode="numeric" value={formatCommaNumber(price.naverFree)} onChange={(e) => update(row.order_item_id, "naverFree", normalizeCommaNumberInput(e.target.value))} /></td>
                   <td className="whitespace-nowrap border-r border-slate-200 px-1.5 py-2 text-right" title={formatMargin(nf)}>{formatMargin(nf)}</td>
-                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" type="number" value={price.naverCod} onChange={(e) => update(row.order_item_id, "naverCod", e.target.value)} /></td>
+                  <td className="border-r border-slate-200 px-1 py-1"><input className="h-7 w-full rounded border border-slate-200 px-1.5 text-right text-xs outline-orange-400" inputMode="numeric" value={formatCommaNumber(price.naverCod)} onChange={(e) => update(row.order_item_id, "naverCod", normalizeCommaNumberInput(e.target.value))} /></td>
                   <td className="whitespace-nowrap px-1.5 py-2 text-right" title={formatMargin(nc)}>{formatMargin(nc)}</td>
                 </tr>
               );
@@ -4803,7 +4820,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
                           <b>{material.name}</b>
                           <span className="ml-2 text-xs font-bold text-slate-500">재고 {Number(material.material_stock || 0).toLocaleString("ko-KR")}</span>
                         </span>
-                        <input className="field-input h-8 text-right" type="number" min="0" step="0.01" disabled={!checked} value={linked?.quantity_per_unit || 1} onChange={(event) => setMaterialQty(material.id, event.target.value)} />
+                        <input className="field-input h-8 text-right" inputMode="decimal" disabled={!checked} value={formatCommaNumber(linked?.quantity_per_unit || 1, { decimal: true })} onChange={(event) => setMaterialQty(material.id, normalizeCommaNumberInput(event.target.value, { decimal: true }))} />
                       </label>
                     );
                   })}
@@ -4856,7 +4873,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
                             <p className="font-black">{item.name}</p>
                             <p className="text-xs font-bold text-slate-500">{item.factory_name || "-"}</p>
                           </div>
-                          <input className={`${modalInputClass} h-9 text-right`} type="number" min="0" step="0.01" disabled={!checked} value={linked?.qty_per_product || linked?.quantity_per_unit || 1} onChange={(event) => setLinkedProductQty(item.id, event.target.value)} />
+                          <input className={`${modalInputClass} h-9 text-right`} inputMode="decimal" disabled={!checked} value={formatCommaNumber(linked?.qty_per_product || linked?.quantity_per_unit || 1, { decimal: true })} onChange={(event) => setLinkedProductQty(item.id, normalizeCommaNumberInput(event.target.value, { decimal: true }))} />
                           <button type="button" className={`h-9 rounded-lg px-4 text-sm font-black transition ${checked ? "border border-orange-300 bg-orange-50 text-orange-700" : "bg-[#ff6a00] text-white hover:bg-[#ea580c]"}`} onClick={() => toggleLinkedProduct(item)}>
                             {checked ? "선택됨" : "추가"}
                           </button>
@@ -5604,7 +5621,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
               </Field>
               <Field label="예상 제작기간">
                 <div className="grid grid-cols-[1fr_38px]">
-                  <input className="field-input rounded-r-none px-3 py-2 text-right" type="number" min="0" step="1" value={productionDays} onChange={(event) => setProductionDays(event.target.value)} placeholder="7" />
+                  <input className="field-input rounded-r-none px-3 py-2 text-right" inputMode="numeric" value={formatCommaNumber(productionDays)} onChange={(event) => setProductionDays(normalizeCommaNumberInput(event.target.value))} placeholder="7" />
                   <span className="bg-slate-50 px-2 py-2 text-center text-sm font-bold">일</span>
                 </div>
               </Field>
@@ -5645,9 +5662,9 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                     </div>
                     <input className="field-input" value={line.product_name} onChange={(e) => updateLine(index, { product_name: e.target.value, product_id: "" })} placeholder="제품명" />
                     <input className="field-input" value={line.option_value} onChange={(e) => updateLine(index, { option_value: e.target.value })} placeholder="옵션" />
-                    <input className="field-input text-right" type="number" step="0.01" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} placeholder="수량" />
+                    <input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(line.quantity, { decimal: true })} onChange={(e) => updateLine(index, { quantity: normalizeCommaNumberInput(e.target.value, { decimal: true }) })} placeholder="수량" />
                     <div className="grid grid-cols-[1fr_76px] gap-2">
-                      <input className="field-input text-right" type="number" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} placeholder="단가" />
+                      <input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(line.unit_price, { decimal: true })} onChange={(e) => updateLine(index, { unit_price: normalizeCommaNumberInput(e.target.value, { decimal: true }) })} placeholder="단가" />
                       <select className="field-input" value={line.item_currency} onChange={(e) => updateLine(index, { item_currency: e.target.value })}>
                         {["CNY", "USD", "JPY", "KRW", "EUR"].map((item) => <option key={item}>{item}</option>)}
                       </select>
@@ -5674,11 +5691,9 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                                 <span className="truncate">{linkVariantLabel(link) || fnProductSku(link.product)}</span>
                                 <input
                                   className="h-8 rounded-md border border-orange-200 px-2 text-right text-xs font-black outline-orange-400"
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={linkPurchaseQty(line, link)}
-                                  onChange={(event) => updateLineSkuQty(index, link, event.target.value)}
+                                  inputMode="decimal"
+                                  value={formatCommaNumber(linkPurchaseQty(line, link), { decimal: true })}
+                                  onChange={(event) => updateLineSkuQty(index, link, normalizeCommaNumberInput(event.target.value, { decimal: true }))}
                                 />
                                 <span className="text-xs font-black">개</span>
                               </label>
@@ -5704,8 +5719,8 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                         <option>CNY</option>
                       </select>
                     </Field>
-                    <Field label={`1차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment1} onChange={(event) => setActualPayment1(event.target.value)} /></Field>
-                    <Field label={`2차 결제(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment2} onChange={(event) => setActualPayment2(event.target.value)} /></Field>
+                    <Field label={`1차 결제(${actualCurrency})`}><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment1, { decimal: true })} onChange={(event) => setActualPayment1(normalizeCommaNumberInput(event.target.value, { decimal: true }))} /></Field>
+                    <Field label={`2차 결제(${actualCurrency})`}><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment2, { decimal: true })} onChange={(event) => setActualPayment2(normalizeCommaNumberInput(event.target.value, { decimal: true }))} /></Field>
                     <Field label={`최종 실 결제금액(${actualCurrency})`}><p className="whitespace-nowrap px-1 py-2 text-right text-sm font-black">{actualPaymentValue.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} {actualCurrency}</p></Field>
                   </>
                 ) : (
@@ -5717,7 +5732,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
                         <option>CNY</option>
                       </select>
                     </Field>
-                    <Field label={`실 결제금액(${actualCurrency})`}><input className="field-input text-right" type="number" min="0" step="0.01" value={actualPayment} onChange={(event) => setActualPayment(event.target.value)} placeholder="비우면 제품 라인 기준" /></Field>
+                    <Field label={`실 결제금액(${actualCurrency})`}><input className="field-input text-right" inputMode="decimal" value={formatCommaNumber(actualPayment, { decimal: true })} onChange={(event) => setActualPayment(normalizeCommaNumberInput(event.target.value, { decimal: true }))} placeholder="비우면 제품 라인 기준" /></Field>
                   </>
                 )}
               </div>
@@ -5730,9 +5745,9 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
               </div>
             </div>
             <div className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 md:grid-cols-[1fr_1fr_1fr_1.2fr_110px]">
-              <Field label="중국내 배송비"><input className="field-input text-right" type="number" name="china_domestic_shipping" value={chinaCosts.shipping} onChange={(event) => setChinaCosts((prev) => ({ ...prev, shipping: event.target.value }))} /></Field>
-              <Field label="수수료"><input className="field-input text-right" type="number" name="china_fee" value={chinaCosts.fee} onChange={(event) => setChinaCosts((prev) => ({ ...prev, fee: event.target.value }))} /></Field>
-              <Field label="중국내 기타금액"><input className="field-input text-right" type="number" name="china_other_cost" value={chinaCosts.other} onChange={(event) => setChinaCosts((prev) => ({ ...prev, other: event.target.value }))} /></Field>
+              <Field label="중국내 배송비"><input className="field-input text-right" inputMode="decimal" name="china_domestic_shipping" value={formatCommaNumber(chinaCosts.shipping, { decimal: true })} onChange={(event) => setChinaCosts((prev) => ({ ...prev, shipping: normalizeCommaNumberInput(event.target.value, { decimal: true }) }))} /></Field>
+              <Field label="수수료"><input className="field-input text-right" inputMode="decimal" name="china_fee" value={formatCommaNumber(chinaCosts.fee, { decimal: true })} onChange={(event) => setChinaCosts((prev) => ({ ...prev, fee: normalizeCommaNumberInput(event.target.value, { decimal: true }) }))} /></Field>
+              <Field label="중국내 기타금액"><input className="field-input text-right" inputMode="decimal" name="china_other_cost" value={formatCommaNumber(chinaCosts.other, { decimal: true })} onChange={(event) => setChinaCosts((prev) => ({ ...prev, other: normalizeCommaNumberInput(event.target.value, { decimal: true }) }))} /></Field>
               <Field label="기타 적요"><input className="field-input" name="china_other_note" value={chinaCosts.otherNote} onChange={(event) => setChinaCosts((prev) => ({ ...prev, otherNote: event.target.value }))} placeholder="인쇄비, 할인 등" /></Field>
               <Field label="통화">
                 <select className="field-input" name="china_cost_currency" value={chinaCosts.currency} onChange={(event) => setChinaCosts((prev) => ({ ...prev, currency: event.target.value }))}>
@@ -5914,8 +5929,8 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
                   </select>
                   <input className="field-input" value={line.product_name} onChange={(e) => updateLine(index, { product_name: e.target.value })} placeholder="제품명" />
                   <input className="field-input" value={line.option_value} onChange={(e) => updateLine(index, { option_value: e.target.value })} placeholder="옵션" />
-                  <input className="field-input" type="number" step="0.01" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} placeholder="수량" />
-                  <input className="field-input" type="number" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} placeholder="단가" />
+                  <input className="field-input" inputMode="decimal" value={formatCommaNumber(line.quantity, { decimal: true })} onChange={(e) => updateLine(index, { quantity: normalizeCommaNumberInput(e.target.value, { decimal: true }) })} placeholder="수량" />
+                  <input className="field-input" inputMode="decimal" value={formatCommaNumber(line.unit_price, { decimal: true })} onChange={(e) => updateLine(index, { unit_price: normalizeCommaNumberInput(e.target.value, { decimal: true }) })} placeholder="단가" />
                   <input className="field-input" value={line.line_note} onChange={(e) => updateLine(index, { line_note: e.target.value })} placeholder="비고" />
                   <button type="button" className="rounded-md border border-rose-200 text-rose-600 disabled:opacity-40" disabled={lines.length === 1} onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>×</button>
                 </div>
@@ -8369,8 +8384,8 @@ function SalesRightTools() {
               <input value={registerForm.prod_name} onChange={(event) => updateRegisterField("prod_name", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="품목명 *" />
               <input value={registerForm.size_des} onChange={(event) => updateRegisterField("size_des", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="규격" />
               <div className="grid grid-cols-2 gap-2">
-                <input value={registerForm.in_price} onChange={(event) => updateRegisterField("in_price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="입고단가" />
-                <input value={registerForm.out_price} onChange={(event) => updateRegisterField("out_price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="출고단가" />
+                <input inputMode="numeric" value={formatCommaNumber(registerForm.in_price)} onChange={(event) => updateRegisterField("in_price", normalizeCommaNumberInput(event.target.value))} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="입고단가" />
+                <input inputMode="numeric" value={formatCommaNumber(registerForm.out_price)} onChange={(event) => updateRegisterField("out_price", normalizeCommaNumberInput(event.target.value))} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="출고단가" />
               </div>
             </>
           ) : (
@@ -8404,8 +8419,8 @@ function SalesRightTools() {
           </div>
           <input value={inputForm.prod_cd} onChange={(event) => updateInputField("prod_cd", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="품목코드 *" />
           <div className="grid grid-cols-2 gap-2">
-            <input value={inputForm.qty} onChange={(event) => updateInputField("qty", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="수량 *" />
-            <input value={inputForm.price} onChange={(event) => updateInputField("price", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="단가 *" />
+            <input inputMode="decimal" value={formatCommaNumber(inputForm.qty, { decimal: true })} onChange={(event) => updateInputField("qty", normalizeCommaNumberInput(event.target.value, { decimal: true }))} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="수량 *" />
+            <input inputMode="numeric" value={formatCommaNumber(inputForm.price)} onChange={(event) => updateInputField("price", normalizeCommaNumberInput(event.target.value))} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="단가 *" />
           </div>
           <input value={inputForm.remarks} onChange={(event) => updateInputField("remarks", event.target.value)} className="rounded-md border border-slate-200 px-2 py-2 text-xs outline-orange-400" placeholder="적요" />
           <button type="button" onClick={submitInput} disabled={inputLoading} className="rounded-md bg-orange-500 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
@@ -13499,11 +13514,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </select>
                 <div>
                   {inventoryBulkCommonField === "qty" && (
-                    <input className={modalInputClass} type="number" value={inventoryBulkCommonDraft.qty} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, qty: event.target.value }))} placeholder="재고수량" />
+                    <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(inventoryBulkCommonDraft.qty)} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, qty: normalizeCommaNumberInput(event.target.value) }))} placeholder="재고수량" />
                   )}
                   {inventoryBulkCommonField === "transfer" && (
                     <div className="grid gap-2 md:grid-cols-[1fr_1.4fr]">
-                      <input className={modalInputClass} type="number" value={inventoryBulkCommonDraft.moveQty} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, moveQty: event.target.value }))} placeholder="이동 수량" />
+                      <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(inventoryBulkCommonDraft.moveQty)} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, moveQty: normalizeCommaNumberInput(event.target.value) }))} placeholder="이동 수량" />
                       <select className={modalSelectClass} value={inventoryBulkCommonDraft.targetWarehouseCode} onChange={(event) => setInventoryBulkCommonDraft((prev) => ({ ...prev, targetWarehouseCode: event.target.value }))}>
                         <option value="">이동 대상 창고</option>
                         {inventoryWarehouses.map((warehouse) => <option key={warehouse.id || warehouse.warehouse_code} value={warehouse.warehouse_code}>{warehouse.warehouse_code} · {warehouse.warehouse_name}</option>)}
@@ -13544,13 +13559,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                         </td>
                         {inventoryBulkFields.includes("qty") && (
                           <td className="px-2 py-2">
-                            <input className={modalInputClass} type="number" value={draft.qty ?? String(row.qty)} onChange={(event) => updateInventoryBulkDraft(row.key, { qty: event.target.value })} />
+                            <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.qty ?? String(row.qty))} onChange={(event) => updateInventoryBulkDraft(row.key, { qty: normalizeCommaNumberInput(event.target.value) })} />
                           </td>
                         )}
                         {inventoryBulkFields.includes("transfer") && (
                           <td className="px-2 py-2">
                             <div className="grid gap-2 md:grid-cols-[0.8fr_1.2fr]">
-                              <input className={modalInputClass} type="number" value={draft.moveQty || ""} onChange={(event) => updateInventoryBulkDraft(row.key, { moveQty: event.target.value })} placeholder="이동 수량" />
+                              <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.moveQty || "")} onChange={(event) => updateInventoryBulkDraft(row.key, { moveQty: normalizeCommaNumberInput(event.target.value) })} placeholder="이동 수량" />
                               <select className={modalSelectClass} value={draft.targetWarehouseCode || ""} onChange={(event) => updateInventoryBulkDraft(row.key, { targetWarehouseCode: event.target.value })}>
                                 <option value="">대상 창고</option>
                                 {inventoryWarehouses.filter((warehouse) => warehouse.warehouse_code !== row.warehouseCode).map((warehouse) => <option key={warehouse.id || warehouse.warehouse_code} value={warehouse.warehouse_code}>{warehouse.warehouse_code} · {warehouse.warehouse_name}</option>)}
@@ -13624,10 +13639,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <FormField label="품목명"><input className={modalInputClass} value={editingInventoryRow.productName} readOnly /></FormField>
             <FormField label="현재 창고"><input className={modalInputClass} value={`${editingInventoryRow.warehouseCode} ${editingInventoryRow.warehouseName}`} readOnly /></FormField>
             <FormField label="재고수량">
-              <input className={modalInputClass} value={inventoryEditDraft.qty} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, qty: event.target.value }))} placeholder="실제 재고 보정" />
+              <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(inventoryEditDraft.qty)} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, qty: normalizeCommaNumberInput(event.target.value) }))} placeholder="실제 재고 보정" />
             </FormField>
             <FormField label="창고 이동 수량">
-              <input className={modalInputClass} value={inventoryEditDraft.moveQty} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, moveQty: event.target.value }))} placeholder="A창고에서 이동할 수량" />
+              <input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(inventoryEditDraft.moveQty)} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, moveQty: normalizeCommaNumberInput(event.target.value) }))} placeholder="A창고에서 이동할 수량" />
             </FormField>
             <FormField label="이동 대상 창고">
               <select className={modalSelectClass} value={inventoryEditDraft.targetWarehouseCode} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, targetWarehouseCode: event.target.value }))}>
@@ -14674,8 +14689,8 @@ function SalesPurchaseEntryModal({
                     }
                     moveToNextField(event.currentTarget);
                   }} /></td>
-                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.qty} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
-                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" value={line.price} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
+                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="decimal" value={formatCommaNumber(line.qty, { decimal: true })} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", normalizeCommaNumberInput(event.target.value, { decimal: true }))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
+                  <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="numeric" value={formatCommaNumber(line.price)} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", normalizeCommaNumberInput(event.target.value))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
                   {vatMode === "excluded" && <td className="px-2 py-2 text-right font-bold text-gray-600">{Math.round(lineTax(line) * lineQty(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="memo" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "memo")) return; if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
@@ -18613,8 +18628,8 @@ function ProductEditModal({
         <div className="grid gap-4 md:grid-cols-2">
           <FormField label="품목코드" required><input className={modalInputClass} value={draft.product_code || ""} onChange={(event) => onChange("product_code", event.target.value)} /></FormField>
           <FormField label="품목명" required><input className={modalInputClass} value={draft.product_name || ""} onChange={(event) => onChange("product_name", event.target.value)} /></FormField>
-          <FormField label="입고가"><input className={modalInputClass} type="number" value={draft.cost_price || ""} onChange={(event) => onChange("cost_price", event.target.value)} /></FormField>
-          <FormField label="출고가"><input className={modalInputClass} type="number" value={draft.standard_price || ""} onChange={(event) => onChange("standard_price", event.target.value)} /></FormField>
+          <FormField label="입고가"><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.cost_price || "")} onChange={(event) => onChange("cost_price", normalizeCommaNumberInput(event.target.value))} /></FormField>
+          <FormField label="출고가"><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.standard_price || "")} onChange={(event) => onChange("standard_price", normalizeCommaNumberInput(event.target.value))} /></FormField>
         </div>
         <div className="rounded-xl border border-gray-200 p-4">
           <div className="mb-3 text-sm font-semibold text-gray-900">재고등록(수정)</div>
@@ -18627,10 +18642,10 @@ function ProductEditModal({
                 </span>
                 <input
                   className={modalInputClass}
-                  type="number"
-                  value={draft[`stock_${warehouse.warehouse_code}`] || ""}
+                  inputMode="numeric"
+                  value={formatCommaNumber(draft[`stock_${warehouse.warehouse_code}`] || "")}
                   placeholder="수정 수량"
-                  onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, event.target.value)}
+                  onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, normalizeCommaNumberInput(event.target.value))}
                 />
               </label>
             ))}
@@ -18677,7 +18692,7 @@ function ProductEditModal({
               <div key={`${row.component_product_id}-${index}`} className="grid items-center gap-2 rounded-lg bg-gray-50 p-2 md:grid-cols-[120px_1fr_90px_64px]">
                 <div className="text-sm font-black">{row.component_product_code || row.component_sku}</div>
                 <div className="truncate text-sm font-bold text-slate-600">{row.component_product_name || "-"}</div>
-                <input className={`${modalInputClass} h-8 text-right`} type="number" min="0" step="1" value={row.qty_per_unit || ""} onChange={(event) => updateBomQty(index, event.target.value)} />
+                <input className={`${modalInputClass} h-8 text-right`} inputMode="numeric" value={formatCommaNumber(row.qty_per_unit || "")} onChange={(event) => updateBomQty(index, normalizeCommaNumberInput(event.target.value))} />
                 <ActionButton type="button" variant="secondary" className="h-8 border-rose-200 px-2 text-xs text-rose-600 hover:bg-rose-50" onClick={() => removeBomComponent(index)}>삭제</ActionButton>
               </div>
             ))}
@@ -23446,13 +23461,13 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         <input className={modalInputClass} value={manual.payment_method} onChange={(event) => setManual((prev) => ({ ...prev, payment_method: event.target.value }))} />
       </FormField>
       <FormField label="공급가액">
-        <input className={`${modalInputClass} text-right`} type="number" value={manual.amount} onChange={(event) => setManual((prev) => ({ ...prev, amount: event.target.value }))} />
+        <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(manual.amount, { negative: true })} onChange={(event) => setManual((prev) => ({ ...prev, amount: normalizeCommaNumberInput(event.target.value, { negative: true }) }))} />
       </FormField>
       <FormField label="부가세">
-        <input className={`${modalInputClass} text-right`} type="number" value={manual.vat_amount} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: event.target.value }))} />
+        <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(manual.vat_amount, { negative: true })} onChange={(event) => setManual((prev) => ({ ...prev, vat_amount: normalizeCommaNumberInput(event.target.value, { negative: true }) }))} />
       </FormField>
       <FormField label="합계">
-        <input className={`${modalInputClass} text-right`} type="number" value={manual.total_amount} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: event.target.value }))} />
+        <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(manual.total_amount, { negative: true })} onChange={(event) => setManual((prev) => ({ ...prev, total_amount: normalizeCommaNumberInput(event.target.value, { negative: true }) }))} />
       </FormField>
       <FormField label="메모" className="md:col-span-2">
         <textarea className={modalTextareaClass} value={manual.memo} onChange={(event) => setManual((prev) => ({ ...prev, memo: event.target.value }))} />
