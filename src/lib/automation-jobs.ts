@@ -67,6 +67,23 @@ function maybeJsonColumn(row: AnyRecord, key: string, fallback: unknown) {
   return value;
 }
 
+function recordValue(value: unknown): AnyRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {};
+}
+
+function inputText(row: AnyRecord, key: string) {
+  const input = recordValue(row.input_json);
+  return text(row[key] ?? input[key]);
+}
+
+function missingColumnName(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.match(/컬럼 '([^']+)'/)?.[1]
+    || message.match(/而щ읆 '([^']+)'/)?.[1]
+    || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1]
+    || "";
+}
+
 export function automationJobLabel(jobType: AutomationJobType) {
   return AUTOMATION_JOB_TYPE_LABELS[jobType] || jobType;
 }
@@ -84,6 +101,9 @@ export function normalizeAutomationJob(row: AnyRecord): AutomationJob {
     title: text(row.title) || automationJobLabel(jobType),
     status,
     requested_by: text(row.requested_by) || "manual",
+    assigned_agent: inputText(row, "assigned_agent"),
+    source: inputText(row, "source") || "manual",
+    requested_text: inputText(row, "requested_text"),
     input_json: maybeJsonColumn(row, "input_json", {}),
     result_json: maybeJsonColumn(row, "result_json", {}),
     log_text: text(row.log_text),
@@ -122,7 +142,7 @@ export async function createAutomationJob(body: AnyRecord) {
   const jobType = normalizeJobType(body.job_type);
   const status = normalizeStatus(body.status, "queued");
   const now = new Date().toISOString();
-  const [saved] = await insertRows<AnyRecord>("automation_jobs", {
+  let values: AnyRecord = {
     job_type: jobType,
     title: text(body.title) || automationJobLabel(jobType),
     status,
@@ -136,8 +156,26 @@ export async function createAutomationJob(body: AnyRecord) {
     created_at: now,
     started_at: body.started_at ? normalizeDate(body.started_at) : status === "running" ? now : null,
     finished_at: body.finished_at ? normalizeDate(body.finished_at) : ["success", "failed", "cancelled"].includes(status) ? now : null,
-  });
-  return normalizeAutomationJob(saved);
+  };
+  if ("assigned_agent" in body) values.assigned_agent = nullableText(body.assigned_agent);
+  if ("source" in body) values.source = text(body.source) || "manual";
+  if ("requested_text" in body) values.requested_text = nullableText(body.requested_text);
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const [saved] = await insertRows<AnyRecord>("automation_jobs", values);
+      return normalizeAutomationJob(saved);
+    } catch (error) {
+      const column = missingColumnName(error);
+      if (!column || !(column in values) || !["assigned_agent", "source", "requested_text"].includes(column)) throw error;
+      values = {
+        ...values,
+        input_json: { ...recordValue(values.input_json), [column]: values[column] },
+      };
+      delete values[column];
+    }
+  }
+  throw new FnosDbError("?먮룞???묒뾽 ???媛??而щ읆 ?뺤씤???ㅽ뙣?덉뒿?덈떎.");
 }
 
 export async function updateAutomationJob(id: string, body: AnyRecord) {
@@ -149,6 +187,9 @@ export async function updateAutomationJob(id: string, body: AnyRecord) {
   if ("job_type" in body) values.job_type = normalizeJobType(body.job_type);
   if ("title" in body) values.title = text(body.title) || (values.job_type ? automationJobLabel(values.job_type as AutomationJobType) : undefined);
   if ("requested_by" in body) values.requested_by = text(body.requested_by) || "manual";
+  if ("assigned_agent" in body) values.assigned_agent = nullableText(body.assigned_agent);
+  if ("source" in body) values.source = text(body.source) || "manual";
+  if ("requested_text" in body) values.requested_text = nullableText(body.requested_text);
   if ("input_json" in body) values.input_json = jsonValue(body.input_json, {});
   if ("result_json" in body) values.result_json = jsonValue(body.result_json, {});
   if ("log_text" in body) values.log_text = text(body.log_text);

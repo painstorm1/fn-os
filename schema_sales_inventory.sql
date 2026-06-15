@@ -1429,6 +1429,9 @@ create table if not exists automation_jobs (
   title text not null,
   status text not null default 'queued',
   requested_by text not null default 'manual',
+  assigned_agent text,
+  source text not null default 'manual',
+  requested_text text,
   input_json jsonb not null default '{}'::jsonb,
   result_json jsonb not null default '{}'::jsonb,
   error_message text,
@@ -1468,6 +1471,9 @@ alter table automation_jobs add column if not exists job_type text;
 alter table automation_jobs add column if not exists title text;
 alter table automation_jobs add column if not exists status text default 'queued';
 alter table automation_jobs add column if not exists requested_by text default 'manual';
+alter table automation_jobs add column if not exists assigned_agent text;
+alter table automation_jobs add column if not exists source text default 'manual';
+alter table automation_jobs add column if not exists requested_text text;
 alter table automation_jobs add column if not exists input_json jsonb default '{}'::jsonb;
 alter table automation_jobs add column if not exists result_json jsonb default '{}'::jsonb;
 alter table automation_jobs add column if not exists error_message text;

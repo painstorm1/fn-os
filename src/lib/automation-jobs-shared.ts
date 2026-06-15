@@ -60,6 +60,9 @@ export type AutomationJob = {
   title: string;
   status: AutomationJobStatus;
   requested_by: string;
+  assigned_agent: string;
+  source: string;
+  requested_text: string;
   input_json: unknown;
   result_json: unknown;
   log_text: string;
