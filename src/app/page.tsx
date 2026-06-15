@@ -9348,7 +9348,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
-  const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed"; message: string }>>([]);
+  const [collectionStatuses, setCollectionStatuses] = useState<Array<{ name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string }>>([]);
   const [shippingPreviewTab, setShippingPreviewTab] = useState<"shipping" | DirectShippingPartner>("shipping");
   const isOnlineSection = section === "online";
   const isHistorySection = section === "history";
@@ -9878,12 +9878,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
-      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
+      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; message?: string }> : [];
       setCollectionStatuses(statuses.length
         ? statuses.map((item) => ({
             name: salesCellText(item.channel_name) || "쇼핑몰",
-            status: item.ok ? "done" : "failed",
-            message: item.ok ? `${Number(item.count || 0)}건 수집` : salesCellText(item.message || "수집 실패"),
+            status: item.ok ? "done" : item.skipped ? "skipped" : "failed",
+            message: item.ok ? `${Number(item.count || 0)}건 수집` : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
           }))
         : [
             {

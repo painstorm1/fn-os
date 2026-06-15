@@ -29,6 +29,10 @@ function credentialReadError(rows: Array<{ error?: string }>) {
   return rows.find((row) => row.error)?.error || "";
 }
 
+function credentialValueCount(rows: Array<{ value?: string; error?: string }>) {
+  return rows.filter((row) => text(row.value) && !row.error).length;
+}
+
 function adapterCodeForChannel(channel: AnyRecord) {
   const code = text(channel.channel_code).toUpperCase();
   const name = text(channel.channel_name).toUpperCase();
@@ -111,7 +115,10 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   const credentialRows = await readChannelCredentials(text(channel.id), true);
   const credentialError = credentialReadError(credentialRows);
   if (credentialError) {
-    return { channel, ok: false, orders: [] as NormalizedOrder[], message: credentialError };
+    return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: credentialError };
+  }
+  if (!credentialValueCount(credentialRows)) {
+    return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: "API 인증값을 먼저 저장해 주세요." };
   }
   const credentials = credentialMap(credentialRows);
   const params = {
@@ -198,6 +205,7 @@ export async function POST(request: NextRequest) {
         channel_code: text(result.channel.channel_code),
         channel_name: text(result.channel.channel_name),
         ok: result.ok,
+        skipped: Boolean(result.skipped),
         count: result.orders.length,
         message: result.message,
       })),
