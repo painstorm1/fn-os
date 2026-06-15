@@ -1431,6 +1431,7 @@ create table if not exists automation_jobs (
   requested_by text not null default 'manual',
   assigned_agent text,
   source text not null default 'manual',
+  trigger_type text,
   requested_text text,
   input_json jsonb not null default '{}'::jsonb,
   result_json jsonb not null default '{}'::jsonb,
@@ -1444,12 +1445,14 @@ create table if not exists automation_jobs (
   constraint automation_jobs_type_check check (job_type in (
     'collect_smartstore_orders',
     'collect_coupang_orders',
+    'online_order_status_update',
     'generate_invoice_file',
     'download_ads_report',
     'download_accounting_report',
     'create_detail_page_draft',
     'ads_collect',
     'ads_analyze',
+    'coupang_report_reservation',
     'orders_collect',
     'invoice_prepare',
     'fnos_report',
@@ -1473,6 +1476,7 @@ alter table automation_jobs add column if not exists status text default 'queued
 alter table automation_jobs add column if not exists requested_by text default 'manual';
 alter table automation_jobs add column if not exists assigned_agent text;
 alter table automation_jobs add column if not exists source text default 'manual';
+alter table automation_jobs add column if not exists trigger_type text;
 alter table automation_jobs add column if not exists requested_text text;
 alter table automation_jobs add column if not exists input_json jsonb default '{}'::jsonb;
 alter table automation_jobs add column if not exists result_json jsonb default '{}'::jsonb;
@@ -1488,12 +1492,14 @@ alter table automation_jobs drop constraint if exists automation_jobs_type_check
 alter table automation_jobs add constraint automation_jobs_type_check check (job_type in (
   'collect_smartstore_orders',
   'collect_coupang_orders',
+  'online_order_status_update',
   'generate_invoice_file',
   'download_ads_report',
   'download_accounting_report',
   'create_detail_page_draft',
   'ads_collect',
   'ads_analyze',
+  'coupang_report_reservation',
   'orders_collect',
   'invoice_prepare',
   'fnos_report',
@@ -1557,6 +1563,21 @@ create index if not exists idx_ai_snapshots_generated_at on ai_snapshots(generat
 create index if not exists idx_automation_jobs_status_created on automation_jobs(status, created_at asc);
 create index if not exists idx_automation_jobs_type_created on automation_jobs(job_type, created_at desc);
 create index if not exists idx_automation_jobs_created on automation_jobs(created_at desc);
+create index if not exists idx_automation_jobs_agent_status_created on automation_jobs(assigned_agent, status, created_at asc);
+
+create table if not exists automation_agent_heartbeats (
+  agent_name text primary key,
+  status text,
+  current_job_id uuid,
+  last_seen_at timestamptz default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table automation_agent_heartbeats add column if not exists agent_name text;
+alter table automation_agent_heartbeats add column if not exists status text;
+alter table automation_agent_heartbeats add column if not exists current_job_id uuid;
+alter table automation_agent_heartbeats add column if not exists last_seen_at timestamptz default now();
+alter table automation_agent_heartbeats add column if not exists updated_at timestamptz default now();
 create index if not exists idx_bom_parent on product_boms(parent_product_id);
 create index if not exists idx_bom_items_bom on product_bom_items(bom_id);
 create index if not exists idx_orders_date on orders(order_date desc);

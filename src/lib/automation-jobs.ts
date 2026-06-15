@@ -1,4 +1,4 @@
-import { FnosDbError, hasDbConfig, insertRows, patchRows, selectRows } from "./fnos-db";
+import { FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
 import {
   AUTOMATION_JOB_STATUS_LABELS,
   AUTOMATION_JOB_TYPE_LABELS,
@@ -15,6 +15,7 @@ export type AutomationJobListFilters = {
   id?: string;
   jobType?: string;
   status?: string;
+  assignedAgent?: string;
   limit?: number;
 };
 
@@ -103,6 +104,7 @@ export function normalizeAutomationJob(row: AnyRecord): AutomationJob {
     requested_by: text(row.requested_by) || "manual",
     assigned_agent: inputText(row, "assigned_agent"),
     source: inputText(row, "source") || "manual",
+    trigger_type: inputText(row, "trigger_type"),
     requested_text: inputText(row, "requested_text"),
     input_json: maybeJsonColumn(row, "input_json", {}),
     result_json: maybeJsonColumn(row, "result_json", {}),
@@ -125,6 +127,7 @@ export async function listAutomationJobs(filters: AutomationJobListFilters = {})
   if (filters.id) query.id = `eq.${filters.id}`;
   if (filters.jobType && isAutomationJobType(filters.jobType)) query.job_type = `eq.${filters.jobType}`;
   if (filters.status && isAutomationJobStatus(filters.status)) query.status = `eq.${filters.status}`;
+  if (filters.assignedAgent) query.assigned_agent = `eq.${filters.assignedAgent}`;
   const rows = await selectRows<AnyRecord>("automation_jobs", query);
   return rows.map(normalizeAutomationJob);
 }
@@ -159,6 +162,7 @@ export async function createAutomationJob(body: AnyRecord) {
   };
   if ("assigned_agent" in body) values.assigned_agent = nullableText(body.assigned_agent);
   if ("source" in body) values.source = text(body.source) || "manual";
+  if ("trigger_type" in body) values.trigger_type = nullableText(body.trigger_type);
   if ("requested_text" in body) values.requested_text = nullableText(body.requested_text);
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -167,7 +171,7 @@ export async function createAutomationJob(body: AnyRecord) {
       return normalizeAutomationJob(saved);
     } catch (error) {
       const column = missingColumnName(error);
-      if (!column || !(column in values) || !["assigned_agent", "source", "requested_text"].includes(column)) throw error;
+      if (!column || !(column in values) || !["assigned_agent", "source", "trigger_type", "requested_text"].includes(column)) throw error;
       values = {
         ...values,
         input_json: { ...recordValue(values.input_json), [column]: values[column] },
@@ -189,6 +193,7 @@ export async function updateAutomationJob(id: string, body: AnyRecord) {
   if ("requested_by" in body) values.requested_by = text(body.requested_by) || "manual";
   if ("assigned_agent" in body) values.assigned_agent = nullableText(body.assigned_agent);
   if ("source" in body) values.source = text(body.source) || "manual";
+  if ("trigger_type" in body) values.trigger_type = nullableText(body.trigger_type);
   if ("requested_text" in body) values.requested_text = nullableText(body.requested_text);
   if ("input_json" in body) values.input_json = jsonValue(body.input_json, {});
   if ("result_json" in body) values.result_json = jsonValue(body.result_json, {});
@@ -242,4 +247,148 @@ export async function claimNextAutomationJob(body: AnyRecord = {}) {
     if (claimed) return normalizeAutomationJob(claimed);
   }
   return null;
+}
+
+function appendLog(current: unknown, addition: unknown) {
+  const next = text(addition);
+  if (!next) return text(current);
+  const timestamped = `[${new Date().toISOString()}] ${next}`;
+  return [text(current), timestamped].filter(Boolean).join("\n");
+}
+
+export async function reportAutomationJobStart(body: AnyRecord = {}) {
+  const jobId = text(body.job_id || body.jobId || body.current_job_id);
+  const now = new Date().toISOString();
+  if (jobId) {
+    const job = await getAutomationJob(jobId);
+    const [saved] = await patchRows<AnyRecord>(
+      "automation_jobs",
+      { id: `eq.${jobId}` },
+      {
+        status: "running",
+        started_at: job.started_at || now,
+        assigned_agent: nullableText(body.assigned_agent) || job.assigned_agent || null,
+        source: text(body.source) || job.source || "hermes",
+        trigger_type: nullableText(body.trigger_type) || job.trigger_type || null,
+        input_json: body.input_json === undefined ? job.input_json : jsonValue(body.input_json, {}) ?? {},
+        log_text: appendLog(job.log_text, body.log_text || "started"),
+      },
+    );
+    if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
+    return normalizeAutomationJob(saved);
+  }
+  return createAutomationJob({
+    ...body,
+    status: "running",
+    source: text(body.source) || "hermes",
+    started_at: now,
+    log_text: body.log_text || "started",
+  });
+}
+
+export async function appendAutomationJobLog(body: AnyRecord = {}) {
+  const jobId = text(body.job_id || body.jobId);
+  if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
+  const job = await getAutomationJob(jobId);
+  const [saved] = await patchRows<AnyRecord>(
+    "automation_jobs",
+    { id: `eq.${jobId}` },
+    { log_text: appendLog(job.log_text, body.log_text || body.message) },
+  );
+  if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
+  return normalizeAutomationJob(saved);
+}
+
+export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
+  const jobId = text(body.job_id || body.jobId);
+  if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
+  const job = await getAutomationJob(jobId);
+  const now = new Date().toISOString();
+  const [saved] = await patchRows<AnyRecord>(
+    "automation_jobs",
+    { id: `eq.${jobId}` },
+    {
+      status: "success",
+      result_json: jsonValue(body.result_json, {}) ?? {},
+      result_file_url: nullableText(body.result_file_url),
+      screenshot_url: nullableText(body.screenshot_url),
+      log_text: appendLog(job.log_text, body.log_text || "success"),
+      finished_at: now,
+    },
+  );
+  if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
+  return normalizeAutomationJob(saved);
+}
+
+export async function reportAutomationJobFail(body: AnyRecord = {}) {
+  const jobId = text(body.job_id || body.jobId);
+  if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
+  const job = await getAutomationJob(jobId);
+  const now = new Date().toISOString();
+  const [saved] = await patchRows<AnyRecord>(
+    "automation_jobs",
+    { id: `eq.${jobId}` },
+    {
+      status: "failed",
+      error_message: text(body.error_message || body.error || "failed"),
+      screenshot_url: nullableText(body.screenshot_url),
+      log_text: appendLog(job.log_text, body.log_text || body.error_message || "failed"),
+      finished_at: now,
+    },
+  );
+  if (!saved) throw new FnosDbError("작업을 찾을 수 없습니다.", 404);
+  return normalizeAutomationJob(saved);
+}
+
+export async function claimNextAutomationJobForAgent(agent: string) {
+  if (!hasDbConfig()) throw new FnosDbError("Supabase 환경변수가 설정되지 않았습니다.", 503);
+  const assignedAgent = text(agent);
+  if (!assignedAgent) throw new FnosDbError("agent가 필요합니다.", 400);
+  const queued = await selectRows<AnyRecord>("automation_jobs", {
+    status: "eq.queued",
+    assigned_agent: `eq.${assignedAgent}`,
+    order: "created_at.asc",
+    limit: 10,
+  });
+  const now = new Date().toISOString();
+  for (const row of queued) {
+    const id = text(row.id);
+    if (!id) continue;
+    const jobType = text(row.job_type);
+    if (jobType) {
+      const runningSameType = await selectRows<AnyRecord>("automation_jobs", {
+        status: "eq.running",
+        assigned_agent: `eq.${assignedAgent}`,
+        job_type: `eq.${jobType}`,
+        limit: 1,
+      });
+      if (runningSameType.length) continue;
+    }
+    const [claimed] = await patchRows<AnyRecord>(
+      "automation_jobs",
+      { id: `eq.${id}`, status: "eq.queued", assigned_agent: `eq.${assignedAgent}` },
+      { status: "running", started_at: now, log_text: appendLog(row.log_text, `claimed by ${assignedAgent}`) },
+    );
+    if (claimed) return normalizeAutomationJob(claimed);
+  }
+  return null;
+}
+
+export async function upsertAutomationAgentHeartbeat(body: AnyRecord = {}) {
+  if (!hasDbConfig()) throw new FnosDbError("Supabase 환경변수가 설정되지 않았습니다.", 503);
+  const agentName = text(body.agent_name || body.agentName);
+  if (!agentName) throw new FnosDbError("agent_name이 필요합니다.", 400);
+  const now = new Date().toISOString();
+  const [saved] = await upsertRows<AnyRecord>(
+    "automation_agent_heartbeats",
+    {
+      agent_name: agentName,
+      status: text(body.status) || "alive",
+      current_job_id: nullableText(body.current_job_id || body.currentJobId),
+      last_seen_at: body.last_seen_at ? normalizeDate(body.last_seen_at) : now,
+      updated_at: now,
+    },
+    "agent_name",
+  );
+  return saved;
 }

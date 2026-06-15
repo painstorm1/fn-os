@@ -8,6 +8,7 @@ export const AUTOMATION_JOB_TYPES = [
   "create_detail_page_draft",
   "ads_collect",
   "ads_analyze",
+  "coupang_report_reservation",
   "orders_collect",
   "invoice_prepare",
   "fnos_report",
@@ -28,6 +29,7 @@ export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
   create_detail_page_draft: "상세페이지 초안 생성",
   ads_collect: "광고자료 수집",
   ads_analyze: "광고성과 분석",
+  coupang_report_reservation: "쿠팡 월간 리포트 예약",
   orders_collect: "주문/발주 수집",
   invoice_prepare: "송장 준비",
   fnos_report: "FN OS 보고",
@@ -64,6 +66,7 @@ export type AutomationJob = {
   requested_by: string;
   assigned_agent: string;
   source: string;
+  trigger_type: string;
   requested_text: string;
   input_json: unknown;
   result_json: unknown;

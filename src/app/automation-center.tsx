@@ -104,7 +104,7 @@ function jobMatchesView(job: AutomationJob, view: AutomationView) {
   if (view === "all") return true;
   if (view === "orders") return ["collect_smartstore_orders", "collect_coupang_orders", "orders_collect"].includes(job.job_type);
   if (view === "invoice") return ["generate_invoice_file", "invoice_prepare"].includes(job.job_type);
-  if (view === "ads") return ["download_ads_report", "ads_collect", "ads_analyze"].includes(job.job_type);
+  if (view === "ads") return ["download_ads_report", "ads_collect", "ads_analyze", "coupang_report_reservation"].includes(job.job_type);
   if (view === "accounting") return ["download_accounting_report", "accounting_collect"].includes(job.job_type);
   if (view === "detail") return ["create_detail_page_draft", "content_draft"].includes(job.job_type);
   if (view === "logs") return Boolean(job.log_text || job.error_message);
