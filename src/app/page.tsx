@@ -25084,7 +25084,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         >
           <div className="grid gap-4 md:grid-cols-2">
             <FormField label="카테고리1" required>
-              <select className={modalSelectClass} value={matchStatusEditDraft.categoryLarge} onChange={(event) => setMatchStatusEditDraft({ categoryLarge: event.target.value, categoryId: "" })}>
+              <select className={modalSelectClass} value={matchStatusEditDraft.categoryLarge} onChange={(event) => setMatchStatusEditDraft((prev) => ({ ...prev, categoryLarge: event.target.value, categoryId: "" }))}>
                 <option value="">선택</option>
                 {categoryLargeOptions.map((large) => <option key={large} value={large}>{large}</option>)}
               </select>
