@@ -1,13 +1,22 @@
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { envValue, loadEnvFiles } from "./env-utils.mjs";
 
 const args = new Set(process.argv.slice(2));
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+loadEnvFiles(repoRoot);
 const origin = (process.env.FN_OS_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
 const executionOrigin = (process.env.FN_WORKER_EXECUTION_ORIGIN || process.env.FN_OS_EXECUTION_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
 const workerId = process.env.FN_WORKER_ID || `${os.hostname()}-fn-worker`;
-const pollMs = Math.max(5000, Number(process.env.FN_WORKER_POLL_MS || 60_000));
+const pollMs = Math.max(1000, Number(process.env.FN_WORKER_POLL_MS || 60_000));
 const jobType = process.env.FN_WORKER_JOB_TYPE || "";
 const once = args.has("--once") || process.env.FN_WORKER_ONCE === "1";
+const localApiKey = envValue("FN_OS_API_KEY") || envValue("FN_OS_AUTH_TOKEN") || envValue("FN_OS_PASSWORD");
+const productionEnv = readEnvFile(path.join(repoRoot, ".env.vercel.production.local"));
+const remoteApiKey = text(productionEnv.FN_OS_API_KEY || productionEnv.FN_OS_AUTH_TOKEN || productionEnv.FN_OS_PASSWORD) || localApiKey;
 
 function now() {
   return new Date().toISOString();
@@ -15,6 +24,24 @@ function now() {
 
 function text(value) {
   return String(value ?? "").trim();
+}
+
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const env = {};
+  const content = fs.readFileSync(filePath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) continue;
+    const eq = line.indexOf("=");
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+  return env;
 }
 
 function jsonPreview(value) {
@@ -34,10 +61,13 @@ async function request(path, init = {}) {
 }
 
 async function requestFrom(baseUrl, path, init = {}) {
+  const isExecutionOrigin = baseUrl === executionOrigin;
+  const requestApiKey = isExecutionOrigin ? localApiKey : remoteApiKey;
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
+      ...(requestApiKey ? { "x-fnos-api-key": requestApiKey } : {}),
       ...(init.headers || {}),
     },
   });

@@ -15,9 +15,10 @@ export function proxy(request: NextRequest) {
   const isLoginPage = pathname === "/login";
   const isLoginApi = pathname === "/api/login";
   const isApi = pathname.startsWith("/api/");
+  const isAutomationJobApi = pathname.startsWith("/api/fnos/automation-jobs");
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
-  if (isLoginPage || isLoginApi || isPublicAsset) {
+  if (isLoginPage || isLoginApi || isAutomationJobApi || isPublicAsset) {
     return NextResponse.next();
   }
 

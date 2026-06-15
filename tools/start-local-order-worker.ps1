@@ -66,9 +66,11 @@ if (-not (Wait-LocalPort -TargetPort $Port)) {
 if (-not (Test-WorkerRunning)) {
   $oldOrigin = $env:FN_OS_ORIGIN
   $oldExecutionOrigin = $env:FN_WORKER_EXECUTION_ORIGIN
+  $oldPollMs = $env:FN_WORKER_POLL_MS
   try {
     $env:FN_OS_ORIGIN = $ProdOrigin
     $env:FN_WORKER_EXECUTION_ORIGIN = $LocalOrigin
+    $env:FN_WORKER_POLL_MS = "3000"
     Start-Process `
       -FilePath $NodeExe `
       -ArgumentList @("tools\automation-worker.mjs") `
@@ -77,6 +79,7 @@ if (-not (Test-WorkerRunning)) {
   } finally {
     $env:FN_OS_ORIGIN = $oldOrigin
     $env:FN_WORKER_EXECUTION_ORIGIN = $oldExecutionOrigin
+    $env:FN_WORKER_POLL_MS = $oldPollMs
   }
 }
 
