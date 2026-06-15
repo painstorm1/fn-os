@@ -8330,6 +8330,336 @@ function SalesExcelGrid({
   );
 }
 
+function OnlineOrderProgressList({
+  rows,
+  onChange,
+  onProductLinked,
+  onSelectionChange,
+  resetKey = 0,
+  highlightedRows = [],
+}: {
+  rows: string[][];
+  onChange: (rows: string[][]) => void;
+  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem) => void;
+  onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
+  resetKey?: number;
+  highlightedRows?: number[];
+}) {
+  const headers = salesSheetHeaders["발주 진행 단계"];
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [productSearchAttribute, setProductSearchAttribute] = useState<ProductSearchAttributeFilter>("plain");
+  const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
+    open: false,
+    row: 0,
+    col: progressIndex("품목코드(ERP)"),
+    query: "",
+    searchedQuery: "",
+    results: [],
+    selectedIndex: 0,
+    loading: false,
+    error: "",
+  });
+  const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
+  const visibleRows = useMemo(() => rows
+    .map((row, index) => ({ row, index, key: `progress-${index}` }))
+    .filter((item) => rowHasValue(item.row)), [rows]);
+  const visibleKeys = visibleRows.map((item) => item.key);
+  const selection = useCheckboxColumnSelection({ keys: visibleKeys, selectedKeys, setSelectedKeys });
+  const selectedIndexes = selectedKeys
+    .map((key) => visibleRows.find((item) => item.key === key)?.index)
+    .filter((index): index is number => typeof index === "number");
+
+  useEffect(() => {
+    setSelectedKeys([]);
+    setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: progressIndex("품목코드(ERP)"), query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (!onSelectionChange) return;
+    if (!selectedIndexes.length) {
+      onSelectionChange("발주 진행 단계", { startRow: 0, endRow: 0, startCol: 0, endCol: headers.length - 1 }, []);
+      return;
+    }
+    const sorted = [...selectedIndexes].sort((a, b) => a - b);
+    onSelectionChange("발주 진행 단계", { startRow: sorted[0], endRow: sorted[sorted.length - 1], startCol: 0, endCol: headers.length - 1 }, sorted);
+  }, [selectedKeys, rows]);
+
+  function updateProgressCell(rowIndex: number, header: string, value: string) {
+    onChange(rows.map((row, index) => {
+      if (index !== rowIndex) return row;
+      const next = [...row];
+      setProgressValue(next, header, value);
+      return next;
+    }));
+  }
+
+  async function searchFnOsProducts(query: string, attributeFilter = productSearchAttribute) {
+    const keyword = query.trim();
+    if (!keyword) {
+      setProductSearch((prev) => ({ ...prev, results: [], selectedIndex: 0, error: "검색어를 입력해주세요." }));
+      return;
+    }
+    setProductSearch((prev) => ({ ...prev, query: keyword, loading: true, error: "" }));
+    try {
+      const res = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: keyword, productAttribute: attributeFilter }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: data.error || "품목검색 실패" }));
+        return;
+      }
+      const results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results, selectedIndex: 0, error: results.length ? "" : "검색 결과가 없습니다." }));
+    } catch (error) {
+      setProductSearch((prev) => ({ ...prev, loading: false, searchedQuery: keyword, results: [], selectedIndex: 0, error: error instanceof Error ? error.message : "품목검색 실패" }));
+    }
+  }
+
+  function openProductSearch(rowIndex: number, query: string) {
+    setProductSearch({
+      open: true,
+      row: rowIndex,
+      col: progressIndex("품목코드(ERP)"),
+      query,
+      searchedQuery: "",
+      results: [],
+      selectedIndex: 0,
+      loading: Boolean(query.trim()),
+      error: "",
+    });
+    if (query.trim()) void searchFnOsProducts(query);
+  }
+
+  function selectProductSearchItem(item: FnOsProductSearchItem) {
+    if (!item.code) return;
+    let linkedRow: string[] | null = null;
+    const nextRows = rows.map((row, index) => {
+      if (index !== productSearch.row) return row;
+      const next = [...row];
+      setProgressValue(next, "품목코드(ERP)", item.code || "");
+      setProgressValue(next, "품목명(ERP)", item.name || "");
+      linkedRow = next;
+      return next;
+    });
+    onChange(nextRows);
+    if (linkedRow) onProductLinked?.(productSearch.row, linkedRow, item);
+    setProductSearch((prev) => ({ ...prev, open: false }));
+  }
+
+  useEscapeToClose(productSearch.open, () => setProductSearch((prev) => ({ ...prev, open: false })));
+
+  const renderText = (row: string[], header: string) => progressValue(row, header) || "-";
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="overflow-auto">
+        <table className="w-full min-w-[2200px] table-fixed text-sm">
+          <thead className="bg-slate-50 text-xs font-black text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="w-12 px-2 py-2 text-center">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                  checked={selection.allSelected}
+                  onChange={(event) => selection.toggleAll(event.target.checked)}
+                  aria-label="발주 진행 단계 전체 선택"
+                />
+              </th>
+              <th className="w-36 px-2 py-2 text-left">쇼핑몰(거래처)</th>
+              <th className="w-24 px-2 py-2 text-left">수집일자</th>
+              <th className="w-36 px-2 py-2 text-left">품목코드(ERP)</th>
+              <th className="w-52 px-2 py-2 text-left">품목명(ERP)</th>
+              <th className="w-32 px-2 py-2 text-left">쇼핑몰상품코드</th>
+              <th className="w-64 px-2 py-2 text-left">쇼핑몰품목key</th>
+              <th className="w-28 px-2 py-2 text-left">쇼핑몰명</th>
+              <th className="w-24 px-2 py-2 text-left">쇼핑몰코드</th>
+              <th className="w-36 px-2 py-2 text-left">주문번호</th>
+              <th className="w-36 px-2 py-2 text-left">묶음주문번호</th>
+              <th className="w-28 px-2 py-2 text-left">배송방법코드</th>
+              <th className="w-32 px-2 py-2 text-left">송장번호</th>
+              <th className="w-24 px-2 py-2 text-left">주문상태</th>
+              <th className="w-24 px-2 py-2 text-left">수취인</th>
+              <th className="w-32 px-2 py-2 text-left">수취인연락처1</th>
+              <th className="w-32 px-2 py-2 text-left">수취인연락처2</th>
+              <th className="w-24 px-2 py-2 text-left">우편번호</th>
+              <th className="w-72 px-2 py-2 text-left">주소</th>
+              <th className="w-16 px-2 py-2 text-right">수량</th>
+              <th className="w-48 px-2 py-2 text-left">배송요청사항</th>
+              <th className="w-28 px-2 py-2 text-right">정산예정금액</th>
+              <th className="w-24 px-2 py-2 text-left">배송방법</th>
+              <th className="w-28 px-2 py-2 text-right">배송비금액</th>
+              <th className="w-20 px-2 py-2 text-right">배송비</th>
+              <th className="w-28 px-2 py-2 text-left">직송거래처</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map(({ row, index, key }, visibleIndex) => {
+              const selected = selectedKeys.includes(key);
+              return (
+                <tr key={key} className={`border-b border-slate-100 ${highlightedRowSet.has(index) ? "bg-orange-50" : selected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                  <td className="px-2 py-2 text-center">
+                    <SelectionNumberButton index={visibleIndex} selected={selected} onMouseDown={(event) => selection.beginSelection(key, visibleIndex, event)} onMouseEnter={() => selection.continueSelection(key, visibleIndex)} />
+                  </td>
+                  <td className="truncate px-2 py-2 font-black text-slate-800">{renderText(row, "쇼핑몰(거래처)")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "수집일자")}</td>
+                  <td className="px-2 py-2">
+                    <input
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-black text-blue-700 outline-orange-400"
+                      value={progressValue(row, "품목코드(ERP)")}
+                      onChange={(event) => updateProgressCell(index, "품목코드(ERP)", event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        openProductSearch(index, event.currentTarget.value || progressValue(row, "품목명(ERP)"));
+                      }}
+                      placeholder="검색"
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <input
+                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm outline-orange-400"
+                      value={progressValue(row, "품목명(ERP)")}
+                      onChange={(event) => updateProgressCell(index, "품목명(ERP)", event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        openProductSearch(index, event.currentTarget.value || progressValue(row, "품목코드(ERP)"));
+                      }}
+                      placeholder="검색"
+                    />
+                  </td>
+                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰상품코드")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰품목key")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰명")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰코드")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "주문번호")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "묶음주문번호")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "배송방법코드")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "송장번호")}</td>
+                  <td className="truncate px-2 py-2 font-black text-blue-700">{renderText(row, "주문상태")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "수취인")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "수취인연락처1")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "수취인연락처2")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "우편번호")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "주소")}</td>
+                  <td className="px-2 py-2 text-right font-black">{renderText(row, "수량")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "배송요청사항")}</td>
+                  <td className="px-2 py-2 text-right font-black">{renderText(row, "정산예정금액")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "배송방법")}</td>
+                  <td className="px-2 py-2 text-right">{renderText(row, "배송비금액")}</td>
+                  <td className="px-2 py-2 text-right">{renderText(row, "배송비")}</td>
+                  <td className="truncate px-2 py-2">{renderText(row, "직송거래처")}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!visibleRows.length && <EmptyState title="수집된 주문이 없습니다." />}
+      </div>
+      {productSearch.open && (
+        <SelectionModal
+          title="품목검색"
+          onClose={() => setProductSearch((prev) => ({ ...prev, open: false }))}
+          size="lg"
+          footer={
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1 text-sm font-black" aria-label="품목 속성 검색">
+                {productSearchAttributeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      const next = option.value;
+                      setProductSearchAttribute(next);
+                      if (productSearch.query.trim()) void searchFnOsProducts(productSearch.query, next);
+                    }}
+                    className={`rounded-md px-2.5 py-1.5 ${productSearchAttribute === option.value ? "bg-orange-500 text-white" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <ActionButton type="button" variant="secondary" onClick={() => setProductSearch((prev) => ({ ...prev, open: false }))}>닫기</ActionButton>
+            </div>
+          }
+        >
+          <div onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setProductSearch((prev) => ({ ...prev, selectedIndex: Math.min(Math.max(0, prev.results.length - 1), prev.selectedIndex + 1) }));
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setProductSearch((prev) => ({ ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) }));
+            }
+            if (event.key === "Enter" && productSearch.results[productSearch.selectedIndex]) {
+              event.preventDefault();
+              selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
+            }
+          }}>
+            <div className="mb-3 flex gap-2 [&_button]:w-20 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:px-0">
+              <input
+                autoFocus
+                className={`${modalInputClass} min-w-0 flex-[0_1_78%]`}
+                value={productSearch.query}
+                onChange={(event) => setProductSearch((prev) => ({ ...prev, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (productSearch.results.length && productSearch.query.trim() === productSearch.searchedQuery && productSearch.results[productSearch.selectedIndex]) {
+                    selectProductSearchItem(productSearch.results[productSearch.selectedIndex]);
+                    return;
+                  }
+                  void searchFnOsProducts(productSearch.query);
+                }}
+                placeholder="품목명 또는 품목코드"
+              />
+              <ActionButton type="button" onClick={() => void searchFnOsProducts(productSearch.query)}>찾기</ActionButton>
+            </div>
+            <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200">
+              <table className="w-full table-fixed text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="w-10 py-2">선택</th>
+                    <th className="w-24 py-2 text-left">품목코드</th>
+                    <th className="w-[300px] py-2 text-left">품목명</th>
+                    <th className="w-24 py-2 pr-3 text-right">입고단가</th>
+                    <th className="w-24 py-2 pr-4 text-right">출고단가</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productSearch.results.map((item, index) => {
+                    const selected = productSearch.selectedIndex === index;
+                    return (
+                      <tr key={`${item.code || "item"}-${index}`} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-orange-50" : "hover:bg-orange-50"}`} onMouseEnter={() => setProductSearch((prev) => ({ ...prev, selectedIndex: index }))} onDoubleClick={() => selectProductSearchItem(item)}>
+                        <td className="py-2 text-center">
+                          <button type="button" className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-xs font-black ${selected ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-400"}`} onClick={() => selectProductSearchItem(item)}>
+                            {index + 1}
+                          </button>
+                        </td>
+                        <td className="truncate py-2 pr-2 font-black text-blue-700">{item.code || "-"}</td>
+                        <td className="truncate py-2 pr-2">{item.name || "-"}</td>
+                        <td className="py-2 pr-3 text-right font-semibold text-slate-700">{item.inPrice ? krw(Number(String(item.inPrice).replace(/[^\d.-]/g, ""))) : "-"}</td>
+                        <td className="py-2 pr-4 text-right font-semibold text-slate-700">{item.outPrice ? krw(Number(String(item.outPrice).replace(/[^\d.-]/g, ""))) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {!productSearch.loading && !productSearch.results.length && <EmptyState title={productSearch.error || "검색 결과가 없습니다."} />}
+            </div>
+          </div>
+        </SelectionModal>
+      )}
+    </div>
+  );
+}
+
 const FNOS_DB_ERROR_MESSAGE = "FN OS 자체 DB 처리 중 문제가 발생했습니다. Supabase 테이블과 환경변수를 확인해 주세요.";
 
 function SalesRightTools() {
@@ -10048,11 +10378,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let data = await res.json().catch(() => ({}));
       if (data.queued && data.job_id) {
         const jobId = salesCellText(data.job_id);
-        setCollectionStatuses([{
-          name: "온라인 발주",
-          status: "running",
-          message: "로컬 워커가 주문수집 작업을 처리하는 중입니다.",
-        }]);
+        const queuedStatuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; channel_code?: string; message?: string }> : [];
+        const waitingStatuses = queuedStatuses.length
+          ? queuedStatuses.map((item) => ({
+              name: salesCellText(item.channel_name || item.channel_code) || "쇼핑몰",
+              status: "running" as const,
+              message: salesCellText(item.message) || "로컬 워커 대기 중입니다.",
+            }))
+          : [{ name: "쇼핑몰", status: "running" as const, message: "로컬 워커 대기 중입니다." }];
+        setCollectionStatuses(waitingStatuses);
         for (let attempt = 0; attempt < 45; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
           const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include" });
@@ -10066,11 +10400,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (status === "failed" || status === "cancelled") {
             throw new Error(salesCellText(job.error_message) || "로컬 워커 주문수집 실패");
           }
-          setCollectionStatuses([{
-            name: "온라인 발주",
+          setCollectionStatuses((prev) => (prev.length ? prev : waitingStatuses).map((item) => ({
+            ...item,
             status: status === "queued" ? "skipped" : "running",
             message: status === "queued" ? "로컬 워커 대기 중입니다." : "로컬 워커가 주문수집 중입니다.",
-          }]);
+          })));
         }
         if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해주세요.");
       }

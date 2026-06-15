@@ -190,34 +190,6 @@ export async function POST(request: NextRequest) {
     }
     const body = await request.json().catch(() => ({})) as AnyRecord;
     const channelCode = text(body.channel_code).toUpperCase();
-    if (shouldQueueForLocalWorker(body)) {
-      const job = await createAutomationJob({
-        job_type: orderJobType(channelCode),
-        title: channelCode ? `온라인 주문수집 ${channelCode}` : "온라인 주문수집",
-        requested_by: "sales_inventory",
-        input_json: {
-          ...body,
-          worker_direct: true,
-          use_worker: false,
-          requested_from: request.nextUrl.origin,
-        },
-      });
-      return NextResponse.json({
-        ok: true,
-        queued: true,
-        job_id: job.id,
-        statuses: [{
-          channel_code: channelCode,
-          channel_name: "온라인 발주",
-          ok: false,
-          skipped: true,
-          count: 0,
-          message: "주문수집 작업을 로컬 워커에 등록했습니다.",
-        }],
-        orders: [],
-        count: 0,
-      });
-    }
     const query: Record<string, string | number> = {
       order: "channel_code.asc",
       limit: 100,
@@ -234,6 +206,35 @@ export async function POST(request: NextRequest) {
         statuses: [],
         orders: [],
       }, { status: 400 });
+    }
+
+    if (shouldQueueForLocalWorker(body)) {
+      const job = await createAutomationJob({
+        job_type: orderJobType(channelCode),
+        title: channelCode ? `온라인 주문수집 ${channelCode}` : "온라인 주문수집",
+        requested_by: "sales_inventory",
+        input_json: {
+          ...body,
+          worker_direct: true,
+          use_worker: false,
+          requested_from: request.nextUrl.origin,
+        },
+      });
+      return NextResponse.json({
+        ok: true,
+        queued: true,
+        job_id: job.id,
+        statuses: activeChannels.map((channel) => ({
+          channel_code: text(channel.channel_code),
+          channel_name: text(channel.channel_name) || text(channel.customer_name) || text(channel.channel_code),
+          ok: false,
+          skipped: true,
+          count: 0,
+          message: "로컬 워커 대기 중입니다.",
+        })),
+        orders: [],
+        count: 0,
+      });
     }
 
     const results = await Promise.all(activeChannels.map((channel) => collectChannel(channel, body)));
