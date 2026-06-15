@@ -9,10 +9,30 @@ import { readChannelCredentials } from "@/lib/sales-channel-credentials";
 
 type AnyRecord = Record<string, unknown>;
 
+const localBridgeCorsHeaders = {
+  "Access-Control-Allow-Origin": "https://fn-os.vercel.app",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
+};
+
 const adapters: Record<string, SalesChannelAdapter> = {
   NAVER: new NaverChannelAdapter(),
   COUPANG: new CoupangChannelAdapter(),
 };
+
+function jsonResponse(body: AnyRecord, init?: ResponseInit) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      ...localBridgeCorsHeaders,
+      ...(init?.headers || {}),
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: localBridgeCorsHeaders });
+}
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -187,7 +207,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
 export async function POST(request: NextRequest) {
   try {
     if (!hasDbConfig()) {
-      return NextResponse.json({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
+      return jsonResponse({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
     }
     const body = await request.json().catch(() => ({})) as AnyRecord;
     const channelCode = text(body.channel_code).toUpperCase();
@@ -201,7 +221,7 @@ export async function POST(request: NextRequest) {
     const channels = await selectRows<AnyRecord>("sales_channels", query);
     const activeChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
     if (!activeChannels.length) {
-      return NextResponse.json({
+      return jsonResponse({
         ok: false,
         error: "API 사용으로 저장된 네이버/쿠팡 쇼핑몰이 없습니다. 기초관리 > 쇼핑몰에서 API 정보를 저장해주세요.",
         statuses: [],
@@ -221,7 +241,7 @@ export async function POST(request: NextRequest) {
           requested_from: request.nextUrl.origin,
         },
       });
-      return NextResponse.json({
+      return jsonResponse({
         ok: true,
         queued: true,
         job_id: job.id,
@@ -240,7 +260,7 @@ export async function POST(request: NextRequest) {
 
     const results = await Promise.all(activeChannels.map((channel) => collectChannel(channel, body)));
     const orders = results.flatMap((result) => result.orders);
-    return NextResponse.json({
+    return jsonResponse({
       ok: results.some((result) => result.ok),
       statuses: results.map((result) => ({
         channel_code: text(result.channel.channel_code),
@@ -255,6 +275,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 수집 실패" }, { status });
+    return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 수집 실패" }, { status });
   }
 }

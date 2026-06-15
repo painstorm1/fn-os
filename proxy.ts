@@ -17,10 +17,12 @@ export function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isAutomationAgentApi = pathname.startsWith("/api/automation/");
   const isAutomationJobApi = pathname.startsWith("/api/fnos/automation-jobs");
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(request.nextUrl.hostname);
+  const isLocalOnlineOrderSyncApi = isLocalHost && pathname === "/api/fnos/online-orders/sync";
   const isSlackCommandApi = pathname === "/api/slack/commands";
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
-  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isSlackCommandApi || isPublicAsset) {
+  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isLocalOnlineOrderSyncApi || isSlackCommandApi || isPublicAsset) {
     return NextResponse.next();
   }
 

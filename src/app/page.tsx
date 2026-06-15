@@ -10630,13 +10630,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("");
     try {
       const today = formatDateKey(new Date());
-      const res = await fetch("/api/fnos/online-orders/sync", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        fnosSkipBusyOverlay: true,
-        body: JSON.stringify({ from: today, to: today }),
-      } as RequestInit & { fnosSkipBusyOverlay: boolean });
+      const requestBody = { from: today, to: today };
+      const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      let res: Response;
+      if (isLocalPage) {
+        res = await fetch("/api/fnos/online-orders/sync", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          fnosSkipBusyOverlay: true,
+          body: JSON.stringify(requestBody),
+        } as RequestInit & { fnosSkipBusyOverlay: boolean });
+      } else {
+        setCollectionStatuses([{ name: "온라인 발주", status: "running", message: "로컬 주문수집 연결 중" }]);
+        try {
+          res = await fetch("http://127.0.0.1:3000/api/fnos/online-orders/sync", {
+            method: "POST",
+            mode: "cors",
+            headers: { "Content-Type": "application/json", "X-FNOS-Local-Bridge": "1" },
+            fnosSkipBusyOverlay: true,
+            body: JSON.stringify({ ...requestBody, run_direct: true, use_worker: false }),
+          } as RequestInit & { fnosSkipBusyOverlay: boolean });
+        } catch {
+          throw new Error("로컬 주문수집 서버에 연결하지 못했습니다. localhost:3000을 켠 뒤 다시 시도해 주세요.");
+        }
+      }
       let data = await res.json().catch(() => ({}));
       if (data.queued && data.job_id) {
         const jobId = salesCellText(data.job_id);
