@@ -31,8 +31,8 @@ function credentialReadError(rows: Array<{ error?: string }>) {
   return rows.find((row) => row.error)?.error || "";
 }
 
-function channelMatches(channel: AnyRecord, name: string) {
-  const needle = text(name);
+function channelMatches(channel: AnyRecord, value: string) {
+  const needle = text(value);
   if (!needle) return false;
   return [channel.channel_name, channel.customer_name, channel.channel_code]
     .map(text)
@@ -46,7 +46,31 @@ function shouldQueueForLocalWorker(body: AnyRecord) {
 }
 
 function rowsForChannel(rows: AnyRecord[], channel: AnyRecord) {
-  return rows.filter((row) => channelMatches(channel, text(row.channelName || row.channel_name || row.mallName || row.mall_name)));
+  return rows.filter((row) => [
+    row.channelName,
+    row.channel_name,
+    row.mallName,
+    row.mall_name,
+    row.customerName,
+    row.customer_name,
+    row.channelCode,
+    row.channel_code,
+    row.customerCode,
+    row.customer_code,
+  ].some((value) => channelMatches(channel, text(value))));
+}
+
+function rowProductOrderId(row: AnyRecord) {
+  return text(
+    row.productOrderId
+      || row.product_order_id
+      || row.channelOptionCode
+      || row.channel_option_code
+      || row.mallProductCode
+      || row.mall_product_code
+      || row.orderNo
+      || row.order_no,
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -101,7 +125,7 @@ export async function POST(request: NextRequest) {
         channel_name: text(channel.channel_name),
       };
       if (action === "confirm") {
-        const productOrderIds = Array.from(new Set(channelRows.map((row) => text(row.productOrderId || row.product_order_id)).filter(Boolean)));
+        const productOrderIds = Array.from(new Set(channelRows.map(rowProductOrderId).filter(Boolean)));
         const result = adapter.confirmOrders
           ? await adapter.confirmOrders({ ...baseParams, productOrderIds })
           : { ok: false, error: "해당 쇼핑몰은 발주확인을 지원하지 않습니다." };
@@ -109,7 +133,7 @@ export async function POST(request: NextRequest) {
       }
       if (action === "dispatch") {
         const dispatchProductOrders = channelRows.map((row) => ({
-          productOrderId: text(row.productOrderId || row.product_order_id),
+          productOrderId: rowProductOrderId(row),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
           deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
           trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
