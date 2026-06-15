@@ -10045,7 +10045,35 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         fnosSkipBusyOverlay: true,
         body: JSON.stringify({ from: today, to: today }),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+      if (data.queued && data.job_id) {
+        const jobId = salesCellText(data.job_id);
+        setCollectionStatuses([{
+          name: "온라인 발주",
+          status: "running",
+          message: "로컬 워커가 주문수집 작업을 처리하는 중입니다.",
+        }]);
+        for (let attempt = 0; attempt < 45; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
+          const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include" });
+          const jobData = await jobRes.json().catch(() => ({}));
+          const job = jobData.job || {};
+          const status = salesCellText(job.status);
+          if (status === "success") {
+            data = job.result_json || {};
+            break;
+          }
+          if (status === "failed" || status === "cancelled") {
+            throw new Error(salesCellText(job.error_message) || "로컬 워커 주문수집 실패");
+          }
+          setCollectionStatuses([{
+            name: "온라인 발주",
+            status: status === "queued" ? "skipped" : "running",
+            message: status === "queued" ? "로컬 워커 대기 중입니다." : "로컬 워커가 주문수집 중입니다.",
+          }]);
+        }
+        if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해주세요.");
+      }
       const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; message?: string }> : [];
       setCollectionStatuses(statuses.length
         ? statuses.map((item) => ({

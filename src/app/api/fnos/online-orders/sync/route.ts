@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CoupangChannelAdapter } from "@/lib/channels/coupang";
 import { NaverChannelAdapter } from "@/lib/channels/naver";
 import type { ChannelResult, NormalizedOrder, SalesChannelAdapter } from "@/lib/channels/common/types";
+import { createAutomationJob } from "@/lib/automation-jobs";
 import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
 import { readChannelCredentials } from "@/lib/sales-channel-credentials";
 
@@ -31,6 +32,16 @@ function credentialReadError(rows: Array<{ error?: string }>) {
 
 function credentialValueCount(rows: Array<{ value?: string; error?: string }>) {
   return rows.filter((row) => text(row.value) && !row.error).length;
+}
+
+function shouldQueueForLocalWorker(body: AnyRecord) {
+  if (body.worker_direct === true || body.run_direct === true) return false;
+  if (body.use_worker === false) return false;
+  return body.use_worker === true || process.env.VERCEL === "1";
+}
+
+function orderJobType(channelCode: string) {
+  return channelCode === "COUPANG" ? "collect_coupang_orders" : "collect_smartstore_orders";
 }
 
 function adapterCodeForChannel(channel: AnyRecord) {
@@ -179,6 +190,34 @@ export async function POST(request: NextRequest) {
     }
     const body = await request.json().catch(() => ({})) as AnyRecord;
     const channelCode = text(body.channel_code).toUpperCase();
+    if (shouldQueueForLocalWorker(body)) {
+      const job = await createAutomationJob({
+        job_type: orderJobType(channelCode),
+        title: channelCode ? `온라인 주문수집 ${channelCode}` : "온라인 주문수집",
+        requested_by: "sales_inventory",
+        input_json: {
+          ...body,
+          worker_direct: true,
+          use_worker: false,
+          requested_from: request.nextUrl.origin,
+        },
+      });
+      return NextResponse.json({
+        ok: true,
+        queued: true,
+        job_id: job.id,
+        statuses: [{
+          channel_code: channelCode,
+          channel_name: "온라인 발주",
+          ok: false,
+          skipped: true,
+          count: 0,
+          message: "주문수집 작업을 로컬 워커에 등록했습니다.",
+        }],
+        orders: [],
+        count: 0,
+      });
+    }
     const query: Record<string, string | number> = {
       order: "channel_code.asc",
       limit: 100,

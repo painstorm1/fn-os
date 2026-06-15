@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const args = new Set(process.argv.slice(2));
 const origin = (process.env.FN_OS_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
+const executionOrigin = (process.env.FN_WORKER_EXECUTION_ORIGIN || process.env.FN_OS_EXECUTION_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
 const workerId = process.env.FN_WORKER_ID || `${os.hostname()}-fn-worker`;
 const pollMs = Math.max(5000, Number(process.env.FN_WORKER_POLL_MS || 60_000));
 const jobType = process.env.FN_WORKER_JOB_TYPE || "";
@@ -29,7 +30,11 @@ function appendLog(job, line) {
 }
 
 async function request(path, init = {}) {
-  const response = await fetch(`${origin}${path}`, {
+  return requestFrom(origin, path, init);
+}
+
+async function requestFrom(baseUrl, path, init = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -60,6 +65,32 @@ async function claimJob() {
 
 async function runStubHandler(job) {
   const input = job.input_json && typeof job.input_json === "object" ? job.input_json : {};
+  if (job.job_type === "collect_smartstore_orders" || job.job_type === "collect_coupang_orders") {
+    const requestedChannelCode = text(input.channel_code);
+    const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/sync", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        ...(requestedChannelCode ? { channel_code: requestedChannelCode } : {}),
+        worker_direct: true,
+        use_worker: false,
+      }),
+    });
+    const ok = data.ok !== false;
+    const count = Number(data.count || (Array.isArray(data.orders) ? data.orders.length : 0));
+    return {
+      status: ok ? "success" : "failed",
+      result_json: {
+        ...data,
+        worker_id: workerId,
+        execution_origin: executionOrigin,
+        handled_at: now(),
+      },
+      log_text: appendLog(job, `order collection ${ok ? "completed" : "failed"} via ${executionOrigin}: ${count} orders`),
+      error_message: ok ? "" : text(data.error || data.message || "Order collection failed."),
+    };
+  }
+
   const dryRun = input.dry_run === true || input.mode === "hello";
   const result = {
     worker_id: workerId,
@@ -118,7 +149,7 @@ async function processOne() {
 
 async function main() {
   console.log(`[${now()}] FN OS automation worker started`);
-  console.log(`origin=${origin} worker_id=${workerId} poll_ms=${pollMs}${jobType ? ` job_type=${jobType}` : ""}`);
+  console.log(`origin=${origin} execution_origin=${executionOrigin} worker_id=${workerId} poll_ms=${pollMs}${jobType ? ` job_type=${jobType}` : ""}`);
 
   while (true) {
     try {
