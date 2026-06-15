@@ -1,8 +1,7 @@
 import "dotenv/config";
 
 import { App, LogLevel } from "@slack/bolt";
-import { parseHermesCommand } from "./command-parser.mjs";
-import { createAutomationJob } from "./fnos-client.mjs";
+import { sendHermesCommand } from "./fnos-client.mjs";
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -42,8 +41,8 @@ app.use(async ({ body, next }) => {
   await next();
 });
 
-async function enqueueFromSlack({ client, event, logger, text }) {
-  debugLog("enqueue requested", {
+async function forwardToHermes({ client, event, logger, text }) {
+  debugLog("hermes command requested", {
     channel: event.channel,
     channel_type: event.channel_type,
     user: event.user,
@@ -51,45 +50,42 @@ async function enqueueFromSlack({ client, event, logger, text }) {
     text,
   });
 
-  const parsed = parseHermesCommand(text);
-  if (!parsed.requested_text) {
+  const requestedText = String(text || "").trim();
+  if (!requestedText) {
     await client.chat.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts || event.ts,
-      text: "어떤 작업을 등록할지 메시지로 알려주세요. 예: `ads collect yesterday`",
+      text: "명령을 입력해주세요. 예: `ads collect yesterday`",
     });
     return;
   }
 
-  const job = await createAutomationJob({
-    ...parsed,
-    requested_by: "slack",
-    source: "slack_agent",
-    trigger_type: "slack",
-    input_json: {
-      ...parsed.input_json,
-      slack: slackContext(event),
-    },
+  if (/^ping$/i.test(requestedText)) {
+    await client.chat.postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts || event.ts,
+      text: "pong",
+    });
+    return;
+  }
+
+  const result = await sendHermesCommand({
+    source: "slack",
+    requested_by: event.user,
+    text: requestedText,
     slack: slackContext(event),
   });
 
-  logger.info(`Created FN OS automation job ${job.id} from Slack event ${event.ts}`);
-  debugLog("automation job created", {
-    job_id: job.id,
-    job_type: job.job_type,
-    assigned_agent: job.assigned_agent || parsed.assigned_agent,
-    status: job.status,
+  logger.info(`Forwarded Slack command ${event.ts} to Hermes command handler`);
+  debugLog("hermes command accepted", {
+    run_id: result.run_id || result.run?.id,
+    task_type: result.task_type || result.run?.task_type,
+    status: result.status || result.run?.status,
   });
   await client.chat.postMessage({
     channel: event.channel,
     thread_ts: event.thread_ts || event.ts,
-    text: [
-      "작업 접수됨.",
-      `작업 ID: ${job.id}`,
-      `작업: ${job.job_type}`,
-      `담당: ${job.assigned_agent || parsed.assigned_agent}`,
-      `상태: ${job.status}`,
-    ].join("\n"),
+    text: result.reply || result.message || "Hermes에 명령을 전달했습니다.",
   });
 }
 
@@ -103,7 +99,7 @@ app.event("app_mention", async ({ client, event, logger }) => {
 
   try {
     const text = String(event.text || "").replace(/<@[A-Z0-9]+>/g, "").trim();
-    await enqueueFromSlack({ client, event, logger, text });
+    await forwardToHermes({ client, event, logger, text });
   } catch (error) {
     debugLog("app_mention failed", {
       message: error instanceof Error ? error.message : String(error),
@@ -112,7 +108,7 @@ app.event("app_mention", async ({ client, event, logger }) => {
     await client.chat.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts || event.ts,
-      text: `작업 접수 실패: ${error instanceof Error ? error.message : String(error)}`,
+      text: `Hermes 명령 전달 실패: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
 });
@@ -152,7 +148,7 @@ app.message(async ({ client, event, logger }) => {
   });
 
   try {
-    await enqueueFromSlack({ client, event, logger, text: event.text || "" });
+    await forwardToHermes({ client, event, logger, text: event.text || "" });
   } catch (error) {
     debugLog("message.im failed", {
       message: error instanceof Error ? error.message : String(error),
@@ -161,7 +157,7 @@ app.message(async ({ client, event, logger }) => {
     await client.chat.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts || event.ts,
-      text: `작업 접수 실패: ${error instanceof Error ? error.message : String(error)}`,
+      text: `Hermes 명령 전달 실패: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
 });
@@ -169,7 +165,7 @@ app.message(async ({ client, event, logger }) => {
 debugLog("socket mode starting", {
   has_bot_token: Boolean(process.env.SLACK_BOT_TOKEN),
   has_app_token: Boolean(process.env.SLACK_APP_TOKEN),
-  fnos_api_base: process.env.FNOS_AUTOMATION_API_BASE || "https://fn-os.vercel.app",
+  hermes_command_webhook_configured: Boolean(process.env.HERMES_COMMAND_WEBHOOK_URL || process.env.HERMES_COMMAND_URL),
 });
 
 await app.start();

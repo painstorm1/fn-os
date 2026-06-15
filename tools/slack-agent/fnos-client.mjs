@@ -26,3 +26,25 @@ export async function createAutomationJob(payload) {
   }
   return data.job;
 }
+
+function hermesCommandUrl() {
+  return (process.env.HERMES_COMMAND_WEBHOOK_URL || process.env.HERMES_COMMAND_URL || "").trim();
+}
+
+export async function sendHermesCommand(payload) {
+  const url = hermesCommandUrl();
+  if (!url) {
+    throw new Error("HERMES_COMMAND_WEBHOOK_URL is not configured.");
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.ok === false) {
+    throw new Error(data?.error || `Hermes command handler failed: ${response.status}`);
+  }
+  return data;
+}

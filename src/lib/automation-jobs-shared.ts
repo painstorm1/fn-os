@@ -81,6 +81,7 @@ export type AutomationJob = {
 
 export type AutomationLog = {
   id: string;
+  run_id?: string;
   job_id: string;
   agent_name: string;
   level: string;
@@ -88,6 +89,27 @@ export type AutomationLog = {
   message: string;
   payload: unknown;
   created_at: string;
+};
+
+export type AutomationRun = {
+  id: string;
+  source: "cron" | "slack" | "manual_auto" | string;
+  agent: string;
+  task_type: AutomationJobType | string;
+  title: string;
+  status: "running" | "success" | "failed" | string;
+  requested_by: string;
+  slack_channel_id: string;
+  slack_thread_ts: string;
+  input_json: unknown;
+  result_json: unknown;
+  error_message: string;
+  result_file_url: string;
+  screenshot_url: string;
+  started_at: string;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export function isAutomationJobType(value: unknown): value is AutomationJobType {

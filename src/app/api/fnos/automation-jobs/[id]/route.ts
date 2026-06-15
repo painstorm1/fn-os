@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAutomationJob, listAutomationLogs, updateAutomationJob } from "@/lib/automation-jobs";
+import { getAutomationRunAsJob, listAutomationRunLogs, updateAutomationRun } from "@/lib/automation-jobs";
 import { FnosDbError } from "@/lib/fnos-db";
 
 export const runtime = "nodejs";
@@ -12,8 +12,8 @@ type RouteContext = {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const job = await getAutomationJob(id);
-    const logs = await listAutomationLogs(id);
+    const job = await getAutomationRunAsJob(id);
+    const logs = await listAutomationRunLogs(id);
     return NextResponse.json({ ok: true, job, logs });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
@@ -25,8 +25,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));
-    const job = await updateAutomationJob(id, body);
-    const logs = await listAutomationLogs(id);
+    const job = await updateAutomationRun(id, body);
+    const logs = await listAutomationRunLogs(id);
     return NextResponse.json({ ok: true, job, logs });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

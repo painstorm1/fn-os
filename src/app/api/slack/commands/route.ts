@@ -1,9 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { createAutomationJob } from "@/lib/automation-jobs";
-import type { AutomationJob } from "@/lib/automation-jobs-shared";
 import { FnosDbError } from "@/lib/fnos-db";
-import { buildSlackAutomationJobDraft, parseSlackCommandPayload } from "@/lib/slack-commands";
+import { parseSlackCommandPayload } from "@/lib/slack-commands";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +13,7 @@ function slackJson(text: string, status = 200) {
   return NextResponse.json({ response_type: "ephemeral", text }, { status });
 }
 
-function slackJobRegistered(job: AutomationJob) {
+function slackJobRegistered(job: { id: string; job_type: string; assigned_agent?: string; status: string }) {
   return slackJson([
     "작업 등록 완료.",
     `작업 ID: ${job.id}`,
@@ -45,15 +43,52 @@ function verifySlackSignature(rawBody: string, timestamp: string | null, signatu
 async function createSlackAutomationJob(rawBody: string) {
   const payload = parseSlackCommandPayload(rawBody);
   if (payload.command && payload.command !== "/fn") throw new FnosDbError("지원하지 않는 Slack command입니다.", 400);
-  return createAutomationJob(buildSlackAutomationJobDraft(payload));
+  return forwardSlackCommandToHermesPayload(payload);
+}
+
+function hermesCommandUrl() {
+  return (process.env.HERMES_COMMAND_WEBHOOK_URL || process.env.HERMES_COMMAND_URL || "").trim();
+}
+
+async function forwardSlackCommandToHermesPayload(payload: ReturnType<typeof parseSlackCommandPayload>) {
+  const text = String(payload.text || "").trim();
+  if (!text) return { text: "명령을 입력해주세요. 예: `/fn ads collect yesterday`" };
+  if (/^ping$/i.test(text)) return { text: "pong" };
+
+  const url = hermesCommandUrl();
+  if (!url) throw new FnosDbError("HERMES_COMMAND_WEBHOOK_URL is not configured.", 503);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      source: "slack",
+      command: payload.command,
+      text,
+      requested_by: payload.user_id || payload.user_name || "slack",
+      slack: {
+        response_url: payload.response_url,
+        channel_id: payload.channel_id,
+        team_id: payload.team_id,
+        user_id: payload.user_id,
+        user_name: payload.user_name,
+        trigger_id: payload.trigger_id,
+      },
+    }),
+    cache: "no-store",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.ok === false) throw new Error(data?.error || `Hermes command handler failed: ${response.status}`);
+  return data;
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
     route: "/api/slack/commands",
-    job_intake: "automation_jobs",
+    job_intake: "disabled",
+    command_target: "hermes",
     slack_signing_secret_configured: Boolean(process.env.SLACK_SIGNING_SECRET),
+    hermes_command_webhook_configured: Boolean(hermesCommandUrl()),
   });
 }
 
@@ -67,8 +102,8 @@ export async function POST(request: NextRequest) {
     );
     if (!verified) return slackJson("요청 검증 실패");
 
-    const job = await createSlackAutomationJob(rawBody);
-    return slackJobRegistered(job);
+    const result = await createSlackAutomationJob(rawBody);
+    return slackJson(result.reply || result.message || result.text || "Hermes에 명령을 전달했습니다.");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Slack 명령 처리 실패";
     console.error("Slack command intake failed", error);

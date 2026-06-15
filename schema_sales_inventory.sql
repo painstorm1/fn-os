@@ -1565,8 +1565,54 @@ create index if not exists idx_automation_jobs_type_created on automation_jobs(j
 create index if not exists idx_automation_jobs_created on automation_jobs(created_at desc);
 create index if not exists idx_automation_jobs_agent_status_created on automation_jobs(assigned_agent, status, created_at asc);
 
+create table if not exists automation_runs (
+  id uuid primary key default gen_random_uuid(),
+  source text not null,
+  agent text not null,
+  task_type text not null,
+  title text not null,
+  status text not null default 'running',
+  requested_by text default 'hermes',
+  slack_channel_id text,
+  slack_thread_ts text,
+  input_json jsonb not null default '{}'::jsonb,
+  result_json jsonb not null default '{}'::jsonb,
+  error_message text,
+  result_file_url text,
+  screenshot_url text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint automation_runs_status_check check (status in ('running', 'success', 'failed'))
+);
+
+alter table automation_runs add column if not exists source text;
+alter table automation_runs add column if not exists agent text;
+alter table automation_runs add column if not exists task_type text;
+alter table automation_runs add column if not exists title text;
+alter table automation_runs add column if not exists status text default 'running';
+alter table automation_runs add column if not exists requested_by text default 'hermes';
+alter table automation_runs add column if not exists slack_channel_id text;
+alter table automation_runs add column if not exists slack_thread_ts text;
+alter table automation_runs add column if not exists input_json jsonb default '{}'::jsonb;
+alter table automation_runs add column if not exists result_json jsonb default '{}'::jsonb;
+alter table automation_runs add column if not exists error_message text;
+alter table automation_runs add column if not exists result_file_url text;
+alter table automation_runs add column if not exists screenshot_url text;
+alter table automation_runs add column if not exists started_at timestamptz default now();
+alter table automation_runs add column if not exists finished_at timestamptz;
+alter table automation_runs add column if not exists created_at timestamptz default now();
+alter table automation_runs add column if not exists updated_at timestamptz default now();
+alter table automation_runs drop constraint if exists automation_runs_status_check;
+alter table automation_runs add constraint automation_runs_status_check check (status in ('running', 'success', 'failed'));
+create index if not exists idx_automation_runs_started on automation_runs(started_at desc);
+create index if not exists idx_automation_runs_agent_status_started on automation_runs(agent, status, started_at desc);
+create index if not exists idx_automation_runs_task_started on automation_runs(task_type, started_at desc);
+
 create table if not exists automation_logs (
   id uuid primary key default gen_random_uuid(),
+  run_id uuid references automation_runs(id) on delete cascade,
   job_id uuid references automation_jobs(id) on delete cascade,
   agent_name text,
   level text not null default 'info',
@@ -1576,6 +1622,7 @@ create table if not exists automation_logs (
   created_at timestamptz not null default now()
 );
 
+alter table automation_logs add column if not exists run_id uuid;
 alter table automation_logs add column if not exists job_id uuid;
 alter table automation_logs add column if not exists agent_name text;
 alter table automation_logs add column if not exists level text default 'info';
@@ -1583,6 +1630,7 @@ alter table automation_logs add column if not exists event_type text;
 alter table automation_logs add column if not exists message text;
 alter table automation_logs add column if not exists payload jsonb default '{}'::jsonb;
 alter table automation_logs add column if not exists created_at timestamptz default now();
+create index if not exists idx_automation_logs_run_created on automation_logs(run_id, created_at asc);
 create index if not exists idx_automation_logs_job_created on automation_logs(job_id, created_at asc);
 create index if not exists idx_automation_logs_created on automation_logs(created_at desc);
 

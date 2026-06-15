@@ -4,6 +4,7 @@ import {
   AUTOMATION_JOB_TYPE_LABELS,
   type AutomationJob,
   type AutomationLog,
+  type AutomationRun,
   type AutomationJobStatus,
   type AutomationJobType,
   isAutomationJobStatus,
@@ -53,6 +54,15 @@ function normalizeStatus(value: unknown, fallback: AutomationJobStatus = "queued
   if (!next) return fallback;
   if (isAutomationJobStatus(next)) return next;
   throw new FnosDbError("지원하지 않는 작업 상태입니다.", 400);
+}
+
+function normalizeRunStatus(value: unknown, fallback = "running") {
+  const next = text(value);
+  if (!next) return fallback;
+  if (["running", "success", "failed"].includes(next)) return next;
+  if (next === "queued" || next === "waiting_approval") return "running";
+  if (next === "cancelled") return "failed";
+  throw new FnosDbError("Unsupported automation run status.", 400);
 }
 
 function normalizeDate(value: unknown) {
@@ -122,6 +132,7 @@ export function normalizeAutomationJob(row: AnyRecord): AutomationJob {
 export function normalizeAutomationLog(row: AnyRecord): AutomationLog {
   return {
     id: text(row.id),
+    run_id: text(row.run_id),
     job_id: text(row.job_id),
     agent_name: text(row.agent_name),
     level: text(row.level) || "info",
@@ -129,6 +140,63 @@ export function normalizeAutomationLog(row: AnyRecord): AutomationLog {
     message: text(row.message),
     payload: maybeJsonColumn(row, "payload", {}),
     created_at: text(row.created_at),
+  };
+}
+
+export function normalizeAutomationRun(row: AnyRecord): AutomationRun {
+  const status = text(row.status) || "running";
+  return {
+    id: text(row.id),
+    source: text(row.source) || "cron",
+    agent: text(row.agent),
+    task_type: text(row.task_type),
+    title: text(row.title) || text(row.task_type) || "automation run",
+    status,
+    requested_by: text(row.requested_by) || "hermes",
+    slack_channel_id: text(row.slack_channel_id),
+    slack_thread_ts: text(row.slack_thread_ts),
+    input_json: maybeJsonColumn(row, "input_json", {}),
+    result_json: maybeJsonColumn(row, "result_json", {}),
+    error_message: text(row.error_message),
+    result_file_url: text(row.result_file_url),
+    screenshot_url: text(row.screenshot_url),
+    started_at: text(row.started_at),
+    finished_at: nullableText(row.finished_at),
+    created_at: text(row.created_at || row.started_at),
+    updated_at: text(row.updated_at),
+  };
+}
+
+function automationRunAsJob(run: AutomationRun): AutomationJob {
+  const jobType = isAutomationJobType(run.task_type) ? run.task_type : "fnos_report";
+  const status = isAutomationJobStatus(run.status) ? run.status : run.status === "success" ? "success" : run.status === "failed" ? "failed" : "running";
+  const input = recordValue(run.input_json);
+  return {
+    id: run.id,
+    job_type: jobType,
+    title: run.title || automationJobLabel(jobType),
+    status,
+    requested_by: run.requested_by,
+    assigned_agent: run.agent,
+    source: run.source,
+    trigger_type: run.source,
+    requested_text: "",
+    input_json: {
+      ...input,
+      slack: {
+        ...recordValue(input.slack),
+        channel_id: run.slack_channel_id || text(recordValue(input.slack).channel_id),
+        thread_ts: run.slack_thread_ts || text(recordValue(input.slack).thread_ts),
+      },
+    },
+    result_json: run.result_json,
+    log_text: "",
+    error_message: run.error_message,
+    result_file_url: run.result_file_url,
+    screenshot_url: run.screenshot_url,
+    created_at: run.created_at || run.started_at,
+    started_at: run.started_at || null,
+    finished_at: run.finished_at,
   };
 }
 
@@ -164,6 +232,250 @@ export async function listAutomationLogs(jobId: string, limit = 500) {
     limit: Math.min(Math.max(Number(limit || 500), 1), 1000),
   });
   return rows.map(normalizeAutomationLog);
+}
+
+export async function listAutomationRunLogs(runId: string, limit = 500) {
+  if (!hasDbConfig()) return [];
+  const id = text(runId);
+  if (!id) return [];
+  try {
+    const rows = await selectRows<AnyRecord>("automation_logs", {
+      run_id: `eq.${id}`,
+      order: "created_at.asc",
+      limit: Math.min(Math.max(Number(limit || 500), 1), 1000),
+    });
+    return rows.map(normalizeAutomationLog);
+  } catch (error) {
+    const column = missingColumnName(error);
+    if (column === "run_id") return listAutomationLogs(id, limit);
+    throw error;
+  }
+}
+
+export async function listAutomationRuns(filters: AutomationJobListFilters = {}) {
+  if (!hasDbConfig()) return [];
+  const query: Record<string, string | number> = {
+    order: "started_at.desc",
+    limit: Math.min(Math.max(Number(filters.limit || 500), 1), 1000),
+  };
+  if (filters.id) query.id = `eq.${filters.id}`;
+  if (filters.jobType) query.task_type = `eq.${filters.jobType}`;
+  if (filters.status) query.status = `eq.${filters.status}`;
+  if (filters.assignedAgent) query.agent = `eq.${filters.assignedAgent}`;
+  const rows = await selectRows<AnyRecord>("automation_runs", query);
+  return rows.map(normalizeAutomationRun);
+}
+
+export async function listAutomationRunsAsJobs(filters: AutomationJobListFilters = {}) {
+  try {
+    const runs = await listAutomationRuns(filters);
+    return runs.map(automationRunAsJob);
+  } catch (error) {
+    if (error instanceof FnosDbError && /automation_runs|DB/.test(error.message)) {
+      return listAutomationJobs(filters);
+    }
+    throw error;
+  }
+}
+
+export async function getAutomationRun(id: string) {
+  const runId = text(id);
+  if (!runId) throw new FnosDbError("automation run id is required.", 400);
+  const [run] = await listAutomationRuns({ id: runId, limit: 1 });
+  if (!run) throw new FnosDbError("automation run not found.", 404);
+  return run;
+}
+
+export async function getAutomationRunAsJob(id: string) {
+  try {
+    return automationRunAsJob(await getAutomationRun(id));
+  } catch (error) {
+    if (error instanceof FnosDbError && /automation_runs|not found|DB/.test(error.message)) {
+      return getAutomationJob(id);
+    }
+    throw error;
+  }
+}
+
+export async function updateAutomationRun(id: string, body: AnyRecord) {
+  if (!hasDbConfig()) throw new FnosDbError("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??", 503);
+  const runId = text(id);
+  if (!runId) throw new FnosDbError("automation run id is required.", 400);
+  const values: AnyRecord = { updated_at: new Date().toISOString() };
+  if ("title" in body) values.title = text(body.title);
+  if ("status" in body) values.status = normalizeRunStatus(body.status);
+  if ("requested_by" in body) values.requested_by = text(body.requested_by) || "hermes";
+  if ("input_json" in body) values.input_json = jsonValue(body.input_json, {});
+  if ("result_json" in body) values.result_json = jsonValue(body.result_json, {});
+  if ("error_message" in body) values.error_message = text(body.error_message);
+  if ("result_file_url" in body) values.result_file_url = nullableText(body.result_file_url);
+  if ("screenshot_url" in body) values.screenshot_url = nullableText(body.screenshot_url);
+  if ("started_at" in body) values.started_at = normalizeDate(body.started_at);
+  if ("finished_at" in body) values.finished_at = normalizeDate(body.finished_at);
+  if (values.status && ["success", "failed"].includes(String(values.status)) && !("finished_at" in body)) values.finished_at = new Date().toISOString();
+  const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, values);
+  if (!saved) throw new FnosDbError("automation run not found.", 404);
+  const run = normalizeAutomationRun(saved);
+  if ("status" in values) {
+    await createAutomationLog({
+      run_id: run.id,
+      agent_name: run.agent,
+      event_type: "status_changed",
+      message: `status changed to ${run.status}`,
+      payload: { status: run.status },
+    }).catch(() => null);
+  }
+  return automationRunAsJob(run);
+}
+
+function runSlackContext(body: AnyRecord) {
+  const input = recordValue(body.input_json);
+  const slack = recordValue(body.slack || input.slack);
+  return {
+    channel: text(body.slack_channel_id || slack.channel_id || slack.channel),
+    threadTs: text(body.slack_thread_ts || slack.thread_ts || slack.threadTs || slack.message_ts || slack.messageTs),
+  };
+}
+
+export async function createAutomationRun(body: AnyRecord = {}) {
+  if (!hasDbConfig()) throw new FnosDbError("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??", 503);
+  const taskType = text(body.task_type || body.job_type);
+  if (!taskType) throw new FnosDbError("task_type is required.", 400);
+  const now = new Date().toISOString();
+  const slack = runSlackContext(body);
+  const values: AnyRecord = {
+    source: text(body.source) || text(body.trigger_type) || "cron",
+    agent: text(body.agent || body.assigned_agent || body.agent_name) || "hermes",
+    task_type: taskType,
+    title: text(body.title) || taskType,
+    status: normalizeRunStatus(body.status, "running"),
+    requested_by: text(body.requested_by) || "hermes",
+    slack_channel_id: slack.channel || null,
+    slack_thread_ts: slack.threadTs || null,
+    input_json: jsonValue(body.input_json, {}) ?? {},
+    result_json: jsonValue(body.result_json, {}) ?? {},
+    error_message: text(body.error_message || body.error),
+    result_file_url: nullableText(body.result_file_url),
+    screenshot_url: nullableText(body.screenshot_url),
+    started_at: body.started_at ? normalizeDate(body.started_at) : now,
+    finished_at: body.finished_at ? normalizeDate(body.finished_at) : ["success", "failed"].includes(text(body.status)) ? now : null,
+    created_at: now,
+    updated_at: now,
+  };
+  const [saved] = await insertRows<AnyRecord>("automation_runs", values);
+  const run = normalizeAutomationRun(saved);
+  await createAutomationLog({
+    run_id: run.id,
+    agent_name: run.agent,
+    event_type: "started",
+    message: text(body.log_text || body.message || "started"),
+    payload: { source: run.source, task_type: run.task_type },
+  }).catch(() => null);
+  return run;
+}
+
+export async function reportAutomationRunStart(body: AnyRecord = {}) {
+  const runId = text(body.run_id || body.runId || body.job_id || body.jobId || body.current_job_id);
+  if (runId) {
+    const run = await getAutomationRun(runId);
+    const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, {
+      status: "running",
+      agent: text(body.agent || body.assigned_agent || body.agent_name) || run.agent,
+      source: text(body.source) || run.source,
+      input_json: body.input_json === undefined ? run.input_json : jsonValue(body.input_json, {}) ?? {},
+      started_at: run.started_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    if (!saved) throw new FnosDbError("automation run not found.", 404);
+    const normalized = normalizeAutomationRun(saved);
+    await createAutomationLog({
+      run_id: normalized.id,
+      agent_name: normalized.agent,
+      event_type: "started",
+      message: text(body.log_text || body.message || "started"),
+      payload: { source: normalized.source, task_type: normalized.task_type },
+    }).catch(() => null);
+    return normalized;
+  }
+  return createAutomationRun({ ...body, status: "running" });
+}
+
+export async function appendAutomationRunLog(body: AnyRecord = {}) {
+  const runId = text(body.run_id || body.runId || body.job_id || body.jobId);
+  if (!runId) throw new FnosDbError("automation run id is required.", 400);
+  const run = await getAutomationRun(runId);
+  await createAutomationLog({
+    run_id: run.id,
+    agent_name: text(body.agent || body.assigned_agent || body.agent_name) || run.agent,
+    level: text(body.level) || "info",
+    event_type: text(body.event_type || body.eventType || "log"),
+    message: text(body.log_text || body.message),
+    payload: body.payload || {},
+  });
+  return run;
+}
+
+export async function reportAutomationRunSuccess(body: AnyRecord = {}) {
+  const runId = text(body.run_id || body.runId || body.job_id || body.jobId);
+  if (!runId) throw new FnosDbError("automation run id is required.", 400);
+  const now = new Date().toISOString();
+  const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, {
+    status: "success",
+    result_json: jsonValue(body.result_json, {}) ?? {},
+    result_file_url: nullableText(body.result_file_url),
+    screenshot_url: nullableText(body.screenshot_url),
+    finished_at: now,
+    updated_at: now,
+  });
+  if (!saved) throw new FnosDbError("automation run not found.", 404);
+  const run = normalizeAutomationRun(saved);
+  await createAutomationLog({
+    run_id: run.id,
+    agent_name: run.agent,
+    event_type: "success",
+    message: text(body.log_text || body.message || "success"),
+    payload: body.result_json || {},
+  }).catch(() => null);
+  await postSlackFollowup(automationRunAsJob(run), `작업 완료.\n작업 ID: ${run.id}\n작업: ${run.task_type}\n상태: success`).catch((error) => createAutomationLog({
+    run_id: run.id,
+    agent_name: run.agent,
+    level: "warn",
+    event_type: "slack_followup_failed",
+    message: error instanceof Error ? error.message : "Slack followup failed",
+  }).catch(() => null));
+  return run;
+}
+
+export async function reportAutomationRunFail(body: AnyRecord = {}) {
+  const runId = text(body.run_id || body.runId || body.job_id || body.jobId);
+  if (!runId) throw new FnosDbError("automation run id is required.", 400);
+  const now = new Date().toISOString();
+  const errorMessage = text(body.error_message || body.error || "failed");
+  const [saved] = await patchRows<AnyRecord>("automation_runs", { id: `eq.${runId}` }, {
+    status: "failed",
+    error_message: errorMessage,
+    screenshot_url: nullableText(body.screenshot_url),
+    finished_at: now,
+    updated_at: now,
+  });
+  if (!saved) throw new FnosDbError("automation run not found.", 404);
+  const run = normalizeAutomationRun(saved);
+  await createAutomationLog({
+    run_id: run.id,
+    agent_name: run.agent,
+    level: "error",
+    event_type: "failed",
+    message: text(body.log_text || errorMessage),
+    payload: { screenshot_url: run.screenshot_url },
+  }).catch(() => null);
+  await postSlackFollowup(automationRunAsJob(run), `작업 실패.\n작업 ID: ${run.id}\n작업: ${run.task_type}\n상태: failed\n오류: ${run.error_message || "-"}`).catch((error) => createAutomationLog({
+    run_id: run.id,
+    agent_name: run.agent,
+    level: "warn",
+    event_type: "slack_followup_failed",
+    message: error instanceof Error ? error.message : "Slack followup failed",
+  }).catch(() => null));
+  return run;
 }
 
 export async function createAutomationJob(body: AnyRecord) {
@@ -328,10 +640,12 @@ function appendLog(current: unknown, addition: unknown) {
 
 async function createAutomationLog(body: AnyRecord = {}) {
   if (!hasDbConfig()) return null;
+  const runId = nullableText(body.run_id || body.runId);
   const jobId = nullableText(body.job_id || body.jobId);
   const message = text(body.message || body.log_text);
   const payload = jsonValue(body.payload, {}) ?? {};
-  const [saved] = await insertRows<AnyRecord>("automation_logs", {
+  let values: AnyRecord = {
+    run_id: runId,
     job_id: jobId,
     agent_name: nullableText(body.agent_name || body.assigned_agent || body.agentName),
     level: text(body.level) || "info",
@@ -339,7 +653,19 @@ async function createAutomationLog(body: AnyRecord = {}) {
     message,
     payload,
     created_at: new Date().toISOString(),
-  });
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const [saved] = await insertRows<AnyRecord>("automation_logs", values);
+      return saved;
+    } catch (error) {
+      const column = missingColumnName(error);
+      if (column !== "run_id" || !("run_id" in values)) throw error;
+      const { run_id: _removed, ...rest } = values;
+      values = rest;
+    }
+  }
+  const [saved] = await insertRows<AnyRecord>("automation_logs", values);
   return saved;
 }
 
@@ -390,6 +716,8 @@ async function postSlackFollowup(job: AutomationJob, textMessage: string) {
 }
 
 export async function reportAutomationJobStart(body: AnyRecord = {}) {
+  const run = await reportAutomationRunStart(body);
+  return automationRunAsJob(run);
   const jobId = text(body.job_id || body.jobId || body.current_job_id);
   const now = new Date().toISOString();
   if (jobId) {
@@ -436,6 +764,8 @@ export async function reportAutomationJobStart(body: AnyRecord = {}) {
 }
 
 export async function appendAutomationJobLog(body: AnyRecord = {}) {
+  const run = await appendAutomationRunLog(body);
+  return automationRunAsJob(run);
   const jobId = text(body.job_id || body.jobId);
   if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
   const job = await getAutomationJob(jobId);
@@ -458,6 +788,8 @@ export async function appendAutomationJobLog(body: AnyRecord = {}) {
 }
 
 export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
+  const run = await reportAutomationRunSuccess(body);
+  return automationRunAsJob(run);
   const jobId = text(body.job_id || body.jobId);
   if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
   const job = await getAutomationJob(jobId);
@@ -497,6 +829,8 @@ export async function reportAutomationJobSuccess(body: AnyRecord = {}) {
 }
 
 export async function reportAutomationJobFail(body: AnyRecord = {}) {
+  const run = await reportAutomationRunFail(body);
+  return automationRunAsJob(run);
   const jobId = text(body.job_id || body.jobId);
   if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
   const job = await getAutomationJob(jobId);

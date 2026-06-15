@@ -293,7 +293,6 @@ export default function AutomationCenter({ view = "all" }: { view?: string }) {
         actions={(
           <>
             <ActionButton type="button" variant="secondary" onClick={() => void loadJobs()} disabled={loading || saving}>새로고침</ActionButton>
-            <ActionButton type="button" onClick={openCreateModal} disabled={saving}>작업 생성</ActionButton>
           </>
         )}
       />

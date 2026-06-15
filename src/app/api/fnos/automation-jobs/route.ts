@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAutomationJob, listAutomationJobs } from "@/lib/automation-jobs";
+import { createAutomationRun, listAutomationRunsAsJobs } from "@/lib/automation-jobs";
 import { FnosDbError } from "@/lib/fnos-db";
 
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const jobs = await listAutomationJobs({
+    const jobs = await listAutomationRunsAsJobs({
       jobType: request.nextUrl.searchParams.get("job_type") || undefined,
       status: request.nextUrl.searchParams.get("status") || undefined,
       limit: Number(request.nextUrl.searchParams.get("limit") || 500),
@@ -22,7 +22,15 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const job = await createAutomationJob(body);
+    const run = await createAutomationRun({
+      ...body,
+      source: body.source || "manual_auto",
+      agent: body.agent || body.assigned_agent || "fnos-manual",
+      task_type: body.task_type || body.job_type,
+      status: body.status || "running",
+    });
+    const jobs = await listAutomationRunsAsJobs({ id: run.id, limit: 1 });
+    const job = jobs[0];
     return NextResponse.json({ ok: true, job });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

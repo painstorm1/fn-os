@@ -2,19 +2,33 @@
 
 Bolt-based Slack listener inspired by `slack-samples/bolt-js-starter-agent`.
 
-This process does not run Hermes jobs directly. It only receives Slack app mentions or DMs, creates an FN OS `automation_jobs` row through `POST /api/automation/jobs`, and replies in the Slack thread with the queued job ID. Hermes/HA keeps using pull mode through `GET /api/automation/jobs/next?agent=ads-agent`.
+Slack is now the entrance to HA/Hermes, not an FN OS job intake. This process receives Slack app mentions or DMs and forwards the command to the configured Hermes command handler. It does not create FN OS `automation_jobs`.
+
+FN OS Automation Center is updated later by Hermes itself, only after a real automation run starts, through `automation_runs` and `automation_logs`.
 
 Required environment variables:
 
 ```env
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-FNOS_AUTOMATION_API_BASE=https://fn-os.vercel.app
-FNOS_AUTOMATION_AGENT_TOKEN=optional-if-set-on-fnos
+HERMES_COMMAND_WEBHOOK_URL=http://127.0.0.1:8791
+```
+
+Optional environment variables:
+
+```env
+FNOS_AUTOMATION_AGENT_TOKEN=optional-shared-token-for-hermes-command-handler
+SLACK_AGENT_LOG_LEVEL=INFO
 ```
 
 Run:
 
 ```sh
 npm run slack:agent
+```
+
+Local Hermes command handler:
+
+```sh
+python C:\Users\pains\AppData\Local\hermes\profiles\ads-agent\scripts\hermes_command_handler.py
 ```
