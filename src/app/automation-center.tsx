@@ -27,6 +27,7 @@ import {
 } from "@/lib/automation-jobs-shared";
 
 type AutomationJobFilter = "all" | "orders" | "invoice" | "ads" | "accounting";
+type AutomationStatusFilter = "all" | "needs_attention" | AutomationJobStatus;
 
 type CreateDraft = {
   job_type: AutomationJobType;
@@ -59,6 +60,17 @@ const jobFilterOptions: Array<{ value: AutomationJobFilter; label: string }> = [
 
 const summaryStatuses: AutomationJobStatus[] = ["queued", "running", "success", "failed", "waiting_approval"];
 
+const statusFilterOptions: Array<{ value: AutomationStatusFilter; label: string }> = [
+  { value: "all", label: "전체 상태" },
+  { value: "needs_attention", label: "확인 필요" },
+  { value: "queued", label: "대기" },
+  { value: "running", label: "실행중" },
+  { value: "waiting_approval", label: "승인대기" },
+  { value: "failed", label: "실패" },
+  { value: "success", label: "성공" },
+  { value: "cancelled", label: "취소" },
+];
+
 function parseJsonField(value: string, fallback: unknown) {
   const next = value.trim();
   if (!next) return fallback;
@@ -85,6 +97,25 @@ function formatTime(value?: string | null) {
   }).format(date);
 }
 
+function jobTimeValue(job: AutomationJob) {
+  const value = job.finished_at || job.started_at || job.created_at;
+  const time = new Date(value || "").getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function jobLastMessage(job: AutomationJob) {
+  if (job.error_message) return job.error_message;
+  const lines = String(job.log_text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.at(-1) || "-";
+}
+
+function isStaleRunning(job: AutomationJob) {
+  if (job.status !== "running" || !job.started_at) return false;
+  const started = new Date(job.started_at).getTime();
+  if (Number.isNaN(started)) return false;
+  return Date.now() - started > 30 * 60 * 1000;
+}
+
 function statusTone(status: AutomationJobStatus) {
   if (status === "success") return "success" as const;
   if (status === "failed") return "danger" as const;
@@ -101,6 +132,12 @@ function jobMatchesFilter(job: AutomationJob, filter: AutomationJobFilter) {
   if (filter === "ads") return ["download_ads_report", "ads_collect", "ads_analyze", "coupang_report_reservation"].includes(job.job_type);
   if (filter === "accounting") return ["download_accounting_report", "accounting_collect"].includes(job.job_type);
   return true;
+}
+
+function jobMatchesStatus(job: AutomationJob, filter: AutomationStatusFilter) {
+  if (filter === "all") return true;
+  if (filter === "needs_attention") return job.status === "failed" || job.status === "waiting_approval" || isStaleRunning(job);
+  return job.status === filter;
 }
 
 function createInitialDraft(): CreateDraft {
@@ -141,6 +178,7 @@ export default function AutomationCenter() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [jobFilter, setJobFilter] = useState<AutomationJobFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<AutomationStatusFilter>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() => createInitialDraft());
   const [detailJob, setDetailJob] = useState<AutomationJob | null>(null);
@@ -169,7 +207,20 @@ export default function AutomationCenter() {
     return Object.fromEntries(AUTOMATION_JOB_STATUSES.map((status) => [status, jobs.filter((job) => job.status === status).length])) as Record<AutomationJobStatus, number>;
   }, [jobs]);
 
-  const filteredJobs = useMemo(() => jobs.filter((job) => jobMatchesFilter(job, jobFilter)), [jobFilter, jobs]);
+  const attentionJobs = useMemo(() => {
+    return jobs
+      .filter((job) => job.status === "failed" || job.status === "waiting_approval" || isStaleRunning(job))
+      .sort((a, b) => jobTimeValue(b) - jobTimeValue(a))
+      .slice(0, 5);
+  }, [jobs]);
+
+  const recentJobs = useMemo(() => {
+    return [...jobs].sort((a, b) => jobTimeValue(b) - jobTimeValue(a)).slice(0, 5);
+  }, [jobs]);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((job) => jobMatchesFilter(job, jobFilter) && jobMatchesStatus(job, statusFilter));
+  }, [jobFilter, jobs, statusFilter]);
 
   async function createJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -240,6 +291,26 @@ export default function AutomationCenter() {
     }
   }
 
+  async function retryJob(job: AutomationJob) {
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const stamp = new Date().toISOString();
+      const nextLog = [job.log_text, `[${stamp}] queued again by operator`].filter(Boolean).join("\n");
+      await patchJob(job.id, {
+        status: "queued",
+        error_message: "",
+        log_text: nextLog,
+      });
+      setMessage("작업을 다시 대기열에 올렸습니다.");
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "작업 재실행 등록 실패");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveDetail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detailJob || !detailDraft) return;
@@ -298,34 +369,101 @@ export default function AutomationCenter() {
         ))}
       </div>
 
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="rounded-lg p-5">
+          <SectionHeader
+            title="확인 필요"
+            description={<span>{attentionJobs.length.toLocaleString("ko-KR")}건</span>}
+            actions={attentionJobs.length ? <ActionButton type="button" variant="secondary" onClick={() => setStatusFilter("needs_attention")}>목록에서 보기</ActionButton> : null}
+          />
+          <div className="mt-3 space-y-2">
+            {attentionJobs.map((job) => (
+              <div key={job.id} className="rounded-md border border-amber-100 bg-amber-50/50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone={statusTone(job.status)}>{isStaleRunning(job) ? "장시간 실행중" : AUTOMATION_JOB_STATUS_LABELS[job.status]}</StatusBadge>
+                      <span className="text-xs font-bold text-slate-500">{formatTime(job.started_at || job.created_at)}</span>
+                    </div>
+                    <p className="mt-1 truncate text-sm font-black text-slate-900" title={job.title}>{job.title}</p>
+                    <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-600">{jobLastMessage(job)}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <button type="button" className="h-8 rounded-md border border-gray-300 bg-white px-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50" onClick={() => void openDetail(job)}>상세</button>
+                    <button type="button" className="h-8 rounded-md border border-orange-200 bg-white px-2.5 text-xs font-bold text-orange-700 hover:bg-orange-50 disabled:opacity-40" disabled={saving || job.status === "running"} onClick={() => void retryJob(job)}>재실행</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {!attentionJobs.length && <EmptyState title="확인할 자동화 작업이 없습니다." />}
+          </div>
+        </Card>
+
+        <Card className="rounded-lg p-5">
+          <SectionHeader title="최근 실행" description={<span>{recentJobs.length.toLocaleString("ko-KR")}건</span>} />
+          <div className="mt-3 space-y-2">
+            {recentJobs.map((job) => (
+              <button
+                key={job.id}
+                type="button"
+                className="block w-full rounded-md border border-slate-200 bg-white p-3 text-left hover:bg-slate-50"
+                onClick={() => void openDetail(job)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="min-w-0 truncate text-sm font-black text-slate-900">{job.title}</p>
+                  <StatusBadge tone={statusTone(job.status)}>{AUTOMATION_JOB_STATUS_LABELS[job.status]}</StatusBadge>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                  <span>{AUTOMATION_JOB_TYPE_LABELS[job.job_type]}</span>
+                  <span>{formatTime(job.finished_at || job.started_at || job.created_at)}</span>
+                </div>
+              </button>
+            ))}
+            {!recentJobs.length && <EmptyState title="최근 자동화 실행 기록이 없습니다." />}
+          </div>
+        </Card>
+      </div>
+
       <Card className="mt-5 rounded-lg p-5">
         <SectionHeader
           title="작업 목록"
           description={<span>{tableRows.length.toLocaleString("ko-KR")}건</span>}
           actions={(
-            <select
-              className={`${modalSelectClass} h-9 w-52 text-sm`}
-              value={jobFilter}
-              onChange={(event) => setJobFilter(event.target.value as AutomationJobFilter)}
-            >
-              {jobFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
+            <div className="flex flex-wrap gap-2">
+              <select
+                className={`${modalSelectClass} h-9 w-52 text-sm`}
+                value={jobFilter}
+                onChange={(event) => setJobFilter(event.target.value as AutomationJobFilter)}
+              >
+                {jobFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                className={`${modalSelectClass} h-9 w-40 text-sm`}
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as AutomationStatusFilter)}
+              >
+                {statusFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
           )}
         />
         <div className="overflow-x-auto">
-          <table className="min-w-[1120px] w-full table-fixed text-left text-sm">
+          <table className="min-w-[1280px] w-full table-fixed text-left text-sm">
             <thead className="bg-gray-50 text-xs font-bold text-gray-500">
               <tr>
                 <th className="w-[132px] px-3 py-3">생성시간</th>
                 <th className="w-[190px] px-3 py-3">작업명</th>
                 <th className="w-[170px] px-3 py-3">작업유형</th>
                 <th className="w-[110px] px-3 py-3">상태</th>
+                <th className="w-[210px] px-3 py-3">최근 로그</th>
                 <th className="w-[100px] px-3 py-3">요청자</th>
                 <th className="w-[132px] px-3 py-3">시작시간</th>
                 <th className="w-[132px] px-3 py-3">종료시간</th>
-                <th className="w-[254px] px-3 py-3">관리</th>
+                <th className="w-[294px] px-3 py-3">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -335,6 +473,7 @@ export default function AutomationCenter() {
                   <td className="truncate px-3 py-3 font-bold text-gray-900" title={job.title}>{job.title}</td>
                   <td className="px-3 py-3 text-gray-600">{AUTOMATION_JOB_TYPE_LABELS[job.job_type]}</td>
                   <td className="px-3 py-3"><StatusBadge tone={statusTone(job.status)}>{AUTOMATION_JOB_STATUS_LABELS[job.status]}</StatusBadge></td>
+                  <td className="truncate px-3 py-3 text-xs font-semibold text-gray-600" title={jobLastMessage(job)}>{jobLastMessage(job)}</td>
                   <td className="px-3 py-3 text-gray-600">{job.requested_by || "-"}</td>
                   <td className="px-3 py-3 text-gray-600">{formatTime(job.started_at)}</td>
                   <td className="px-3 py-3 text-gray-600">{formatTime(job.finished_at)}</td>
@@ -344,6 +483,7 @@ export default function AutomationCenter() {
                       <button type="button" className="h-8 rounded-md border border-sky-200 bg-sky-50 px-2.5 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:opacity-40" disabled={job.status === "running" || saving} onClick={() => void quickStatus(job, "running")}>실행중</button>
                       <button type="button" className="h-8 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40" disabled={job.status === "success" || saving} onClick={() => void quickStatus(job, "success")}>성공</button>
                       <button type="button" className="h-8 rounded-md border border-red-200 bg-red-50 px-2.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-40" disabled={job.status === "failed" || saving} onClick={() => void quickStatus(job, "failed")}>실패</button>
+                      <button type="button" className="h-8 rounded-md border border-orange-200 bg-orange-50 px-2.5 text-xs font-bold text-orange-700 hover:bg-orange-100 disabled:opacity-40" disabled={saving || job.status === "running"} onClick={() => void retryJob(job)}>재실행</button>
                     </div>
                   </td>
                 </tr>
