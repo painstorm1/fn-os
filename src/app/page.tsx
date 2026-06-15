@@ -7257,6 +7257,30 @@ function appendCollectedOnlineOrdersToSheets(
   nextSheets.송장출력용 = padSalesRows("송장출력용", [...currentShippingRows, ...shippingRows]);
   nextSheets.FN송장입력 = padSalesRows("FN송장입력", [...currentInvoiceRows, ...invoiceRows]);
   nextSheets["발주 진행 단계"] = buildOrderProgressRows(nextSheets);
+  const collectedStatusByKey = new Map<string, string>();
+  orders.forEach((order) => {
+    const status = salesCellText(order.orderStatus);
+    if (!status) return;
+    const orderNo = salesCellText(order.orderNo);
+    (order.items || []).forEach((item) => {
+      const productOrderId = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku);
+      [orderNo, productOrderId, [orderNo, productOrderId].filter(Boolean).join("|")].filter(Boolean).forEach((key) => collectedStatusByKey.set(key, status));
+    });
+  });
+  if (collectedStatusByKey.size) {
+    nextSheets["발주 진행 단계"] = nextSheets["발주 진행 단계"].map((row) => {
+      if (!rowHasValue(row)) return row;
+      const orderNo = progressValue(row, "주문번호");
+      const productOrderId = progressValue(row, "쇼핑몰코드");
+      const status = collectedStatusByKey.get([orderNo, productOrderId].filter(Boolean).join("|"))
+        || collectedStatusByKey.get(productOrderId)
+        || collectedStatusByKey.get(orderNo);
+      if (!status) return row;
+      const next = [...row];
+      setProgressValue(next, "주문상태", status);
+      return next;
+    });
+  }
   return nextSheets;
 }
 
