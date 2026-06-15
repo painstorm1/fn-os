@@ -73,7 +73,10 @@ async function requestFrom(baseUrl, path, init = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data?.ok === false) {
-    throw new Error(data?.error || `${init.method || "GET"} ${path} failed: ${response.status}`);
+    const statusMessages = Array.isArray(data?.statuses)
+      ? data.statuses.map((item) => text(item?.message)).filter(Boolean).join(" / ")
+      : "";
+    throw new Error(data?.error || statusMessages || `${init.method || "GET"} ${path} failed: ${response.status}`);
   }
   return data;
 }

@@ -74,10 +74,13 @@ const confirmedOrderStatusPatterns = [
 const exactNewStatuses = new Set(["NOTYET", "NOTYETPLACE", "NOTYETPLACEORDER"]);
 const exactConfirmedStatuses = new Set(["OK", "PLACEORDEROK"]);
 
-export function collectableOnlineOrderStage(status: unknown): CollectableOnlineOrderStage | "" {
+export function collectableOnlineOrderStage(status: unknown, placeOrderStatus?: unknown): CollectableOnlineOrderStage | "" {
   const compact = compactStatus(status);
-  if (!compact) return "";
   if (includesAny(compact, excludedStatusPatterns)) return "";
+  const compactPlaceOrder = compactStatus(placeOrderStatus);
+  if (exactConfirmedStatuses.has(compactPlaceOrder)) return "주문확인";
+  if (exactNewStatuses.has(compactPlaceOrder)) return "신규주문";
+  if (!compact) return "";
   if (exactConfirmedStatuses.has(compact) || includesAny(compact, confirmedOrderStatusPatterns)) return "주문확인";
   if (exactNewStatuses.has(compact) || includesAny(compact, newOrderStatusPatterns)) return "신규주문";
   return "";
@@ -87,13 +90,18 @@ export function normalizeCollectableOnlineOrders<T extends NormalizedOrder>(orde
   return orders.flatMap((order) => {
     let orderStage = collectableOnlineOrderStage(order.orderStatus);
     const items = order.items.filter((item) => {
-      const itemStatus = statusText((item.raw as { productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown } } | undefined)?.productOrder?.productOrderStatus)
-        || statusText((item.raw as { productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown } } | undefined)?.productOrder?.orderStatus)
+      const raw = item.raw as {
+        content?: { productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown; placeOrderStatus?: unknown } };
+        productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown; placeOrderStatus?: unknown };
+      } | undefined;
+      const rawProductOrder = raw?.productOrder || raw?.content?.productOrder;
+      const itemStatus = statusText(rawProductOrder?.productOrderStatus)
+        || statusText(rawProductOrder?.orderStatus)
         || statusText((item.raw as { productOrderStatus?: unknown; orderStatus?: unknown } | undefined)?.productOrderStatus)
         || statusText((item.raw as { productOrderStatus?: unknown; orderStatus?: unknown } | undefined)?.orderStatus)
         || order.orderStatus;
-      const itemStage = collectableOnlineOrderStage(itemStatus);
-      if (!orderStage && itemStage) orderStage = itemStage;
+      const itemStage = collectableOnlineOrderStage(itemStatus, rawProductOrder?.placeOrderStatus);
+      if (itemStage) orderStage = itemStage;
       return Boolean(itemStage);
     });
     if (!orderStage || !items.length) return [];

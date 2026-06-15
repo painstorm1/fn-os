@@ -101,9 +101,10 @@ function normalizeDetail(
   row: AnyRecord,
   base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string },
 ): NormalizedOrder {
-  const order = record(row.order);
-  const productOrder = record(row.productOrder || row.product_order || row);
-  const delivery = record(row.delivery || row.shippingAddress || row.receiver);
+  const content = record(row.content);
+  const order = record(row.order || content.order);
+  const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
+  const delivery = record(row.delivery || content.delivery || row.shippingAddress || row.receiver);
   const address = record(row.shippingAddress || row.receiverAddress || delivery.address);
   const productOrderId = firstText(productOrder.productOrderId, productOrder.productOrderNo, row.productOrderId);
   const orderNo = firstText(order.orderId, productOrder.orderId, row.orderId, productOrderId);
@@ -123,14 +124,14 @@ function normalizeDetail(
     qty,
     salesAmount: salesAmount || undefined,
     settlementAmount: numberValue(productOrder.settlementExpectAmount || productOrder.expectedSettlementAmount) || undefined,
-    raw: { ...row, productOrder: { ...productOrder, productOrderStatus: firstText(productOrder.placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus) } },
+    raw: row,
   };
   return {
     ...base,
     orderNo: orderNo || productOrderId,
     bundleOrderNo: firstText(order.orderId, row.orderId),
     orderDate: naverOrderDate(order, productOrder),
-    orderStatus: firstText(productOrder.placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus, row.placeOrderStatus, row.productOrderStatus),
+    orderStatus: firstText(productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus, productOrder.placeOrderStatus, row.placeOrderStatus),
     receiverName: firstText(address.name, address.receiverName, delivery.receiverName),
     phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1),
     phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2),
@@ -188,6 +189,31 @@ function productOrderIdsFromParams(params: Record<string, unknown>) {
   return (Array.isArray(raw) ? raw : [raw]).map((value) => text(value)).filter(Boolean).slice(0, 30);
 }
 
+async function fetchConditionalOrders(token: string, from: string, to: string, placeOrderStatusType: "NOT_YET" | "OK") {
+  const url = new URL(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders`);
+  url.searchParams.set("from", from);
+  url.searchParams.set("to", to);
+  url.searchParams.set("rangeType", "PAYED_DATETIME");
+  url.searchParams.set("productOrderStatuses", "PAYED");
+  url.searchParams.set("placeOrderStatusType", placeOrderStatusType);
+  url.searchParams.set("pageSize", "300");
+  url.searchParams.set("page", "1");
+  url.searchParams.set("quantityClaimCompatibility", "true");
+  const data = await readJson(await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  }));
+  return arrayAt(data, [
+    ["data", "contents"],
+    ["data", "productOrders"],
+    ["contents"],
+    ["productOrders"],
+    ["data"],
+  ]);
+}
+
 export class NaverChannelAdapter implements SalesChannelAdapter {
   async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
     const clientId = text(params.api_client_id || params.client_id);
@@ -197,61 +223,15 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
     }
 
     try {
-      const timestamp = Date.now();
-      const clientSecretSign = Buffer.from(bcrypt.hashSync(`${clientId}_${timestamp}`, clientSecret), "utf8").toString("base64");
-      const tokenBody = new URLSearchParams({
-        client_id: clientId,
-        timestamp: String(timestamp),
-        client_secret_sign: clientSecretSign,
-        grant_type: "client_credentials",
-        type: "SELF",
-      });
-      const tokenData = record(await readJson(await fetch(`${NAVER_BASE_URL}/v1/oauth2/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: tokenBody,
-      })));
-      const token = firstText(tokenData.access_token, tokenData.accessToken, record(tokenData.data).access_token);
-      if (!token) throw new Error("네이버 접근 토큰을 받지 못했습니다.");
-
+      const token = await issueNaverToken(params);
       const from = normalizeNaverDateTime(params.from, "start");
       const to = normalizeNaverDateTime(params.to, "end");
-      const statusUrl = new URL(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/last-changed-statuses`);
-      statusUrl.searchParams.set("lastChangedFrom", from);
-      statusUrl.searchParams.set("lastChangedTo", to);
-      statusUrl.searchParams.set("limitCount", "300");
-      const changedData = await readJson(await fetch(statusUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      }));
-      const changedRows = arrayAt(changedData, [
-        ["data", "lastChangeStatuses"],
-        ["data", "productOrderChangeStatuses"],
-        ["lastChangeStatuses"],
-        ["productOrderChangeStatuses"],
-        ["contents"],
-        ["data"],
-      ]);
-      const productOrderIds = Array.from(new Set(changedRows
-        .map((row) => firstText(row.productOrderId, row.productOrderNo, row.product_order_id))
-        .filter(Boolean)))
-        .slice(0, 300);
-      if (!productOrderIds.length) return { ok: true, data: [], message: "네이버 신규/변경 주문이 없습니다." };
+      const detailRows = [
+        ...await fetchConditionalOrders(token, from, to, "NOT_YET"),
+        ...await fetchConditionalOrders(token, from, to, "OK"),
+      ];
+      if (!detailRows.length) return { ok: true, data: [], message: "네이버 신규/주문확인 주문이 없습니다." };
 
-      const detailData = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/query`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ productOrderIds }),
-      }));
-      const detailRows = arrayAt(detailData, [
-        ["data", "productOrders"],
-        ["data", "orderProductList"],
-        ["productOrders"],
-        ["contents"],
-        ["data"],
-      ]);
       const base = {
         channelCode: text(params.channel_code) || "NAVER",
         channelName: text(params.channel_name) || "네이버 스마트스토어",

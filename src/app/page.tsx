@@ -10434,14 +10434,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage("");
     try {
       const today = formatDateKey(new Date());
-      const maxLookupFrom = new Date();
-      maxLookupFrom.setMonth(maxLookupFrom.getMonth() - 3);
       const res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         fnosSkipBusyOverlay: true,
-        body: JSON.stringify({ from: formatDateKey(maxLookupFrom), to: today }),
+        body: JSON.stringify({ from: today, to: today }),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
       if (data.queued && data.job_id) {
