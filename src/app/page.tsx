@@ -7218,6 +7218,18 @@ function onlineOrderShippingDisplayQty(qty: unknown) {
   return Math.max(1, Math.round(salesQuantityValue(qty)) || 1);
 }
 
+function onlineOrderContactValue(value: unknown) {
+  const raw = salesCellText(value);
+  if (!raw || /^-+$/.test(raw)) return "";
+  return raw;
+}
+
+function onlineOrderPairContacts(first: unknown, second: unknown) {
+  const phone1 = onlineOrderContactValue(first);
+  const phone2 = onlineOrderContactValue(second);
+  return { phone1: phone1 || phone2, phone2: phone2 || phone1 };
+}
+
 function onlineOrderRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -7295,9 +7307,10 @@ function appendCollectedOnlineOrdersToSheets(
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
-      const receiverName = salesCellText(order.receiverName) || onlineOrderFallbackText(order, item, ["receiverName", "receiver_name", "recipientName", "recipient", "recipient_name", "shipToName", "shipTo", "name"]);
-      const phone1 = salesCellText(order.phone1) || onlineOrderFallbackText(order, item, ["phone1", "tel1", "receiverPhoneNumber1", "receiverTelNo1", "receiverMobile", "safeNumber", "mobile"]);
-      const phone2 = salesCellText(order.phone2) || onlineOrderFallbackText(order, item, ["phone2", "tel2", "receiverPhoneNumber2", "receiverTelNo2", "receiverPhone", "phone"]);
+      const receiverName = salesCellText(order.receiverName) || onlineOrderFallbackText(order, item, ["receiverName", "receiver_name", "recipientName", "recipient_name", "shipToName"]);
+      const rawPhone1 = salesCellText(order.phone1) || onlineOrderFallbackText(order, item, ["phone1", "tel1", "receiverPhoneNumber1", "receiverTelNo1", "receiverMobile", "safeNumber", "mobile"]);
+      const rawPhone2 = salesCellText(order.phone2) || onlineOrderFallbackText(order, item, ["phone2", "tel2", "receiverPhoneNumber2", "receiverTelNo2", "receiverPhone"]);
+      const { phone1, phone2 } = onlineOrderPairContacts(rawPhone1, rawPhone2);
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
       const baseAddress = salesCellText(order.address) || onlineOrderFallbackText(order, item, ["address", "baseAddress", "address1", "receiverAddress", "shippingAddress"]);
       const detailAddress = onlineOrderFallbackText(order, item, ["detailedAddress", "address2", "receiverDetailAddress", "detailAddress"]);

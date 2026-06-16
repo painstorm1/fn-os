@@ -143,6 +143,10 @@ function normalizeDetail(
       || productOrder.productPaymentAmount
       || productOrder.productPrice,
   );
+  const directPhone1 = firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1);
+  const directPhone2 = firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2);
+  const phone1 = usablePhoneValue(directPhone1) || usablePhoneValue(directPhone2);
+  const phone2 = usablePhoneValue(directPhone2) || usablePhoneValue(directPhone1);
   const item: NormalizedOrderItem = {
     channelProductCode: firstText(productOrder.sellerManagementCode, productOrder.productId, productOrder.productNo),
     channelOptionCode: productOrderId,
@@ -169,8 +173,8 @@ function normalizeDetail(
       delivery.recipientName,
       firstDeepText(row, ["receiverName", "receiver_name", "recipientName", "recipient_name", "shipToName"]),
     ),
-    phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1, firstDeepText(row, ["receiverPhoneNumber1", "receiverTelNo1", "tel1", "phone1", "mobile"])),
-    phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2, firstDeepText(row, ["receiverPhoneNumber2", "receiverTelNo2", "tel2", "phone2", "phone"])),
+    phone1,
+    phone2,
     zipcode: firstText(address.zipCode, address.zipcode, delivery.zipCode, firstDeepText(row, ["zipCode", "zipcode", "postCode"])),
     address: [firstText(address.baseAddress, address.address1, address.receiverAddress, delivery.baseAddress, delivery.receiverAddress), firstText(address.detailedAddress, address.address2, delivery.detailedAddress, firstDeepText(row, ["receiverDetailAddress"]))]
       .filter(Boolean)
@@ -179,6 +183,34 @@ function normalizeDetail(
     items: [item],
     raw: row,
   };
+}
+
+function usablePhoneValue(value: unknown) {
+  const raw = text(value);
+  if (!raw || /^-+$/.test(raw)) return "";
+  return raw;
+}
+
+function hasCustomerShippingAddress(row: AnyRecord) {
+  const content = record(row.content);
+  const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
+  const delivery = record(row.delivery || content.delivery || productOrder.delivery || row.shippingAddress || row.receiver);
+  const address = record(row.shippingAddress || row.receiverAddress || productOrder.shippingAddress || productOrder.receiverAddress || delivery.address || delivery.shippingAddress || delivery.receiverAddress);
+  return Boolean(firstText(
+    address.name,
+    address.receiverName,
+    address.recipientName,
+    address.tel1,
+    address.phone1,
+    address.baseAddress,
+    address.address1,
+    address.receiverAddress,
+    delivery.receiverName,
+    delivery.receiverPhoneNumber1,
+    delivery.receiverTelNo1,
+    delivery.baseAddress,
+    delivery.receiverAddress,
+  ));
 }
 
 function compactNaverDeliveryValue(value: unknown) {
@@ -313,7 +345,9 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       ];
       if (!detailRows.length) return { ok: true, data: [], message: "네이버 신규/주문확인 주문이 없습니다." };
       const warehouseShipRows = detailRows.filter((row) => !isNaverManagedDeliveryOrder(row as AnyRecord));
+      const shippableRows = warehouseShipRows.filter((row) => hasCustomerShippingAddress(row as AnyRecord));
       const managedDeliveryCount = detailRows.length - warehouseShipRows.length;
+      const waitingAddressCount = warehouseShipRows.length - shippableRows.length;
 
       const base = {
         channelCode: text(params.channel_code) || "NAVER",
@@ -321,12 +355,12 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
         customerCode: text(params.customer_code),
         customerName: text(params.customer_name),
       };
-      const normalizedOrders = warehouseShipRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
+      const normalizedOrders = shippableRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
       const collectableOrders = normalizeCollectableOnlineOrders(normalizedOrders);
       return {
         ok: true,
         data: mergeOrders(collectableOrders),
-        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. N배송 ${managedDeliveryCount}건, 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
+        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. N배송 ${managedDeliveryCount}건, 배송지 미확정 ${waitingAddressCount}건, 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "네이버 주문 수집 실패" };
