@@ -7135,8 +7135,8 @@ function shippingRowsForExcelExport(currentSheets: Record<SalesSheetName, string
     if (optionIndex >= 0) {
       next[optionIndex] = onlineOrderShippingOptionName(
         progressValue(progress, "품목명(ERP)"),
-        row[optionIndex],
-        qtyIndex >= 0 ? row[qtyIndex] : progressValue(progress, "수량"),
+        progressValue(progress, "쇼핑몰품목key") || row[optionIndex],
+        progressValue(progress, "수량") || (qtyIndex >= 0 ? row[qtyIndex] : ""),
       );
     }
     if (qtyIndex >= 0) next[qtyIndex] = "1";
@@ -7210,8 +7210,12 @@ function onlineOrderSettlementExportAmount(value: unknown, alias: string, channe
 
 function onlineOrderShippingOptionName(productName: unknown, fallback: unknown, qty: unknown) {
   const name = salesCellText(productName) || salesCellText(fallback);
-  const quantity = Math.max(1, Math.round(salesQuantityValue(qty)) || 1);
+  const quantity = onlineOrderShippingDisplayQty(qty);
   return quantity > 1 && name ? `${name}-★${quantity}개` : name;
+}
+
+function onlineOrderShippingDisplayQty(qty: unknown) {
+  return Math.max(1, Math.round(salesQuantityValue(qty)) || 1);
 }
 
 function onlineOrderRecord(value: unknown): Record<string, unknown> {
@@ -7291,7 +7295,7 @@ function appendCollectedOnlineOrdersToSheets(
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
-      const receiverName = salesCellText(order.receiverName) || onlineOrderFallbackText(order, item, ["receiverName", "receiver_name", "recipientName", "recipient", "shipToName"]);
+      const receiverName = salesCellText(order.receiverName) || onlineOrderFallbackText(order, item, ["receiverName", "receiver_name", "recipientName", "recipient", "recipient_name", "shipToName", "shipTo", "name"]);
       const phone1 = salesCellText(order.phone1) || onlineOrderFallbackText(order, item, ["phone1", "tel1", "receiverPhoneNumber1", "receiverTelNo1", "receiverMobile", "safeNumber", "mobile"]);
       const phone2 = salesCellText(order.phone2) || onlineOrderFallbackText(order, item, ["phone2", "tel2", "receiverPhoneNumber2", "receiverTelNo2", "receiverPhone", "phone"]);
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
