@@ -20994,10 +20994,11 @@ function adsSummaryUrl(range: AdsSummaryRange) {
   return `/api/fnos/ads/summary?${params.toString()}`;
 }
 
-function cachedAdsSummary(range: AdsSummaryRange) {
+function cachedAdsSummary(range: AdsSummaryRange, force = false) {
   return cachedClientJson<AdsSummary>(adsSummaryUrl(range), {
-    ttl: ADS_SUMMARY_CACHE_TTL,
-    storageTtl: ADS_SUMMARY_STORAGE_TTL,
+    ttl: force ? 0 : ADS_SUMMARY_CACHE_TTL,
+    storageTtl: force ? 0 : ADS_SUMMARY_STORAGE_TTL,
+    force,
   });
 }
 
@@ -21637,18 +21638,22 @@ function AdsAnalysisWorkspace() {
   const [loading, setLoading] = useState(!initialSummary || !initialChartSummary);
   const [selectedAdChannels, setSelectedAdChannels] = useState<string[]>(adReportChannelOrder);
 
-  const loadSummary = () => {
-    const cachedSummary = readCachedJson<AdsSummary>(adsSummaryUrl(selectedRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
-    const cachedChartSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
-      ? cachedSummary
-      : readCachedJson<AdsSummary>(adsSummaryUrl(graphRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
-    if (cachedSummary) setSummary(cachedSummary);
-    if (cachedChartSummary) setChartSummary(cachedChartSummary);
+  const loadSummary = (force = false) => {
+    const cachedSummary = force ? null : readCachedJson<AdsSummary>(adsSummaryUrl(selectedRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+    const cachedChartSummary = force
+      ? null
+      : graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
+        ? cachedSummary
+        : readCachedJson<AdsSummary>(adsSummaryUrl(graphRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
+    if (!force) {
+      if (cachedSummary) setSummary(cachedSummary);
+      if (cachedChartSummary) setChartSummary(cachedChartSummary);
+    }
     setLoading(!cachedSummary || !cachedChartSummary);
-    const selectedSummary = cachedAdsSummary(selectedRange);
+    const selectedSummary = cachedAdsSummary(selectedRange, force);
     const graphSummary = graphRange.from === selectedRange.from && graphRange.to === selectedRange.to
       ? selectedSummary
-      : cachedAdsSummary(graphRange);
+      : cachedAdsSummary(graphRange, force);
     Promise.all([
       selectedSummary,
       graphSummary,
@@ -21668,6 +21673,12 @@ function AdsAnalysisWorkspace() {
   useEffect(() => {
     const timer = window.setTimeout(loadSummary, 0);
     return () => window.clearTimeout(timer);
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    const refreshAdsSummary = () => loadSummary(true);
+    window.addEventListener("fnos:ads-summary-refresh", refreshAdsSummary);
+    return () => window.removeEventListener("fnos:ads-summary-refresh", refreshAdsSummary);
   }, [dateFrom, dateTo]);
 
   async function exportAdReportXlsx() {
@@ -21919,6 +21930,7 @@ function AdsRightPanel() {
       invalidateClientCache("/api/fnos/ads/summary");
       setUploadedAdFiles([]);
       openAdRange(uploadReportDate, uploadReportDate);
+      window.dispatchEvent(new Event("fnos:ads-summary-refresh"));
     }
   }
 

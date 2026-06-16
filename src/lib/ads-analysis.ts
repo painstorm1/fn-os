@@ -218,7 +218,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   return {
     batch_id: batchId,
     channel,
-    report_date: dateValue(first(row, ["보고 시작", "report_date", "date", "일자", "날짜", "기간", "__report_date"])),
+    report_date: dateValue(first(row, ["__report_date", "보고 시작", "report_date", "date", "일자", "날짜", "기간"])),
     campaign_name: campaignName || adGroupName || adName || "-",
     ad_group_name: adGroupName,
     ad_name: adName || campaignName,
