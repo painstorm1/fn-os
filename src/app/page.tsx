@@ -13527,15 +13527,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const current = Math.max(0, Math.min(pickerIndex, rows.length - 1));
         const next = Math.max(0, Math.min(rows.length - 1, current + direction));
         if (extend && next !== current) {
-          const currentSelected = pickerItemSelected(rows[current]);
-          const shouldSelect = !currentSelected;
-          if (direction > 0) {
-            setPickerItemSelected(rows[current], shouldSelect);
-            setPickerItemSelected(rows[next], shouldSelect);
-          } else {
-            setPickerItemSelected(rows[current], shouldSelect);
-            setPickerItemSelected(rows[next], shouldSelect);
-          }
+          const shouldSelect = !pickerItemSelected(rows[next]);
+          setPickerItemSelected(rows[current], shouldSelect);
+          setPickerItemSelected(rows[next], shouldSelect);
         }
         pickerIndex = next;
         renderPicker();
@@ -19055,21 +19049,16 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
       }))
       .filter((row) => row.customer_code && row.customer_name);
     const exactMatches = normalized.filter((row) => {
-      const found = existing.get(row.customer_code);
-      return found && String(found.customer_name || found.cust_name || "").trim() === row.customer_name;
+      return existing.has(row.customer_code);
     });
     const overwrite = exactMatches.length
-      ? window.confirm(`${exactMatches.length}개 거래처의 거래처코드와 거래처명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      ? window.confirm(`엑셀에 이미 등록된 거래처코드 ${exactMatches.length}개가 있습니다.\n\n확인: 신규 거래처는 추가하고 기존 거래처는 엑셀 내용으로 덮어쓰기\n취소: 신규 거래처만 추가하고 기존 거래처는 건너뛰기`)
       : false;
     let saved = 0;
     let skipped = 0;
     for (const row of normalized) {
       const found = existing.get(row.customer_code);
       if (found && !overwrite) {
-        skipped += 1;
-        continue;
-      }
-      if (found && String(found.customer_name || found.cust_name || "").trim() !== row.customer_name) {
         skipped += 1;
         continue;
       }
@@ -19743,11 +19732,10 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
       return map;
     }, new Map<string, typeof normalized[number] & { bom: Array<{ component_code: string; qty: string }> }>()).values());
     const exactMatches = grouped.filter((row) => {
-      const found = existing.get(row.product_code);
-      return found && String(found.product_name || "").trim() === row.product_name;
+      return existing.has(row.product_code);
     });
     const overwrite = exactMatches.length
-      ? window.confirm(`${exactMatches.length}개 품목의 품목코드와 품목명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      ? window.confirm(`엑셀에 이미 등록된 품목코드 ${exactMatches.length}개가 있습니다.\n\n확인: 신규 품목은 추가하고 기존 품목은 엑셀 내용으로 덮어쓰기\n취소: 신규 품목만 추가하고 기존 품목은 건너뛰기`)
       : false;
     let saved = 0;
     let skipped = 0;
