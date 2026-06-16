@@ -172,6 +172,51 @@ function normalizeDetail(
   };
 }
 
+function compactNaverDeliveryValue(value: unknown) {
+  return text(value).replace(/[\s_()/.-]+/g, "").toUpperCase();
+}
+
+function isNaverManagedDeliveryOrder(row: AnyRecord) {
+  const content = record(row.content);
+  const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
+  const delivery = record(row.delivery || content.delivery || productOrder.delivery || row.shippingAddress || row.receiver);
+  const deliveryAttributeType = compactNaverDeliveryValue(firstText(
+    productOrder.deliveryAttributeType,
+    productOrder.deliveryAttributeCode,
+    productOrder.deliveryType,
+    row.deliveryAttributeType,
+    row.deliveryAttributeCode,
+  ));
+  const deliveryText = compactNaverDeliveryValue(firstText(
+    productOrder.deliveryAttributeTypeName,
+    productOrder.deliveryTypeName,
+    productOrder.deliveryMethodName,
+    productOrder.logisticsDeliveryMethod,
+    delivery.deliveryTypeName,
+    delivery.deliveryMethodName,
+  ));
+  const logisticsCompanyId = firstText(
+    productOrder.logisticsCompanyId,
+    productOrder.logisticsCenterId,
+    productOrder.fulfillmentCompanyId,
+    delivery.logisticsCompanyId,
+    row.logisticsCompanyId,
+  );
+  const fulfillmentFlag = compactNaverDeliveryValue(firstText(
+    productOrder.fulfillmentYn,
+    productOrder.naverFulfillmentYn,
+    productOrder.nDeliveryYn,
+    row.fulfillmentYn,
+    row.naverFulfillmentYn,
+  ));
+  return deliveryAttributeType === "ARRIVALGUARANTEE"
+    || deliveryAttributeType.includes("NDELIVERY")
+    || deliveryText.includes("N배송")
+    || deliveryText.includes("NDELIVERY")
+    || Boolean(logisticsCompanyId)
+    || ["Y", "TRUE", "1"].includes(fulfillmentFlag);
+}
+
 function mergeOrders(orders: NormalizedOrder[]) {
   const byOrder = new Map<string, NormalizedOrder>();
   orders.forEach((order) => {
@@ -258,6 +303,8 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
         ...await fetchConditionalOrders(token, from, to, "OK"),
       ];
       if (!detailRows.length) return { ok: true, data: [], message: "네이버 신규/주문확인 주문이 없습니다." };
+      const warehouseShipRows = detailRows.filter((row) => !isNaverManagedDeliveryOrder(row as AnyRecord));
+      const managedDeliveryCount = detailRows.length - warehouseShipRows.length;
 
       const base = {
         channelCode: text(params.channel_code) || "NAVER",
@@ -265,12 +312,12 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
         customerCode: text(params.customer_code),
         customerName: text(params.customer_name),
       };
-      const normalizedOrders = detailRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
+      const normalizedOrders = warehouseShipRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
       const collectableOrders = normalizeCollectableOnlineOrders(normalizedOrders);
       return {
         ok: true,
         data: mergeOrders(collectableOrders),
-        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
+        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. N배송 ${managedDeliveryCount}건, 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "네이버 주문 수집 실패" };
