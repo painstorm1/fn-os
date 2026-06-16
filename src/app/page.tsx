@@ -29829,7 +29829,7 @@ function HomeContent() {
           )}
         </section>
         {activeSlug === "import" && <RightTools />}
-        {activeSlug === "accounting" && <AccountingRightPanel />}
+        {(activeSlug === "dashboard" || activeSlug === "accounting") && <AccountingRightPanel />}
         {activeSlug === "ads" && <AdsRightPanel />}
       </div>
     </main>
