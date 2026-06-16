@@ -3077,8 +3077,8 @@ function NativeOrders({
   useF2Navigate(true, importHref("/orders/new"));
   const initialOrders = readInitialImportCache<{ orders?: ImportOrder[] }>("/api/fnos/orders");
   const [orders, setOrders] = useState<ImportOrder[]>(initialOrders?.orders || []);
-  const [details, setDetails] = useState<Record<number, ImportOrderDetail>>({});
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [details, setDetails] = useState<Record<string, ImportOrderDetail>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [folderOrder, setFolderOrder] = useState<ImportOrder | null>(null);
   const [loading, setLoading] = useState(!initialOrders?.orders?.length);
   const [filters, setFilters] = useState(initialFilters);
@@ -3112,16 +3112,18 @@ function NativeOrders({
     };
   }, []);
 
-  async function openOrder(orderId: number) {
-    setExpandedId(orderId);
-    if (!details[orderId]) {
+  async function openOrder(orderId: number | string) {
+    const orderKey = String(orderId);
+    setExpandedId(orderKey);
+    if (!details[orderKey]) {
       const detail = await cachedJson<ImportOrderDetail>(`/api/fnos/orders/${orderId}`, 30_000);
-      setDetails((prev) => ({ ...prev, [orderId]: detail }));
+      setDetails((prev) => ({ ...prev, [orderKey]: detail }));
     }
   }
 
-  async function toggleOrder(orderId: number) {
-    if (expandedId === orderId) {
+  async function toggleOrder(orderId: number | string) {
+    const orderKey = String(orderId);
+    if (expandedId === orderKey) {
       setExpandedId(null);
       return;
     }
@@ -3129,11 +3131,12 @@ function NativeOrders({
   }
 
   function updateAttachmentCount(orderId: number, count: number) {
-    setOrders((prev) => prev.map((order) => order.id === orderId ? { ...order, attachment_count: count } : order));
+    const orderKey = String(orderId);
+    setOrders((prev) => prev.map((order) => String(order.id) === orderKey ? { ...order, attachment_count: count } : order));
     setDetails((prev) => {
-      const detail = prev[orderId];
+      const detail = prev[orderKey];
       if (!detail) return prev;
-      return { ...prev, [orderId]: { ...detail, order: { ...detail.order, attachment_count: count } } };
+      return { ...prev, [orderKey]: { ...detail, order: { ...detail.order, attachment_count: count } } };
     });
     invalidateApiCache("/api/fnos/orders");
     invalidateApiCache("/api/fnos/dashboard");
@@ -3168,8 +3171,10 @@ function NativeOrders({
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_44px_76px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
             <span className="text-left">주문날짜</span><span className="text-left">대표 제품</span><span className="text-left">공장</span><span className="text-right">수량</span><span className="text-right">금액(원)</span><span /><span className="pr-3 text-right">입고예정</span><span className="text-center">상태</span>
           </div>
-          {orders.map((order) => (
-            <div key={order.id} className={expandedId === order.id ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
+          {orders.map((order) => {
+            const orderKey = String(order.id);
+            return (
+            <div key={order.id} className={expandedId === orderKey ? "border-l-4 border-orange-500 bg-orange-50/40" : "border-l-4 border-transparent"}>
               <div role="button" tabIndex={0} onClick={() => toggleOrder(order.id)} onKeyDown={(event) => { if (event.key === "Enter") void toggleOrder(order.id); }} className="grid w-full cursor-pointer items-center gap-3 border-b border-slate-200 px-4 py-3 text-left text-sm hover:bg-orange-50 xl:grid-cols-[120px_1.4fr_1fr_80px_128px_44px_76px_90px]">
                 <span className="font-black">{order.order_date || order.paid_date || "-"}</span>
                 <span className="grid grid-cols-[56px_1fr] items-center gap-3">
@@ -3199,14 +3204,14 @@ function NativeOrders({
                 <span className="pr-3 text-right font-black text-orange-600">{productionDueText(order)}</span>
                 <span className="flex justify-center"><StatusPill status={order.status} /></span>
               </div>
-              {expandedId === order.id && (
-                details[order.id]
-                  ? <NativeOrderQuickEditor detail={details[order.id]} onSaved={(next) => {
+              {expandedId === orderKey && (
+                details[orderKey]
+                  ? <NativeOrderQuickEditor detail={details[orderKey]} onSaved={(next) => {
                     if (!next) {
                       setExpandedId(null);
                       setDetails((prev) => {
                         const copy = { ...prev };
-                        delete copy[order.id];
+                        delete copy[orderKey];
                         return copy;
                       });
                       void loadOrders();
@@ -3214,9 +3219,9 @@ function NativeOrders({
                     }
                     setDetails((prev) => ({
                       ...prev,
-                      [order.id]: {
+                      [orderKey]: {
                         ...next,
-                        items: Array.isArray(next.items) ? next.items : prev[order.id]?.items || [],
+                        items: Array.isArray(next.items) ? next.items : prev[orderKey]?.items || [],
                       },
                     }));
                     void loadOrders();
@@ -3224,7 +3229,8 @@ function NativeOrders({
                   : null
               )}
             </div>
-          ))}
+            );
+          })}
           {!orders.length && <p className="p-8 text-center text-sm font-bold text-slate-500">아직 발주가 없습니다.</p>}
         </div>
       )}

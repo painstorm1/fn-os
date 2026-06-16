@@ -390,7 +390,7 @@ export async function mainDashboardSummary() {
       total_won: importOrderTotalWon(row, lines, importRateMap),
     };
   });
-  const importOrders = importPurchaseOrders.length ? importPurchaseOrders : importErpOrders;
+  const importOrders = importErpOrders.length ? importErpOrders : importPurchaseOrders;
   const importDate = (row: Row) => row.order_date ?? row.expected_inbound_date ?? row.created_at;
   const importAmount = (row: Row) =>
     row.total_won ??

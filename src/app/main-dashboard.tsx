@@ -75,6 +75,16 @@ function orderAmount(row: Row) {
   return row.total_won ?? row.total_amount ?? row.amount ?? row.actual_payment_total_krw ?? row.actual_payment_total ?? row.actual_payment_usd ?? 0;
 }
 
+function importOrderOpenId(row: Row) {
+  const explicitId = row.import_order_id ?? row.order_id;
+  if (explicitId !== undefined && explicitId !== null && explicitId !== "") return String(explicitId);
+  const ref = String(row.source_ref_id || "");
+  const refId = ref.match(/^import-order-(\d+)/)?.[1] || "";
+  if (refId) return refId;
+  const id = row.id;
+  return id !== undefined && id !== null && id !== "" ? String(id) : "";
+}
+
 function titleFrom(row: Row) {
   return String(row.display_title || row.order_no || row.order_code || row.product_name || row.sku || row.memo || "-");
 }
@@ -91,8 +101,8 @@ function monthTitle(point: Point) {
 }
 
 function importOrderHref(row: Row) {
-  const id = row.id;
-  if (id === undefined || id === null || id === "") return "/?menu=import&section=%2Forders";
+  const id = importOrderOpenId(row);
+  if (!id) return "/?menu=import&section=%2Forders";
   return `/?menu=import&section=${encodeURIComponent(`/orders?open=${id}`)}`;
 }
 
