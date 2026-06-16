@@ -93,14 +93,17 @@ export function normalizeCollectableOnlineOrders<T extends NormalizedOrder>(orde
       const raw = item.raw as {
         content?: { productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown; placeOrderStatus?: unknown } };
         productOrder?: { productOrderStatus?: unknown; orderStatus?: unknown; placeOrderStatus?: unknown };
+        placeOrderStatus?: unknown;
+        __fnosPlaceOrderStatusType?: unknown;
       } | undefined;
       const rawProductOrder = raw?.productOrder || raw?.content?.productOrder;
+      const itemPlaceOrderStatus = rawProductOrder?.placeOrderStatus || raw?.placeOrderStatus || raw?.__fnosPlaceOrderStatusType;
       const itemStatus = statusText(rawProductOrder?.productOrderStatus)
         || statusText(rawProductOrder?.orderStatus)
         || statusText((item.raw as { productOrderStatus?: unknown; orderStatus?: unknown } | undefined)?.productOrderStatus)
         || statusText((item.raw as { productOrderStatus?: unknown; orderStatus?: unknown } | undefined)?.orderStatus)
         || order.orderStatus;
-      const itemStage = collectableOnlineOrderStage(itemStatus, rawProductOrder?.placeOrderStatus);
+      const itemStage = collectableOnlineOrderStage(itemStatus, itemPlaceOrderStatus);
       if (itemStage) orderStage = itemStage;
       return Boolean(itemStage);
     });

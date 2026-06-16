@@ -133,6 +133,7 @@ function normalizeDetail(
   const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
   const delivery = record(row.delivery || content.delivery || productOrder.delivery || row.shippingAddress || row.receiver);
   const address = record(row.shippingAddress || row.receiverAddress || productOrder.shippingAddress || productOrder.receiverAddress || delivery.address || delivery.shippingAddress || delivery.receiverAddress);
+  const placeOrderStatus = firstText(productOrder.placeOrderStatus, row.placeOrderStatus, row.__fnosPlaceOrderStatusType);
   const productOrderId = firstText(productOrder.productOrderId, productOrder.productOrderNo, row.productOrderId);
   const orderNo = firstText(order.orderId, productOrder.orderId, row.orderId, productOrderId);
   const qty = numberValue(productOrder.quantity || productOrder.productOrderQuantity || row.quantity) || 1;
@@ -158,7 +159,7 @@ function normalizeDetail(
     orderNo: orderNo || productOrderId,
     bundleOrderNo: firstText(order.orderId, row.orderId),
     orderDate: naverOrderDate(order, productOrder),
-    orderStatus: firstText(productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus, productOrder.placeOrderStatus, row.placeOrderStatus),
+    orderStatus: firstText(placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus),
     receiverName: firstText(
       address.name,
       address.receiverName,
@@ -166,12 +167,12 @@ function normalizeDetail(
       address.receiver,
       delivery.receiverName,
       delivery.recipientName,
-      firstDeepText(row, ["receiverName", "receiver_name", "recipientName", "recipient", "recipient_name", "shipToName", "shipTo", "name"]),
+      firstDeepText(row, ["receiverName", "receiver_name", "recipientName", "recipient_name", "shipToName"]),
     ),
     phone1: firstText(address.tel1, address.phone1, delivery.receiverPhoneNumber1, delivery.receiverTelNo1, firstDeepText(row, ["receiverPhoneNumber1", "receiverTelNo1", "tel1", "phone1", "mobile"])),
     phone2: firstText(address.tel2, address.phone2, delivery.receiverPhoneNumber2, delivery.receiverTelNo2, firstDeepText(row, ["receiverPhoneNumber2", "receiverTelNo2", "tel2", "phone2", "phone"])),
     zipcode: firstText(address.zipCode, address.zipcode, delivery.zipCode, firstDeepText(row, ["zipCode", "zipcode", "postCode"])),
-    address: [firstText(address.baseAddress, address.address1, delivery.baseAddress, firstDeepText(row, ["baseAddress", "address1", "receiverAddress"])), firstText(address.detailedAddress, address.address2, delivery.detailedAddress, firstDeepText(row, ["detailedAddress", "address2", "receiverDetailAddress"]))]
+    address: [firstText(address.baseAddress, address.address1, address.receiverAddress, delivery.baseAddress, delivery.receiverAddress), firstText(address.detailedAddress, address.address2, delivery.detailedAddress, firstDeepText(row, ["receiverDetailAddress"]))]
       .filter(Boolean)
       .join(" "),
     deliveryMessage: firstText(delivery.deliveryMessage, address.deliveryMessage, productOrder.shippingMemo),
@@ -291,7 +292,7 @@ async function fetchConditionalOrders(token: string, from: string, to: string, p
     ["contents"],
     ["productOrders"],
     ["data"],
-  ]);
+  ]).map((row) => ({ ...row, __fnosPlaceOrderStatusType: placeOrderStatusType }));
 }
 
 export class NaverChannelAdapter implements SalesChannelAdapter {
