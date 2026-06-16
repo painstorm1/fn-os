@@ -10166,6 +10166,27 @@ function inventoryQty(row: Partial<ProductInventoryRow> | Record<string, unknown
   return Number(item.qty ?? item.available_qty ?? item.on_hand_qty ?? item.bal_qty ?? 0);
 }
 
+function inventoryFilterTerms(value: string) {
+  return value.split(/[,|\n]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function inventoryJoinFilterValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join(", ");
+}
+
+function inventorySearchTerms(value: string) {
+  return value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function inventoryMatchesTerms(haystack: string, query: string) {
+  const text = haystack.toLowerCase();
+  return inventorySearchTerms(query).every((term) => text.includes(term));
+}
+
+function inventoryMatchesAnyFilterTerm(haystack: string, terms: string[]) {
+  return terms.some((term) => inventoryMatchesTerms(haystack, term));
+}
+
 function salesRowProductCode(row: Record<string, unknown>) {
   return String(row.prod_cd || row.product_code || row.sku || row.prod_name || row.product_name || "").trim();
 }
@@ -13638,10 +13659,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } satisfies InventoryListRow;
     });
   }).filter((row) => {
-    const warehouseNeedle = inventoryFilters.warehouse.trim().toLowerCase();
-    const productNeedle = inventoryFilters.product.trim().toLowerCase();
-    if (warehouseNeedle && !`${row.warehouseCode} ${row.warehouseName}`.toLowerCase().includes(warehouseNeedle)) return false;
-    if (productNeedle && !`${row.productCode} ${row.productName}`.toLowerCase().includes(productNeedle)) return false;
+    const warehouseTerms = inventoryFilterTerms(inventoryFilters.warehouse);
+    const productTerms = inventoryFilterTerms(inventoryFilters.product);
+    if (warehouseTerms.length && !inventoryMatchesAnyFilterTerm(`${row.warehouseCode} ${row.warehouseName}`, warehouseTerms)) return false;
+    if (productTerms.length && !inventoryMatchesAnyFilterTerm(`${row.productCode} ${row.productName}`, productTerms)) return false;
     return true;
   }).sort((left, right) => {
     const direction = inventorySort.direction === "asc" ? 1 : -1;
@@ -13677,11 +13698,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const start = Math.min(Math.max(1, inventoryCurrentPage - 2), Math.max(1, inventoryTotalPages - 4));
     return start + index;
   }).filter((page) => page <= inventoryTotalPages);
-  const inventorySearchTerms = (value: string) => value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const inventoryMatchesTerms = (haystack: string, query: string) => {
-    const text = haystack.toLowerCase();
-    return inventorySearchTerms(query).every((term) => text.includes(term));
-  };
   const inventoryProductMatchesAttribute = (product: FnProduct, attribute: ProductSearchAttributeFilter) => {
     if (attribute === "all") return true;
     const productAttribute = String(product.product_attribute || product.product_kind || "").toLowerCase();
@@ -13701,12 +13717,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return `${warehouse.warehouse_code}-${String(warehouse.id || index)}`;
   };
   const inventoryWarehousePickerOptions = inventoryWarehouses.filter((warehouse) => {
-    const needle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.searchedQuery : inventoryFilters.warehouse).trim();
+    const rawNeedle = (inventoryPicker?.type === "warehouse" ? inventoryPicker.searchedQuery : inventoryFilters.warehouse).trim();
+    const needle = inventoryFilterTerms(rawNeedle).length > 1 ? "" : rawNeedle;
     if (!needle) return true;
     return inventoryMatchesTerms(`${warehouse.warehouse_code} ${warehouse.warehouse_name}`, needle);
   }).slice(0, 50);
   const inventoryProductPickerOptions = inventoryProducts.filter((product) => {
-    const needle = (inventoryPicker?.type === "product" ? inventoryPicker.searchedQuery : inventoryFilters.product).trim();
+    const rawNeedle = (inventoryPicker?.type === "product" ? inventoryPicker.searchedQuery : inventoryFilters.product).trim();
+    const needle = inventoryFilterTerms(rawNeedle).length > 1 ? "" : rawNeedle;
     if (!inventoryProductMatchesAttribute(product, inventoryPicker?.attribute || "all")) return false;
     if (!needle) return true;
     return inventoryMatchesTerms(`${inventoryProductCode(product)} ${inventoryProductName(product)}`, needle);
@@ -13941,7 +13959,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     inventoryPickerDragModeRef.current = null;
     lastInventoryPickerSelectionIndexRef.current = null;
     const query = type === "warehouse" ? inventoryFilters.warehouse : inventoryFilters.product;
-    setInventoryPicker({ type, query, searchedQuery: query.trim(), index: 0, selectedKeys: [], attribute: "plain" });
+    const terms = inventoryFilterTerms(query);
+    setInventoryPicker({ type, query, searchedQuery: terms.length > 1 ? "" : query.trim(), index: 0, selectedKeys: [], attribute: "plain" });
   }
 
   function setInventoryPickerSelected(key: string, selected: boolean) {
@@ -13997,15 +14016,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function applyInventoryPickerSelection() {
     if (!inventoryPicker) return;
     if (inventoryPicker.type === "warehouse") {
-      const selectedIndex = inventoryWarehousePickerOptions.findIndex((warehouse, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(warehouse, index)));
-      const warehouse = inventoryWarehousePickerOptions[selectedIndex >= 0 ? selectedIndex : inventoryPicker.index];
-      if (!warehouse) return;
-      setInventoryFilters((prev) => ({ ...prev, warehouse: warehouse.warehouse_code }));
+      const selectedWarehouses = inventoryWarehousePickerOptions.filter((warehouse, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(warehouse, index)));
+      const warehouses = selectedWarehouses.length ? selectedWarehouses : [inventoryWarehousePickerOptions[inventoryPicker.index]].filter(Boolean);
+      if (!warehouses.length) return;
+      setInventoryFilters((prev) => ({ ...prev, warehouse: inventoryJoinFilterValues(warehouses.map((warehouse) => warehouse.warehouse_code)) }));
     } else {
-      const selectedIndex = inventoryProductPickerOptions.findIndex((product, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(product, index)));
-      const product = inventoryProductPickerOptions[selectedIndex >= 0 ? selectedIndex : inventoryPicker.index];
-      if (!product) return;
-      setInventoryFilters((prev) => ({ ...prev, product: inventoryProductCode(product) }));
+      const selectedProducts = inventoryProductPickerOptions.filter((product, index) => inventoryPicker.selectedKeys.includes(inventoryPickerKey(product, index)));
+      const products = selectedProducts.length ? selectedProducts : [inventoryProductPickerOptions[inventoryPicker.index]].filter(Boolean);
+      if (!products.length) return;
+      setInventoryFilters((prev) => ({ ...prev, product: inventoryJoinFilterValues(products.map((product) => inventoryProductCode(product))) }));
     }
     setInventoryPicker(null);
   }
