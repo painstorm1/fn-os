@@ -8283,10 +8283,11 @@ function SalesExcelGrid({
     event.stopPropagation();
     setResize({ type: "row", index, start: event.clientY, initial: rowHeights[index] || 30 });
   }
+  const showEntryToolbarInTitleSlot = isSalesEntrySheet(sheet);
   return (
     <div className="rounded-md border border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-        <strong>{sheet}</strong>
+      <div className={`flex items-center border-b border-slate-200 px-3 py-2 ${showEntryToolbarInTitleSlot ? "justify-start" : "justify-between"}`}>
+        {!showEntryToolbarInTitleSlot && <strong>{sheet}</strong>}
         <div className="flex items-center gap-2">
           {showOnlineReviewTools && (
             <button type="button" onClick={deleteSelectedGridRows} className="rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-black text-rose-600 hover:bg-rose-50">삭제</button>
