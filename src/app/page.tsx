@@ -8689,7 +8689,7 @@ function OnlineOrderProgressList({
 
   function openProductSearch(rowIndex: number, query: string) {
     const popupToken = `fnos-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const popup = window.open("", "fnos-product-link-popup", "width=550,height=650,left=120,top=80,resizable=yes,scrollbars=yes");
+    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=yes");
     if (!popup) {
       window.alert("팝업이 차단되었습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.");
       return;
@@ -17118,7 +17118,7 @@ function ChannelProductMappingPanel() {
     if (!targetRow) return;
     setDraft(targetRow);
     const popupToken = `fnos-mapping-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const popup = window.open("", "fnos-product-link-popup", "width=550,height=650,left=120,top=80,resizable=yes,scrollbars=yes");
+    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=yes");
     if (!popup) {
       window.alert("팝업이 차단되었습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.");
       return;
