@@ -10286,14 +10286,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEffect(() => {
     function closeOnlineSheetPreviews(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
-      ["online-shipping-sheet-toggle", "online-sales-sheet-toggle", "online-purchase-sheet-toggle"].forEach((id) => {
-        const input = document.getElementById(id);
-        if (input instanceof HTMLInputElement) input.checked = false;
-      });
+      closeOnlineSheetPreview();
     }
     window.addEventListener("keydown", closeOnlineSheetPreviews, true);
     return () => window.removeEventListener("keydown", closeOnlineSheetPreviews, true);
   }, []);
+
+  function closeOnlineSheetPreview(target?: "shipping" | "sales" | "purchase") {
+    const ids = target === "sales"
+      ? ["online-sales-sheet-toggle"]
+      : target === "purchase"
+        ? ["online-purchase-sheet-toggle"]
+        : target === "shipping"
+          ? ["online-shipping-sheet-toggle"]
+          : ["online-shipping-sheet-toggle", "online-sales-sheet-toggle", "online-purchase-sheet-toggle"];
+    ids.forEach((id) => {
+      const input = document.getElementById(id);
+      if (input instanceof HTMLInputElement) input.checked = false;
+    });
+  }
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
@@ -11298,6 +11309,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
         setMessage(`판매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
+        if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("sales");
       }
       invalidateSalesInventoryCaches();
       loadSummary(true);
@@ -11385,6 +11397,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, purchaseSent: true }));
         setMessage(`구매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
+        if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("purchase");
       }
       invalidateSalesInventoryCaches();
       loadSummary(true);
