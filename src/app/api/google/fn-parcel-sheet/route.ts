@@ -197,6 +197,24 @@ async function resolveSheetName(spreadsheetId: string, requestedSheetName: strin
   return newSheetName;
 }
 
+async function sheetIdForName(spreadsheetId: string, sheetName: string) {
+  const metadata = await googleSheetsFetch(`${spreadsheetId}?fields=sheets(properties(sheetId,title))`);
+  const sheets: { id?: number; title: string }[] = Array.isArray(metadata.sheets)
+    ? metadata.sheets.map((sheet: { properties?: { sheetId?: number; title?: string } }) => ({
+      id: sheet.properties?.sheetId,
+      title: String(sheet.properties?.title || ""),
+    }))
+    : [];
+  return sheets.find((sheet) => sheet.title === sheetName)?.id ?? 0;
+}
+
+function spreadsheetViewUrl(spreadsheetId: string, sheetId: number, range: string) {
+  const params = new URLSearchParams();
+  params.set("gid", String(sheetId || 0));
+  if (range) params.set("range", range.replace(/^'([^']+)'!/, "").replace(/^[^!]+!/, ""));
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit#${params.toString()}`;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const spreadsheetId = env("GOOGLE_SHEETS_SPREADSHEET_ID");
@@ -210,6 +228,7 @@ export async function POST(request: NextRequest) {
     if (!filledRows.length) return NextResponse.json({ ok: false, error: "반영할 데이터가 없습니다." }, { status: 400 });
 
     const sheetName = await resolveSheetName(spreadsheetId, requestedSheetName);
+    const sheetId = await sheetIdForName(spreadsheetId, sheetName);
 
     const range = sheetRange(sheetName);
     const existing = await googleSheetsFetch(`${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`);
@@ -229,6 +248,7 @@ export async function POST(request: NextRequest) {
         duplicateRows: duplicates.map((item) => item.rowNumber),
         allDuplicate: duplicates.length > 0,
         updatedRange: "",
+        spreadsheetUrl: spreadsheetViewUrl(spreadsheetId, sheetId, ""),
       });
     }
 
@@ -248,6 +268,7 @@ export async function POST(request: NextRequest) {
       duplicateCount: duplicates.length,
       duplicateRows: duplicates.map((item) => item.rowNumber),
       updatedRange: updated.updatedRange || "",
+      spreadsheetUrl: spreadsheetViewUrl(spreadsheetId, sheetId, `${sheetName}!A${startRow}:K${endRow}`),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "FN_택배시트 반영 실패";

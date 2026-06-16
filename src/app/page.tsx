@@ -10762,17 +10762,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setCollectionStatuses([]);
     const ok = window.confirm("주문 수집하시겠습니까?");
     if (!ok) return;
-    if (completedSalesTasks.orderFlow) {
-      const retry = window.confirm("이미 주문수집 작업을 실행한 것으로 보입니다. 중복 작업일 수 있는데 계속할까요?");
-      if (!retry) {
-        setMessage("주문수집 작업 실행을 취소했습니다.");
-        return;
-      }
-    }
-    if (pendingOrderFiles.length) {
-      void parseWaitingFiles("orders");
-      return;
-    }
+    resetSalesWorkspaceForOrderCollection();
     setCollectionStatuses([
       { name: "온라인 발주", status: "running", message: "API 수집 중" },
     ]);
@@ -11485,13 +11475,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function applyFnParcelSheet() {
     const exportSheets = applyProgressTrackingToShipping(sheets);
-    const shippingRows = shippingRowsForExcelExport(exportSheets).filter((row) => row.some((cell) => String(cell || "").trim()));
+    const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
+    const shippingRows = shippingRowsForExcelExport(exportSheets)
+      .filter((row) => row.some((cell) => String(cell || "").trim()))
+      .filter((row) => trackingIndex < 0 || salesCellText(row[trackingIndex]));
     if (!shippingRows.length) {
-      window.alert("FN_택배시트에 반영할 송장출력용 데이터가 없습니다.");
+      window.alert("FN_택배시트에 반영할 송장번호 입력 행이 없습니다.");
       return;
     }
     const targetSheet = fnParcelSheetName();
-    const ok = window.confirm(`FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 ${shippingRows.length}개 행을 구글시트에 반영합니다. 계속할까요?`);
+    const ok = window.confirm(`송장번호가 입력된 ${shippingRows.length}개 행을 FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 구글시트에 반영합니다. 계속할까요?`);
     if (!ok) return;
     try {
       const rows = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || ""));
@@ -11517,6 +11510,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           : `FN_택배시트 '${data.sheetName || targetSheet}'에 ${reflectedCount || shippingRows.length}개 행을 반영했습니다.`;
       window.alert(resultMessage);
       setMessage(resultMessage);
+      if (data.spreadsheetUrl) {
+        window.open(String(data.spreadsheetUrl), "_blank", "noopener,noreferrer");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "FN_택배시트 반영 실패";
       window.alert(message);
@@ -12050,6 +12046,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     clearSalesWorkspaceStorage();
     setSalesGridResetKey((value) => value + 1);
     setMessage("이번 작업을 초기화했습니다.");
+  }
+
+  function resetSalesWorkspaceForOrderCollection() {
+    setUploadedFiles([]);
+    setPendingOrderFiles([]);
+    setPendingInvoiceFiles([]);
+    setSelectedSalesRange(null);
+    setCompletedSalesTasks({});
+    setInvoiceMemoText("");
+    setSalesSheetHighlightedRows({});
+    setDirectShippingRows({ JB: [], 케이모아: [] });
+    directShippingFileHandles.current = {};
+    setActiveSheet("발주 진행 단계");
+    setSheets(salesInitialSheets());
+    clearSalesWorkspaceStorage();
+    setSalesGridResetKey((value) => value + 1);
   }
 
   useEffect(() => {
