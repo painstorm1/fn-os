@@ -7822,6 +7822,38 @@ const onlineOrderWarehouseOptions = [
   { code: "102", label: "102 (네이버/N배송)" },
 ];
 
+const directShippingCustomerOptions = {
+  JB: [
+    { code: "1262636402_D", name: "제이비(직거래)", label: "제이비(직거래)" },
+    { code: "1262636402", name: "제이비컴퍼니", label: "제이비컴퍼니" },
+  ],
+  케이모아: [
+    { code: "1262590506", name: "케이모아", label: "케이모아" },
+  ],
+} as const;
+
+function directShippingCustomerForPartner(partner: DirectShippingPartner) {
+  return directShippingCustomerOptions[partner][0];
+}
+
+function directShippingCustomerMatch(row: Record<string, string> | string[]) {
+  const code = Array.isArray(row) ? salesCellText(row[salesSheetHeaders["FN구매입력"].indexOf("거래처코드")]) : salesCellText(row.거래처코드);
+  const name = Array.isArray(row) ? salesCellText(row[salesSheetHeaders["FN구매입력"].indexOf("거래처명")]) : salesCellText(row.거래처명);
+  if (["1262636402_D", "1262636402"].includes(code) || ["JB", "제이비(직거래)", "제이비컴퍼니"].includes(name)) return "JB" as DirectShippingPartner;
+  if (code === "1262590506" || ["케이모아"].includes(name)) return "케이모아" as DirectShippingPartner;
+  return "";
+}
+
+function normalizeDirectShippingPurchaseCustomer(row: Record<string, string>) {
+  const partner = directShippingCustomerMatch(row);
+  if (!partner) return row;
+  const currentCode = salesCellText(row.거래처코드);
+  const currentName = salesCellText(row.거래처명);
+  const isJbCompany = partner === "JB" && (currentCode === "1262636402" || currentName === "제이비컴퍼니");
+  const customer = isJbCompany ? directShippingCustomerOptions.JB[1] : directShippingCustomerForPartner(partner);
+  return { ...row, 거래처코드: customer.code, 거래처명: customer.name };
+}
+
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
   return {
     startRow: Math.min(a.row, b.row),
@@ -7916,6 +7948,8 @@ function SalesExcelGrid({
   const productCodeCol = headers.includes("품목코드(ERP)") ? headers.indexOf("품목코드(ERP)") : headers.indexOf("품목코드");
   const warehouseHeader = sheet === "FN판매입력" ? "출하창고" : sheet === "FN구매입력" ? "입고창고" : "";
   const warehouseCol = warehouseHeader ? headers.indexOf(warehouseHeader) : -1;
+  const customerCodeCol = headers.indexOf("거래처코드");
+  const customerNameCol = headers.indexOf("거래처명");
   const isOnlineOrderWarehouseCell = (colIndex: number) => warehouseCol >= 0 && colIndex === warehouseCol;
   const showOnlineReviewTools = sheet === "송장출력용" || sheet === "FN판매입력" || sheet === "FN구매입력";
   const selectableRowIndexes = rows.map((row, index) => rowHasValue(row) ? index : -1).filter((index) => index >= 0);
@@ -8037,6 +8071,30 @@ function SalesExcelGrid({
       const next = [...row];
       next[warehouseCol] = value;
       return normalizeSalesEntryRow(sheet, next, warehouseHeader);
+    }));
+  }
+  function selectedJbPurchaseRows() {
+    if (sheet !== "FN구매입력") return [] as number[];
+    return selectedRows.filter((index) => rowHasValue(rows[index] || []) && directShippingCustomerMatch(rows[index] || []) === "JB");
+  }
+  function applyJbPurchaseCustomerToSelectedRows(value: string) {
+    if (sheet !== "FN구매입력" || customerCodeCol < 0 || customerNameCol < 0) return;
+    const option = directShippingCustomerOptions.JB.find((item) => item.code === value);
+    if (!option) return;
+    const targets = selectedJbPurchaseRows();
+    if (!targets.length) {
+      window.alert("JB 직송 구매입력 행을 선택해 주세요.");
+      return;
+    }
+    const ok = window.confirm(`${targets.length.toLocaleString("ko-KR")}건 거래처를 ${option.name}으로 변경하시겠습니까?`);
+    if (!ok) return;
+    const targetSet = new Set(targets);
+    onChange(rows.map((row, index) => {
+      if (!targetSet.has(index)) return row;
+      const next = [...row];
+      next[customerCodeCol] = option.code;
+      next[customerNameCol] = option.name;
+      return next;
     }));
   }
   async function searchFnOsProducts(query: string) {
@@ -8304,6 +8362,20 @@ function SalesExcelGrid({
             >
               <option value="">창고 변경</option>
               {onlineOrderWarehouseOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+            </select>
+          )}
+          {selectedJbPurchaseRows().length > 0 && (
+            <select
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 outline-orange-400"
+              defaultValue=""
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                event.currentTarget.value = "";
+                if (value) applyJbPurchaseCustomerToSelectedRows(value);
+              }}
+            >
+              <option value="">JB 거래처 변경</option>
+              {directShippingCustomerOptions.JB.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
             </select>
           )}
           {!showOnlineReviewTools && <button type="button" onClick={addRow} className="rounded-md border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">행 추가</button>}
@@ -11117,7 +11189,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (index >= 0) purchase[index] = value;
         };
         setPurchase("일자", today);
-        setPurchase("거래처명", partner);
+        const directCustomer = directShippingCustomerForPartner(partner);
+        setPurchase("거래처코드", directCustomer.code);
+        setPurchase("거래처명", directCustomer.name);
         setPurchase("입고창고", "100");
         setPurchase("VAT 포함/별도", "포함");
         setPurchase("품목코드", progress ? progressValue(progress, "품목코드(ERP)") : "");
@@ -11198,7 +11272,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const enriched: Array<Record<string, string>> = [];
     const productErrors: string[] = [];
     for (const [rowIndex, row] of sourceRows.entries()) {
-      const next = { ...row };
+      const next = mode === "purchases" ? normalizeDirectShippingPurchaseCustomer(row) : { ...row };
       const customer = salesCellText(next.거래처코드)
         ? customerByCode.get(salesCellText(next.거래처코드).toLowerCase())
         : customerByName.get(salesCellText(next.거래처명).toLowerCase());
