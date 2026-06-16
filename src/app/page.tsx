@@ -7299,7 +7299,7 @@ function appendCollectedOnlineOrdersToSheets(
       existingKeys.add(itemKey);
 
       const qty = onlineOrderMoney(item.qty) || 1;
-      const amount = onlineOrderMoney(item.salesAmount || item.settlementAmount);
+      const amount = onlineOrderMoney(item.settlementAmount || item.salesAmount);
       const unitPrice = qty ? Math.round(amount / qty) : amount;
       const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
@@ -7328,7 +7328,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(sale, "FN판매입력", "단가", unitPrice || "");
       setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
       setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "메모", itemKey);
+      setSalesSheetCell(sale, "FN판매입력", "메모", "");
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
@@ -7887,6 +7887,8 @@ function SalesExcelGrid({
 }) {
   const headers = salesSheetHeaders[sheet];
   const displayHeaders = salesSheetDisplayHeaders(sheet);
+  const hiddenHeaders = new Set(isSalesEntrySheet(sheet) ? ["단가"] : []);
+  const visibleColIndexes = headers.map((_, index) => index).filter((index) => !hiddenHeaders.has(headers[index]));
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
   const [range, setRange] = useState<SalesGridRange>({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
@@ -7905,6 +7907,7 @@ function SalesExcelGrid({
   const warehouseHeader = sheet === "FN판매입력" ? "출하창고" : sheet === "FN구매입력" ? "입고창고" : "";
   const warehouseCol = warehouseHeader ? headers.indexOf(warehouseHeader) : -1;
   const isOnlineOrderWarehouseCell = (colIndex: number) => warehouseCol >= 0 && colIndex === warehouseCol;
+  const showOnlineReviewTools = sheet === "송장출력용" || sheet === "FN판매입력" || sheet === "FN구매입력";
   const selectableRowIndexes = rows.map((row, index) => rowHasValue(row) ? index : -1).filter((index) => index >= 0);
   const selectableRowSet = useMemo(() => new Set(selectableRowIndexes), [selectableRowIndexes.join("|")]);
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
@@ -7966,10 +7969,13 @@ function SalesExcelGrid({
 
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     const changedHeader = headers[colIndex];
+    if (isLockedOnlineEntryCell(colIndex)) return;
     if (isOnlineOrderWarehouseCell(colIndex)) {
       const targetRows = selectedRows.length && selectedRows.includes(rowIndex)
         ? selectedRows.filter((index) => rowHasValue(rows[index] || []))
         : [rowIndex];
+      const ok = window.confirm(`${targetRows.length.toLocaleString("ko-KR")}건 창고를 ${value}로 변경하시겠습니까?`);
+      if (!ok) return;
       const targetSet = new Set(targetRows);
       onChange(rows.map((row, r) => {
         if (!targetSet.has(r)) return row;
@@ -7982,6 +7988,45 @@ function SalesExcelGrid({
       if (r !== rowIndex) return row;
       const nextRow = row.map((cell, c) => c === colIndex ? value : cell);
       return normalizeSalesEntryRow(sheet, nextRow, changedHeader);
+    }));
+  }
+  function isLockedOnlineEntryCell(colIndex: number) {
+    if (!isSalesEntrySheet(sheet)) return false;
+    const header = headers[colIndex];
+    return header !== warehouseHeader && header !== "메모";
+  }
+  function deleteSelectedGridRows() {
+    const targets = selectedRows.filter((index) => rowHasValue(rows[index] || []));
+    if (!targets.length) {
+      window.alert("삭제할 행을 선택해 주세요.");
+      return;
+    }
+    const ok = window.confirm(`${targets.length.toLocaleString("ko-KR")}건을 삭제하시겠습니까?`);
+    if (!ok) return;
+    const targetSet = new Set(targets);
+    const next = rows.filter((_, index) => !targetSet.has(index));
+    while (next.length < rows.length) next.push(headers.map(() => ""));
+    onChange(next);
+    setSelectedRows([]);
+    setRange({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 });
+    setAnchor({ row: 0, col: 0 });
+    setEditing(null);
+  }
+  function applyWarehouseToSelectedRows(value: string) {
+    if (!warehouseHeader || warehouseCol < 0) return;
+    const targets = selectedRows.filter((index) => rowHasValue(rows[index] || []));
+    if (!targets.length) {
+      window.alert("창고를 변경할 행을 선택해 주세요.");
+      return;
+    }
+    const ok = window.confirm(`${targets.length.toLocaleString("ko-KR")}건 창고를 ${value}로 변경하시겠습니까?`);
+    if (!ok) return;
+    const targetSet = new Set(targets);
+    onChange(rows.map((row, index) => {
+      if (!targetSet.has(index)) return row;
+      const next = [...row];
+      next[warehouseCol] = value;
+      return normalizeSalesEntryRow(sheet, next, warehouseHeader);
     }));
   }
   async function searchFnOsProducts(query: string) {
@@ -8181,7 +8226,7 @@ function SalesExcelGrid({
       line.forEach((value, colOffset) => {
         const rowIndex = range.startRow + rowOffset;
         const colIndex = range.startCol + colOffset;
-        if (colIndex < headers.length) next[rowIndex][colIndex] = value;
+        if (colIndex < headers.length && !isLockedOnlineEntryCell(colIndex)) next[rowIndex][colIndex] = value;
       });
       const rowIndex = range.startRow + rowOffset;
       next[rowIndex] = normalizeSalesEntryRow(sheet, next[rowIndex]);
@@ -8196,14 +8241,14 @@ function SalesExcelGrid({
   function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (editing) return;
     if (event.key === "Delete" || event.key === "Backspace") {
-      const next = rows.map((row, rowIndex) => row.map((cell, colIndex) => isSelected(rowIndex, colIndex) ? "" : cell));
+      const next = rows.map((row, rowIndex) => row.map((cell, colIndex) => isSelected(rowIndex, colIndex) && !isLockedOnlineEntryCell(colIndex) ? "" : cell));
       onChange(next);
       event.preventDefault();
       return;
     }
     const current = { row: range.startRow, col: range.startCol };
     if (event.key === "Enter") {
-      setEditing(current);
+      if (!isLockedOnlineEntryCell(current.col)) setEditing(current);
       event.preventDefault();
       return;
     }
@@ -8232,7 +8277,26 @@ function SalesExcelGrid({
     <div className="rounded-md border border-slate-200 bg-white">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
         <strong>{sheet}</strong>
-        <button type="button" onClick={addRow} className="rounded-md border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">행 추가</button>
+        <div className="flex items-center gap-2">
+          {showOnlineReviewTools && (
+            <button type="button" onClick={deleteSelectedGridRows} className="rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-black text-rose-600 hover:bg-rose-50">삭제</button>
+          )}
+          {isSalesEntrySheet(sheet) && (
+            <select
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 outline-orange-400"
+              defaultValue=""
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                event.currentTarget.value = "";
+                if (value) applyWarehouseToSelectedRows(value);
+              }}
+            >
+              <option value="">창고 변경</option>
+              {onlineOrderWarehouseOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+            </select>
+          )}
+          {!showOnlineReviewTools && <button type="button" onClick={addRow} className="rounded-md border border-slate-200 px-3 py-1 text-xs font-black text-slate-600">행 추가</button>}
+        </div>
       </div>
       <div
         ref={gridRef}
@@ -8245,11 +8309,11 @@ function SalesExcelGrid({
         }}
         className="max-h-[560px] overflow-auto outline-none"
       >
-        <table className="table-fixed border-collapse text-xs" style={{ width: 54 + colWidths.reduce((sum, width) => sum + width, 0) }}>
+        <table className="table-fixed border-collapse text-xs" style={{ width: 54 + visibleColIndexes.reduce((sum, colIndex) => sum + (colWidths[colIndex] || 95), 0) }}>
           <colgroup>
             <col style={{ width: 54 }} />
-            {headers.map((header, colIndex) => (
-              <col key={header} style={{ width: colWidths[colIndex] || 95 }} />
+            {visibleColIndexes.map((colIndex) => (
+              <col key={headers[colIndex]} style={{ width: colWidths[colIndex] || 95 }} />
             ))}
           </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100">
@@ -8265,29 +8329,32 @@ function SalesExcelGrid({
                   {selectedRows.length ? "✓" : ""}
                 </button>
               </th>
-              {headers.map((header, colIndex) => (
-                <th
-                  key={header}
-                  style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }}
-                  onDoubleClick={() => sortByColumn(colIndex)}
-                  title={isSortableSheet ? "더블클릭하면 오름/내림차순 정렬" : undefined}
-                  className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isSortableSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
-                >
-                  <div className="flex min-w-0 items-center gap-1">
-                    <span className="truncate">{displayHeaders[colIndex] || header}</span>
-                    {isSortableSheet && sortState?.col === colIndex && (
-                      <span className="shrink-0 text-[10px] text-orange-600">{sortState.dir === "asc" ? "ASC" : "DESC"}</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={`${header} 열 너비 조절`}
-                    onMouseDown={(event) => startColResize(event, colIndex)}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-orange-300"
-                  />
-                </th>
-              ))}
+              {visibleColIndexes.map((colIndex) => {
+                const header = headers[colIndex];
+                return (
+                  <th
+                    key={header}
+                    style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95 }}
+                    onDoubleClick={() => sortByColumn(colIndex)}
+                    title={isSortableSheet ? "더블클릭하면 오름/내림차순 정렬" : undefined}
+                    className={`relative border border-slate-200 px-2 py-2 text-left font-black text-slate-600 ${isSortableSheet ? "cursor-pointer select-none hover:bg-orange-50" : ""}`}
+                  >
+                    <div className="flex min-w-0 items-center gap-1">
+                      <span className="truncate">{displayHeaders[colIndex] || header}</span>
+                      {isSortableSheet && sortState?.col === colIndex && (
+                        <span className="shrink-0 text-[10px] text-orange-600">{sortState.dir === "asc" ? "ASC" : "DESC"}</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`${header} 열 너비 조절`}
+                      onMouseDown={(event) => startColResize(event, colIndex)}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-orange-300"
+                    />
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -8324,7 +8391,10 @@ function SalesExcelGrid({
                     className="absolute bottom-0 left-0 h-1 w-full cursor-row-resize hover:bg-orange-300"
                   />
                 </td>
-                {headers.map((header, colIndex) => (
+                {visibleColIndexes.map((colIndex) => {
+                  const header = headers[colIndex];
+                  const lockedCell = isLockedOnlineEntryCell(colIndex);
+                  return (
                   <td
                     key={`${header}-${colIndex}`}
                     style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95, height: rowHeights[rowIndex] || 30 }}
@@ -8345,8 +8415,10 @@ function SalesExcelGrid({
                     onMouseEnter={() => {
                       if (selecting) setRange(normalizeRange(anchor, { row: rowIndex, col: colIndex }));
                     }}
-                    onDoubleClick={() => setEditing({ row: rowIndex, col: colIndex })}
-                    className={`border p-0 align-middle ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
+                    onDoubleClick={() => {
+                      if (!lockedCell) setEditing({ row: rowIndex, col: colIndex });
+                    }}
+                    className={`border p-0 align-middle ${lockedCell ? "text-slate-600" : ""} ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : lockedCell ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
                   >
                     {editing?.row === rowIndex && editing?.col === colIndex && isOnlineOrderWarehouseCell(colIndex) ? (
                       <select
@@ -8386,7 +8458,8 @@ function SalesExcelGrid({
                       <div className={`h-full w-full select-none overflow-hidden px-2 py-1 leading-5 ${sheet === "발주 진행 단계" ? "whitespace-normal break-words" : "whitespace-nowrap"}`}>{row[colIndex] || ""}</div>
                     )}
                   </td>
-                ))}
+                  );
+                })}
               </tr>
               );
             })}
@@ -11041,7 +11114,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setPurchase("단가", progress ? progressValue(progress, "정산예정금액") : "");
         setPurchase("공급가액", progress ? progressValue(progress, "정산예정금액") : "");
         setPurchase("합계금액", progress ? progressValue(progress, "정산예정금액") : "");
-        setPurchase("메모", `직송 ${partner}`);
+        setPurchase("메모", "");
         purchaseRows[rowIndex] = purchase;
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
@@ -11054,8 +11127,70 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setDirectPartnerPickerOpen(false);
   }
 
+  async function enrichOnlineEntryRows(
+    sourceRows: Array<Record<string, string>>,
+    mode: "sales" | "purchases",
+  ) {
+    if (!sourceRows.length) return sourceRows;
+    const customerRows = await fetch("/api/fnos/customers?pageSize=5000", { credentials: "include", cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data.customers) ? data.customers as Array<{ customer_code?: string; customer_name?: string }> : [])
+      .catch(() => []);
+    const customerByCode = new Map(customerRows.map((row) => [salesCellText(row.customer_code).toLowerCase(), row]));
+    const customerByName = new Map(customerRows.map((row) => [salesCellText(row.customer_name).toLowerCase(), row]));
+    const productCache = new Map<string, FnOsProductSearchItem | null>();
+    async function findProduct(query: string) {
+      const key = salesCellText(query).toLowerCase();
+      if (!key) return null;
+      if (productCache.has(key)) return productCache.get(key) || null;
+      const product = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          const rows = Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [];
+          return rows.find((item) => salesCellText(item.code).toLowerCase() === key || salesCellText(item.name).toLowerCase() === key) || rows[0] || null;
+        })
+        .catch(() => null);
+      productCache.set(key, product);
+      return product;
+    }
+    const enriched: Array<Record<string, string>> = [];
+    for (const row of sourceRows) {
+      const next = { ...row };
+      const customer = salesCellText(next.거래처코드)
+        ? customerByCode.get(salesCellText(next.거래처코드).toLowerCase())
+        : customerByName.get(salesCellText(next.거래처명).toLowerCase());
+      if (customer) {
+        if (!salesCellText(next.거래처코드)) next.거래처코드 = salesCellText(customer.customer_code);
+        if (!salesCellText(next.거래처명)) next.거래처명 = salesCellText(customer.customer_name);
+      }
+      if (!salesCellText(next.품목코드) || !salesCellText(next.품목명)) {
+        const product = await findProduct(salesCellText(next.품목코드) || salesCellText(next.품목명));
+        if (product) {
+          if (!salesCellText(next.품목코드)) next.품목코드 = salesCellText(product.code);
+          if (!salesCellText(next.품목명)) next.품목명 = salesCellText(product.name);
+          if (mode === "purchases" && !salesMoneyValue(next.공급가액)) {
+            const qty = salesQuantityValue(next.수량) || 1;
+            const cost = salesMoneyValue(product.inPrice);
+            if (cost) {
+              next.단가 = String(Math.round(cost));
+              next.공급가액 = String(Math.round(qty * cost));
+              next.합계금액 = String(Math.round(qty * cost));
+            }
+          }
+        }
+      }
+      enriched.push(next);
+    }
+    return enriched;
+  }
+
   async function sendSalesInput() {
-    const sourceRows = sheets["FN판매입력"]
+    let sourceRows: Array<Record<string, string>> = sheets["FN판매입력"]
       .filter(rowHasValue)
       .map((row) => {
         const item = salesRowObject("FN판매입력", normalizeSalesEntryRow("FN판매입력", row));
@@ -11075,6 +11210,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
+    sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
     if (missingRequired.length) {
       window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
@@ -11136,7 +11272,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendPurchaseInput() {
-    const sourceRows = sheets["FN구매입력"]
+    let sourceRows: Array<Record<string, string>> = sheets["FN구매입력"]
       .filter(rowHasValue)
       .map((row) => {
         const item = salesRowObject("FN구매입력", normalizeSalesEntryRow("FN구매입력", row));
@@ -11156,6 +11292,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
+    sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
     if (missingRequired.length) {
       window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
@@ -14088,11 +14225,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <label htmlFor="online-shipping-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
               </div>
               <div className="min-h-0 flex-1 overflow-auto p-5">
-                <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>송장출력용</button>
+                {(directShippingRows.JB.length > 0 || directShippingRows.케이모아.length > 0) && <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
                   {directShippingRows.JB.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일</button>}
                   {directShippingRows.케이모아.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일</button>}
-                </div>
+                </div>}
                 {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={(rows) => setSheets((prev) => ({ ...prev, 송장출력용: rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} />}
                 {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} />}
                 {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} />}
@@ -14114,7 +14250,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
                 <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원</span>
-                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" variant="secondary" onClick={exportSalesShipmentList}>출고리스트</ActionButton><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
+                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
               </div>
             </div>
           </div>
