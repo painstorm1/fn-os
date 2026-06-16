@@ -8611,6 +8611,18 @@ function OnlineOrderProgressList({
   const requestedPage = page ?? uncontrolledPage;
   const currentPage = Math.min(Math.max(1, requestedPage), totalPages);
   const pageRows = visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const bundleToneByRowIndex = useMemo(() => {
+    const tones: Record<number, 0 | 1> = {};
+    let tone: 0 | 1 = 0;
+    let previousBundle = "";
+    visibleRows.forEach(({ row, index }, visibleIndex) => {
+      const bundleNo = salesCellText(progressValue(row, "묶음주문번호")) || `row-${index}`;
+      if (visibleIndex > 0 && bundleNo !== previousBundle) tone = tone === 0 ? 1 : 0;
+      tones[index] = tone;
+      previousBundle = bundleNo;
+    });
+    return tones;
+  }, [visibleRows]);
   const pageKeys = pageRows.map((item) => item.key);
   const selection = useCheckboxColumnSelection({ keys: pageKeys, selectedKeys, setSelectedKeys });
   const selectedIndexes = selectedKeys
@@ -8832,9 +8844,9 @@ function OnlineOrderProgressList({
     return frozenProgressHeaders.includes(header) ? { left: frozenProgressLeft[header] } : undefined;
   }
 
-  function frozenProgressCellClass(header: string, selected: boolean, highlighted: boolean) {
+  function frozenProgressCellClass(header: string, selected: boolean, highlighted: boolean, bundleTone: 0 | 1) {
     if (!frozenProgressHeaders.includes(header)) return "";
-    const background = selected ? "bg-blue-50" : highlighted ? "bg-orange-50" : "bg-white";
+    const background = selected ? "bg-blue-50" : highlighted ? "bg-orange-50" : bundleTone === 1 ? "bg-slate-50" : "bg-white";
     return `sticky z-20 ${background} shadow-[1px_0_0_#e2e8f0]`;
   }
 
@@ -8863,15 +8875,17 @@ function OnlineOrderProgressList({
           <tbody>
             {pageRows.map(({ row, index, key }, visibleIndex) => {
               const selected = selectedKeys.includes(key);
+              const bundleTone = bundleToneByRowIndex[index] || 0;
+              const rowBackground = selected ? "bg-blue-50" : highlightedRowSet.has(index) ? "bg-orange-50" : bundleTone === 1 ? "bg-slate-50" : "bg-white";
               const rowNumber = (currentPage - 1) * pageSize + visibleIndex;
               return (
-                <tr key={key} className={`border-b border-slate-100 ${highlightedRowSet.has(index) ? "bg-orange-50" : selected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                  <td className={`px-2 py-2 text-center ${frozenProgressCellClass("__select", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("__select")}>
+                <tr key={key} className={`border-b border-slate-100 ${rowBackground} ${!selected && !highlightedRowSet.has(index) ? "hover:bg-slate-100" : ""}`}>
+                  <td className={`px-2 py-2 text-center ${frozenProgressCellClass("__select", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("__select")}>
                     <SelectionNumberButton index={rowNumber} selected={selected} onMouseDown={(event) => selection.beginSelection(key, visibleIndex, event)} onMouseEnter={() => selection.continueSelection(key, visibleIndex)} />
                   </td>
-                  <td className={`truncate px-2 py-2 font-black text-slate-800 ${frozenProgressCellClass("쇼핑몰(거래처)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("쇼핑몰(거래처)")}>{renderText(row, "쇼핑몰(거래처)")}</td>
-                  <td className={`truncate px-2 py-2 ${frozenProgressCellClass("수집일자", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("수집일자")}>{renderText(row, "수집일자")}</td>
-                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목코드(ERP)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("품목코드(ERP)")}>
+                  <td className={`truncate px-2 py-2 font-black text-slate-800 ${frozenProgressCellClass("쇼핑몰(거래처)", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("쇼핑몰(거래처)")}>{renderText(row, "쇼핑몰(거래처)")}</td>
+                  <td className={`truncate px-2 py-2 ${frozenProgressCellClass("수집일자", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("수집일자")}>{renderText(row, "수집일자")}</td>
+                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목코드(ERP)", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("품목코드(ERP)")}>
                     <input
                       className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-blue-700 outline-orange-400"
                       value={progressValue(row, "품목코드(ERP)")}
@@ -8884,7 +8898,7 @@ function OnlineOrderProgressList({
                       placeholder="검색"
                     />
                   </td>
-                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목명(ERP)", selected, highlightedRowSet.has(index))}`} style={frozenProgressCellStyle("품목명(ERP)")}>
+                  <td className={`px-2 py-2 ${frozenProgressCellClass("품목명(ERP)", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("품목명(ERP)")}>
                     <input
                       className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-orange-400"
                       value={progressValue(row, "품목명(ERP)")}
@@ -11471,7 +11485,24 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(status === "출고완료" ? "송장번호가 입력된 선택 주문이 없습니다." : "처리할 주문이 없습니다.");
       return;
     }
-    const ok = window.confirm(`${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`);
+    const eligibleSet = new Set(eligibleIndexes);
+    const partialBundleWarnings: string[] = [];
+    const checkedBundles = new Set<string>();
+    eligibleIndexes.forEach((rowIndex) => {
+      const bundleNo = salesCellText(progressValue(sheets["발주 진행 단계"][rowIndex] || [], "묶음주문번호"));
+      if (!bundleNo || checkedBundles.has(bundleNo)) return;
+      checkedBundles.add(bundleNo);
+      const bundleIndexes = sheets["발주 진행 단계"]
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => rowHasValue(row) && salesCellText(progressValue(row, "묶음주문번호")) === bundleNo)
+        .map(({ index }) => index);
+      if (bundleIndexes.length <= 1 || bundleIndexes.every((index) => eligibleSet.has(index))) return;
+      partialBundleWarnings.push(`${bundleIndexes.map((index) => `${index + 1}행`).join(", ")} (${bundleNo})`);
+    });
+    const statusTargetLabel = status === "주문확인" ? "주문확인으로" : status === "출고대기" ? "출고대기로" : "출고완료로";
+    const ok = partialBundleWarnings.length
+      ? window.confirm(`묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?`)
+      : window.confirm(`${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`);
     if (!ok) return;
     try {
       if (status === "주문확인") await callOnlineOrderStatusApi("confirm", eligibleIndexes);
