@@ -497,18 +497,19 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
 function parseInvoiceRowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
   const rows: ParsedInvoiceRow[] = [];
+  const seen = new Set<string>();
   matrix.forEach((row, rowIndex) => {
     const trackingNo = clean(row[7]);
-    const count = Math.max(1, Math.round(parseNumber(row[14])) || 1);
     const recipient = clean(row[20]);
     const phone = clean(row[21]);
     const address = clean(row[23]);
     const productCode = clean(row[24]);
     if (!trackingNo || !recipient || !phone || !address) return;
     if (/송장|운송장|받는분|수취인/i.test(`${trackingNo} ${recipient}`)) return;
-    for (let index = 0; index < count; index += 1) {
-      rows.push({ trackingNo, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
-    }
+    const key = [trackingNo, recipient, phone, address, productCode].map((value) => value.replace(/\s+/g, "").toLowerCase()).join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ trackingNo, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
   });
   return rows;
 }

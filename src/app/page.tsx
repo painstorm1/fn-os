@@ -6766,7 +6766,10 @@ function applyInvoiceTrackingToSheets(
             || invoiceKey === invoiceMatchKey(name, phone2, address)
             || (productKey && invoiceProductCodeKey(row[0]) === productKey);
         });
-        if (alreadyIndex >= 0) alreadyMatchedShipping += 1;
+        if (alreadyIndex >= 0) {
+          alreadyMatchedShipping += 1;
+          return;
+        }
         const highlightIndex = productKey
           ? nextShipping.findIndex((row) => rowHasValue(row) && invoiceProductCodeKey(row[0]) === productKey)
           : -1;
@@ -7785,6 +7788,7 @@ type SalesGridRange = { startRow: number; endRow: number; startCol: number; endC
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
+type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string };
 type OrderProductLinkDraft = {
   rowIndex: number;
@@ -11138,12 +11142,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .catch(() => []);
     const customerByCode = new Map(customerRows.map((row) => [salesCellText(row.customer_code).toLowerCase(), row]));
     const customerByName = new Map(customerRows.map((row) => [salesCellText(row.customer_name).toLowerCase(), row]));
-    const productCache = new Map<string, FnOsProductSearchItem | null>();
-    async function findProduct(query: string) {
+    const productListCache = new Map<string, FnOsProductSearchItem[]>();
+    async function findProducts(query: string) {
       const key = salesCellText(query).toLowerCase();
-      if (!key) return null;
-      if (productCache.has(key)) return productCache.get(key) || null;
-      const product = await fetch("/api/fnos/quick-lookup", {
+      if (!key) return [] as FnOsProductSearchItem[];
+      const cached = productListCache.get(key);
+      if (cached) return cached;
+      const rows = await fetch("/api/fnos/quick-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -11152,14 +11157,39 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .then((res) => res.json())
         .then((data) => {
           const rows = Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [];
-          return rows.find((item) => salesCellText(item.code).toLowerCase() === key || salesCellText(item.name).toLowerCase() === key) || rows[0] || null;
+          return rows;
         })
-        .catch(() => null);
-      productCache.set(key, product);
-      return product;
+        .catch(() => [] as FnOsProductSearchItem[]);
+      productListCache.set(key, rows);
+      return rows;
+    }
+    async function resolveProduct(codeValue: string, nameValue: string): Promise<FnOsProductResolveResult> {
+      const code = salesCellText(codeValue);
+      const name = salesCellText(nameValue);
+      const codeKey = code.toLowerCase();
+      const nameKey = name.toLowerCase();
+      const byCode = code ? (await findProducts(code)).find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
+      const byName = name ? (await findProducts(name)).find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
+      if (code && name) {
+        if (byCode && byName && salesCellText(byCode.code).toLowerCase() !== salesCellText(byName.code).toLowerCase()) {
+          return { product: null, error: `품목코드(${code})와 품목명(${name})이 서로 다른 품목입니다.` };
+        }
+        const product = byCode || byName;
+        if (!product) return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
+        if (byCode && salesCellText(byCode.name) && salesCellText(byCode.name).toLowerCase() !== nameKey) {
+          return { product: null, error: `품목코드(${code})의 실제 품목명은 "${salesCellText(byCode.name)}"입니다.` };
+        }
+        if (byName && salesCellText(byName.code) && salesCellText(byName.code).toLowerCase() !== codeKey) {
+          return { product: null, error: `품목명(${name})의 실제 품목코드는 "${salesCellText(byName.code)}"입니다.` };
+        }
+        return { product, error: "" };
+      }
+      const product = byCode || byName;
+      return product ? { product, error: "" } : { product: null, error: `품목(${code || name})을 FN OS 품목 DB에서 정확히 확인하지 못했습니다.` };
     }
     const enriched: Array<Record<string, string>> = [];
-    for (const row of sourceRows) {
+    const productErrors: string[] = [];
+    for (const [rowIndex, row] of sourceRows.entries()) {
       const next = { ...row };
       const customer = salesCellText(next.거래처코드)
         ? customerByCode.get(salesCellText(next.거래처코드).toLowerCase())
@@ -11168,11 +11198,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (!salesCellText(next.거래처코드)) next.거래처코드 = salesCellText(customer.customer_code);
         if (!salesCellText(next.거래처명)) next.거래처명 = salesCellText(customer.customer_name);
       }
-      if (!salesCellText(next.품목코드) || !salesCellText(next.품목명)) {
-        const product = await findProduct(salesCellText(next.품목코드) || salesCellText(next.품목명));
+      if (salesCellText(next.품목코드) || salesCellText(next.품목명)) {
+        const resolved = await resolveProduct(next.품목코드, next.품목명);
+        if (resolved.error) productErrors.push(`${rowIndex + 1}행: ${resolved.error}`);
+        const product = resolved.product;
         if (product) {
-          if (!salesCellText(next.품목코드)) next.품목코드 = salesCellText(product.code);
-          if (!salesCellText(next.품목명)) next.품목명 = salesCellText(product.name);
+          next.품목코드 = salesCellText(product.code) || next.품목코드;
+          next.품목명 = salesCellText(product.name) || next.품목명;
           if (mode === "purchases" && !salesMoneyValue(next.공급가액)) {
             const qty = salesQuantityValue(next.수량) || 1;
             const cost = salesMoneyValue(product.inPrice);
@@ -11185,6 +11217,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
       }
       enriched.push(next);
+    }
+    if (productErrors.length) {
+      throw new Error(`품목코드와 품목명이 일치하지 않는 행이 있습니다.\n${productErrors.slice(0, 10).join("\n")}${productErrors.length > 10 ? `\n외 ${productErrors.length - 10}건` : ""}\n\n품목연결/품목검색으로 같은 품목을 다시 선택해 주세요.`);
     }
     return enriched;
   }
@@ -11210,7 +11245,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
+    try {
+      sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "품목코드와 품목명 검증에 실패했습니다.");
+      return;
+    }
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
     if (missingRequired.length) {
       window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
@@ -11292,7 +11332,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
+    try {
+      sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "품목코드와 품목명 검증에 실패했습니다.");
+      return;
+    }
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
     if (missingRequired.length) {
       window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
@@ -11609,6 +11654,102 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return data;
   }
 
+  async function validateAndNormalizeProgressProducts(indexes: number[]) {
+    const productListCache = new Map<string, FnOsProductSearchItem[]>();
+    async function findProducts(query: string) {
+      const key = salesCellText(query).toLowerCase();
+      if (!key) return [] as FnOsProductSearchItem[];
+      const cached = productListCache.get(key);
+      if (cached) return cached;
+      const rows = await fetch("/api/fnos/quick-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query }),
+      })
+        .then((res) => res.json())
+        .then((data) => Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [])
+        .catch(() => [] as FnOsProductSearchItem[]);
+      productListCache.set(key, rows);
+      return rows;
+    }
+    async function resolveProduct(codeValue: string, nameValue: string): Promise<FnOsProductResolveResult> {
+      const code = salesCellText(codeValue);
+      const name = salesCellText(nameValue);
+      if (!code && !name) return { product: null, error: "품목코드(ERP)와 품목명(ERP)이 없습니다." };
+      const codeKey = code.toLowerCase();
+      const nameKey = name.toLowerCase();
+      const byCode = code ? (await findProducts(code)).find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
+      const byName = name ? (await findProducts(name)).find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
+      if (code && name) {
+        if (byCode && byName && salesCellText(byCode.code).toLowerCase() !== salesCellText(byName.code).toLowerCase()) {
+          return { product: null, error: `품목코드(${code})와 품목명(${name})이 서로 다른 품목입니다.` };
+        }
+        const product = byCode || byName;
+        if (!product) return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
+        if (byCode && salesCellText(byCode.name) && salesCellText(byCode.name).toLowerCase() !== nameKey) {
+          return { product: null, error: `품목코드(${code})의 실제 품목명은 "${salesCellText(byCode.name)}"입니다.` };
+        }
+        if (byName && salesCellText(byName.code) && salesCellText(byName.code).toLowerCase() !== codeKey) {
+          return { product: null, error: `품목명(${name})의 실제 품목코드는 "${salesCellText(byName.code)}"입니다.` };
+        }
+        return { product, error: "" };
+      }
+      const product = byCode || byName;
+      return product ? { product, error: "" } : { product: null, error: `품목(${code || name})을 FN OS 품목 DB에서 정확히 확인하지 못했습니다.` };
+    }
+
+    const errors: string[] = [];
+    const patches: Array<{ index: number; code: string; name: string }> = [];
+    for (const rowIndex of indexes) {
+      const row = sheets["발주 진행 단계"][rowIndex] || [];
+      const code = progressValue(row, "품목코드(ERP)");
+      const name = progressValue(row, "품목명(ERP)");
+      const resolved = await resolveProduct(code, name);
+      if (resolved.error) {
+        errors.push(`${rowIndex + 1}행: ${resolved.error}`);
+        continue;
+      }
+      if (resolved.product) {
+        const productCode = salesCellText(resolved.product.code);
+        const productName = salesCellText(resolved.product.name);
+        if (productCode && productName && (productCode !== code || productName !== name)) patches.push({ index: rowIndex, code: productCode, name: productName });
+      }
+    }
+    if (errors.length) {
+      window.alert(`품목코드(ERP)와 품목명(ERP)이 일치하지 않아 진행할 수 없습니다.\n${errors.slice(0, 10).join("\n")}${errors.length > 10 ? `\n외 ${errors.length - 10}건` : ""}\n\n품목연결/품목검색으로 같은 품목을 다시 선택해 주세요.`);
+      return false;
+    }
+    if (patches.length) {
+      setSheets((prev) => {
+        const next = { ...prev };
+        const progressRows = next["발주 진행 단계"].map((row) => [...row]);
+        const saleRows = next["FN판매입력"].map((row) => [...row]);
+        const purchaseRows = next["FN구매입력"].map((row) => [...row]);
+        patches.forEach((patch) => {
+          if (progressRows[patch.index]) {
+            setProgressValue(progressRows[patch.index], "품목코드(ERP)", patch.code);
+            setProgressValue(progressRows[patch.index], "품목명(ERP)", patch.name);
+          }
+          if (saleRows[patch.index]) {
+            setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목코드", patch.code);
+            setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목명", patch.name);
+          }
+          if (purchaseRows[patch.index]) {
+            setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목코드", patch.code);
+            setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목명", patch.name);
+          }
+        });
+        next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+        next["FN판매입력"] = padSalesRows("FN판매입력", saleRows);
+        next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+        return next;
+      });
+      setSalesGridResetKey((value) => value + 1);
+    }
+    return true;
+  }
+
   async function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
     const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
     if (!indexes.length) {
@@ -11622,6 +11763,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(status === "출고완료" ? "송장번호가 입력된 선택 주문이 없습니다." : "처리할 주문이 없습니다.");
       return;
     }
+    if (!await validateAndNormalizeProgressProducts(eligibleIndexes)) return;
     const eligibleSet = new Set(eligibleIndexes);
     const partialBundleWarnings: string[] = [];
     const checkedBundles = new Set<string>();
