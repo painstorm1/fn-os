@@ -12759,6 +12759,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let pickerIndex = 0;
       let pickerAttr = "all";
       let pickerSearchedQuery = "";
+      let pickerDragMode = null;
       let lastRows = [];
       let lastExportRows = [];
       let expandedVoucherKey = "";
@@ -13460,7 +13461,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (activePicker === "product") return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='selectNumber "+(isPicked ? "selected" : "")+"'>"+(index+1)+"</span></td><td class='code'>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td><td class='num'>₩"+fmt.format(Math.round(item.cost||0))+"</td><td class='num'>₩"+fmt.format(Math.round(item.price||0))+"</td></tr>";
           return "<tr class='clickable "+(index === pickerIndex ? "active" : "")+" "+(isPicked ? "selected" : "")+"' data-index='"+index+"'><td><span class='selectNumber "+(isPicked ? "selected" : "")+"'>"+(index+1)+"</span></td><td class='code'>"+esc(item.code||"-")+"</td><td>"+esc(item.name||"-")+"</td></tr>";
         }).join("") || "<tr><td colspan='5' class='muted'>"+(pickerSearchedQuery ? esc(pickerSearchedQuery)+"로 검색되는 항목이 없습니다." : "선택할 항목이 없습니다.")+"</td></tr>";
-        document.querySelectorAll("#pickerBody tr[data-index]").forEach((row) => row.addEventListener("click", () => togglePicker(Number(row.dataset.index))));
+        document.querySelectorAll("#pickerBody tr[data-index]").forEach((row) => {
+          row.addEventListener("mousedown", (event) => beginPickerDrag(Number(row.dataset.index), event));
+          row.addEventListener("mouseenter", () => continuePickerDrag(Number(row.dataset.index)));
+        });
         const all = document.getElementById("pickerAll");
         if (all) all.addEventListener("change", (event) => {
           selected[activePicker] = event.target.checked ? rows.slice() : [];
@@ -13490,11 +13494,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         selected[activePicker] = exists ? selected[activePicker].filter((picked) => optionKey(picked) !== key) : [...selected[activePicker], item];
         renderPicker();
       }
+      function pickerItemSelected(item){
+        const key = optionKey(item);
+        return selected[activePicker].some((picked) => optionKey(picked) === key);
+      }
       function setPickerItemSelected(item, shouldSelect){
         const key = optionKey(item);
         const exists = selected[activePicker].some((picked) => optionKey(picked) === key);
         if (shouldSelect && !exists) selected[activePicker] = [...selected[activePicker], item];
         if (!shouldSelect && exists) selected[activePicker] = selected[activePicker].filter((picked) => optionKey(picked) !== key);
+      }
+      function beginPickerDrag(index, event){
+        event.preventDefault();
+        const item = pickerMatches()[index];
+        if (!item) return;
+        pickerIndex = index;
+        pickerDragMode = pickerItemSelected(item) ? "deselect" : "select";
+        setPickerItemSelected(item, pickerDragMode === "select");
+        renderPicker();
+      }
+      function continuePickerDrag(index){
+        if (!pickerDragMode) return;
+        const item = pickerMatches()[index];
+        if (!item) return;
+        pickerIndex = index;
+        setPickerItemSelected(item, pickerDragMode === "select");
+        renderPicker();
       }
       function movePickerSelection(direction, extend){
         const rows = pickerMatches();
@@ -13502,11 +13527,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const current = Math.max(0, Math.min(pickerIndex, rows.length - 1));
         const next = Math.max(0, Math.min(rows.length - 1, current + direction));
         if (extend && next !== current) {
+          const currentSelected = pickerItemSelected(rows[current]);
+          const shouldSelect = !currentSelected;
           if (direction > 0) {
-            setPickerItemSelected(rows[current], true);
-            setPickerItemSelected(rows[next], true);
+            setPickerItemSelected(rows[current], shouldSelect);
+            setPickerItemSelected(rows[next], shouldSelect);
           } else {
-            setPickerItemSelected(rows[current], false);
+            setPickerItemSelected(rows[current], shouldSelect);
+            setPickerItemSelected(rows[next], shouldSelect);
           }
         }
         pickerIndex = next;
@@ -13563,9 +13591,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         selected[activePicker] = [];
         renderPicker();
       }));
+      document.addEventListener("mouseup", () => { pickerDragMode = null; });
       document.getElementById("search").addEventListener("click",renderAndReset);
       document.getElementById("resetAnalysis").addEventListener("click", resetAnalysisDefaults);
       document.addEventListener("keydown", (event) => {
+        const pickerOpen = document.getElementById("pickerBackdrop").classList.contains("open");
+        if (pickerOpen && event.target.id !== "pickerQuery") {
+          if (event.key === "ArrowDown") { event.preventDefault(); movePickerSelection(1, event.shiftKey); return; }
+          if (event.key === "ArrowUp") { event.preventDefault(); movePickerSelection(-1, event.shiftKey); return; }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const item = pickerMatches()[pickerIndex];
+            if (item && selectedSet(activePicker).has(optionKey(item))) applyPicker(); else togglePicker();
+            return;
+          }
+          if (event.key === "Escape") { event.preventDefault(); closePicker(); return; }
+        }
         if (event.key === "F5") {
           event.preventDefault();
           resetAnalysisDefaults();
