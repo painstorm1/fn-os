@@ -8751,7 +8751,7 @@ function OnlineOrderProgressList({
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
     rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(e.target.closest('button') && tr) choose(Number(tr.dataset.index || 0)); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); if(e.detail >= 2 || e.target.closest('button')) choose(selectedIndex); else render(); });
     document.getElementById('searchBtn').addEventListener('click', search);
     document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
@@ -17180,7 +17180,7 @@ function ChannelProductMappingPanel() {
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
     rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(e.target.closest('button') && tr) choose(Number(tr.dataset.index || 0)); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); if(e.detail >= 2 || e.target.closest('button')) choose(selectedIndex); else render(); });
     document.getElementById('searchBtn').addEventListener('click', search);
     document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
