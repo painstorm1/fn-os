@@ -12772,6 +12772,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       function optionKey(item){ return String(item.code || item.name || ""); }
       function optionLabel(item){ return item.code && item.name && item.code !== item.name ? item.code + " / " + item.name : (item.name || item.code || "-"); }
       function selectedSet(kind){ return new Set(selected[kind].map(optionKey)); }
+      function selectedProductMatchesRow(row, item){
+        return row.actualProductCode === item.code || row.sourceProductCode === item.code || row.actualProductName === item.name || row.sourceProductName === item.name;
+      }
       const normalizeLookupText = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, "").replace(/[()\\[\\]{}<>貴中귀중]/g, "");
       const customerDirectoryPromise = fetch("/api/fnos/customers?page=1&pageSize=5000&_=" + Date.now(), { cache: "no-store", credentials: "include" }).then((res) => res.json()).then((data) => {
         customerDirectory = data.customers || [];
@@ -13037,7 +13040,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (from && row.date < from) return false;
           if (to && row.date > to) return false;
           if (productKeys.size) {
-            const matchesProduct = selected.product.some((item) => row.actualProductCode === item.code || row.sourceProductCode === item.code || row.actualProductName === item.name || row.sourceProductName === item.name);
+            const matchesProduct = selected.product.some((item) => selectedProductMatchesRow(row, item));
             if (!matchesProduct) return false;
           } else if (product && !text(row.actualProductCode + " " + row.actualProductName + " " + row.sourceProductCode + " " + row.sourceProductName).includes(product)) return false;
           if (warehouseKeys.size) {
@@ -13389,7 +13392,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           const sorted = rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
           if (selected.product.length > 1) {
             tbody.innerHTML = selected.product.map((item) => {
-              const part = sorted.filter((r) => r.actualProductCode === item.code || r.sourceProductCode === item.code || r.actualProductName === item.name || r.sourceProductName === item.name);
+              const part = sorted.filter((r) => selectedProductMatchesRow(r, item));
               const qty = part.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
               const amount = part.reduce((sum, row) => sum + Number(row.amount || 0), 0);
               const avg = qty ? amount / qty : 0;
@@ -13417,7 +13420,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const keyFns = { product:r=>(r.actualProductCode||"-")+" / "+(r.actualProductName||"-"), warehouse:r=>r.warehouse, customer:r=>r.customer, date:r=>r.date, month:r=>r.month };
         const grouped = aggregate(rows, keyFns[group]);
         thead.innerHTML = "<tr><th>기준</th><th class='num'>판매수량</th><th class='num'>판매금액</th><th class='num'>판매단가</th><th class='num'>구매수량</th><th class='num'>구매금액</th><th class='num'>구매단가</th><th class='num'>거래처수</th><th>창고</th><th>최근거래일</th></tr>";
-        tbody.innerHTML = grouped.map((r)=>"<tr><td>"+esc(r.key)+"</td><td class='num rowSales'>"+fmt.format(r.salesQty)+"</td><td class='num rowSales'>"+krw(r.salesAmount)+"</td><td class='num rowSales'>"+(r.salesQty ? krw(r.salesAmount / r.salesQty) : "-")+"</td><td class='num rowPurchase'>"+fmt.format(r.purchaseQty)+"</td><td class='num rowPurchase'>"+krw(r.purchaseAmount)+"</td><td class='num rowPurchase'>"+(r.purchaseQty ? krw(r.purchaseAmount / r.purchaseQty) : "-")+"</td><td class='num'>"+fmt.format(r.customers.size)+"</td><td>"+esc(Array.from(r.warehouses).sort().join(" ") || "-")+"</td><td>"+esc(r.latest||"-")+"</td></tr>").join("");
+        const groupedRowsHtml = (items) => items.map((r)=>"<tr><td>"+esc(r.key)+"</td><td class='num rowSales'>"+fmt.format(r.salesQty)+"</td><td class='num rowSales'>"+krw(r.salesAmount)+"</td><td class='num rowSales'>"+(r.salesQty ? krw(r.salesAmount / r.salesQty) : "-")+"</td><td class='num rowPurchase'>"+fmt.format(r.purchaseQty)+"</td><td class='num rowPurchase'>"+krw(r.purchaseAmount)+"</td><td class='num rowPurchase'>"+(r.purchaseQty ? krw(r.purchaseAmount / r.purchaseQty) : "-")+"</td><td class='num'>"+fmt.format(r.customers.size)+"</td><td>"+esc(Array.from(r.warehouses).sort().join(" ") || "-")+"</td><td>"+esc(r.latest||"-")+"</td></tr>").join("");
+        if (selected.product.length > 1 && group !== "product") {
+          tbody.innerHTML = selected.product.map((item) => {
+            const part = rows.filter((r) => selectedProductMatchesRow(r, item));
+            const productGrouped = aggregate(part, keyFns[group]);
+            const qty = part.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
+            const amount = part.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+            const header = "<tr class='groupRow'><td colspan='4' class='groupSummaryName'>품목 " + esc(optionLabel(item)) + " / " + fmt.format(part.length) + "건</td><td class='num groupSummaryMetric'>" + fmt.format(qty) + "</td><td class='num groupSummaryMetric'>" + krw(amount) + "</td><td colspan='4'></td></tr>";
+            return header + (productGrouped.length ? groupedRowsHtml(productGrouped) : "<tr><td colspan='10' class='muted'>조회되는 내역이 없습니다.</td></tr>");
+          }).join("");
+        } else {
+          tbody.innerHTML = groupedRowsHtml(grouped);
+        }
         updateNav();
       }
       function optionsFor(kind){
