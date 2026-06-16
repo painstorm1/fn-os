@@ -8711,7 +8711,7 @@ function OnlineOrderProgressList({
   <div class="wrap">
     <div class="head"><div><h1>품목코드 연동</h1><p class="hint">뒤의 발주 자료를 보면서 이 창에서 FN OS 품목을 검색해 선택합니다.</p></div><button class="secondary" id="closeBtn">닫기</button></div>
     <div class="tabs" id="tabs"></div>
-    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button></div>
+    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button><button class="primary" id="applyBtn">적용</button></div>
     <div class="panel"><table><thead><tr><th class="pick">선택</th><th style="width:150px">품목코드</th><th>품목명</th><th class="num" style="width:120px">입고단가</th><th class="num" style="width:120px">출고단가</th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
   </div>
   <script>
@@ -8736,6 +8736,7 @@ function OnlineOrderProgressList({
     rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
     rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(e.target.closest('button') && tr) choose(Number(tr.dataset.index || 0)); });
     document.getElementById('searchBtn').addEventListener('click', search);
+    document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
     query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
     renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(query.value.trim()) search();
