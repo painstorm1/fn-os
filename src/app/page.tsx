@@ -17618,6 +17618,8 @@ function ChannelProductMappingPanel() {
       row.productName,
     ].some((value) => salesCellText(value).toLowerCase().includes(needle)));
   }, [rows, query]);
+  const filteredKeys = useMemo(() => filteredRows.map((row, index) => mappingRowKey(row, index)), [filteredRows]);
+  const mappingSelection = useCheckboxColumnSelection({ keys: filteredKeys, selectedKeys, setSelectedKeys, enabled: !productSearch.open });
 
   function closeMappingWindow() {
     if (typeof window === "undefined") return;
@@ -17860,7 +17862,7 @@ function ChannelProductMappingPanel() {
             <col className="w-[74px]" />
           </colgroup>
           <thead className="bg-gray-50 text-xs font-black text-gray-500">
-            <tr><th className="px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="whitespace-nowrap px-3 py-2 text-center">관리</th></tr>
+            <tr><th className="px-3 py-2 text-center"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={mappingSelection.allSelected} onChange={(event) => mappingSelection.toggleAll(event.target.checked)} /></th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="whitespace-nowrap px-3 py-2 text-center">관리</th></tr>
           </thead>
           <tbody>
             {filteredRows.map((row, index) => {
@@ -17868,7 +17870,7 @@ function ChannelProductMappingPanel() {
               const selected = selectedKeys.includes(key);
               return (
               <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setDraft(row)}>
-                <td className="px-3 py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); setDraft(row); setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]); }} onMouseEnter={() => {}} /></td>
+                <td className="px-3 py-2 text-center" onClick={(event) => event.stopPropagation()}><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { setDraft(row); mappingSelection.beginSelection(key, index, event); }} onMouseEnter={() => mappingSelection.continueSelection(key, index)} /></td>
                 <td className="truncate px-3 py-2 font-semibold" title={row.mallName}>{row.mallName}</td>
                 <td className="truncate px-3 py-2" title={row.mallCode || "-"}>{row.mallCode || "-"}</td>
                 <td className="truncate px-3 py-2" title={row.mallProductCode || "-"}>{row.mallProductCode || "-"}</td>
