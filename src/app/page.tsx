@@ -10187,6 +10187,13 @@ function inventoryMatchesAnyFilterTerm(haystack: string, terms: string[]) {
   return terms.some((term) => inventoryMatchesTerms(haystack, term));
 }
 
+function parseInventoryNumber(value: unknown, fallback = 0) {
+  const normalized = normalizeCommaNumberInput(value, { negative: true });
+  if (!normalized || normalized === "-") return fallback;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
 function salesRowProductCode(row: Record<string, unknown>) {
   return String(row.prod_cd || row.product_code || row.sku || row.prod_name || row.product_name || "").trim();
 }
@@ -14117,10 +14124,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!editingInventoryRow) return;
     setInventorySaving(true);
     try {
-      const nextQty = Number(String(inventoryEditDraft.qty || editingInventoryRow.qty).replace(/[^\d.-]/g, ""));
-      const moveQty = Number(String(inventoryEditDraft.moveQty || "0").replace(/[^\d.-]/g, ""));
-      if (!Number.isFinite(nextQty) || nextQty < 0) {
-        window.alert("재고수량은 0 이상 숫자로 입력해 주세요.");
+      const nextQty = parseInventoryNumber(inventoryEditDraft.qty, editingInventoryRow.qty);
+      const moveQty = parseInventoryNumber(inventoryEditDraft.moveQty, 0);
+      if (!Number.isFinite(nextQty)) {
+        window.alert("재고수량은 숫자로 입력해 주세요.");
+        return;
+      }
+      if (!Number.isFinite(moveQty) || moveQty < 0) {
+        window.alert("이동 수량은 0 이상 숫자로 입력해 주세요.");
+        return;
+      }
+      if (moveQty > 0 && !inventoryEditDraft.targetWarehouseCode.trim()) {
+        window.alert("이동 대상 창고를 선택해 주세요.");
         return;
       }
       const inventoryHistory: Array<Record<string, unknown>> = [];
@@ -14138,12 +14153,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         warehouse_name: editingInventoryRow.warehouseName,
         qty: nextQty,
       });
-      if (moveQty > 0 && inventoryEditDraft.targetWarehouseCode.trim()) {
+      if (moveQty > 0) {
         const targetCode = inventoryEditDraft.targetWarehouseCode.trim();
         const targetWarehouse = inventoryWarehouses.find((warehouse) => warehouse.warehouse_code === targetCode);
         const source = inventoryMap.get(editingInventoryRow.warehouseCode);
         const target = inventoryMap.get(targetCode);
-        inventoryMap.set(editingInventoryRow.warehouseCode, { ...source, warehouse_code: editingInventoryRow.warehouseCode, warehouse_name: editingInventoryRow.warehouseName, qty: Math.max(0, Number(source?.qty || 0) - moveQty) });
+        inventoryMap.set(editingInventoryRow.warehouseCode, { ...source, warehouse_code: editingInventoryRow.warehouseCode, warehouse_name: editingInventoryRow.warehouseName, qty: Number(source?.qty || 0) - moveQty });
         inventoryMap.set(targetCode, { ...target, warehouse_code: targetCode, warehouse_name: targetWarehouse?.warehouse_name || target?.warehouse_name || targetCode, qty: Number(target?.qty || 0) + moveQty });
         inventoryHistory.push(transferInventoryHistory(editingInventoryRow, moveQty, targetCode, inventoryEditDraft.memo));
       }
