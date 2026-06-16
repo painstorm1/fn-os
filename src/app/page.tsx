@@ -19746,10 +19746,6 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
         skipped += 1;
         continue;
       }
-      if (found && String(found.product_name || "").trim() !== row.product_name) {
-        skipped += 1;
-        continue;
-      }
       const res = await fetch("/api/fnos/products/master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -20325,21 +20321,16 @@ function WarehouseManagementPanel({ message, setMessage }: { message: string; se
       }))
       .filter((row) => row.warehouse_code && row.warehouse_name);
     const exactMatches = normalized.filter((row) => {
-      const found = existing.get(row.warehouse_code);
-      return found && String(found.warehouse_name || "").trim() === row.warehouse_name;
+      return existing.has(row.warehouse_code);
     });
     const overwrite = exactMatches.length
-      ? window.confirm(`${exactMatches.length}개 창고의 창고코드와 창고명이 일치합니다. 현재 엑셀 데이터로 덮어쓰기 하시겠습니까?\n\n확인: 덮어쓰기\n취소: 기존 항목 스킵`)
+      ? window.confirm(`엑셀에 이미 등록된 창고코드 ${exactMatches.length}개가 있습니다.\n\n확인: 신규 창고는 추가하고 기존 창고는 엑셀 내용으로 덮어쓰기\n취소: 신규 창고만 추가하고 기존 창고는 건너뛰기`)
       : false;
     let saved = 0;
     let skipped = 0;
     for (const row of normalized) {
       const found = existing.get(row.warehouse_code);
       if (found && !overwrite) {
-        skipped += 1;
-        continue;
-      }
-      if (found && String(found.warehouse_name || "").trim() !== row.warehouse_name) {
         skipped += 1;
         continue;
       }
