@@ -328,6 +328,193 @@ function productName(row: RawRow | null | undefined) {
   return text(row?.product_name || row?.prod_name || row?.name);
 }
 
+function canonicalCustomerCode(row: RawRow | null | undefined) {
+  return text(row?.customer_code || row?.cust_code);
+}
+
+function canonicalCustomerName(row: RawRow | null | undefined) {
+  return text(row?.customer_name || row?.cust_name);
+}
+
+function warehouseCode(row: RawRow | null | undefined) {
+  return text(row?.warehouse_code || row?.wh_cd);
+}
+
+function warehouseName(row: RawRow | null | undefined) {
+  return text(row?.warehouse_name || row?.wh_name);
+}
+
+function lookupKey(value: unknown) {
+  return text(value).toLowerCase();
+}
+
+function pushLookup(map: Map<string, RawRow[]>, value: unknown, row: RawRow) {
+  const key = lookupKey(value);
+  if (!key) return;
+  const current = map.get(key) || [];
+  if (current.some((item) => sameReference(item, row))) return;
+  map.set(key, [...current, row]);
+}
+
+function sameReference(left: RawRow | null | undefined, right: RawRow | null | undefined) {
+  if (!left || !right) return false;
+  const leftId = text(left.id);
+  const rightId = text(right.id);
+  if (leftId && rightId) return leftId === rightId;
+  return left === right;
+}
+
+function matchesAny(value: string, candidates: string[]) {
+  const key = lookupKey(value);
+  return Boolean(key) && candidates.some((candidate) => lookupKey(candidate) === key);
+}
+
+async function referenceRows(table: "customers" | "products" | "warehouses") {
+  return optionalRows(table, { order: "created_at.asc", limit: 50000 });
+}
+
+async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchases") {
+  const [customers, products, warehouses] = await Promise.all([
+    referenceRows("customers"),
+    referenceRows("products"),
+    referenceRows("warehouses"),
+  ]);
+
+  const customerByCode = new Map<string, RawRow[]>();
+  const customerByName = new Map<string, RawRow[]>();
+  customers.forEach((row) => {
+    pushLookup(customerByCode, row.customer_code, row);
+    pushLookup(customerByCode, row.cust_code, row);
+    pushLookup(customerByName, row.customer_name, row);
+    pushLookup(customerByName, row.cust_name, row);
+  });
+
+  const productByCode = new Map<string, RawRow[]>();
+  const productByName = new Map<string, RawRow[]>();
+  products.forEach((row) => {
+    pushLookup(productByCode, row.product_code, row);
+    pushLookup(productByCode, row.prod_cd, row);
+    pushLookup(productByCode, row.sku, row);
+    pushLookup(productByName, row.product_name, row);
+    pushLookup(productByName, row.prod_name, row);
+  });
+
+  const warehouseByCode = new Map<string, RawRow[]>();
+  const warehouseByName = new Map<string, RawRow[]>();
+  warehouses.forEach((row) => {
+    pushLookup(warehouseByCode, row.warehouse_code, row);
+    pushLookup(warehouseByCode, row.wh_cd, row);
+    pushLookup(warehouseByName, row.warehouse_name, row);
+    pushLookup(warehouseByName, row.wh_name, row);
+  });
+
+  const errors: string[] = [];
+  const normalizedRows = rows.map((row, index) => {
+    const next = { ...row };
+    const rowLabel = `${index + 1}행`;
+
+    const customerCodeValue = text(next.cust_code || next.customer_code);
+    const customerNameValue = text(next.cust_name || next.customer_name);
+    const customerCodeMatches = customerCodeValue ? customerByCode.get(lookupKey(customerCodeValue)) || [] : [];
+    const customerNameMatches = customerNameValue ? customerByName.get(lookupKey(customerNameValue)) || [] : [];
+    const customerByCodeRow = customerCodeMatches[0] || null;
+    const customerByNameRow = customerNameMatches[0] || null;
+
+    let customer = customerByCodeRow || customerByNameRow;
+    if (customerCodeValue && !customerByCodeRow) {
+      errors.push(`${rowLabel}: 거래처코드 '${customerCodeValue}'가 기초관리 거래처 DB에 없습니다.`);
+    }
+    if (customerNameValue && !customerByNameRow && !customerByCodeRow) {
+      errors.push(`${rowLabel}: 거래처명 '${customerNameValue}'가 기초관리 거래처 DB에 없습니다.`);
+    }
+    if (!customerCodeValue && customerNameMatches.length > 1) {
+      errors.push(`${rowLabel}: 거래처명 '${customerNameValue}'와 일치하는 거래처가 여러 개입니다. 거래처코드를 입력해 주세요.`);
+    }
+    if (customerCodeValue && customerNameValue && customerByCodeRow && customerByNameRow && !sameReference(customerByCodeRow, customerByNameRow)) {
+      errors.push(`${rowLabel}: 거래처코드 '${customerCodeValue}'와 거래처명 '${customerNameValue}'가 서로 다른 거래처입니다.`);
+    }
+    if (customerByCodeRow && customerNameValue && !matchesAny(customerNameValue, [text(customerByCodeRow.customer_name), text(customerByCodeRow.cust_name)])) {
+      errors.push(`${rowLabel}: 거래처코드 '${customerCodeValue}'의 기초관리 거래처명은 '${canonicalCustomerName(customerByCodeRow)}'입니다.`);
+    }
+    if (customer) {
+      next.cust_code = canonicalCustomerCode(customer);
+      next.cust_name = canonicalCustomerName(customer);
+    }
+
+    const whValue = text(next.wh_cd || next.warehouse_code);
+    const whNameValue = text(next.wh_name || next.warehouse_name);
+    const whCodeMatches = whValue ? warehouseByCode.get(lookupKey(whValue)) || [] : [];
+    const whNameMatches = whNameValue ? warehouseByName.get(lookupKey(whNameValue)) || [] : [];
+    const whByCodeRow = whCodeMatches[0] || null;
+    const whByNameRow = whNameMatches[0] || null;
+    const warehouse = whByCodeRow || whByNameRow;
+    if (whValue && !whByCodeRow) {
+      errors.push(`${rowLabel}: ${kind === "purchases" ? "입고창고" : "출하창고"} '${whValue}'가 기초관리 창고 DB에 없습니다.`);
+    }
+    if (!whValue && whNameValue && !whByNameRow) {
+      errors.push(`${rowLabel}: 창고명 '${whNameValue}'가 기초관리 창고 DB에 없습니다.`);
+    }
+    if (!whValue && whNameMatches.length > 1) {
+      errors.push(`${rowLabel}: 창고명 '${whNameValue}'와 일치하는 창고가 여러 개입니다. 창고코드를 입력해 주세요.`);
+    }
+    if (whValue && whNameValue && whByCodeRow && whByNameRow && !sameReference(whByCodeRow, whByNameRow)) {
+      errors.push(`${rowLabel}: 창고코드 '${whValue}'와 창고명 '${whNameValue}'가 서로 다른 창고입니다.`);
+    }
+    if (warehouse) {
+      next.wh_cd = warehouseCode(warehouse);
+      if (warehouseName(warehouse)) next.wh_name = warehouseName(warehouse);
+    }
+
+    const productCodeValue = text(next.prod_cd || next.product_code || next.sku);
+    const productNameValue = text(next.prod_name || next.product_name);
+    const productCodeMatches = productCodeValue ? productByCode.get(lookupKey(productCodeValue)) || [] : [];
+    const productNameMatches = productNameValue ? productByName.get(lookupKey(productNameValue)) || [] : [];
+    const productByCodeRow = productCodeMatches[0] || null;
+    const productByNameRow = productNameMatches[0] || null;
+    const product = productByCodeRow || productByNameRow;
+    if (productCodeValue && !productByCodeRow) {
+      errors.push(`${rowLabel}: 품목코드 '${productCodeValue}'가 기초관리 품목 DB에 없습니다.`);
+    }
+    if (productNameValue && !productByNameRow && !productByCodeRow) {
+      errors.push(`${rowLabel}: 품목명 '${productNameValue}'가 기초관리 품목 DB에 없습니다.`);
+    }
+    if (!productCodeValue && productNameMatches.length > 1) {
+      errors.push(`${rowLabel}: 품목명 '${productNameValue}'와 일치하는 품목이 여러 개입니다. 품목코드를 입력해 주세요.`);
+    }
+    if (productCodeValue && productNameValue && productByCodeRow && productByNameRow && !sameReference(productByCodeRow, productByNameRow)) {
+      errors.push(`${rowLabel}: 품목코드 '${productCodeValue}'와 품목명 '${productNameValue}'가 서로 다른 품목입니다.`);
+    }
+    if (productByCodeRow && productNameValue && !matchesAny(productNameValue, [text(productByCodeRow.product_name), text(productByCodeRow.prod_name)])) {
+      errors.push(`${rowLabel}: 품목코드 '${productCodeValue}'의 기초관리 품목명은 '${productName(productByCodeRow)}'입니다.`);
+    }
+    if (product) {
+      const code = productCode(product);
+      next.prod_cd = code;
+      next.product_code = code;
+      next.sku = text(product.sku) || code;
+      next.prod_name = productName(product);
+      next.product_name = productName(product);
+      next.product_id = text(product.id) || null;
+    }
+
+    return next;
+  });
+
+  return { rows: normalizedRows, errors };
+}
+
+function blockedImportResult(rows: RawRow[], errors: string[]): ImportResult {
+  return {
+    ok: false,
+    message: errors[0] || "FN OS DB reference validation failed.",
+    db_saved_count: 0,
+    success_count: 0,
+    fail_count: rows.length,
+    errors,
+    external_sync_enabled: false,
+  };
+}
+
 async function activeBomItems(productId: string) {
   if (!productId) return [];
   const boms = await optionalRows("product_boms", {
@@ -504,12 +691,18 @@ function salesInventoryEntryRequiredError(row: RawRow, kind: "sales" | "purchase
 export async function importSalesRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
-  const batch = await createUploadBatch("sales", sourceFileName, rows.length);
   const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index)).filter(Boolean);
-  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "sales", index));
-  const normalized = validRows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
+  if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
+
+  const batch = await createUploadBatch("sales", sourceFileName, rows.length);
+  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
+  const referenceResult = await validateEntryReferences(normalized, "sales");
+  if (referenceResult.errors.length) {
+    await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
+    return blockedImportResult(rows, referenceResult.errors);
+  }
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
-  const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
+  const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
   const movementCount = await writeInventoryMovements(saved, "sale_out").catch(() => 0);
   await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
@@ -522,7 +715,7 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
-    duplicate_count: validRows.length - freshRows.length,
+    duplicate_count: referenceResult.rows.length - freshRows.length,
     inventory_movement_count: movementCount,
     errors: invalidErrors,
     batch_id: batch.id,
@@ -533,10 +726,11 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
 export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
-  const batch = await createUploadBatch("return_exchange", sourceFileName, rows.length);
   const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index)).filter(Boolean);
-  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "sales", index));
-  const normalized = validRows.map((row, index) => {
+  if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
+
+  const batch = await createUploadBatch("return_exchange", sourceFileName, rows.length);
+  const normalized = rows.map((row, index) => {
     const kind = text(row.return_exchange_type || row.io_type).includes("exchange") || text(row.io_type).includes("교환") ? "exchange_out" : "return_in";
     return {
       ...normalizeSale(row, index, batch.id, sourceFileName || "FN_OS_RETURN_EXCHANGE_ENTRY"),
@@ -546,8 +740,13 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
       remarks: text(row.remarks || row.memo),
     };
   });
+  const referenceResult = await validateEntryReferences(normalized, "sales");
+  if (referenceResult.errors.length) {
+    await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
+    return blockedImportResult(rows, referenceResult.errors);
+  }
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
-  const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
+  const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
   const returnRows = saved.filter((row) => returnExchangeKindFromRow(row) !== "exchange_out");
   const exchangeRows = saved.filter((row) => returnExchangeKindFromRow(row) === "exchange_out");
@@ -564,7 +763,7 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
-    duplicate_count: validRows.length - freshRows.length,
+    duplicate_count: referenceResult.rows.length - freshRows.length,
     inventory_movement_count: movementCount,
     errors: invalidErrors,
     batch_id: batch.id,
@@ -575,12 +774,18 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
 export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
-  const batch = await createUploadBatch("purchases", sourceFileName, rows.length);
   const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "purchases", index)).filter(Boolean);
-  const validRows = rows.filter((row, index) => !salesInventoryEntryRequiredError(row, "purchases", index));
-  const normalized = validRows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
+  if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
+
+  const batch = await createUploadBatch("purchases", sourceFileName, rows.length);
+  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
+  const referenceResult = await validateEntryReferences(normalized, "purchases");
+  if (referenceResult.errors.length) {
+    await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
+    return blockedImportResult(rows, referenceResult.errors);
+  }
   const existingRefs = await existingSourceRefs("purchases", normalized.map((row) => row.source_ref_id));
-  const freshRows = normalized.filter((row) => !existingRefs.has(row.source_ref_id));
+  const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("purchases", freshRows) : { saved: [], removedColumns: [] };
   const movementCount = await writeInventoryMovements(saved, "purchase_in").catch(() => 0);
   await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
@@ -593,7 +798,7 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
     db_saved_count: saved.length,
     success_count: saved.length,
     fail_count: rows.length - saved.length,
-    duplicate_count: validRows.length - freshRows.length,
+    duplicate_count: referenceResult.rows.length - freshRows.length,
     inventory_movement_count: movementCount,
     errors: invalidErrors,
     batch_id: batch.id,
