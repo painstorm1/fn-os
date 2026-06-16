@@ -10146,6 +10146,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEscapeToClose(inventoryHistoryOpen, () => setInventoryHistoryOpen(false));
 
   useEffect(() => {
+    if (!collectionPopupOpen) return;
+    const finished = collectionStatuses.length > 0 && collectionStatuses.every((item) => !["waiting", "running"].includes(item.status));
+    if (!finished) return;
+    function closeFinishedCollectionPopup(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      setCollectionPopupOpen(false);
+    }
+    window.addEventListener("keydown", closeFinishedCollectionPopup, true);
+    return () => window.removeEventListener("keydown", closeFinishedCollectionPopup, true);
+  }, [collectionPopupOpen, collectionStatuses]);
+
+  useEffect(() => {
     if (!inventoryPicker) return;
     inventoryPickerRowRefs.current[inventoryPicker.index]?.scrollIntoView({ block: "nearest" });
   }, [inventoryPicker?.index, inventoryPicker?.type]);
