@@ -51,6 +51,7 @@ function customerName(row: Row) {
 
 function customerType(row: Row) {
   const raw = compact(row.customer_type || row.cust_type || row.customer_type_label);
+  if (raw.includes("쇼핑몰") || raw.includes("쇳븨")) return "shopping";
   return raw.includes("shopping") || raw.includes("mall") || raw.includes("shop") || raw.includes("쇼핑몰") ? "shopping" : "general";
 }
 
@@ -221,6 +222,7 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     const customerRecord = findCustomer(code, name);
     const display = customerRecord?.name || text(name) || text(code) || "-";
     const key = compact(customerRecord?.code || code || display) || compact(display);
+    if (customerRecord?.type === "shopping") return null;
     if (!key || display === "-" || display === "거래처" || display === "구매처") return null;
     if (!customerRecord?.balance_reflect) return null;
     if (targetNeedle && ![customerRecord?.code, customerRecord?.name, code, name].map(compact).some((value) => value && (value.includes(targetNeedle) || targetNeedle.includes(value)))) return null;
