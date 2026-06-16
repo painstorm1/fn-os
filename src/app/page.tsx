@@ -17178,9 +17178,19 @@ function ChannelProductMappingPanel() {
         <span className="text-xs font-bold text-slate-400">표시 {filteredRows.length.toLocaleString("ko-KR")} / 전체 {rows.length.toLocaleString("ko-KR")}</span>
       </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
-        <table className="w-full min-w-[1060px] text-sm">
+        <table className="w-full min-w-[1280px] table-fixed text-sm">
+          <colgroup>
+            <col className="w-14" />
+            <col className="w-[130px]" />
+            <col className="w-[150px]" />
+            <col className="w-[150px]" />
+            <col className="w-[90px]" />
+            <col className="w-[220px]" />
+            <col className="w-[410px]" />
+            <col className="w-[74px]" />
+          </colgroup>
           <thead className="bg-gray-50 text-xs font-black text-gray-500">
-            <tr><th className="w-16 px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="px-3 py-2 text-center">관리</th></tr>
+            <tr><th className="px-3 py-2 text-center">선택</th><th className="px-3 py-2 text-left">쇼핑몰명</th><th className="px-3 py-2 text-left">쇼핑몰코드</th><th className="px-3 py-2 text-left">쇼핑몰상품코드</th><th className="px-3 py-2 text-left">품목코드</th><th className="px-3 py-2 text-left">품목명</th><th className="px-3 py-2 text-left">쇼핑몰품목key</th><th className="whitespace-nowrap px-3 py-2 text-center">관리</th></tr>
           </thead>
           <tbody>
             {filteredRows.map((row, index) => {
@@ -17189,13 +17199,13 @@ function ChannelProductMappingPanel() {
               return (
               <tr key={key} className={`cursor-pointer border-t border-gray-100 ${selected ? "bg-sky-50" : ""}`} onClick={() => setDraft(row)}>
                 <td className="px-3 py-2 text-center"><SelectionNumberButton index={index} selected={selected} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedKeys((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]); }} onMouseEnter={() => {}} /></td>
-                <td className="px-3 py-2 font-semibold">{row.mallName}</td>
-                <td className="px-3 py-2">{row.mallCode || "-"}</td>
-                <td className="px-3 py-2">{row.mallProductCode || "-"}</td>
-                <td className="px-3 py-2">{row.productCode}</td>
-                <td className="px-3 py-2">{row.productName}</td>
-                <td className="px-3 py-2">{row.mallProductKey}</td>
-                <td className="px-3 py-2 text-center"><button type="button" className="text-xs font-black text-rose-600" onClick={async (event) => { event.stopPropagation(); if (!row.id || !window.confirm("이 연결을 삭제할까요?")) return; await fetch(`/api/fnos/sales-channel-product-mappings?id=${encodeURIComponent(String(row.id))}`, { method: "DELETE", credentials: "include" }); await loadMappings(); }}>삭제</button></td>
+                <td className="truncate px-3 py-2 font-semibold" title={row.mallName}>{row.mallName}</td>
+                <td className="truncate px-3 py-2" title={row.mallCode || "-"}>{row.mallCode || "-"}</td>
+                <td className="truncate px-3 py-2" title={row.mallProductCode || "-"}>{row.mallProductCode || "-"}</td>
+                <td className="truncate px-3 py-2" title={row.productCode}>{row.productCode}</td>
+                <td className="truncate px-3 py-2" title={row.productName}>{row.productName}</td>
+                <td className="break-words px-3 py-2" title={row.mallProductKey}>{row.mallProductKey}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-center"><button type="button" className="whitespace-nowrap text-xs font-black text-rose-600" onClick={async (event) => { event.stopPropagation(); if (!row.id || !window.confirm("이 연결을 삭제할까요?")) return; await fetch(`/api/fnos/sales-channel-product-mappings?id=${encodeURIComponent(String(row.id))}`, { method: "DELETE", credentials: "include" }); await loadMappings(); }}>삭제</button></td>
               </tr>
             );})}
           </tbody>
