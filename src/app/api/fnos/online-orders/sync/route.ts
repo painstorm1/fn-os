@@ -65,6 +65,10 @@ function orderJobType(channelCode: string) {
   return channelCode === "COUPANG" ? "collect_coupang_orders" : "collect_smartstore_orders";
 }
 
+function orderItemCount(orders: NormalizedOrder[]) {
+  return orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
+}
+
 function adapterCodeForChannel(channel: AnyRecord) {
   const code = text(channel.channel_code).toUpperCase();
   const name = text(channel.channel_name).toUpperCase();
@@ -180,7 +184,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
       target_type: "online_orders",
       started_at: startedAt,
       finished_at: new Date().toISOString(),
-      success_count: result.ok ? orders.length : 0,
+      success_count: result.ok ? orderItemCount(orders) : 0,
       fail_count: result.ok ? 0 : 1,
       status: result.ok ? "success" : "failed",
       error_message: result.ok ? null : result.error || result.message || null,
@@ -258,7 +262,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const results = await Promise.all(activeChannels.map((channel) => collectChannel(channel, body)));
+    const results = [];
+    for (const channel of activeChannels) {
+      results.push(await collectChannel(channel, body));
+    }
     const orders = results.flatMap((result) => result.orders);
     return jsonResponse({
       ok: results.some((result) => result.ok),
@@ -267,11 +274,11 @@ export async function POST(request: NextRequest) {
         channel_name: text(result.channel.channel_name),
         ok: result.ok,
         skipped: Boolean(result.skipped),
-        count: result.orders.length,
+        count: orderItemCount(result.orders),
         message: result.message,
       })),
       orders,
-      count: orders.length,
+      count: orderItemCount(orders),
     });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

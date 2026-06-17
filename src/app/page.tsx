@@ -10887,8 +10887,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setCollectionPopupOpen(true);
     setMessage("");
     try {
-      const today = formatDateKey(new Date());
-      const requestBody = { from: today, to: today };
+      const todayDate = new Date();
+      const fromDate = new Date(todayDate);
+      fromDate.setDate(todayDate.getDate() - 6);
+      const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
       let res: Response;
       if (isLocalPage) {
@@ -10965,6 +10967,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return;
       }
       const orders = Array.isArray(data.orders) ? data.orders as CollectedOnlineOrder[] : [];
+      const collectedItemCount = orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
       if (orders.length) {
         const mappings = await loadSalesChannelProductMappings().catch((error) => {
           setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 조회 실패");
@@ -10974,7 +10977,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setSalesGridResetKey((value) => value + 1);
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-      setMessage(`쇼핑몰 API 주문 ${orders.length}건을 수집해 온라인 발주 시트에 반영했습니다.`);
+      setMessage(`쇼핑몰 API 주문 ${collectedItemCount}건을 수집해 온라인 발주 시트에 반영했습니다.`);
       window.alert("작업 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : "쇼핑몰 API 주문 수집 실패";

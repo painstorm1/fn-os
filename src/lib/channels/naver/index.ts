@@ -88,6 +88,24 @@ function normalizeNaverDateTime(value: unknown, boundary: "start" | "end") {
   return formatKstDateTime(fallback);
 }
 
+function naverDailyRanges(fromValue: unknown, toValue: unknown) {
+  const from = new Date(normalizeNaverDateTime(fromValue, "start"));
+  const to = new Date(normalizeNaverDateTime(toValue, "end"));
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from.getTime() > to.getTime()) {
+    return [{ from: normalizeNaverDateTime(fromValue, "start"), to: normalizeNaverDateTime(toValue, "end") }];
+  }
+  const ranges: Array<{ from: string; to: string }> = [];
+  let cursor = from.getTime();
+  const end = to.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  while (cursor <= end && ranges.length < 370) {
+    const rangeEnd = Math.min(cursor + dayMs - 1, end);
+    ranges.push({ from: formatKstDateTime(new Date(cursor)), to: formatKstDateTime(new Date(rangeEnd)) });
+    cursor = rangeEnd + 1;
+  }
+  return ranges.length ? ranges : [{ from: normalizeNaverDateTime(fromValue, "start"), to: normalizeNaverDateTime(toValue, "end") }];
+}
+
 function arrayAt(root: unknown, paths: string[][]) {
   for (const path of paths) {
     let current = root;
@@ -274,6 +292,22 @@ function mergeOrders(orders: NormalizedOrder[]) {
   return Array.from(byOrder.values());
 }
 
+function uniqueNaverRows(rows: AnyRecord[]) {
+  const seen = new Set<string>();
+  return rows.filter((row, index) => {
+    const content = record(row.content);
+    const productOrder = record(row.productOrder || row.product_order || content.productOrder || row);
+    const key = firstText(productOrder.productOrderId, productOrder.productOrderNo, row.productOrderId) || `row-${index}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function issueNaverToken(params: Record<string, unknown>) {
   const clientId = text(params.api_client_id || params.client_id);
   const clientSecret = text(params.api_client_secret || params.client_secret);
@@ -312,12 +346,22 @@ async function fetchConditionalOrders(token: string, from: string, to: string, p
   url.searchParams.set("pageSize", "300");
   url.searchParams.set("page", "1");
   url.searchParams.set("quantityClaimCompatibility", "true");
-  const data = await readJson(await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-    },
-  }));
+  let data: unknown = {};
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      data = await readJson(await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }));
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!/요청이 많|too many|429|rate/i.test(message) || attempt === 3) throw error;
+      await wait(1500 * (attempt + 1));
+    }
+  }
   return arrayAt(data, [
     ["data", "contents"],
     ["data", "productOrders"],
@@ -337,12 +381,15 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
 
     try {
       const token = await issueNaverToken(params);
-      const from = normalizeNaverDateTime(params.from, "start");
-      const to = normalizeNaverDateTime(params.to, "end");
-      const detailRows = [
-        ...await fetchConditionalOrders(token, from, to, "NOT_YET"),
-        ...await fetchConditionalOrders(token, from, to, "OK"),
-      ];
+      const ranges = naverDailyRanges(params.from, params.to);
+      const fetchedRows: AnyRecord[] = [];
+      for (const range of ranges) {
+        fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "NOT_YET"));
+        await wait(700);
+        fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "OK"));
+        await wait(700);
+      }
+      const detailRows = uniqueNaverRows(fetchedRows);
       if (!detailRows.length) return { ok: true, data: [], message: "네이버 신규/주문확인 주문이 없습니다." };
       const warehouseShipRows = detailRows.filter((row) => !isNaverManagedDeliveryOrder(row as AnyRecord));
       const shippableRows = warehouseShipRows.filter((row) => hasCustomerShippingAddress(row as AnyRecord));
