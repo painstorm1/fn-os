@@ -641,6 +641,8 @@ function manualCategoryPath(row: RawRow) {
   const sourceType = text(row.source_type);
   const sourceName = text(row.source_name);
   const haystack = `${existingLarge} ${existingMiddle} ${existingSmall} ${merchant} ${text(row.description)}`;
+  const compactHaystack = haystack.replace(/\s+/g, "");
+  const isOutgoing = text(row.direction) === "expense" || numberValue(row.debit_amount) > 0 || /출금/.test(existingLarge);
   const pair = (large: string, middle: string) => ({ large, middle });
   if (sourceType === "bank" && (text(row.direction) === "income" || numberValue(row.credit_amount) > 0)) {
     if (/스마트스토어|NAVER\s*FINANCIAL|네이버/i.test(haystack)) return pair("판매 정산금", "스마트스토어");
@@ -693,8 +695,10 @@ function manualCategoryPath(row: RawRow) {
   if (/하이패스/.test(haystack)) return pair("유지비", "하이패스");
   if (/화재보험/.test(haystack)) return pair("유지비", "화재보험");
   if (/급여/.test(haystack)) return pair("인건비", "급여");
+  if (isOutgoing && /이자-\d{1,3}-\d+/.test(compactHaystack)) return pair("금융비용", "대출 원리금");
   if (/대출이자|대출|원리금|상환/.test(haystack)) return pair("금융비용", "대출 원리금");
   if (/보증료|수수료|문자통지료|SMS/.test(haystack)) return pair("금융비용", "보증료/수수료");
+  if (/통합(?:연금|산재|고용|건강)\d{2,6}/.test(compactHaystack)) return pair("복리후생비", "4대보험");
   if (/4대보험|산재보험|고용보험|국민연금|국민건강/.test(haystack)) return pair("복리후생비", "4대보험");
   if (/식대|점심|커피|편의점|회식/.test(haystack)) return pair("복리후생비", "회식 식대");
   if (/교통비|티머니/.test(haystack)) return pair("복리후생비", "직원 교통비");
