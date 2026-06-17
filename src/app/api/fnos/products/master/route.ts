@@ -517,6 +517,16 @@ export async function DELETE(request: NextRequest) {
       is_active: false,
       updated_at: nowIso(),
     });
+    const deletedIds = rows.map((row) => text(row.id)).filter(Boolean);
+    for (const productId of deletedIds) {
+      await deleteRows("import_product_sku_links", { product_id: `eq.${productId}` }).catch(() => []);
+      const boms = await selectRows<AnyRecord>("product_boms", { parent_product_id: `eq.${productId}`, limit: 500 }).catch(() => []);
+      for (const bom of boms) {
+        await deleteRows("product_bom_items", { bom_id: `eq.${bom.id}` }).catch(() => []);
+      }
+      await deleteRows("product_boms", { parent_product_id: `eq.${productId}` }).catch(() => []);
+      await deleteRows("product_bom_items", { component_product_id: `eq.${productId}` }).catch(() => []);
+    }
     return NextResponse.json({ ok: true, deleted: rows.length });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

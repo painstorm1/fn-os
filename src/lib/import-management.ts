@@ -107,6 +107,10 @@ function productKind(row: AnyRecord) {
   return "plain";
 }
 
+function isActiveProduct(row: AnyRecord) {
+  return text(row.status).toLowerCase() !== "deleted" && row.is_active !== false;
+}
+
 function productCost(row: AnyRecord) {
   return numberValue(row.cost_price ?? row.in_price ?? row.standard_price ?? row.out_price);
 }
@@ -177,6 +181,7 @@ export async function searchFnProducts(query: string, limit = 80) {
     activeBomParentProductIds(),
   ]);
   const matched = rows
+    .filter(isActiveProduct)
     .filter((row) => !bomParentIds.has(text(row.id)))
     .filter((row) => productKind(row) === "plain")
     .map((row) => {
@@ -203,10 +208,19 @@ export async function listImportProductLinks(importProductId: number | string): 
     order: "sort_order.asc,is_primary.desc,created_at.asc",
     limit: 500,
   }).catch(() => []);
-  const productRows = await productsByIds(links.map((row) => text(row.product_id)));
+  const productRows = (await productsByIds(links.map((row) => text(row.product_id)))).filter(isActiveProduct);
+  const activeProductIds = new Set(productRows.map((row) => text(row.id)));
+  const staleLinkIds = links
+    .filter((row) => text(row.product_id) && !activeProductIds.has(text(row.product_id)))
+    .map((row) => text(row.id))
+    .filter(Boolean);
+  if (staleLinkIds.length) {
+    await deleteRows("import_product_sku_links", { id: sqlList(staleLinkIds) }).catch(() => []);
+  }
+  const validLinks = links.filter((row) => activeProductIds.has(text(row.product_id)));
   const inventoryByProduct = await inventoryForProducts(productRows.map((row) => text(row.id)));
   const productMap = new Map(productRows.map((row) => [text(row.id), normalizeProduct(row, inventoryByProduct)]));
-  return links.map((link) => {
+  return validLinks.map((link) => {
     const optionName = text(link.option_name || link.import_option_name || link.import_option_key);
     const groupLabel = text(link.group_label || link.match_group_label || optionName);
     return {
@@ -225,9 +239,11 @@ export async function listImportProductLinks(importProductId: number | string): 
 export async function saveImportProductLinks(importProductId: number | string, links: ImportSkuLinkInput[]) {
   if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
   await deleteRows("import_product_sku_links", { import_product_id: `eq.${importProductId}` });
+  const productIds = Array.from(new Set(links.map((link) => text(link.product_id)).filter(Boolean)));
+  const activeProductIds = new Set((await productsByIds(productIds)).filter(isActiveProduct).map((row) => text(row.id)));
   const now = nowIso();
   const rows = links
-    .filter((link) => text(link.product_id))
+    .filter((link) => activeProductIds.has(text(link.product_id)))
     .map((link, index) => ({
       import_product_id: Number(importProductId),
       product_id: link.product_id,

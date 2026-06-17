@@ -19554,6 +19554,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setMessage("");
     setModalOpen(false);
     invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/products/search");
+    invalidateClientCache("/api/fnos/products");
     invalidateClientCache("/api/fnos/inventory/history");
     await loadProducts(page, query);
   }
@@ -19577,6 +19579,8 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setProductMessage(`품목 삭제 완료: ${productCode}`);
     setModalOpen(false);
     invalidateClientCache("/api/fnos/products/master");
+    invalidateClientCache("/api/fnos/products/search");
+    invalidateClientCache("/api/fnos/products");
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
@@ -19650,6 +19654,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     setSelectedProductKeys([]);
     invalidateClientCache("/api/fnos/products/master");
     invalidateClientCache("/api/fnos/products/search");
+    invalidateClientCache("/api/fnos/products");
     await loadProducts(page, query, relationFilter, searchByCode);
   }
 
