@@ -13688,7 +13688,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const productCode = inventoryProductCode(product);
     const productName = inventoryProductName(product);
     const cost = Number(product.cost_price || 0);
-    const stockRows = product.inventory?.length ? product.inventory : [{ warehouse_code: "100", warehouse_name: "100", qty: product.current_stock || 0 }];
+    const stockRows = product.inventory || [];
     return stockRows.map((stock) => {
       const rawWarehouseCode = inventoryWarehouseCode(stock);
       const warehouse = inventoryWarehouseByCode.get(rawWarehouseCode);
@@ -13723,7 +13723,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setting,
       } satisfies InventoryListRow;
     });
-  }).filter((row) => {
+  }).filter((row) => row.qty !== 0).filter((row) => {
     const warehouseTerms = inventoryFilterTerms(inventoryFilters.warehouse);
     const productTerms = inventoryFilterTerms(inventoryFilters.product);
     if (warehouseTerms.length && !inventoryMatchesAnyFilterTerm(`${row.warehouseCode} ${row.warehouseName}`, warehouseTerms)) return false;

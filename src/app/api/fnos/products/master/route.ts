@@ -211,13 +211,23 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const activeProducts = products.filter((row) => text(row.status).toLowerCase() !== "deleted" && row.is_active !== false);
+    const activeProductIds = new Set(activeProducts.map((row) => text(row.id)).filter(Boolean));
+    const activeProductCodes = new Set(activeProducts.map((row) => productCode(row)).filter(Boolean));
     const inventoryByProduct = new Map<string, AnyRecord[]>();
     const inventoryByCode = new Map<string, AnyRecord[]>();
     inventory.forEach((row) => {
+      const qty = numberValue(row.on_hand_qty ?? row.bal_qty);
+      if (qty === 0) return;
       const productId = text(row.product_id);
       const code = text(row.prod_cd || row.sku);
-      if (productId) inventoryByProduct.set(productId, [...(inventoryByProduct.get(productId) || []), row]);
-      if (code) inventoryByCode.set(code, [...(inventoryByCode.get(code) || []), row]);
+      if (productId) {
+        if (!activeProductIds.has(productId)) return;
+        inventoryByProduct.set(productId, [...(inventoryByProduct.get(productId) || []), row]);
+        return;
+      }
+      if (!code || !activeProductCodes.has(code)) return;
+      inventoryByCode.set(code, [...(inventoryByCode.get(code) || []), row]);
     });
     const productById = new Map(products.map((row) => [text(row.id), row]));
     const bomByProduct = new Map<string, AnyRecord>();
@@ -239,7 +249,6 @@ export async function GET(request: NextRequest) {
       importLinksByProduct.set(key, [...(importLinksByProduct.get(key) || []), row]);
     });
 
-    const activeProducts = products.filter((row) => text(row.status).toLowerCase() !== "deleted" && row.is_active !== false);
     const normalizedProducts = activeProducts.map((row) => {
       const code = productCode(row);
       const stockRows = inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
