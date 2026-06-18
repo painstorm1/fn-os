@@ -14489,10 +14489,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <div className="flex flex-col items-start gap-1">
-                <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow(4)}>F1 주문수집</button>
-                <span className="pl-1 text-[11px] font-bold text-slate-400">shift+F1:14일호출</span>
-              </div>
+              <button type="button" title="F1 4일 호출 - Shift+F1 14일 호출" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow(4)}>F1 주문수집</button>
               <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F2 송장 업로드</button>
               <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F3 FN택배시트 반영</button>
               <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>
@@ -14558,9 +14555,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             onPageChange={setOrderProgressPage}
             statusFilter={orderProgressStatusFilter}
           />
-          <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-700">
-            참고: 직송 저장된 주문은 송장출력용 내보내기에서 제외되고, 송장 엑셀 모달에서 거래처별 직송파일과 함께 내보낼 수 있습니다.
-          </p>
           <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
             <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
