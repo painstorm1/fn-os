@@ -525,6 +525,30 @@ function fixedCostKeywords(row: RawRow) {
   return text(raw).split(/[,/|]+/).map(text).filter(Boolean);
 }
 
+function fixedCostCardKey(row: RawRow) {
+  const haystack = `${text(row.fixed_cost_name || row.name)} ${text(row.category_large)} ${text(row.category_middle)} ${text(row.payment_source)} ${text(row.source_card_name)} ${text(row.memo)}`;
+  if (!/카드|카드대금|가온|국민기업|국민 기업/.test(haystack)) return "";
+  const key = accountingCardKey(haystack);
+  return key === "gaon" || key === "kb" ? key : "";
+}
+
+function cardSettlementAmount(row: RawRow) {
+  return numberValue(row.amount_krw || row.domestic_amount || row.amount);
+}
+
+function matchingCardSettlement(fixedCost: RawRow, settlements: RawRow[], dueDate: string) {
+  const cardKey = fixedCostCardKey(fixedCost);
+  if (!cardKey) return null;
+  return settlements
+    .filter((row) => {
+      if (row.paid === true) return false;
+      if (accountingCardKey(row.card_name) !== cardKey) return false;
+      const paymentDueDate = isoDate(row.payment_due_date);
+      return paymentDueDate === dueDate || previousBusinessDay(paymentDueDate) === dueDate;
+    })
+    .sort((left, right) => text(left.payment_due_date).localeCompare(text(right.payment_due_date)))[0] || null;
+}
+
 function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
   const keywords = fixedCostKeywords(fixedCost);
   const from = addDays(dueDate, -3);
@@ -554,14 +578,16 @@ function actualDateInDueWindow(actualDate: string, dueDate: string, today: strin
   return actualDate >= addDays(dueDate, -3) && actualDate <= addDays(dueDate, 3);
 }
 
-function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = [], dueAnchor = today) {
+function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = [], dueAnchor = today, settlements: RawRow[] = []) {
   const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, dueAnchor);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
   const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
+  const cardSettlement = !actualRow ? matchingCardSettlement(row, settlements, dueDate) : null;
   const savedActualDate = isoDate(row.last_actual_date);
   const savedActualInWindow = actualDateInDueWindow(savedActualDate, dueDate, today);
   const actualAmount = actualRow ? transactionAmount(actualRow) : savedActualInWindow ? numberValue(row.last_actual_amount) : 0;
-  const displayAmount = actualAmount || expectedAmount;
+  const settlementAmount = cardSettlement ? cardSettlementAmount(cardSettlement) : 0;
+  const displayAmount = actualAmount || settlementAmount || expectedAmount;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
   const paid = Boolean(actualRow || savedActualInWindow);
   return {
@@ -575,6 +601,9 @@ function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawR
     last_actual_amount: actualAmount || null,
     last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : savedActualInWindow ? savedActualDate : null,
     matched_transaction_id: actualRow?.id || null,
+    matched_card_settlement_id: cardSettlement?.id || null,
+    card_settlement_amount: settlementAmount || null,
+    card_settlement_due_date: cardSettlement ? isoDate(cardSettlement.payment_due_date) : null,
     paid,
     amount: displayAmount,
     due_date: dueDate,
@@ -1784,7 +1813,7 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
   const today = kstToday();
   const sevenDaysLater = addDays(today, 7);
   const occurrenceAnchors = from && to ? monthAnchorsForRange(from, to) : [today];
-  const fixedCostOccurrences = occurrenceAnchors.flatMap((anchor) => activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows, anchor)));
+  const fixedCostOccurrences = occurrenceAnchors.flatMap((anchor) => activeFixedCosts.map((row) => fixedCostOccurrence(row, today, rows, anchor, settlements)));
   const loanOccurrences = occurrenceAnchors.flatMap((anchor) => activeLoans.map((row) => loanOccurrence(row, today, rows, anchor)));
   const loanMaturityOccurrences = (activeLoans.map((row) => loanMaturityOccurrence(row)).filter(Boolean) as RawRow[])
     .filter((row) => {

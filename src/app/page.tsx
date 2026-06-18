@@ -23325,7 +23325,7 @@ function accountingCategoryKind(categoryLarge: unknown): "income" | "expense" {
 }
 
 const ACCOUNTING_SUMMARY_ENDPOINT = "/api/accounting/ledger/summary";
-const ACCOUNTING_CACHE_VERSION = "2026-06-11-review-category-visibility";
+const ACCOUNTING_CACHE_VERSION = "2026-06-18-card-settlement-fixed-costs";
 const ACCOUNTING_CACHE_TTL = 5 * 60_000;
 const ACCOUNTING_STORAGE_TTL = 10 * 60_000;
 type AccountingSummaryScope = "dashboard" | "full" | "ledger" | "fixed" | "db";
@@ -27934,9 +27934,10 @@ function AccountingRightPanel() {
   function upcomingFixedCostTitle(row: Record<string, unknown>) {
     const category = String(row.category_middle || row.category_large || (String(row.row_type || "") === "loan" ? "대출 원리금" : "고정비")).trim();
     const title = String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-").replace(/^\[[^\]]+\]\s*/, "").trim();
+    const suffix = asNumber(row.card_settlement_amount) > 0 ? " - 예정" : "";
     if (!category) return title || "-";
-    if (!title || title === "-" || title === category) return `[${category}]`;
-    return `[${category}] ${title}`;
+    if (!title || title === "-" || title === category) return `[${category}]${suffix}`;
+    return `[${category}] ${title}${suffix}`;
   }
 
   function cardSettlementFor(namePattern: RegExp) {
