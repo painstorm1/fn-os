@@ -1626,6 +1626,18 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
       memo: text(row.review_memo || row.reviewMemo || row.memo) || null,
       updated_at: new Date().toISOString(),
     }).catch(() => []);
+  } else if (payload.review_status === "pending") {
+    await upsertRows("accounting_review_queue", [{
+      transaction_id: id,
+      reason: text(payload.review_reason) || "미분류",
+      status: "pending",
+      suggested_category_id: payload.category_id || null,
+      suggested_category_large: payload.category_large || null,
+      suggested_category_middle: payload.category_middle || null,
+      suggested_category_small: payload.category_small || null,
+      memo: text(row.review_memo || row.reviewMemo || row.memo) || null,
+      updated_at: new Date().toISOString(),
+    }], "transaction_id").catch(() => []);
   }
   if (touchesCardSettlement(row)) await rebuildCardSettlements();
   return saved;

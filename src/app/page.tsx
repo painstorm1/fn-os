@@ -24986,7 +24986,11 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
     .sort((left, right) => String(left.category_middle || "").localeCompare(String(right.category_middle || ""), "ko-KR"));
 
   function matchStatusRuleForRows(targetRows: Array<Record<string, unknown>>) {
-    return rules.find((rule) => {
+    return matchStatusRulesForRows(targetRows)[0];
+  }
+
+  function matchStatusRulesForRows(targetRows: Array<Record<string, unknown>>) {
+    return rules.filter((rule) => {
       if (rule.is_active === false) return false;
       const keyword = String(rule.keyword || "").replace(/\s+/g, "").toLowerCase();
       if (!keyword) return false;
@@ -25111,6 +25115,82 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         }
       }
       setMessage(`${targetRows.length.toLocaleString("ko-KR")}건의 거래명 매칭을 수정했습니다.`);
+      setMatchStatusEditing(null);
+      setMatchStatusEditDraft({ categoryLarge: "", categoryId: "", affectsProfit: true, autoClassify: false, ruleId: "" });
+      invalidateAccountingCache();
+      loadSummary(true);
+      loadLedgerRows(true);
+    } finally {
+      setMatchStatusSaving(false);
+    }
+  }
+
+  async function resetMatchStatusToReview() {
+    if (!matchStatusEditing) return;
+    const targetRows = matchStatusTargetRows(matchStatusEditing);
+    if (!targetRows.length) {
+      window.alert("되돌릴 거래를 찾지 못했습니다.");
+      return;
+    }
+    const message = `${targetRows.length.toLocaleString("ko-KR")}건을 다시 검토필요로 되돌릴까요?\n자동분류 규칙이 연결되어 있으면 함께 해제합니다.`;
+    if (!window.confirm(message)) return;
+    setMatchStatusSaving(true);
+    const fallbackCategoryFor = (row: Record<string, unknown>) => {
+      const large = String(row.direction || "") === "income" ? "기타 입금" : "기타 출금";
+      const category = categories.find((item) => String(item.category_large || "") === large && String(item.category_middle || "") === "검토필요");
+      return { category, large };
+    };
+    patchAccountingRowsLocally(targetRows.map((row) => String(row.id || "")), {
+      review_status: "pending",
+      review_reason: "미분류",
+      category_middle: "검토필요",
+      category_small: "",
+    });
+    try {
+      const ruleIds = Array.from(new Set([
+        matchStatusEditDraft.ruleId,
+        ...matchStatusRulesForRows(targetRows).map((rule) => String(rule.id || "")),
+      ].filter(Boolean)));
+      for (const ruleId of ruleIds) {
+        const ruleRes = await fetch(`/api/accounting/ledger/rules?id=${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+        const ruleData = await ruleRes.json().catch(() => ({}));
+        if (!ruleRes.ok || ruleData.ok === false) {
+          setMessage(ruleData.error || "자동분류 규칙 해제 실패");
+          await loadLedgerRows(true);
+          return;
+        }
+      }
+      const results = await Promise.all(targetRows.map(async (row) => {
+        const id = String(row.id || "");
+        if (!id) return { ok: true };
+        const fallback = fallbackCategoryFor(row);
+        const res = await fetch("/api/accounting/ledger/transactions", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            category_id: String(fallback.category?.id || ""),
+            category_large: fallback.category?.category_large || fallback.large,
+            category_middle: fallback.category?.category_middle || "검토필요",
+            category_small: "",
+            affects_profit: fallback.category?.affects_profit ?? false,
+            affects_cashflow: fallback.category?.affects_cashflow ?? true,
+            memo: row.memo || "",
+            review_status: "pending",
+            review_reason: "미분류",
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok && data.ok !== false, error: data.error };
+      }));
+      const failed = results.find((item) => !item.ok);
+      if (failed) {
+        setMessage(String(failed.error || "검토필요 되돌리기 실패"));
+        await loadSummary(true);
+        await loadLedgerRows(true);
+        return;
+      }
+      setMessage(`${targetRows.length.toLocaleString("ko-KR")}건을 검토필요로 되돌렸습니다.`);
       setMatchStatusEditing(null);
       setMatchStatusEditDraft({ categoryLarge: "", categoryId: "", affectsProfit: true, autoClassify: false, ruleId: "" });
       invalidateAccountingCache();
@@ -26673,6 +26753,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           size="sm"
           footer={
             <>
+              <ActionButton type="button" variant="danger" onClick={() => void resetMatchStatusToReview()} disabled={matchStatusSaving}>검토필요로 되돌리기</ActionButton>
               <ActionButton type="button" variant="secondary" onClick={() => setMatchStatusEditing(null)}>취소</ActionButton>
               <ActionButton type="button" onClick={() => void saveMatchStatusEdit()} disabled={matchStatusSaving || !matchStatusEditDraft.categoryId}>저장</ActionButton>
             </>
