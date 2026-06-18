@@ -10874,22 +10874,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (kind === "orders") window.alert("작업 완료됨!");
   }
 
-  async function runOrderCollectionFlow() {
+  async function runOrderCollectionFlow(dayWindow = 4) {
+    const collectDays = Math.max(1, Math.floor(dayWindow));
     setCollectionPopupOpen(false);
     setCollectionPopupTitle("주문수집");
     setCollectionStatuses([]);
-    const ok = window.confirm("주문 수집하시겠습니까?");
+    const ok = window.confirm(`최근 ${collectDays}일 주문 수집하시겠습니까?`);
     if (!ok) return;
     resetSalesWorkspaceForOrderCollection();
     setCollectionStatuses([
-      { name: "온라인 발주", status: "running", message: "API 수집 중" },
+      { name: "온라인 발주", status: "running", message: `최근 ${collectDays}일 API 수집 중` },
     ]);
     setCollectionPopupOpen(true);
     setMessage("");
     try {
       const todayDate = new Date();
       const fromDate = new Date(todayDate);
-      fromDate.setDate(todayDate.getDate() - 6);
+      fromDate.setDate(todayDate.getDate() - (collectDays - 1));
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
       let res: Response;
@@ -10902,7 +10903,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           body: JSON.stringify(requestBody),
         } as RequestInit & { fnosSkipBusyOverlay: boolean });
       } else {
-        setCollectionStatuses([{ name: "온라인 발주", status: "running", message: "로컬 주문수집 연결 중" }]);
+        setCollectionStatuses([{ name: "온라인 발주", status: "running", message: `로컬 주문수집 연결 중 · 최근 ${collectDays}일` }]);
         try {
           res = await fetch("http://127.0.0.1:3000/api/fnos/online-orders/sync", {
             method: "POST",
@@ -10977,7 +10978,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setSalesGridResetKey((value) => value + 1);
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-      setMessage(`쇼핑몰 API 주문 ${collectedItemCount}건을 수집해 온라인 발주 시트에 반영했습니다.`);
+      setMessage(`최근 ${collectDays}일 쇼핑몰 API 주문 ${collectedItemCount}건을 수집해 온라인 발주 시트에 반영했습니다.`);
       window.alert("작업 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : "쇼핑몰 API 주문 수집 실패";
@@ -12193,11 +12194,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (section !== "online") return undefined;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!/^F[1-3]$/.test(event.key)) return;
-      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
       if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === "F1") void runOrderCollectionFlow();
+      if (event.key === "F1") {
+        void runOrderCollectionFlow(event.shiftKey ? 14 : 4);
+        return;
+      }
+      if (event.shiftKey) return;
       if (event.key === "F2") openInvoiceUpload();
       if (event.key === "F3") void applyFnParcelSheet();
     };
@@ -14484,7 +14489,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow()}>F1 주문수집</button>
+              <div className="flex flex-col items-start gap-1">
+                <button type="button" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow(4)}>F1 주문수집</button>
+                <span className="pl-1 text-[11px] font-bold text-slate-400">shift+F1:14일호출</span>
+              </div>
               <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F2 송장 업로드</button>
               <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F3 FN택배시트 반영</button>
               <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>
