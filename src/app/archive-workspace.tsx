@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import {
   ActionButton,
@@ -22,9 +22,12 @@ type ArchiveItem = {
   id: string;
   title?: string;
   url?: string;
+  normalized_url?: string;
+  url_hash?: string;
   source_type?: string;
   content_type?: string;
   summary?: string;
+  original_url?: string;
   description?: string;
   memo?: string;
   preview_image_url?: string;
@@ -60,7 +63,7 @@ type ActiveMenu = "save" | "all" | "project" | CategoryGroup;
 type ArchiveViewMode = "preview" | "list";
 const PROJECT_LINK_TYPE = "archive_project";
 const ARCHIVE_CACHE_URL = "/api/fnos/archive";
-const ARCHIVE_CACHE_KEY = "/api/fnos/archive?v=20260609";
+const ARCHIVE_CACHE_KEY = "/api/fnos/archive?v=20260619";
 const ARCHIVE_MEMORY_TTL = 10 * 60_000;
 const ARCHIVE_STORAGE_TTL = 30 * 60_000;
 const ARCHIVE_PREVIEW_INITIAL_RENDER = 80;
@@ -90,11 +93,10 @@ function readArchiveCache() {
 const categoryTree: Record<CategoryGroup, string[]> = {
   교육: ["영어", "포토샵", "일러스트", "AI"],
   업무: ["소싱", "광고소재", "상세페이지", "업무방법", "경쟁사", "디자인참고"],
-  개인: ["캠핑", "요리", "살림", "육아", "여행", "동기부여", "유머", "기타"],
+  개인: ["캠핑", "요리", "살림", "육아", "여행", "맛집", "동기부여", "유머", "기타"],
 };
 
 const sources = ["instagram", "youtube", "naver", "coupang", "smartstore", "taobao", "1688", "amazon", "rakuten", "web", "manual", "file"];
-const contentTypes = ["link", "image", "video", "file", "memo", "product", "ad_reference", "detail_page", "supplier"];
 
 function cleanTitle(value: string) {
   return value
@@ -180,6 +182,9 @@ function classifyAutoDraft(url: string, context: string): AutoArchiveDraft {
   } else if (context.includes("여행")) {
     categoryGroup = "개인";
     categoryName = "여행";
+  } else if (context.includes("맛집") || context.includes("식당") || context.includes("카페") || lower.includes("restaurant")) {
+    categoryGroup = "개인";
+    categoryName = "맛집";
   }
 
   const titleSeed = sourceType === "instagram" ? `릴스 ${urlSlug(url)}` : urlSlug(url);
@@ -385,13 +390,13 @@ export default function ArchiveWorkspace() {
     return true;
   }), [activeMenu, categoryById, categoryFilteredItems, filters, projectTextByItemId]);
 
-  function applyArchiveData(value: Partial<ArchiveData> | null | undefined) {
+  const applyArchiveData = useCallback((value: Partial<ArchiveData> | null | undefined) => {
     const normalized = normalizeArchiveData(value);
     lastArchiveData = normalized;
     setData(normalized);
-  }
+  }, []);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const cached = readArchiveCache();
     let showedCachedData = false;
     if (cached) {
@@ -428,20 +433,20 @@ export default function ArchiveWorkspace() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [applyArchiveData]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void refresh();
+      try {
+        const savedProjects = JSON.parse(window.localStorage.getItem("fnos-archive-local-projects") || "[]");
+        setLocalProjects(Array.isArray(savedProjects) ? savedProjects.map(String).map(cleanProjectName).filter(Boolean) : []);
+      } catch {
+        setLocalProjects([]);
+      }
     }, 0);
-    try {
-      const savedProjects = JSON.parse(window.localStorage.getItem("fnos-archive-local-projects") || "[]");
-      if (Array.isArray(savedProjects)) setLocalProjects(savedProjects.map(String).map(cleanProjectName).filter(Boolean));
-    } catch {
-      setLocalProjects([]);
-    }
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -462,9 +467,12 @@ export default function ArchiveWorkspace() {
 
   useEffect(() => {
     if (!message) return;
-    const shouldPopup = /(실패|선택|입력|없습니다)/.test(message) && !message.includes("미리보기를 생성할 URL");
-    if (shouldPopup) setNoticeMessage(message);
-    setMessage("");
+    const timer = window.setTimeout(() => {
+      const shouldPopup = /(실패|선택|입력|없습니다)/.test(message) && !message.includes("미리보기를 생성할 URL");
+      if (shouldPopup) setNoticeMessage(message);
+      setMessage("");
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [message]);
 
   async function postJson(url: string, body: Record<string, unknown>) {
@@ -718,7 +726,9 @@ export default function ArchiveWorkspace() {
     setMessage("");
     try {
       const results = await Promise.all(autoDrafts.map((draft) => {
-        const { warning: _warning, project_name: _projectName, ...saveDraft } = draft;
+        const { warning, project_name: projectName, ...saveDraft } = draft;
+        void warning;
+        void projectName;
         const payload = {
           ...saveDraft,
           category_id: categoryIdByName.get(draft.category_name) || null,
@@ -830,10 +840,6 @@ export default function ArchiveWorkspace() {
     ["업무", "업무"],
     ["개인", "개인"],
   ];
-
-  function categoryCount(categoryName: string) {
-    return archiveCounts.categoryCounts.get(categoryName) || 0;
-  }
 
   function groupCount(group: CategoryGroup) {
     return archiveCounts.groupCounts[group];
@@ -968,6 +974,7 @@ export default function ArchiveWorkspace() {
                       ×
                     </button>
                     <div className="mb-2 text-xs font-black text-slate-500">붙여넣은 이미지 미리보기</div>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- Object URLs from pasted local images cannot go through Next Image optimization. */}
                     <img src={autoImagePreview} alt="붙여넣은 이미지 미리보기" className="max-h-48 w-full rounded border border-slate-200 bg-white object-contain" />
                   </div>
                 )}
@@ -1192,11 +1199,11 @@ function ArchiveList({
     setEditDraft(null);
   }
 
-  function toggleSelected(id: string, checked: boolean) {
+  const toggleSelected = useCallback((id: string, checked: boolean) => {
     setSelectedIds((prev) => checked ? Array.from(new Set([...prev, id])) : prev.filter((itemId) => itemId !== id));
     const index = items.findIndex((item) => item.id === id);
     if (index >= 0) keyboardIndexRef.current = index;
-  }
+  }, [items]);
 
   function beginListDragSelect(id: string, checked?: boolean) {
     if (!selectMode || viewMode !== "list") return;
@@ -1206,11 +1213,11 @@ function ArchiveList({
     toggleSelected(id, nextChecked);
   }
 
-  function continueListDragSelect(id: string) {
+  const continueListDragSelect = useCallback((id: string) => {
     if (!selectMode || viewMode !== "list" || dragSelectModeRef.current === null || dragLastIdRef.current === id) return;
     dragLastIdRef.current = id;
     toggleSelected(id, dragSelectModeRef.current);
-  }
+  }, [selectMode, toggleSelected, viewMode]);
 
   async function moveSelectedCategory() {
     const category = data.categories.find((item) => item.category_name === bulkCategoryName);
@@ -1244,11 +1251,14 @@ function ArchiveList({
   }
 
   useEffect(() => {
-    if (!selectMode) setSelectedIds([]);
+    if (selectMode) return;
+    const timer = window.setTimeout(() => setSelectedIds([]), 0);
+    return () => window.clearTimeout(timer);
   }, [selectMode]);
 
   useEffect(() => {
-    setVisibleCount(archiveInitialRenderCount(viewMode));
+    const timer = window.setTimeout(() => setVisibleCount(archiveInitialRenderCount(viewMode)), 0);
+    return () => window.clearTimeout(timer);
   }, [items, viewMode]);
 
   useEffect(() => {
@@ -1279,7 +1289,7 @@ function ArchiveList({
       window.removeEventListener("mouseup", stopListDragSelect);
       window.removeEventListener("blur", stopListDragSelect);
     };
-  }, [selectMode, viewMode]);
+  }, [continueListDragSelect]);
 
   useEffect(() => {
     if (!selectMode) return;
@@ -1303,7 +1313,7 @@ function ArchiveList({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [items, selectMode, selectedIds, viewMode]);
+  }, [items, selectMode, selectedIds, toggleSelected, viewMode]);
 
   return (
     <div className="space-y-4">
@@ -1391,7 +1401,12 @@ function ArchiveList({
               )}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex aspect-[4/5] w-full items-center justify-center bg-slate-100">
-                  {previewUrl ? <img src={previewUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-cover" /> : <ArchivePreviewFallback item={item} />}
+                  {previewUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- Archive previews are user-supplied external images already fetched/stored as preview URLs. */}
+                      <img src={previewUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-cover" />
+                    </>
+                  ) : <ArchivePreviewFallback item={item} />}
                 </div>
               </a>
               <div className="p-2">

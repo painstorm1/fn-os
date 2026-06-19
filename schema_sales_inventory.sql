@@ -1323,6 +1323,8 @@ create table if not exists archive_items (
   archive_type text,
   title text not null,
   url text,
+  normalized_url text,
+  url_hash text,
   source_type text,
   content_type text default 'link',
   source_ref_id text,
@@ -1345,6 +1347,8 @@ create table if not exists archive_items (
 );
 
 alter table archive_items add column if not exists url text;
+alter table archive_items add column if not exists normalized_url text;
+alter table archive_items add column if not exists url_hash text;
 alter table archive_items add column if not exists content_type text default 'link';
 alter table archive_items add column if not exists summary text;
 alter table archive_items add column if not exists original_url text;
@@ -1524,6 +1528,7 @@ insert into archive_categories (category_name, sort_order) values
   ('살림', 130),
   ('육아', 140),
   ('여행', 150),
+  ('맛집', 155),
   ('동기부여', 160),
   ('유머', 170),
   ('기타', 180),
@@ -1779,6 +1784,8 @@ create index if not exists idx_import_purchase_alloc_item on import_purchase_sku
 create index if not exists idx_import_purchase_alloc_product on import_purchase_sku_allocations(product_id);
 create index if not exists idx_archive_created on archive_items(created_at desc);
 create index if not exists idx_archive_category on archive_items(category_id);
+create index if not exists idx_archive_normalized_url on archive_items(normalized_url);
+create unique index if not exists archive_items_url_hash_uidx on archive_items(url_hash) where url_hash is not null;
 create index if not exists idx_archive_source on archive_items(source_type);
 create index if not exists idx_archive_content on archive_items(content_type);
 create index if not exists idx_archive_status on archive_items(status);

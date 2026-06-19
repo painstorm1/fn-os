@@ -6,7 +6,7 @@ type CategoryGroup = "교육" | "업무" | "개인";
 const categoryTree: Record<CategoryGroup, string[]> = {
   교육: ["영어", "포토샵", "일러스트", "AI"],
   업무: ["소싱", "광고소재", "상세페이지", "업무방법", "경쟁사", "디자인참고"],
-  개인: ["캠핑", "요리", "살림", "육아", "여행", "동기부여", "유머", "기타"],
+  개인: ["캠핑", "요리", "살림", "육아", "여행", "맛집", "동기부여", "유머", "기타"],
 };
 
 const validGroups = Object.keys(categoryTree) as CategoryGroup[];
@@ -81,7 +81,8 @@ function inferCategoryBySignals(text: string): { group: CategoryGroup; categoryN
   const candidates = [
     { group: "개인" as CategoryGroup, categoryName: "캠핑", score: countMatches(value, /캠핑장|글램핑|카라반|차박|오토캠핑|백패킹|camping|glamping|caravan/g) * 3 + countMatches(value, /캠핑/g) * 2 },
     { group: "개인" as CategoryGroup, categoryName: "여행", score: countMatches(value, /여행|숙소|펜션|호텔|리조트|travel|trip|hotel|resort/g) * 2 + countMatches(value, /가평|양양|제주|강릉|속초/g) },
-    { group: "개인" as CategoryGroup, categoryName: "요리", score: countMatches(value, /요리|레시피|맛집|음식|반찬|recipe|cook/g) * 2 },
+    { group: "개인" as CategoryGroup, categoryName: "맛집", score: countMatches(value, /맛집|식당|카페|브런치|디저트|restaurant|cafe|dining|bakery/g) * 2 + countMatches(value, /예약|웨이팅|메뉴|주차/g) },
+    { group: "개인" as CategoryGroup, categoryName: "요리", score: countMatches(value, /요리|레시피|음식|반찬|recipe|cook/g) * 2 },
     { group: "개인" as CategoryGroup, categoryName: "육아", score: countMatches(value, /육아|아이|아기|유아|키즈|kids|baby/g) * 2 },
     { group: "개인" as CategoryGroup, categoryName: "살림", score: countMatches(value, /살림|청소|정리|수납|생활팁|housekeeping/g) * 2 },
     { group: "개인" as CategoryGroup, categoryName: "동기부여", score: countMatches(value, /동기부여|명언|자기계발|motivation/g) * 2 },
@@ -139,7 +140,7 @@ function sanitizeDrafts(value: unknown, fallbackText: string): ArchiveAiDraft[] 
     seen.add(url);
     const sourceType = validSources.includes(String(item.source_type || "")) ? String(item.source_type) : sourceFromUrl(url);
     let group = validGroups.includes(item.category_group as CategoryGroup) ? item.category_group as CategoryGroup : "업무";
-    let categoryOptions = categoryTree[group];
+    const categoryOptions = categoryTree[group];
     let categoryName = categoryOptions.includes(String(item.category_name || "")) ? String(item.category_name) : categoryOptions[0];
     const title = String(item.title || "");
     const memo = String(item.memo || "").replace(/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i, "").trim();
@@ -206,7 +207,8 @@ function mergeWarnings(refined: ArchiveAiDraft[], metadataDrafts: DraftMetadata[
   });
 }
 
-function applyCategoryOverrides(drafts: ArchiveAiDraft[], _contextText: string) {
+function applyCategoryOverrides(drafts: ArchiveAiDraft[], contextText: string) {
+  void contextText;
   return drafts.map((draft) => {
     const itemContext = `${draft.title} ${draft.memo} ${draft.url}`;
     const itemCategory = inferCategoryBySignals(itemContext);

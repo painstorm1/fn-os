@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { deleteRows, insertRows, patchRows, selectRows, uploadStorageFile } from "./fnos-db";
 import { getYoutubeThumbnailUrl } from "./archive-preview";
 
@@ -28,6 +29,41 @@ export type ArchiveInput = {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+const archiveTrackingParams = new Set(["fbclid", "gclid", "igsh", "si", "feature", "app", "share_id"]);
+
+export function normalizeArchiveUrl(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "";
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+
+  try {
+    const url = new URL(withProtocol);
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+
+    const removable: string[] = [];
+    url.searchParams.forEach((_paramValue, key) => {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey.startsWith("utm_") || archiveTrackingParams.has(lowerKey)) removable.push(key);
+    });
+    removable.forEach((key) => url.searchParams.delete(key));
+    url.searchParams.sort();
+
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const path = pathname === "/" ? "" : pathname;
+    const search = url.searchParams.toString();
+    return `${url.protocol.toLowerCase()}//${url.hostname}${url.port ? `:${url.port}` : ""}${path}${search ? `?${search}` : ""}`;
+  } catch {
+    return raw.split("#")[0].replace(/\/+$/, "");
+  }
+}
+
+export function archiveUrlHash(value: unknown) {
+  const normalizedUrl = normalizeArchiveUrl(value);
+  if (!normalizedUrl) return "";
+  return createHash("sha256").update(normalizedUrl, "utf8").digest("hex");
 }
 
 function cleanList(value: unknown) {
@@ -86,10 +122,45 @@ async function saveTags(itemId: string, tags: string[] | string | undefined) {
   return savedTags;
 }
 
+function usableExistingArchiveRow(row: AnyRecord | undefined, excludeId?: string) {
+  if (!row || (excludeId && text(row.id) === excludeId)) return null;
+  return row;
+}
+
+async function findArchiveItemByUrlIdentity(urlHash: string, normalizedUrl: string, sourceUrl: string, excludeId?: string) {
+  if (urlHash) {
+    const rows = await selectRows<AnyRecord>("archive_items", { url_hash: `eq.${urlHash}`, limit: 1 });
+    const row = usableExistingArchiveRow(rows[0], excludeId);
+    if (row) return row;
+  }
+  if (normalizedUrl) {
+    const rows = await selectRows<AnyRecord>("archive_items", { normalized_url: `eq.${normalizedUrl}`, limit: 1 }).catch(() => []);
+    const row = usableExistingArchiveRow(rows[0], excludeId);
+    if (row) return row;
+  }
+  if (sourceUrl) {
+    const rows = await selectRows<AnyRecord>("archive_items", { url: `eq.${sourceUrl}`, limit: 1 }).catch(() => []);
+    const row = usableExistingArchiveRow(rows[0], excludeId);
+    if (row) return row;
+  }
+  return null;
+}
+
+function archiveUrlIdentity(input: ArchiveInput) {
+  const originalUrl = text(input.original_url || input.url);
+  const sourceUrl = text(input.url) || originalUrl;
+  const normalizedUrl = normalizeArchiveUrl(sourceUrl);
+  return {
+    originalUrl,
+    normalizedUrl,
+    urlHash: archiveUrlHash(normalizedUrl),
+  };
+}
+
 export async function listArchiveData() {
   const [items, categories, tags, itemTags, links] = await Promise.all([
     selectRows<AnyRecord>("archive_items", {
-      select: "id,title,url,source_type,content_type,summary,description,memo,preview_image_url,preview_status,preview_error,preview_generated_at,thumbnail_url,file_url,status,category_id,created_at",
+      select: "id,title,url,normalized_url,url_hash,source_type,content_type,summary,original_url,description,memo,preview_image_url,preview_status,preview_error,preview_generated_at,thumbnail_url,file_url,status,category_id,created_at",
       order: "created_at.desc",
       limit: 500,
     }),
@@ -102,33 +173,45 @@ export async function listArchiveData() {
 }
 
 export async function createArchiveItem(input: ArchiveInput) {
-  const categoryId = text(input.category_id) || await ensureCategory(input.category_name);
   const title = text(input.title) || text(input.url) || "제목 없음";
   const url = text(input.url);
+  const { originalUrl, normalizedUrl, urlHash } = archiveUrlIdentity(input);
+  const existing = await findArchiveItemByUrlIdentity(urlHash, normalizedUrl, url || originalUrl);
+  if (existing) return existing;
+  const categoryId = text(input.category_id) || await ensureCategory(input.category_name);
   const contentType = input.content_type || (url ? "link" : "memo");
   const previewImageUrl = text(input.preview_image_url) || getYoutubeThumbnailUrl(url);
   const previewStatus = text(input.preview_status) || (previewImageUrl ? "success" : url ? "pending" : "manual");
   const previewGeneratedAt = text(input.preview_generated_at) || (previewImageUrl ? new Date().toISOString() : null);
-  const [saved] = await insertRows<AnyRecord>("archive_items", {
-    title,
-    url: url || null,
-    source_type: inferSourceType(url, text(input.source_type)),
-    content_type: contentType,
-    summary: text(input.summary) || null,
-    original_url: text(input.original_url || url) || null,
-    description: text(input.description) || null,
-    preview_image_url: previewImageUrl || null,
-    preview_status: previewStatus,
-    preview_error: text(input.preview_error) || null,
-    preview_generated_at: previewGeneratedAt,
-    memo: text(input.memo) || null,
-    thumbnail_url: text(input.thumbnail_url) || null,
-    file_url: text(input.file_url) || null,
-    status: text(input.status) || "active",
-    is_favorite: Boolean(input.is_favorite),
-    category_id: categoryId,
-    reference_type: text(input.reference_type) || null,
-  });
+  let saved: AnyRecord | undefined;
+  try {
+    [saved] = await insertRows<AnyRecord>("archive_items", {
+      title,
+      url: url || null,
+      normalized_url: normalizedUrl || null,
+      url_hash: urlHash || null,
+      source_type: inferSourceType(url, text(input.source_type)),
+      content_type: contentType,
+      summary: text(input.summary) || null,
+      original_url: originalUrl || null,
+      description: text(input.description) || null,
+      preview_image_url: previewImageUrl || null,
+      preview_status: previewStatus,
+      preview_error: text(input.preview_error) || null,
+      preview_generated_at: previewGeneratedAt,
+      memo: text(input.memo) || null,
+      thumbnail_url: text(input.thumbnail_url) || null,
+      file_url: text(input.file_url) || null,
+      status: text(input.status) || "active",
+      is_favorite: Boolean(input.is_favorite),
+      category_id: categoryId,
+      reference_type: text(input.reference_type) || null,
+    });
+  } catch (error) {
+    const duplicate = await findArchiveItemByUrlIdentity(urlHash, normalizedUrl, url || originalUrl).catch(() => null);
+    if (duplicate) return duplicate;
+    throw error;
+  }
   if (saved?.id) await saveTags(text(saved.id), input.tags);
   return saved;
 }
@@ -169,30 +252,42 @@ export async function createArchiveFileItem(formData: FormData) {
 
 export async function updateArchiveItem(id: string, input: ArchiveInput) {
   const url = text(input.url);
+  const { originalUrl, normalizedUrl, urlHash } = archiveUrlIdentity(input);
+  const existing = await findArchiveItemByUrlIdentity(urlHash, normalizedUrl, url || originalUrl, id);
+  if (existing) return existing;
   const previewImageUrl = text(input.preview_image_url) || getYoutubeThumbnailUrl(url);
   const previewStatus = text(input.preview_status) || (previewImageUrl ? "success" : url ? "pending" : "manual");
   const previewGeneratedAt = text(input.preview_generated_at) || (previewImageUrl ? new Date().toISOString() : null);
-  const [saved] = await patchRows<AnyRecord>("archive_items", { id: `eq.${id}` }, {
-    title: text(input.title),
-    url: url || null,
-    source_type: inferSourceType(url, text(input.source_type)),
-    content_type: text(input.content_type) || "link",
-    summary: text(input.summary) || null,
-    original_url: text(input.original_url || input.url) || null,
-    description: text(input.description) || null,
-    preview_image_url: previewImageUrl || null,
-    preview_status: previewStatus,
-    preview_error: text(input.preview_error) || null,
-    preview_generated_at: previewGeneratedAt,
-    memo: text(input.memo) || null,
-    thumbnail_url: text(input.thumbnail_url) || null,
-    file_url: text(input.file_url) || null,
-    status: text(input.status) || "active",
-    is_favorite: Boolean(input.is_favorite),
-    category_id: text(input.category_id) || null,
-    reference_type: text(input.reference_type) || null,
-    updated_at: new Date().toISOString(),
-  });
+  let saved: AnyRecord | undefined;
+  try {
+    [saved] = await patchRows<AnyRecord>("archive_items", { id: `eq.${id}` }, {
+      title: text(input.title),
+      url: url || null,
+      normalized_url: normalizedUrl || null,
+      url_hash: urlHash || null,
+      source_type: inferSourceType(url, text(input.source_type)),
+      content_type: text(input.content_type) || "link",
+      summary: text(input.summary) || null,
+      original_url: originalUrl || null,
+      description: text(input.description) || null,
+      preview_image_url: previewImageUrl || null,
+      preview_status: previewStatus,
+      preview_error: text(input.preview_error) || null,
+      preview_generated_at: previewGeneratedAt,
+      memo: text(input.memo) || null,
+      thumbnail_url: text(input.thumbnail_url) || null,
+      file_url: text(input.file_url) || null,
+      status: text(input.status) || "active",
+      is_favorite: Boolean(input.is_favorite),
+      category_id: text(input.category_id) || null,
+      reference_type: text(input.reference_type) || null,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    const duplicate = await findArchiveItemByUrlIdentity(urlHash, normalizedUrl, url || originalUrl, id).catch(() => null);
+    if (duplicate) return duplicate;
+    throw error;
+  }
   await saveTags(id, input.tags);
   return saved;
 }
