@@ -1,4 +1,5 @@
 import { deleteRows, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
+import { cleanAccountingFixedCostPayload, cleanAccountingLoanPayload, shouldAutoMarkLoanPaid } from "./accounting-ledger-payloads";
 
 type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
@@ -802,7 +803,7 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     optionalRows("accounting_category_rules", { is_active: "eq.true", order: "priority.asc", limit: 500 }),
     optionalRows("accounting_transactions", { review_status: "eq.confirmed", is_active: "eq.true", order: "transaction_date.desc", limit: 3000 }),
   ]);
-  const categoryByPath = new Map(categories.map((category) => [categoryKey(category), category]));
+  const categoryByPath = new Map<string, RawRow>(categories.map((category): [string, RawRow] => [categoryKey(category), category]));
   const defaultReview = categoryByPath.get("기타 출금|검토필요|");
 
   return rows.map((row) => {
@@ -1067,36 +1068,14 @@ export async function deactivateAccountingRule(id: string) {
   return patchRows("accounting_category_rules", { id: `eq.${id}` }, { is_active: false, updated_at: new Date().toISOString() });
 }
 
-function cleanFixedCostPayload(row: RawRow) {
-  const keywords = Array.isArray(row.match_keywords)
-    ? row.match_keywords.map(text).filter(Boolean)
-    : text(row.match_keywords || row.matchKeywords).split(/[,/|]+/).map(text).filter(Boolean);
-  return {
-    fixed_cost_name: text(row.fixed_cost_name || row.fixedCostName || row.name),
-    category_large: text(row.category_large || row.categoryLarge),
-    category_middle: text(row.category_middle || row.categoryMiddle),
-    category_small: "",
-    expected_amount: numberValue(row.expected_amount ?? row.expectedAmount ?? row.amount),
-    base_day: text(row.base_day || row.baseDay || row.payment_day || row.paymentDay),
-    weekend_policy: text(row.weekend_policy || row.weekendPolicy) || "previous_business_day",
-    holiday_policy: text(row.holiday_policy || row.holidayPolicy) || "previous_business_day",
-    payment_type: text(row.payment_type || row.paymentType) || "bank",
-    payment_source: text(row.payment_source || row.paymentSource) || null,
-    source_account_name: text(row.source_account_name || row.sourceAccountName) || null,
-    source_card_name: text(row.source_card_name || row.sourceCardName) || null,
-    affects_profit: row.affects_profit ?? row.affectsProfit ?? true,
-    affects_cashflow: row.affects_cashflow ?? row.affectsCashflow ?? true,
-    match_keywords: keywords.length ? keywords : null,
-    is_active: row.is_active ?? row.isActive ?? true,
-    sort_order: numberValue(row.sort_order ?? row.sortOrder),
-    memo: text(row.memo) || null,
-    updated_at: new Date().toISOString(),
-  };
+function cleanFixedCostPayload(row: RawRow, existing?: RawRow | null) {
+  return cleanAccountingFixedCostPayload(row, existing);
 }
 
 export async function upsertAccountingFixedCost(row: RawRow) {
   const id = text(row.id);
-  const payload = cleanFixedCostPayload(row);
+  const existing = id ? (await selectRows<RawRow>("accounting_fixed_costs", { id: `eq.${id}`, limit: 1 }).catch(() => []))[0] : null;
+  const payload = cleanFixedCostPayload(row, existing);
   if (!payload.fixed_cost_name) throw new Error("고정비명이 필요합니다.");
   if (!payload.base_day) throw new Error("기준일이 필요합니다.");
   if (id) return patchRows("accounting_fixed_costs", { id: `eq.${id}` }, payload);
@@ -1109,38 +1088,14 @@ export async function deactivateAccountingFixedCost(id: string) {
 }
 
 
-function cleanLoanPayload(row: RawRow) {
-  const loanType = normalizeLoanType(row.loan_type || row.loanType);
-  const expectedPrincipal = loanType === "principal_interest" ? numberValue(row.expected_principal_amount ?? row.expectedPrincipalAmount) : 0;
-  const expectedInterest = numberValue(row.expected_interest_amount ?? row.expectedInterestAmount ?? (loanType === "interest_only" ? row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount : 0));
-  const expectedPayment = loanType === "principal_interest"
-    ? expectedPrincipal + expectedInterest
-    : expectedInterest || numberValue(row.expected_payment_amount ?? row.expectedPaymentAmount ?? row.amount);
-  return {
-    loan_name: text(row.loan_name || row.loanName || row.name),
-    principal_amount: numberValue(row.principal_amount ?? row.principalAmount),
-    current_balance: numberValue(row.current_balance ?? row.currentBalance),
-    bank_name: text(row.bank_name || row.bankName) || null,
-    account_holder: text(row.account_holder || row.accountHolder) || null,
-    account_number: text(row.account_number || row.accountNumber) || null,
-    deposit_account_number: text(row.deposit_account_number || row.depositAccountNumber || row.deposit_account || row.depositAccount) || null,
-    loan_start_date: isoDate(row.loan_start_date || row.loanStartDate) || null,
-    loan_period_months: numberValue(row.loan_period_months ?? row.loanPeriodMonths) || null,
-    payment_day: text(row.payment_day || row.paymentDay || row.base_day || row.baseDay),
-    loan_type: loanType,
-    expected_principal_amount: expectedPrincipal,
-    expected_interest_amount: expectedInterest,
-    expected_payment_amount: expectedPayment,
-    payer_name: text(row.payer_name || row.payerName) || null,
-    is_active: row.is_active ?? row.isActive ?? true,
-    memo: text(row.memo) || null,
-    updated_at: new Date().toISOString(),
-  };
+function cleanLoanPayload(row: RawRow, existing?: RawRow | null) {
+  return cleanAccountingLoanPayload(row, existing);
 }
 
 export async function upsertAccountingLoan(row: RawRow) {
   const id = text(row.id);
-  const payload = cleanLoanPayload(row);
+  const existing = id ? (await selectRows<RawRow>("accounting_loans", { id: `eq.${id}`, limit: 1 }).catch(() => []))[0] : null;
+  const payload = cleanLoanPayload(row, existing);
   if (!payload.loan_name) throw new Error("대출명이 필요합니다.");
   if (!payload.payment_day) throw new Error("납입 기준일이 필요합니다.");
   if (id) return patchRows("accounting_loans", { id: `eq.${id}` }, payload);
@@ -1211,10 +1166,11 @@ function loanOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] 
   const amount = numberValue(row.expected_payment_amount)
     || numberValue(row.expected_principal_amount) + numberValue(row.expected_interest_amount);
   const actualRow = matchingLoanPaymentTransaction(row, transactions, dueDate, today, amount);
+  const autoPaid = !actualRow && shouldAutoMarkLoanPaid(row, dueDate, today);
   const combinedPrivateLoanPayment = /재민 신한은행 신용|재민 현대해상 약관/.test(text(row.loan_name)) && actualRow && transactionAmount(actualRow) >= 120000;
   const actualAmount = actualRow ? (combinedPrivateLoanPayment ? amount : transactionAmount(actualRow)) : null;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
-  const paid = Boolean(actualRow);
+  const paid = Boolean(actualRow || autoPaid);
   return {
     id: `loan-${text(row.id)}`,
     loan_id: row.id,
@@ -1874,7 +1830,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     }
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
   };
-  const byMonth = Array.from(filtered.reduce((map, row) => {
+  type MonthSummary = { label: string; income: number; expense: number; amount: number; count: number };
+  const byMonthMap = filtered.reduce<Map<string, MonthSummary>>((map, row) => {
     const label = isoDate(row.transaction_date).slice(0, 7) || "미지정";
     const prev = map.get(label) || { label, income: 0, expense: 0, amount: 0, count: 0 };
     const amount = row.source_type === "card" ? signedAccountingAmount(row) : numberValue(row.amount_krw ?? row.amount);
@@ -1885,7 +1842,8 @@ export async function accountingLedgerSummary(range?: { from?: string; to?: stri
     prev.count += 1;
     map.set(label, prev);
     return map;
-  }, new Map<string, { label: string; income: number; expense: number; amount: number; count: number }>()).values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, new Map<string, MonthSummary>());
+  const byMonth = Array.from(byMonthMap.values()).sort((a, b) => a.label.localeCompare(b.label));
   const incomeRows = filtered.filter((row) => row.direction === "income" && row.affects_profit !== false);
   const expenseRows = filtered.filter((row) => row.direction === "expense" && row.affects_profit !== false);
   const incomeRankPick = (row: RawRow) => text(row.category_middle || row.category_large || row.merchant_name || row.source_name);
