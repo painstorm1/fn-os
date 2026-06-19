@@ -1288,12 +1288,10 @@ function suggestReview(row: RawRow, rules: RawRow[], confirmedRows: RawRow[]) {
 }
 
 function compactAccountingTransaction(row: RawRow) {
-  const {
-    raw_json: _rawJson,
-    raw_payload: _rawPayload,
-    raw: _raw,
-    ...rest
-  } = row;
+  const rest = { ...row };
+  delete rest.raw_json;
+  delete rest.raw_payload;
+  delete rest.raw;
   return rest;
 }
 
@@ -1487,7 +1485,8 @@ async function writeAccountWithColumnFallback(table: string, payload: RawRow, op
       const message = error instanceof Error ? error.message : "";
       const missingColumn = message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
       if (!missingColumn || !(missingColumn in nextPayload)) throw error;
-      const { [missingColumn]: _removed, ...rest } = nextPayload;
+      const rest = { ...nextPayload };
+      delete rest[missingColumn];
       nextPayload = rest;
     }
   }

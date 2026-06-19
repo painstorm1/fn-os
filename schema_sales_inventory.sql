@@ -937,6 +937,9 @@ create table if not exists accounting_bank_accounts (
   unique(bank_name, account_holder, account_number)
 );
 
+create unique index if not exists accounting_bank_accounts_identity_uidx
+  on accounting_bank_accounts (bank_name, coalesce(account_holder, ''), coalesce(account_number, ''));
+
 create table if not exists accounting_card_accounts (
   id uuid primary key default gen_random_uuid(),
   card_type text default 'business',
@@ -1714,16 +1717,10 @@ on conflict (fixed_cost_name) do update set
   memo = excluded.memo,
   updated_at = now();
 
-insert into accounting_bank_accounts (account_type, bank_name, account_holder, account_number, list_enabled, sort_order, memo)
-values
-  ('business', '국민은행', '김재욱(에프엔)', null, true, 10, '회계/비용 통장 내역 기본 필터용. 계좌번호/비밀번호는 사용자가 수정'),
-  ('business', '기업은행', '에프엔', null, true, 20, '회계/비용 통장 내역 기본 필터용. 계좌번호/비밀번호는 사용자가 수정')
-on conflict (bank_name, account_holder, account_number) do update set
-  account_type = excluded.account_type,
-  list_enabled = excluded.list_enabled,
-  sort_order = excluded.sort_order,
-  memo = excluded.memo,
-  updated_at = now();
+-- Bank accounts are managed only from FN 설정 > 통장관리.
+-- Do not seed placeholder bank accounts here: account_number can be null, so
+-- the unique(bank_name, account_holder, account_number) constraint cannot
+-- prevent duplicate placeholder rows when this schema is re-run.
 
 insert into accounting_card_accounts (card_type, card_name, cutoff_start_day, cutoff_end_day, payment_day, card_limit, withdrawal_account_name, list_enabled, sort_order, memo)
 values
