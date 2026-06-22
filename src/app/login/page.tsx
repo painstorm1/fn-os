@@ -33,7 +33,11 @@ export default function LoginPage() {
       <form onSubmit={submit} className="w-full max-w-[420px] rounded-2xl border border-gray-200 bg-white p-8 shadow-[0_12px_40px_rgba(17,24,39,0.08)]">
         <Image src="/fn-logo.jpg" alt="F&" width={92} height={92} className="mb-6 object-contain" priority />
         <h1 className="text-[28px] font-bold leading-tight">FN OS 로그인</h1>
-        <p className="mt-2 text-sm font-medium text-gray-500">FN OS 운영 대시보드에 접속합니다.</p>
+        <div className="mt-2 space-y-1 text-sm font-medium text-gray-500">
+          <p>내부 업무 자동화 및 광고/매출 관리 시스템입니다.</p>
+          <p>관리자 전용 서비스입니다.</p>
+          <p>로그인이 필요합니다.</p>
+        </div>
 
         <label className="mt-8 block text-sm font-semibold text-gray-700" htmlFor="password">
           비밀번호
