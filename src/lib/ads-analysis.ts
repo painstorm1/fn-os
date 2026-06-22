@@ -167,6 +167,7 @@ async function getUsdKrwRate() {
 function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKrwRate: number) {
   const isCoupang = channel.includes("쿠팡");
   const isMeta = channel.includes("메타");
+  const isNaverSearch = channel.includes("네이버_검색광고") || channel.includes("네이버쇼핑검색") || channel.includes("네이버 검색");
   const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
   const clicks = numberValue(first(row, ["clicks", "클릭수", "링크 클릭", "클릭(전체)", "클릭", "clk", "clkCnt"]));
   const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
@@ -197,9 +198,7 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
     "구매완료 광고수익률(%)",
     "purchase_roas",
     ...(isCoupang ? ["총광고수익률(14일)", "총광고수익률(1일)"] : []),
-    "roas",
-    "ROAS",
-    "총 광고수익률(%)",
+    ...(!isNaverSearch ? ["roas", "ROAS", "총 광고수익률(%)"] : []),
   ])) || pct(conversionValue, cost);
   const productCode = text(first(row, [
     "product_code",
