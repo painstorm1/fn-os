@@ -11108,7 +11108,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function selectedOrderRowIndexes() {
     if (!selectedSalesRange) return [] as number[];
     if (!["발주 진행 단계", "송장출력용"].includes(selectedSalesRange.sheet)) return [];
-    if (selectedSalesRange.rowIndexes?.length) return selectedSalesRange.rowIndexes;
+    if (Array.isArray(selectedSalesRange.rowIndexes)) return selectedSalesRange.rowIndexes;
     return Array.from({ length: selectedSalesRange.range.endRow - selectedSalesRange.range.startRow + 1 }, (_, index) => selectedSalesRange.range.startRow + index);
   }
 
@@ -11949,10 +11949,24 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function openSelectedOrderProductLinks() {
-    const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
+    let indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
     if (!indexes.length) {
-      window.alert("품목 연결할 주문건을 먼저 선택해 주세요.");
-      return;
+      const ok = window.confirm("체크한게 없습니다. 전체목록중에 매칭이 안된 주문건만 보여드릴까요?");
+      if (!ok) return;
+      indexes = sheets["발주 진행 단계"]
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => {
+          if (!rowHasValue(row)) return false;
+          const mallProductCode = salesCellText(progressValue(row, "쇼핑몰상품코드"));
+          const mallProductKey = salesCellText(progressValue(row, "쇼핑몰품목key"));
+          const productCode = salesCellText(progressValue(row, "품목코드(ERP)"));
+          return Boolean((mallProductKey || mallProductCode) && !productCode);
+        })
+        .map(({ index }) => index);
+      if (!indexes.length) {
+        window.alert("매칭이 안된 주문건이 없습니다.");
+        return;
+      }
     }
     const drafts = indexes.map((rowIndex) => {
       const row = sheets["발주 진행 단계"][rowIndex] || [];
