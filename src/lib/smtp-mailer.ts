@@ -1,5 +1,11 @@
-import tls from "node:tls";
+import * as tls from "node:tls";
 import { Buffer } from "node:buffer";
+
+export type SmtpMailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
 
 export type SmtpMailInput = {
   to: string;
@@ -8,6 +14,7 @@ export type SmtpMailInput = {
   from?: string;
   fromName?: string;
   replyTo?: string;
+  attachments?: SmtpMailAttachment[];
 };
 
 type SmtpConfig = {
@@ -37,8 +44,8 @@ function encodeAddress(email: string, name?: string) {
   return `${encodeHeader(cleanedName)} <${cleanedEmail}>`;
 }
 
-function chunkBase64(value: string) {
-  return Buffer.from(value, "utf8").toString("base64").replace(/.{1,76}/g, "$&\r\n").trimEnd();
+function chunkBase64(value: string | Buffer) {
+  return Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n").trimEnd();
 }
 
 function dotStuff(value: string) {
@@ -109,11 +116,26 @@ function connectSmtp(config: SmtpConfig) {
   });
 }
 
-function buildMessage(input: Required<Pick<SmtpMailInput, "to" | "subject" | "text">> & Pick<SmtpMailInput, "from" | "fromName" | "replyTo">) {
+function attachmentPart(attachment: SmtpMailAttachment) {
+  const filename = cleanHeader(attachment.filename || "attachment.pdf");
+  const contentType = cleanHeader(attachment.contentType || "application/octet-stream");
+  const encodedFileName = encodeHeader(filename);
+  return [
+    `Content-Type: ${contentType}; name="${encodedFileName}"`,
+    "Content-Transfer-Encoding: base64",
+    `Content-Disposition: attachment; filename="${encodedFileName}"`,
+    "",
+    chunkBase64(attachment.content),
+  ].join("\r\n");
+}
+
+function buildMessage(input: Required<Pick<SmtpMailInput, "to" | "subject" | "text">> & Pick<SmtpMailInput, "from" | "fromName" | "replyTo" | "attachments">) {
   const from = input.from || "";
   const fromName = input.fromName || "에프엔";
   const replyTo = input.replyTo || from;
+  const attachments = input.attachments || [];
   const messageId = `<fnos-${Date.now()}-${Math.random().toString(36).slice(2)}@fnos.local>`;
+  const boundary = `fnos-mixed-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const headers = [
     `Date: ${new Date().toUTCString()}`,
@@ -123,11 +145,26 @@ function buildMessage(input: Required<Pick<SmtpMailInput, "to" | "subject" | "te
     `Subject: ${encodeHeader(input.subject)}`,
     `Message-ID: ${messageId}`,
     "MIME-Version: 1.0",
+    attachments.length
+      ? `Content-Type: multipart/mixed; boundary="${boundary}"`
+      : "Content-Type: text/plain; charset=utf-8",
+    attachments.length ? "" : "Content-Transfer-Encoding: base64",
+  ].filter((header) => header !== "");
+
+  if (!attachments.length) {
+    return `${headers.join("\r\n")}\r\n\r\n${chunkBase64(input.text)}`;
+  }
+
+  const textPart = [
+    `--${boundary}`,
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: base64",
-  ].filter(Boolean);
+    "",
+    chunkBase64(input.text),
+  ].join("\r\n");
+  const attachmentParts = attachments.map((attachment) => `--${boundary}\r\n${attachmentPart(attachment)}`).join("\r\n");
 
-  return `${headers.join("\r\n")}\r\n\r\n${chunkBase64(input.text)}`;
+  return `${headers.join("\r\n")}\r\n\r\n${textPart}\r\n${attachmentParts}\r\n--${boundary}--`;
 }
 
 export async function sendSmtpMail(input: SmtpMailInput) {
@@ -138,6 +175,7 @@ export async function sendSmtpMail(input: SmtpMailInput) {
   const from = input.from || config.from;
   const fromName = input.fromName || config.fromName;
   const replyTo = input.replyTo || config.replyTo;
+  const attachments = input.attachments || [];
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("수신자 이메일 주소 형식이 올바르지 않습니다.");
   if (!subject) throw new Error("메일 제목이 비어 있습니다.");
@@ -153,12 +191,12 @@ export async function sendSmtpMail(input: SmtpMailInput) {
     await smtpRequest(socket, `MAIL FROM:<${from}>`, [250]);
     await smtpRequest(socket, `RCPT TO:<${to}>`, [250, 251]);
     await smtpRequest(socket, "DATA", [354]);
-    socket.write(`${dotStuff(buildMessage({ to, subject, text, from, fromName, replyTo }))}\r\n.\r\n`);
+    socket.write(`${dotStuff(buildMessage({ to, subject, text, from, fromName, replyTo, attachments }))}\r\n.\r\n`);
     await smtpRequest(socket, undefined, [250]);
     await smtpRequest(socket, "QUIT", [221, 250]);
   } finally {
     socket.end();
   }
 
-  return { ok: true, to, from, subject };
+  return { ok: true, to, from, subject, attachments: attachments.map((attachment) => attachment.filename) };
 }

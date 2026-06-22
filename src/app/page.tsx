@@ -12742,7 +12742,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="product" class="field searchInput" placeholder="품목 검색">
           <input id="warehouse" class="field searchInput" placeholder="창고 검색">
           <input id="customer" class="field searchInput" placeholder="거래처 검색">
-          <button id="search" class="btn search">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button><button id="downloadPdf" class="btn pdf" title="PDF 저장" type="button">PDF</button><button id="emailPdf" class="btn mail" title="E-mail" type="button">E-mail</button>
+          <button id="search" class="btn search">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button><button id="downloadPdf" class="btn pdf" title="PDF 저장" type="button">PDF</button><button id="emailPdf" class="btn mail" title="전송" type="button">전송</button>
           <div class="filterSpacer"></div>
           <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
@@ -13379,25 +13379,31 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const vouchers = activeVouchers();
         if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
         const customers = Array.from(new Set(vouchers.map((voucher) => String(voucher.customer || "").trim()).filter(Boolean)));
-        if (customers.length !== 1) { window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다. 거래처를 검색하거나 전표 하나를 펼친 뒤 눌러주세요."); return; }
+        if (customers.length !== 1) { window.alert("전송은 거래처 한 곳의 전표만 보낼 수 있습니다. 거래처를 검색하거나 전표 하나를 펼친 뒤 눌러주세요."); return; }
+        const channel = window.prompt("전송 방법을 선택해 주세요.\n\n1. E-mail\n2. 카카오톡 (준비중)", "1");
+        if (!channel) return;
+        if (/2|카카오|kakao/i.test(channel)) { window.alert("카카오톡 전송은 아직 연결 전입니다. 현재는 E-mail만 발송할 수 있습니다."); return; }
         await ensureCustomerDirectory();
-        const email = customerEmail(customers[0]) || window.prompt("거래처 이메일 주소를 입력해 주세요.", "");
+        const customerName = customers[0];
+        const email = customerEmail(customerName) || window.prompt("거래처 이메일 주소를 입력해 주세요.", "");
         if (!email) return;
-        const subjectDate = String(vouchers[0].displayNo || vouchers[0].date || "").replace(/\\D/g, "").slice(0, 6) || "${today.replace(/\D/g, "").slice(2)}";
-        const kind = vouchers.every((voucher) => voucher.type === "purchase") ? "구매" : "판매";
-        const subject = subjectDate + " - " + kind + " 거래명세서 - 에프엔";
-        const body = "안녕하세요.\\n\\n" + subject + " 거래명세서 안내드립니다.\\nPDF 파일이 필요한 경우 FN OS의 PDF 버튼에서 별도 저장해 주세요.\\n\\n감사합니다.\\n에프엔";
-        if (!window.confirm("아래 주소로 E-mail을 바로 발송할까요?\\n\\n" + email + "\\n\\n" + subject)) return;
+        const docDate = String(vouchers[0].date || "${today}").slice(0, 10) || "${today}";
+        const menuName = vouchers.every((voucher) => voucher.type === "purchase") ? "구매 거래명세서" : "판매 거래명세서";
+        const subject = docDate + " '" + menuName + "' 거래처명:" + customerName;
+        const pdfFilename = docDate.replace(/\D/g, "") + "_" + customerName.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "") + "_" + menuName.replace(/\s+/g, "") + ".pdf";
+        const body = "안녕하세요. 에프엔입니다.\n\n" + docDate + " '" + menuName + "' 보내드립니다.\n거래처명: " + customerName + "\n첨부: " + pdfFilename + "\n\n확인 부탁드립니다.\n감사합니다.\n에프엔";
+        const pdfHtml = statementHtml(vouchers);
+        if (!window.confirm("아래 내용으로 E-mail을 바로 발송할까요?\n\n수신: " + email + "\n제목: " + subject + "\n첨부: " + pdfFilename + "\n\n" + body)) return;
         try {
           const res = await fetch("/api/fnos/email/send", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ to: email, subject, body }),
+            body: JSON.stringify({ to: email, subject, body, pdfHtml, pdfFilename }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) throw new Error(data.error || "메일 발송에 실패했습니다.");
-          window.alert("E-mail 발송이 완료되었습니다.");
+          window.alert("E-mail 발송이 완료되었습니다.\n첨부: " + (Array.isArray(data.attachments) ? data.attachments.join(", ") : pdfFilename));
         } catch (error) {
           window.alert(error instanceof Error ? error.message : "메일 발송에 실패했습니다.");
         }
@@ -21432,25 +21438,61 @@ function SalesInventoryTable({
   async function emailStatement(targetRows: Array<Record<string, unknown>>) {
     const customers = Array.from(new Set(targetRows.map((row) => entryRowCustomer(row, mode).trim()).filter(Boolean)));
     if (customers.length !== 1) {
-      window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다.");
+      window.alert("전송은 거래처 한 곳의 전표만 보낼 수 있습니다.");
       return;
     }
-    const fallback = window.prompt("거래처 이메일 주소를 입력해 주세요.", String(targetRows[0]?.email || ""));
+    const channel = window.prompt("전송 방법을 선택해 주세요.\n\n1. E-mail\n2. 카카오톡 (준비중)", "1");
+    if (!channel) return;
+    if (/2|카카오|kakao/i.test(channel)) {
+      window.alert("카카오톡 전송은 아직 연결 전입니다. 현재는 E-mail만 발송할 수 있습니다.");
+      return;
+    }
+    const customerName = customers[0];
+    const customerDirectoryRows = await fetchStatementCustomers().catch(() => [] as Array<Record<string, unknown>>);
+    const normalizedCustomerName = customerName.replace(/\s+/g, "").toLowerCase();
+    const customer = customerDirectoryRows.find((item) => {
+      const candidates = [item.customer_name, item.cust_name, item.customer_code, item.cust_code].map((value) => String(value || "").trim()).filter(Boolean);
+      return candidates.some((candidate) => candidate === customerName || candidate.replace(/\s+/g, "").toLowerCase() === normalizedCustomerName);
+    });
+    const savedEmail = [customer?.email, customer?.memo, customer?.note, targetRows[0]?.email]
+      .map((value) => String(value || ""))
+      .join(" ")
+      .match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || "";
+    const fallback = window.prompt("거래처 이메일 주소를 입력해 주세요.", savedEmail);
     if (!fallback) return;
-    const firstDate = entryDateFilterKey(entryRowDate(targetRows[0] || {})).slice(2) || entryDateToday().replace(/\D/g, "").slice(2);
-    const subject = `${firstDate} - ${mode === "sales" ? "판매" : "구매"} 거래명세서 - 에프엔`;
-    const body = `안녕하세요.\n\n${subject} 거래명세서 안내드립니다.\nPDF 파일이 필요한 경우 FN OS의 PDF 버튼에서 별도 저장해 주세요.\n\n감사합니다.\n에프엔`;
-    if (!window.confirm(`아래 주소로 E-mail을 바로 발송할까요?\n\n${fallback}\n\n${subject}`)) return;
+    const docDate = entryDateFilterKey(entryRowDate(targetRows[0] || {})) || entryDateToday();
+    const menuName = mode === "sales" ? "판매 거래명세서" : "구매 거래명세서";
+    const safeCustomer = customerName.replace(/[\/:*?"<>|]+/g, "_").replace(/\s+/g, "");
+    const pdfFilename = `${docDate.replace(/\D/g, "")}_${safeCustomer}_${menuName.replace(/\s+/g, "")}.pdf`;
+    const subject = `${docDate} '${menuName}' 거래처명:${customerName}`;
+    const body = `안녕하세요. 에프엔입니다.
+
+${docDate} '${menuName}' 보내드립니다.
+거래처명: ${customerName}
+첨부: ${pdfFilename}
+
+확인 부탁드립니다.
+감사합니다.
+에프엔`;
+    const pdfHtml = statementHtml(targetRows, false, customerDirectoryRows);
+    if (!window.confirm(`아래 내용으로 E-mail을 바로 발송할까요?
+
+수신: ${fallback}
+제목: ${subject}
+첨부: ${pdfFilename}
+
+${body}`)) return;
     try {
       const res = await fetch("/api/fnos/email/send", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: fallback, subject, body }),
+        body: JSON.stringify({ to: fallback, subject, body, pdfHtml, pdfFilename }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.error || "메일 발송에 실패했습니다.");
-      window.alert("E-mail 발송이 완료되었습니다.");
+      window.alert(`E-mail 발송이 완료되었습니다.
+첨부: ${Array.isArray(data.attachments) ? data.attachments.join(", ") : pdfFilename}`);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "메일 발송에 실패했습니다.");
     }
@@ -21470,7 +21512,7 @@ function SalesInventoryTable({
           <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
-          <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("E-mail로 보낼 행을 선택해 주세요."); }}>E-mail</ActionButton>
+          <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("전송할 행을 선택해 주세요."); }}>전송</ActionButton>
         </div>
         <div className="ml-auto flex min-w-[760px] flex-1 justify-end max-xl:min-w-0 max-xl:basis-full">{filterBar}</div>
       </div>
