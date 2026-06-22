@@ -11,7 +11,8 @@
     "db:schema": "node tools/apply-sales-inventory-schema.mjs",
     "db:seed:sales-inventory": "node tools/seed-sales-inventory-from-excel.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:naver-oauth": "node --test tests/naver-oauth.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
