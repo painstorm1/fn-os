@@ -13386,8 +13386,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const subjectDate = String(vouchers[0].displayNo || vouchers[0].date || "").replace(/\\D/g, "").slice(0, 6) || "${today.replace(/\D/g, "").slice(2)}";
         const kind = vouchers.every((voucher) => voucher.type === "purchase") ? "구매" : "판매";
         const subject = subjectDate + " - " + kind + " 거래명세서 - 에프엔";
-        const body = "안녕하세요.\\n\\n" + subject + " PDF 거래명세서를 전달드립니다.\\n거래명세서 PDF는 FN OS의 PDF 버튼에서 저장한 파일을 첨부해 주세요.\\n\\n감사합니다.\\n에프엔";
-        window.location.href = "mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+        const body = "안녕하세요.\\n\\n" + subject + " 거래명세서 안내드립니다.\\nPDF 파일이 필요한 경우 FN OS의 PDF 버튼에서 별도 저장해 주세요.\\n\\n감사합니다.\\n에프엔";
+        if (!window.confirm("아래 주소로 E-mail을 바로 발송할까요?\\n\\n" + email + "\\n\\n" + subject)) return;
+        try {
+          const res = await fetch("/api/fnos/email/send", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ to: email, subject, body }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.ok === false) throw new Error(data.error || "메일 발송에 실패했습니다.");
+          window.alert("E-mail 발송이 완료되었습니다.");
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "메일 발송에 실패했습니다.");
+        }
       }
       function rowsHtml(rows){
         return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
@@ -21416,7 +21429,7 @@ function SalesInventoryTable({
     popup.document.close();
   }
 
-  function emailStatement(targetRows: Array<Record<string, unknown>>) {
+  async function emailStatement(targetRows: Array<Record<string, unknown>>) {
     const customers = Array.from(new Set(targetRows.map((row) => entryRowCustomer(row, mode).trim()).filter(Boolean)));
     if (customers.length !== 1) {
       window.alert("E-mail은 거래처 한 곳의 전표만 보낼 수 있습니다.");
@@ -21426,8 +21439,21 @@ function SalesInventoryTable({
     if (!fallback) return;
     const firstDate = entryDateFilterKey(entryRowDate(targetRows[0] || {})).slice(2) || entryDateToday().replace(/\D/g, "").slice(2);
     const subject = `${firstDate} - ${mode === "sales" ? "판매" : "구매"} 거래명세서 - 에프엔`;
-    const body = `안녕하세요.\n\n${subject} PDF 거래명세서를 전달드립니다.\n거래명세서 PDF는 FN OS의 PDF 버튼에서 저장한 파일을 첨부해 주세요.\n\n감사합니다.\n에프엔`;
-    window.location.href = `mailto:${encodeURIComponent(fallback)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const body = `안녕하세요.\n\n${subject} 거래명세서 안내드립니다.\nPDF 파일이 필요한 경우 FN OS의 PDF 버튼에서 별도 저장해 주세요.\n\n감사합니다.\n에프엔`;
+    if (!window.confirm(`아래 주소로 E-mail을 바로 발송할까요?\n\n${fallback}\n\n${subject}`)) return;
+    try {
+      const res = await fetch("/api/fnos/email/send", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: fallback, subject, body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.error || "메일 발송에 실패했습니다.");
+      window.alert("E-mail 발송이 완료되었습니다.");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "메일 발송에 실패했습니다.");
+    }
   }
 
   const partnerLabel = mode === "purchases" ? "구매처" : "거래처";
