@@ -28,6 +28,10 @@ function hasOAuthConfig() {
   return Boolean(env("GOOGLE_CLIENT_ID") && env("GOOGLE_CLIENT_SECRET") && env("GOOGLE_REFRESH_TOKEN"));
 }
 
+function hasServiceAccountConfig() {
+  return Boolean(env("GOOGLE_SERVICE_ACCOUNT_EMAIL") && env("GOOGLE_PRIVATE_KEY"));
+}
+
 function cleanFileName(value: string) {
   return (value || "attachment").replace(/[\\/:*?"<>|]/g, "_").trim() || "attachment";
 }
@@ -135,7 +139,14 @@ async function getServiceAccountAccessToken() {
 }
 
 async function getGoogleAccessToken() {
-  if (hasOAuthConfig()) return getOAuthAccessToken();
+  if (hasOAuthConfig()) {
+    try {
+      return await getOAuthAccessToken();
+    } catch (error) {
+      if (!hasServiceAccountConfig()) throw error;
+      console.warn("Google OAuth token failed; falling back to service account for attachment sheet conversion.");
+    }
+  }
   return getServiceAccountAccessToken();
 }
 
