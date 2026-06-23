@@ -170,15 +170,25 @@ async function findExistingSheet(title: string, folderId: string) {
   return data.files?.[0] || null;
 }
 
-async function downloadSourceFile(fileUrl: string) {
-  const response = await fetch(fileUrl, { cache: "no-store" });
+async function downloadSourceFile(fileUrl: string, internalOrigin?: string) {
+  const headers: HeadersInit = {};
+  try {
+    const sourceUrl = new URL(fileUrl);
+    if (internalOrigin && sourceUrl.origin === internalOrigin) {
+      const apiKey = env("FN_OS_API_KEY") || env("FN_OS_AUTH_TOKEN") || env("FN_OS_PASSWORD");
+      if (apiKey) headers["x-fnos-api-key"] = apiKey;
+    }
+  } catch {
+    // URL validity is checked by the POST handler before this function is called.
+  }
+  const response = await fetch(fileUrl, { headers, cache: "no-store", signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`첨부파일 원본을 불러오지 못했습니다. HTTP ${response.status}`);
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function createGoogleSheet({ title, fileName, fileUrl, mimeType, folderId }: { title: string; fileName: string; fileUrl: string; mimeType?: string; folderId: string }) {
+async function createGoogleSheet({ title, fileName, fileUrl, mimeType, folderId, internalOrigin }: { title: string; fileName: string; fileUrl: string; mimeType?: string; folderId: string; internalOrigin?: string }) {
   const token = await getGoogleAccessToken();
-  const fileBuffer = await downloadSourceFile(fileUrl);
+  const fileBuffer = await downloadSourceFile(fileUrl, internalOrigin);
   const boundary = `fnos_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
   const metadata = {
     name: title,
@@ -238,7 +248,7 @@ export async function POST(request: NextRequest) {
 
     const title = spreadsheetTitle(body.attachmentId, fileName);
     const existing = await findExistingSheet(title, folderId);
-    const sheet = existing || await createGoogleSheet({ title, fileName, fileUrl, mimeType: body.mimeType, folderId });
+    const sheet = existing || await createGoogleSheet({ title, fileName, fileUrl, mimeType: body.mimeType, folderId, internalOrigin: request.nextUrl.origin });
     if (!sheet.webViewLink) throw new Error("Google Sheets 링크를 만들지 못했습니다.");
 
     return NextResponse.json({

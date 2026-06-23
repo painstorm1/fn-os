@@ -15,6 +15,13 @@ const DATABASE_URL =
   process.env.SUPABASE_POOLER_URL ||
   "";
 
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "";
+
 const pool = DATABASE_URL
   ? globalForImportErp.__fnosImportErpPool ||
     new pg.Pool({
@@ -164,6 +171,95 @@ async function db<T extends QueryResultRow = AnyRecord>(sql: string, params: unk
   if (!pool) throw new Error("FN OS DATABASE_URL이 없습니다.");
   const result = await pool.query<T>(sql, params);
   return result.rows;
+}
+
+function parseSupabaseStorageObject(value: string) {
+  try {
+    const parsed = new URL(value);
+    const match = parsed.pathname.match(/^\/storage\/v1\/object\/(?:public|authenticated|sign)\/([^/]+)\/(.+)$/);
+    if (!match) return null;
+    return {
+      bucket: decodeURIComponent(match[1]),
+      objectPath: decodeURIComponent(match[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function attachmentFileResponseHeaders(attachment: AnyRecord, response: Response) {
+  const headers = new Headers();
+  const mimeType = text(attachment.mime_type) || response.headers.get("content-type") || "application/octet-stream";
+  headers.set("Content-Type", mimeType);
+  headers.set("Cache-Control", "private, max-age=300");
+  const length = response.headers.get("content-length");
+  if (length) headers.set("Content-Length", length);
+  const fileName = encodeURIComponent(text(attachment.file_name) || "attachment");
+  headers.set("Content-Disposition", `inline; filename*=UTF-8''${fileName}`);
+  return headers;
+}
+
+async function fetchAttachmentCandidate(url: string, init: RequestInit = {}) {
+  try {
+    const response = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (response.ok) return response;
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function attachmentStorageResponse(attachment: AnyRecord) {
+  const fileUrl = text(attachment.file_url || attachment.file_path);
+  if (!fileUrl) return null;
+
+  const candidates: Array<{ url: string; init?: RequestInit }> = [];
+  const storageObject = parseSupabaseStorageObject(fileUrl);
+  if (SUPABASE_URL && SUPABASE_KEY && storageObject) {
+    const encodedPath = storageObject.objectPath.split("/").map(encodeURIComponent).join("/");
+    const encodedBucket = encodeURIComponent(storageObject.bucket);
+    candidates.push({
+      url: new URL(`/storage/v1/object/${encodedBucket}/${encodedPath}`, SUPABASE_URL).toString(),
+      init: {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      },
+    });
+    candidates.push({
+      url: new URL(`/storage/v1/object/public/${encodedBucket}/${encodedPath}`, SUPABASE_URL).toString(),
+    });
+  }
+  candidates.push({ url: fileUrl });
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.url)) continue;
+    seen.add(candidate.url);
+    const response = await fetchAttachmentCandidate(candidate.url, candidate.init);
+    if (response) return response;
+  }
+  return null;
+}
+
+async function serveOrderAttachmentFile(id: number) {
+  const [attachment] = await db(`select * from ${q(TABLES.attachments)} where id=$1`, [id]);
+  if (!attachment) return json({ ok: false, error: "첨부파일을 찾을 수 없습니다." }, 404);
+
+  const response = await attachmentStorageResponse(attachment);
+  if (!response?.body) {
+    return json({
+      ok: false,
+      error: "첨부파일 원본 저장소에 접근할 수 없습니다. 파일을 다시 업로드해 주세요.",
+    }, 404);
+  }
+
+  return new NextResponse(response.body, {
+    status: 200,
+    headers: attachmentFileResponseHeaders(attachment, response),
+  });
 }
 
 let ratesCache: { at: number; data: AnyRecord } | null = null;
@@ -1051,6 +1147,9 @@ async function handleGet(path: string, request: NextRequest) {
     }
     return json(grouped);
   }
+  const attachmentFileMatch = path.match(/^api\/fnos\/attachments\/(\d+)\/file$/);
+  if (attachmentFileMatch) return serveOrderAttachmentFile(Number(attachmentFileMatch[1]));
+
   const attachmentMatch = path.match(/^api\/fnos\/orders\/(\d+)\/attachments$/);
   if (attachmentMatch) {
     const orderId = Number(attachmentMatch[1]);

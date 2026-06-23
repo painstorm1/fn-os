@@ -2277,8 +2277,21 @@ function isExcelAttachment(item: OrderAttachment) {
   return /\.(xlsx|xlsm|xls|csv)$/i.test(item.file_name || "");
 }
 
-function attachmentFileUrl(item: OrderAttachment) {
+function attachmentRawFileUrl(item: OrderAttachment) {
   return String(item.file_url || item.file_path || "").trim();
+}
+
+function attachmentFileUrl(item: OrderAttachment) {
+  if (item.id !== undefined && item.id !== null && String(item.id).trim()) {
+    return `/api/fnos/attachments/${encodeURIComponent(String(item.id))}/file`;
+  }
+  return attachmentRawFileUrl(item);
+}
+
+function absoluteAttachmentFileUrl(item: OrderAttachment) {
+  const fileUrl = attachmentFileUrl(item);
+  if (!fileUrl) return "";
+  return /^https?:\/\//i.test(fileUrl) ? fileUrl : new URL(fileUrl, window.location.origin).toString();
 }
 
 const openingAttachmentSheets = new Set<string>();
@@ -2499,7 +2512,8 @@ async function openAttachment(item: OrderAttachment) {
     return;
   }
   if (isExcelAttachment(item)) {
-    const requestKey = attachmentSheetRequestKey(item, fileUrl);
+    const sourceFileUrl = absoluteAttachmentFileUrl(item);
+    const requestKey = attachmentSheetRequestKey(item, sourceFileUrl || fileUrl);
     const cacheKey = `fnos-attachment-sheet:${requestKey}`;
     const cachedUrl = sessionStorage.getItem(cacheKey);
     if (cachedUrl) {
@@ -2516,7 +2530,7 @@ async function openAttachment(item: OrderAttachment) {
         body: JSON.stringify({
           attachmentId: item.id,
           fileName: item.file_name,
-          fileUrl,
+          fileUrl: sourceFileUrl,
           mimeType: item.mime_type,
         }),
       });
