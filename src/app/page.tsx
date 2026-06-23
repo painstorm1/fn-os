@@ -8684,6 +8684,7 @@ function OnlineOrderProgressList({
   page,
   onPageChange,
   statusFilter = "전체",
+  siteFilter = "전체",
 }: {
   rows: string[][];
   onChange: (rows: string[][]) => void;
@@ -8694,6 +8695,7 @@ function OnlineOrderProgressList({
   page?: number;
   onPageChange?: (page: number) => void;
   statusFilter?: string;
+  siteFilter?: string;
 }) {
   const headers = salesSheetHeaders["발주 진행 단계"];
   const progressTableColumnOrder = [
@@ -8772,11 +8774,16 @@ function OnlineOrderProgressList({
     .map((row, index) => ({ row, index, key: `progress-${index}` }))
     .filter((item) => rowHasValue(item.row))
     .filter((item) => {
+      if (!siteFilter || siteFilter === "전체") return true;
+      const site = progressValue(item.row, "쇼핑몰명") || progressValue(item.row, "쇼핑몰(거래처)") || "미지정";
+      return site === siteFilter;
+    })
+    .filter((item) => {
       if (!statusFilter || statusFilter === "전체") return true;
       const status = progressValue(item.row, "주문상태");
       if (statusFilter === "신규주문") return !status || status === "신규주문";
       return status === statusFilter;
-    }), [rows, statusFilter]);
+    }), [rows, statusFilter, siteFilter]);
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
   const requestedPage = page ?? uncontrolledPage;
@@ -10335,6 +10342,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [orderProgressPage, setOrderProgressPage] = useState(1);
   const [orderProgressStatusFilter, setOrderProgressStatusFilter] = useState("전체");
+  const [orderProgressSiteFilter, setOrderProgressSiteFilter] = useState("전체");
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
@@ -11677,21 +11685,47 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return sheets["발주 진행 단계"].filter(rowHasValue);
   }
 
+  function orderProgressSiteName(row: string[]) {
+    return progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)") || "미지정";
+  }
+
+  function orderProgressMatchesStatus(row: string[], label: string) {
+    if (!label || label === "전체") return true;
+    const status = progressValue(row, "주문상태");
+    if (label === "신규주문") return !status || status === "신규주문";
+    return status === label;
+  }
+
+  function orderProgressMatchesSite(row: string[], site: string) {
+    if (!site || site === "전체") return true;
+    return orderProgressSiteName(row) === site;
+  }
+
   function filteredOrderProgressRows() {
-    const rows = orderProgressRows();
-    if (!orderProgressStatusFilter || orderProgressStatusFilter === "전체") return rows;
-    return rows.filter((row) => {
-      const status = progressValue(row, "주문상태");
-      if (orderProgressStatusFilter === "신규주문") return !status || status === "신규주문";
-      return status === orderProgressStatusFilter;
-    });
+    return orderProgressRows().filter((row) => (
+      orderProgressMatchesSite(row, orderProgressSiteFilter) && orderProgressMatchesStatus(row, orderProgressStatusFilter)
+    ));
   }
 
   function orderStatusCount(label: string) {
-    const rows = orderProgressRows();
-    if (label === "전체") return rows.length;
-    if (label === "신규주문") return rows.filter((row) => !progressValue(row, "주문상태") || progressValue(row, "주문상태") === "신규주문").length;
-    return rows.filter((row) => progressValue(row, "주문상태") === label).length;
+    return orderProgressRows().filter((row) => (
+      orderProgressMatchesSite(row, orderProgressSiteFilter) && orderProgressMatchesStatus(row, label)
+    )).length;
+  }
+
+  function orderSiteOptions() {
+    const rows = orderProgressRows().filter((row) => orderProgressMatchesStatus(row, orderProgressStatusFilter));
+    const grouped = rows.reduce<Record<string, number>>((acc, row) => {
+      const site = orderProgressSiteName(row);
+      acc[site] = (acc[site] || 0) + 1;
+      return acc;
+    }, {});
+    return [
+      { name: "전체", count: rows.length },
+      ...Object.entries(grouped)
+        .sort(([left], [right]) => left.localeCompare(right, "ko-KR", { numeric: true, sensitivity: "base" }))
+        .map(([name, count]) => ({ name, count })),
+    ];
   }
 
   function onlineOrderApiPayload(indexes: number[]) {
@@ -14476,6 +14510,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   const orderProgressPageSize = 30;
+  const orderProgressSiteOptions = orderSiteOptions();
   const orderProgressTotalCount = filteredOrderProgressRows().length;
   const orderProgressTotalPages = Math.max(1, Math.ceil(orderProgressTotalCount / orderProgressPageSize));
   const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);
@@ -14544,6 +14579,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
             </div>
           </div>
+          <div className="mb-3 rounded-xl border border-orange-100 bg-orange-50/50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-black uppercase tracking-wide text-orange-700">사이트별 주문</span>
+              <span className="text-xs font-bold text-slate-500">선택한 사이트 기준으로 아래 발주 목록이 나뉘어 표시됩니다.</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {orderProgressSiteOptions.map((site) => (
+                <button
+                  key={site.name}
+                  type="button"
+                  className={`min-h-11 rounded-lg border px-3 py-2 text-left text-xs font-black transition ${orderProgressSiteFilter === site.name ? "border-[#ff6a00] bg-white text-orange-700 shadow-sm" : "border-orange-100 bg-white/70 text-slate-700 hover:border-orange-200 hover:bg-white"}`}
+                  onClick={() => {
+                    setOrderProgressSiteFilter(site.name);
+                    setOrderProgressPage(1);
+                  }}
+                >
+                  <span className="block text-sm text-blue-600">{site.count.toLocaleString("ko-KR")}건</span>
+                  {site.name}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
@@ -14602,6 +14659,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             page={orderProgressCurrentPage}
             onPageChange={setOrderProgressPage}
             statusFilter={orderProgressStatusFilter}
+            siteFilter={orderProgressSiteFilter}
           />
           <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
             <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
