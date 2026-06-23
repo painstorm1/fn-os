@@ -1372,10 +1372,10 @@ const salesChannelPlatformOptions: Array<{
   {
     code: "ELEVENST",
     label: "11번가",
-    supported: false,
+    supported: true,
     requiredKeys: ["api_key"],
     example: "API Key: 11번가 OPEN API Center 발급 키",
-    help: "현재 FN OS 자동 주문수집 어댑터는 아직 없습니다. 키는 저장해둘 수 있고, 당장은 엑셀 발주로 처리됩니다.",
+    help: "11번가 주문 API의 결제완료/발주확인 대상 주문을 수집합니다. Open API 발급 화면에 API를 호출하는 PC/서버의 공인 IP가 등록되어 있어야 합니다.",
   },
   {
     code: "ESM",

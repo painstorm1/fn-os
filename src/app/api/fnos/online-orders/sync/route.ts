@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CoupangChannelAdapter } from "@/lib/channels/coupang";
+import { ElevenstChannelAdapter } from "@/lib/channels/elevenst";
 import { NaverChannelAdapter } from "@/lib/channels/naver";
 import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
 import type { ChannelResult, NormalizedOrder, SalesChannelAdapter } from "@/lib/channels/common/types";
@@ -18,6 +19,7 @@ const localBridgeCorsHeaders = {
 const adapters: Record<string, SalesChannelAdapter> = {
   NAVER: new NaverChannelAdapter(),
   COUPANG: new CoupangChannelAdapter(),
+  ELEVENST: new ElevenstChannelAdapter(),
 };
 
 function jsonResponse(body: AnyRecord, init?: ResponseInit) {
@@ -75,6 +77,7 @@ function adapterCodeForChannel(channel: AnyRecord) {
   const haystack = `${code} ${name}`;
   if (code === "NAVER" || code.startsWith("NAVER_") || /NAVER|네이버|스마트스토어|SMARTSTORE/.test(haystack)) return "NAVER";
   if (code === "COUPANG" || code.startsWith("COUPANG_") || /COUPANG|쿠팡|WING/.test(haystack)) return "COUPANG";
+  if (code === "ELEVENST" || code === "11ST" || code.startsWith("ELEVENST_") || /11ST|11번가|십일번가|ELEVEN/.test(haystack)) return "ELEVENST";
   return code;
 }
 
@@ -227,7 +230,7 @@ export async function POST(request: NextRequest) {
     if (!activeChannels.length) {
       return jsonResponse({
         ok: false,
-        error: "API 사용으로 저장된 네이버/쿠팡 쇼핑몰이 없습니다. 기초관리 > 쇼핑몰에서 API 정보를 저장해주세요.",
+        error: "API 사용으로 저장된 네이버/쿠팡/11번가 쇼핑몰이 없습니다. 기초관리 > 쇼핑몰에서 API 정보를 저장해주세요.",
         statuses: [],
         orders: [],
       }, { status: 400 });
