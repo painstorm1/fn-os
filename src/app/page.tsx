@@ -3400,6 +3400,7 @@ function NativeOrderQuickEditor({ detail, onSaved }: { detail: ImportOrderDetail
         unit_price: item.unit_price || "",
         item_currency: item.item_currency || order.currency || "CNY",
         line_note: item.line_note || "",
+        sku_allocation_json: parseSkuAllocation(item.sku_allocation_json || item.sku_allocations || item.linked_sku_qty),
       }));
     }
     const res = await fetch(apiUrl(`/api/fnos/orders/${order.id}`), {
