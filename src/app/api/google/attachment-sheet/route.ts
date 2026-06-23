@@ -170,13 +170,17 @@ async function findExistingSheet(title: string, folderId: string) {
   return data.files?.[0] || null;
 }
 
-async function downloadSourceFile(fileUrl: string, internalOrigin?: string) {
+async function downloadSourceFile(fileUrl: string, options: { internalOrigin?: string; cookieHeader?: string } = {}) {
   const headers: HeadersInit = {};
   try {
     const sourceUrl = new URL(fileUrl);
-    if (internalOrigin && sourceUrl.origin === internalOrigin) {
+    if (options.internalOrigin && sourceUrl.origin === options.internalOrigin) {
       const apiKey = env("FN_OS_API_KEY") || env("FN_OS_AUTH_TOKEN") || env("FN_OS_PASSWORD");
-      if (apiKey) headers["x-fnos-api-key"] = apiKey;
+      if (apiKey) {
+        headers["x-fnos-api-key"] = apiKey;
+      } else if (options.cookieHeader) {
+        headers.Cookie = options.cookieHeader;
+      }
     }
   } catch {
     // URL validity is checked by the POST handler before this function is called.
@@ -186,9 +190,9 @@ async function downloadSourceFile(fileUrl: string, internalOrigin?: string) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function createGoogleSheet({ title, fileName, fileUrl, mimeType, folderId, internalOrigin }: { title: string; fileName: string; fileUrl: string; mimeType?: string; folderId: string; internalOrigin?: string }) {
+async function createGoogleSheet({ title, fileName, fileUrl, mimeType, folderId, internalOrigin, cookieHeader }: { title: string; fileName: string; fileUrl: string; mimeType?: string; folderId: string; internalOrigin?: string; cookieHeader?: string }) {
   const token = await getGoogleAccessToken();
-  const fileBuffer = await downloadSourceFile(fileUrl, internalOrigin);
+  const fileBuffer = await downloadSourceFile(fileUrl, { internalOrigin, cookieHeader });
   const boundary = `fnos_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
   const metadata = {
     name: title,
@@ -248,7 +252,15 @@ export async function POST(request: NextRequest) {
 
     const title = spreadsheetTitle(body.attachmentId, fileName);
     const existing = await findExistingSheet(title, folderId);
-    const sheet = existing || await createGoogleSheet({ title, fileName, fileUrl, mimeType: body.mimeType, folderId, internalOrigin: request.nextUrl.origin });
+    const sheet = existing || await createGoogleSheet({
+      title,
+      fileName,
+      fileUrl,
+      mimeType: body.mimeType,
+      folderId,
+      internalOrigin: request.nextUrl.origin,
+      cookieHeader: request.headers.get("cookie") || undefined,
+    });
     if (!sheet.webViewLink) throw new Error("Google Sheets 링크를 만들지 못했습니다.");
 
     return NextResponse.json({
