@@ -10342,7 +10342,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [orderProgressPage, setOrderProgressPage] = useState(1);
   const [orderProgressStatusFilter, setOrderProgressStatusFilter] = useState("전체");
-  const [orderProgressSiteFilter, setOrderProgressSiteFilter] = useState("전체");
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
@@ -10897,6 +10896,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (kind === "orders") window.alert("작업 완료됨!");
   }
 
+  async function orderCollectionStatusPlaceholders(collectDays: number): Promise<OnlineApiStatusItem[]> {
+    try {
+      const res = await fetch("/api/fnos/sales-channels", { cache: "no-store", credentials: "include", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean });
+      const data = await res.json().catch(() => ({}));
+      const channels = Array.isArray(data.channels) ? data.channels as Array<Record<string, unknown>> : [];
+      const statuses = channels
+        .filter((channel) => channel.is_active !== false && channel.api_enabled !== false)
+        .map((channel) => ({
+          name: salesCellText(channel.channel_name || channel.customer_name || channel.channel_code) || "쇼핑몰",
+          status: "running" as const,
+          message: `최근 ${collectDays}일`,
+        }));
+      return statuses.length ? statuses : [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일` }];
+    } catch {
+      return [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일` }];
+    }
+  }
   async function runOrderCollectionFlow(dayWindow = 4) {
     const collectDays = Math.max(1, Math.floor(dayWindow));
     setCollectionPopupOpen(false);
@@ -10905,10 +10921,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const ok = window.confirm(`최근 ${collectDays}일 주문 수집하시겠습니까?`);
     if (!ok) return;
     resetSalesWorkspaceForOrderCollection();
-    setCollectionStatuses([
-      { name: "온라인 발주", status: "running", message: `최근 ${collectDays}일 API 수집 중` },
-    ]);
+    setCollectionStatuses([{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]);
     setCollectionPopupOpen(true);
+    void orderCollectionStatusPlaceholders(collectDays).then(setCollectionStatuses);
     setMessage("");
     try {
       const todayDate = new Date();
@@ -10926,7 +10941,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           body: JSON.stringify(requestBody),
         } as RequestInit & { fnosSkipBusyOverlay: boolean });
       } else {
-        setCollectionStatuses([{ name: "온라인 발주", status: "running", message: `로컬 주문수집 연결 중 · 최근 ${collectDays}일` }]);
+        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "로컬 주문수집 연결 중" })));
         try {
           res = await fetch("http://127.0.0.1:3000/api/fnos/online-orders/sync", {
             method: "POST",
@@ -10947,9 +10962,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           ? queuedStatuses.map((item) => ({
               name: salesCellText(item.channel_name || item.channel_code) || "쇼핑몰",
               status: "running" as const,
-              message: salesCellText(item.message) || "로컬 워커 대기 중입니다.",
+              message: salesCellText(item.message) || "수집 대기 중",
             }))
-          : [{ name: "쇼핑몰", status: "running" as const, message: "로컬 워커 대기 중입니다." }];
+          : [{ name: "쇼핑몰", status: "running" as const, message: "수집 대기 중" }];
         setCollectionStatuses(waitingStatuses);
         for (let attempt = 0; attempt < 45; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
@@ -10966,8 +10981,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           }
           setCollectionStatuses((prev) => (prev.length ? prev : waitingStatuses).map((item) => ({
             ...item,
-            status: status === "queued" ? "skipped" : "running",
-            message: status === "queued" ? "로컬 워커 대기 중입니다." : "로컬 워커가 주문수집 중입니다.",
+            status: "running",
+            message: status === "queued" ? "수집 대기 중" : "수집중",
           })));
         }
         if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해주세요.");
@@ -10976,14 +10991,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setCollectionStatuses(statuses.length
         ? statuses.map((item) => ({
             name: salesCellText(item.channel_name) || "쇼핑몰",
-            status: item.ok ? "done" : item.skipped ? "skipped" : "failed",
-            message: item.ok ? `${Number(item.count || 0)}건 수집` : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
+            status: item.ok ? "done" : "failed",
+            message: item.ok ? `${Number(item.count || 0)}건` : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
           }))
         : [
             {
-              name: "온라인 발주",
+              name: "쇼핑몰 API",
               status: res.ok && data.ok !== false ? "done" : "failed",
-              message: salesCellText(data.error || data.message || "처리 완료"),
+              message: res.ok && data.ok !== false ? "" : salesCellText(data.error || data.message || "수집 실패"),
             },
           ]);
       if (!res.ok || data.ok === false) {
@@ -11703,13 +11718,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function filteredOrderProgressRows() {
     return orderProgressRows().filter((row) => (
-      orderProgressMatchesSite(row, orderProgressSiteFilter) && orderProgressMatchesStatus(row, orderProgressStatusFilter)
+      orderProgressMatchesStatus(row, orderProgressStatusFilter)
     ));
   }
 
   function orderStatusCount(label: string) {
     return orderProgressRows().filter((row) => (
-      orderProgressMatchesSite(row, orderProgressSiteFilter) && orderProgressMatchesStatus(row, label)
+      orderProgressMatchesStatus(row, label)
     )).length;
   }
 
@@ -14510,7 +14525,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   const orderProgressPageSize = 30;
-  const orderProgressSiteOptions = orderSiteOptions();
   const orderProgressTotalCount = filteredOrderProgressRows().length;
   const orderProgressTotalPages = Math.max(1, Math.ceil(orderProgressTotalCount / orderProgressPageSize));
   const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);
@@ -14579,28 +14593,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <input ref={invoiceUploadInputRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.csv" className="hidden" onChange={(event) => { pickInvoiceFilesAndMatch(event.target.files); event.target.value = ""; }} />
             </div>
           </div>
-          <div className="mb-3 rounded-xl border border-orange-100 bg-orange-50/50 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-black uppercase tracking-wide text-orange-700">사이트별 주문</span>
-              <span className="text-xs font-bold text-slate-500">선택한 사이트 기준으로 아래 발주 목록이 나뉘어 표시됩니다.</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {orderProgressSiteOptions.map((site) => (
-                <button
-                  key={site.name}
-                  type="button"
-                  className={`min-h-11 rounded-lg border px-3 py-2 text-left text-xs font-black transition ${orderProgressSiteFilter === site.name ? "border-[#ff6a00] bg-white text-orange-700 shadow-sm" : "border-orange-100 bg-white/70 text-slate-700 hover:border-orange-200 hover:bg-white"}`}
-                  onClick={() => {
-                    setOrderProgressSiteFilter(site.name);
-                    setOrderProgressPage(1);
-                  }}
-                >
-                  <span className="block text-sm text-blue-600">{site.count.toLocaleString("ko-KR")}건</span>
-                  {site.name}
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
             <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
               const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
@@ -14659,7 +14651,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             page={orderProgressCurrentPage}
             onPageChange={setOrderProgressPage}
             statusFilter={orderProgressStatusFilter}
-            siteFilter={orderProgressSiteFilter}
           />
           <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
             <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
@@ -14877,17 +14868,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               footer={<ActionButton type="button" onClick={() => setCollectionPopupOpen(false)}>확인</ActionButton>}
             >
               <div className="grid gap-2 md:grid-cols-2">
-                {collectionStatuses.map((item) => (
-                  <div key={item.name} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
-                    <span className={`h-3 w-3 rounded-full ${
-                      item.status === "done" ? "bg-emerald-500" : item.status === "running" ? "bg-amber-400" : item.status === "failed" ? "bg-rose-500" : "bg-slate-300"
-                    }`} />
+                {collectionStatuses.map((item) => {
+                  const isRunning = item.status === "running" || item.status === "waiting";
+                  const tone = item.status === "done"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : isRunning
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-rose-200 bg-rose-50 text-rose-700";
+                  const dot = item.status === "done" ? "bg-emerald-500" : isRunning ? "bg-amber-400" : "bg-rose-500";
+                  const label = item.status === "done" ? "수집완료" : isRunning ? "수집중" : "문제";
+                  return (
+                    <div key={item.name} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${tone}`}>
+                      <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} />
                       <div className="min-w-0">
                         <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
-                        <div className="mt-0.5 truncate text-xs font-semibold text-gray-500">{item.message}</div>
+                        <div className="mt-0.5 truncate text-xs font-semibold"><span className="font-black">{label}</span>{item.message ? ` · ${item.message}` : ""}</div>
                       </div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             </FormModal>
           )}
