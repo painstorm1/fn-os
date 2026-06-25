@@ -10915,7 +10915,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const fromDate = new Date(todayDate);
       fromDate.setDate(todayDate.getDate() - (collectDays - 1));
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
-      const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      const isLocalPage = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname) || window.location.port === "3000";
       let res: Response;
       if (isLocalPage) {
         res = await fetch("/api/fnos/online-orders/sync", {
@@ -11780,7 +11780,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
     }
 
-    const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const isLocalPage = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname) || window.location.port === "3000";
     let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
     if (!isLocalPage && data.queued) {

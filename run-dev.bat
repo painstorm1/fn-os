@@ -1,3 +1,6 @@
 @echo off
 cd /d "%~dp0"
-"C:\Program Files\nodejs\node.exe" "node_modules\next\dist\bin\next" dev -H 127.0.0.1 -p 3000
+set "NODE_EXE=C:\Users\pains\AppData\Local\hermes\node\node.exe"
+if not exist "%NODE_EXE%" set "NODE_EXE=node"
+set "FNOS_ALLOWED_DEV_ORIGINS=192.168.0.27"
+"%NODE_EXE%" "node_modules\next\dist\bin\next" dev -H 0.0.0.0 -p 3000
