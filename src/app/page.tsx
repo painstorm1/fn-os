@@ -10931,16 +10931,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       fromDate.setDate(todayDate.getDate() - (collectDays - 1));
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const isLocalPage = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname) || window.location.port === "3000";
-      let res: Response;
-      if (isLocalPage) {
-        res = await fetch("/api/fnos/online-orders/sync", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          fnosSkipBusyOverlay: true,
-          body: JSON.stringify(requestBody),
-        } as RequestInit & { fnosSkipBusyOverlay: boolean });
-      } else {
+      let res = await fetch("/api/fnos/online-orders/sync", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        fnosSkipBusyOverlay: true,
+        body: JSON.stringify(isLocalPage ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
+      let data = await res.json().catch(() => ({}));
+      if (!isLocalPage && data.queued) {
         setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "로컬 주문수집 연결 중" })));
         try {
           res = await fetch("http://127.0.0.1:3000/api/fnos/online-orders/sync", {
@@ -10950,11 +10949,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             fnosSkipBusyOverlay: true,
             body: JSON.stringify({ ...requestBody, run_direct: true, use_worker: false }),
           } as RequestInit & { fnosSkipBusyOverlay: boolean });
+          data = await res.json().catch(() => ({}));
         } catch {
           throw new Error("로컬 주문수집 서버에 연결하지 못했습니다. localhost:3000을 켠 뒤 다시 시도해 주세요.");
         }
       }
-      let data = await res.json().catch(() => ({}));
       if (data.queued && data.job_id) {
         const jobId = salesCellText(data.job_id);
         const queuedStatuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; channel_code?: string; message?: string }> : [];
