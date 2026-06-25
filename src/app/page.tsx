@@ -10930,7 +10930,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const fromDate = new Date(todayDate);
       fromDate.setDate(todayDate.getDate() - (collectDays - 1));
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
-      const isLocalPage = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname) || window.location.port === "3000";
+      const hostname = window.location.hostname;
+      const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+      const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
+      const isLocalPage = isLoopbackHost || window.location.port === "3000";
+      const shouldUseLocalBridgeFallback = !isLocalPage && isPrivateIpv4Host;
       let res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
@@ -10939,7 +10943,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         body: JSON.stringify(isLocalPage ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
-      if (!isLocalPage && data.queued) {
+      if (shouldUseLocalBridgeFallback && data.queued) {
         setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "로컬 주문수집 연결 중" })));
         try {
           res = await fetch("http://127.0.0.1:3000/api/fnos/online-orders/sync", {
@@ -11794,10 +11798,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
     }
 
-    const isLocalPage = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname) || window.location.port === "3000";
+    const hostname = window.location.hostname;
+    const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+    const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
+    const isLocalPage = isLoopbackHost || window.location.port === "3000";
+    const shouldUseLocalBridgeFallback = !isLocalPage && isPrivateIpv4Host;
     let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
-    if (!isLocalPage && data.queued) {
+    if (shouldUseLocalBridgeFallback && data.queued) {
       setCollectionStatuses(baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })));
       try {
         res = await postStatus("http://127.0.0.1:3000/api/fnos/online-orders/status", { run_direct: true, use_worker: false }, true);
