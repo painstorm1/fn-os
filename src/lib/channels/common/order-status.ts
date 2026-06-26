@@ -58,6 +58,7 @@ const confirmedOrderStatusPatterns = [
   "PLACEORDER",
   "ORDERCONFIRMED",
   "CONFIRMED",
+  "ACCEPT",
   "READYTOSHIP",
   "READYFORDISPATCH",
   "READYFORDELIVERY",
