@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { appendAccountingInstallmentMemo } from "./accounting-installments";
 
 type RawRow = Record<string, unknown>;
 type ExpenseSourceProfile = {
@@ -198,7 +199,7 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
     row.forEach((value, colIndex) => {
       if (clean(value)) rawByColumn[colName(colIndex)] = value;
     });
-    rows.push({
+    const parsedRow = {
       ...rawByColumn,
       expense_date: expenseDate,
       vendor_name: row[profile.columns.vendor],
@@ -218,6 +219,10 @@ function profileRowsFromWorksheet(sheet: XLSX.WorkSheet, profile: ExpenseSourceP
       cash_direction: direction,
       balance_amount: profile.columns.balance !== undefined ? row[profile.columns.balance] : "",
       source_row_no: index + 1,
+    };
+    rows.push({
+      ...parsedRow,
+      category_memo: appendAccountingInstallmentMemo(memo, parsedRow),
     });
   }
   return rows;

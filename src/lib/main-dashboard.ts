@@ -1,3 +1,6 @@
+import {
+  installmentAllocatedAmountForMonth,
+} from "./accounting-installments";
 import { selectRows } from "./fnos-db";
 
 type Row = Record<string, unknown>;
@@ -422,7 +425,10 @@ export async function mainDashboardSummary() {
   const sevenDayAdRows = rowsFrom(adRows, adDate, adSevenDayStart);
   const monthAdRows = adRows.filter((row) => dateKey(adDate(row)).startsWith(month));
   const monthExpenseRows = expenseRows.filter((row) => dateKey(expenseDate(row)).startsWith(month));
-  const cardRows = monthExpenseRows.filter((row) => /card|credit|카드/i.test(`${row.payment_method || ""} ${row.source_type || ""}`));
+  const cardRows = expenseRows.filter((row) => /card|credit|카드/i.test(`${row.payment_method || ""} ${row.source_type || ""}`));
+  const cardExpenseAmount = cardRows.length
+    ? sum(cardRows, (row) => installmentAllocatedAmountForMonth(row, month, (item) => item.total_amount ?? item.amount ?? item.supply_amount, expenseDate))
+    : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount);
   const upcomingFixedCosts = fixedCosts.length
     ? fixedCosts
       .map((row) => {
@@ -517,9 +523,7 @@ export async function mainDashboardSummary() {
     ad_conversion_sales: latestAdConversionSales,
     ad_roas: latestAdSpend ? (latestAdConversionSales / latestAdSpend) * 100 : 0,
     ad_daily: dailyAdSeries(adRows, 7, latestAdDate, adDate, adSpend, adConversionSales),
-    card_expense_amount: cardRows.length
-      ? sum(cardRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount)
-      : sum(monthExpenseRows, (row) => row.total_amount ?? row.amount ?? row.supply_amount),
+    card_expense_amount: cardExpenseAmount,
     bank_balance: null,
     upcoming_fixed_costs: upcomingFixedCosts.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),
     import_recent_orders: recentImportOrders.slice(0, 8).map((row) => ({ ...row, display_title: rowTitle(row) })),

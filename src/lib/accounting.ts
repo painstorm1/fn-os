@@ -1,3 +1,4 @@
+import { appendAccountingInstallmentMemo } from "./accounting-installments";
 import { deleteRows, hasDbConfig, insertRows, patchRows, selectRows } from "./fnos-db";
 
 type RawRow = Record<string, unknown>;
@@ -237,7 +238,7 @@ export async function importExpenseRows(rows: RawRow[], sourceType = "기타", s
     const categoryMemo = text(first(row, ["category_memo", "category_note", "detail_memo", "보조메모", "분류메모"]));
     const paymentDue = text(first(row, ["payment_due_date", "payment_due", "결제예정일"]));
     const currencyHint = text(first(row, ["currency_hint", "currency", "통화"]));
-    const memo = [categoryDetail, categoryMemo, paymentDue ? `결제예정일:${paymentDue}` : "", currencyHint && currencyHint !== "KRW" ? `통화:${currencyHint}` : "", text(first(row, ["memo", "비고", "메모"]))].filter(Boolean).join(" / ");
+    const memo = appendAccountingInstallmentMemo([categoryDetail, categoryMemo, paymentDue ? `결제예정일:${paymentDue}` : "", currencyHint && currencyHint !== "KRW" ? `통화:${currencyHint}` : "", text(first(row, ["memo", "비고", "메모"]))].filter(Boolean).join(" / "), row);
     return {
       expense_date: isoDate(first(row, ["expense_date", "날짜", "일자", "거래일자", "이용일자", "승인일자", "작성일자"])),
       source_type: rowSourceType,

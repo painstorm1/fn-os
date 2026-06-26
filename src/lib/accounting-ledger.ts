@@ -1,3 +1,8 @@
+import {
+  appendAccountingInstallmentMemo,
+  installmentAllocatedAmountForDateRange,
+  installmentParts,
+} from "./accounting-installments";
 import { deleteRows, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
 import { cleanAccountingFixedCostPayload, cleanAccountingLoanPayload, shouldAutoMarkLoanPaid } from "./accounting-ledger-payloads";
 
@@ -334,11 +339,7 @@ function cardPanelStatuses(rows: RawRow[], settlements: RawRow[]) {
   ].map((card) => {
     const cycle = cardPanelCycle(card.key, latestDate);
     const cardRows = rows.filter((row) => accountingCardKey(row.card_name || row.source_name) === card.key && row.affects_card_settlement === true);
-    const currentRows = cycle ? cardRows.filter((row) => {
-      const date = isoDate(row.transaction_date);
-      return date >= cycle.settlement_start && date <= latestDate;
-    }) : [];
-    const currentAmount = currentRows.reduce((sum, row) => sum + signedAccountingAmount(row), 0);
+    const currentAmount = cardRows.reduce((sum, row) => sum + (cycle ? installmentAllocatedAmountForDateRange(row, cycle.settlement_start, latestDate, signedAccountingAmount, (item) => item.transaction_date) : 0), 0);
     const dueSettlement = settlements
       .filter((row) => accountingCardKey(row.card_name) === card.key && row.paid !== true && text(row.payment_due_date) >= latestDate)
       .sort((left, right) => text(left.payment_due_date).localeCompare(text(right.payment_due_date)))[0];
@@ -791,7 +792,7 @@ export function normalizeAccountingTransaction(row: RawRow, fxRates: Record<stri
     existing_category_large: existing.large,
     existing_category_middle: existing.middle,
     existing_category_small: existing.small,
-    memo: text(row.memo || row["비고"]),
+    memo: appendAccountingInstallmentMemo(text(row.memo || row["비고"]), row),
     raw_json: row,
     dedupe_key: key,
   };
@@ -868,26 +869,33 @@ async function rebuildCardSettlements() {
   for (const row of cardRows) {
     if (row.affects_card_settlement !== true) continue;
     const cardName = text(row.card_name || row.source_name);
-    const txDate = isoDate(row.transaction_date);
     const cardAccount = findAccountingSourceAccount(cardName, cardAccounts, "card") || undefined;
-    const settlement = settlementFor(cardName, txDate, cardAccount);
-    if (!settlement) continue;
-    const key = `${cardName}|${settlement.settlement_start}|${settlement.settlement_end}`;
-    const prev = grouped.get(key) || {
-      card_name: cardName,
-      ...settlement,
-      domestic_amount: 0,
-      foreign_amount: 0,
-      amount_krw: 0,
-      currency: "USD",
-      paid: false,
-    };
-    const sign = isCardCancel(row) ? -1 : 1;
-    prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? sign * Math.abs(numberValue(row.amount_krw ?? row.amount)) : 0);
-    prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : sign * Math.abs(numberValue(row.foreign_amount || row.amount)));
-    prev.amount_krw = numberValue(prev.amount_krw) + sign * Math.abs(numberValue(row.amount_krw));
-    prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.amount_krw || prev.domestic_amount) / numberValue(prev.card_limit) : null;
-    grouped.set(key, prev);
+    const krwParts = installmentParts(row, signedAccountingAmount, (item) => item.transaction_date);
+    const foreignParts = installmentParts(row, (item) => {
+      const amount = numberValue(item.foreign_amount || item.amount);
+      return isCardCancel(item) ? -Math.abs(amount) : Math.abs(amount);
+    }, (item) => item.transaction_date);
+    for (let index = 0; index < krwParts.length; index += 1) {
+      const part = krwParts[index];
+      const settlement = settlementFor(cardName, part.date, cardAccount);
+      if (!settlement) continue;
+      const key = `${cardName}|${settlement.settlement_start}|${settlement.settlement_end}`;
+      const prev = grouped.get(key) || {
+        card_name: cardName,
+        ...settlement,
+        domestic_amount: 0,
+        foreign_amount: 0,
+        amount_krw: 0,
+        currency: "USD",
+        paid: false,
+      };
+      const foreignPart = foreignParts[index] || { amount: 0 };
+      prev.domestic_amount = numberValue(prev.domestic_amount) + (text(row.currency) === "KRW" ? part.amount : 0);
+      prev.foreign_amount = numberValue(prev.foreign_amount) + (text(row.currency) === "KRW" ? 0 : foreignPart.amount);
+      prev.amount_krw = numberValue(prev.amount_krw) + part.amount;
+      prev.usage_rate = numberValue(prev.card_limit) ? numberValue(prev.amount_krw || prev.domestic_amount) / numberValue(prev.card_limit) : null;
+      grouped.set(key, prev);
+    }
   }
   const rows = Array.from(grouped.values());
   if (rows.length) await upsertRows("accounting_card_settlements", rows, "card_name,settlement_start,settlement_end");
