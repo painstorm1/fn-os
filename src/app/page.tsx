@@ -10953,7 +10953,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const hostname = window.location.hostname;
       const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
       const isLocalPage = isLoopbackHost || window.location.port === "3000";
-      const localBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "http://127.0.0.1:3000";
+      const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
+      const defaultBridgeOrigin = savedBridgeOrigin || "http://192.168.0.27:3000";
       let res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
@@ -10963,7 +10964,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
       if (!isLocalPage && data.queued) {
-        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "로컬 주문수집 연결 중" })));
+        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 서버 연결 중" })));
+        let localBridgeOrigin = defaultBridgeOrigin;
+        if (!savedBridgeOrigin) {
+          const typedBridgeOrigin = window.prompt("외부 웹 주문수집은 미니PC/FNOS 주문수집 서버 주소가 필요합니다. 같은 사무실이면 미니PC LAN 주소를, 외부망이면 터널 URL을 입력하세요.", defaultBridgeOrigin);
+          if (!typedBridgeOrigin) throw new Error("미니PC 주문수집 서버 주소가 설정되지 않아 수집을 중단했습니다.");
+          localBridgeOrigin = typedBridgeOrigin.trim();
+          window.localStorage.setItem("fnosLocalBridgeOrigin", localBridgeOrigin);
+        }
         try {
           res = await fetch(`${localBridgeOrigin.replace(/\/$/, "")}/api/fnos/online-orders/sync`, {
             method: "POST",
@@ -10974,7 +10982,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           } as RequestInit & { fnosSkipBusyOverlay: boolean });
           data = await res.json().catch(() => ({}));
         } catch {
-          throw new Error("로컬 주문수집 서버에 연결하지 못했습니다. localhost:3000을 켠 뒤 다시 시도해 주세요.");
+          throw new Error(`미니PC 주문수집 서버에 연결하지 못했습니다. 저장된 주소(${localBridgeOrigin})가 현재 브라우저에서 열리는지 확인하거나, 브라우저 콘솔에서 localStorage.setItem('fnosLocalBridgeOrigin', 'http://미니PC-IP:3000') 또는 터널 URL로 다시 설정해 주세요.`);
         }
       }
       if (data.queued && data.job_id) {

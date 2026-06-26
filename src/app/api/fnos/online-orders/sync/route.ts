@@ -226,8 +226,9 @@ export async function POST(request: NextRequest) {
     };
     if (channelCode) query.channel_code = `eq.${channelCode}`;
     const channels = await selectRows<AnyRecord>("sales_channels", query);
-    const activeChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
-    if (!activeChannels.length) {
+    const supportedChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
+    const unsupportedChannels = channels.filter((channel) => !adapters[adapterCodeForChannel(channel)]);
+    if (!supportedChannels.length && !unsupportedChannels.length) {
       return jsonResponse({
         ok: false,
         error: "API 사용으로 저장된 네이버/쿠팡/11번가 쇼핑몰이 없습니다. 기초관리 > 쇼핑몰에서 API 정보를 저장해주세요.",
@@ -252,13 +253,13 @@ export async function POST(request: NextRequest) {
         ok: true,
         queued: true,
         job_id: job.id,
-        statuses: activeChannels.map((channel) => ({
+        statuses: channels.map((channel) => ({
           channel_code: text(channel.channel_code),
           channel_name: text(channel.channel_name) || text(channel.customer_name) || text(channel.channel_code),
           ok: false,
           skipped: true,
           count: 0,
-          message: "로컬 워커 대기 중입니다.",
+          message: adapters[adapterCodeForChannel(channel)] ? "로컬 워커 대기 중입니다." : "자동수집 어댑터 미지원",
         })),
         orders: [],
         count: 0,
@@ -266,8 +267,11 @@ export async function POST(request: NextRequest) {
     }
 
     const results = [];
-    for (const channel of activeChannels) {
+    for (const channel of supportedChannels) {
       results.push(await collectChannel(channel, body));
+    }
+    for (const channel of unsupportedChannels) {
+      results.push({ channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: "자동수집 어댑터 미지원" });
     }
     const orders = results.flatMap((result) => result.orders);
     return jsonResponse({
