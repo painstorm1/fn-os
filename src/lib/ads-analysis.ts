@@ -170,9 +170,11 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
   const isNaverSearch = channel.includes("네이버_검색광고") || channel.includes("네이버쇼핑검색") || channel.includes("네이버 검색");
   const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
   const clicks = numberValue(first(row, ["clicks", "클릭수", "링크 클릭", "클릭(전체)", "클릭", "clk", "clkCnt"]));
-  const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd"]));
+  const metaUsdCost = numberValue(first(row, ["지출 금액 (USD)", "Amount spent (USD)", "spend_usd", "spend", "spend_amount"]));
   const baseCost = numberValue(first(row, ["cost", "광고비", "총비용", "비용", "spend", "spend_amount"]));
-  const cost = baseCost || (isMeta && metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : 0);
+  const cost = isMeta
+    ? (metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : baseCost)
+    : baseCost;
 
   const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
   const rawPurchaseValue = isMeta
