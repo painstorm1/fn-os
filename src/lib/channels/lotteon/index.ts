@@ -1,0 +1,32 @@
+import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
+
+type AnyRecord = Record<string, unknown>;
+const LOTTEON_BASE_URL = "https://openapi.lotteon.com";
+
+function text(value: unknown) { return String(value ?? "").trim(); }
+function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
+function numberValue(value: unknown) { const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, "")); return Number.isFinite(parsed) ? parsed : 0; }
+function firstText(...values: unknown[]) { for (const value of values) { const next = text(value); if (next) return next; } return ""; }
+function formatDate(value: unknown, boundary: "start" | "end") { const raw = text(value); if (/^\d{14}$/.test(raw)) return raw; if (/^\d{8}$/.test(raw)) return `${raw}${boundary === "start" ? "000000" : "235959"}`; const date = raw ? new Date(raw) : new Date(); if (!raw && boundary === "start") date.setDate(date.getDate() - 7); const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000); return `${kst.getUTCFullYear()}${String(kst.getUTCMonth() + 1).padStart(2, "0")}${String(kst.getUTCDate()).padStart(2, "0")}${boundary === "start" ? "000000" : "235959"}`; }
+function normalizeDate(value: unknown) { const raw = text(value); const compact = raw.replace(/\D/g, ""); if (compact.length >= 14) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}T${compact.slice(8,10)}:${compact.slice(10,12)}:${compact.slice(12,14)}+09:00`; if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`; return raw; }
+function arrayAt(root: unknown, paths: string[][]) { for (const path of paths) { let current = root; for (const key of path) current = record(current)[key]; if (Array.isArray(current)) return current as AnyRecord[]; } return Array.isArray(root) ? root as AnyRecord[] : []; }
+function findRows(data: unknown) { const direct = arrayAt(data, [["data", "orderItems"], ["data", "orders"], ["data"], ["orderItems"], ["orders"], ["result", "orderItems"]]); if (direct.length) return direct; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); function visit(value: unknown) { if (!value || seen.has(value) || typeof value !== "object") return; seen.add(value); if (Array.isArray(value)) { value.forEach(visit); return; } const cur = record(value); if (firstText(cur.odNo, cur.orderNo) && firstText(cur.pdNm, cur.goodsNm, cur.prdNm, cur.itemNm)) { rows.push(cur); return; } Object.values(cur).forEach(visit); } visit(data); return rows; }
+async function readJson(response: Response) { const body = await response.text(); const data = body ? JSON.parse(body) : {}; const code = firstText(record(data).returnCode, record(data).code); if (!response.ok || (code && !["0000", "0", "SUCCESS"].includes(code.toUpperCase()))) throw new Error(firstText(record(data).message, record(data).returnMessage, record(data).error, body) || `롯데ON API ${response.status}`); return data; }
+function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
+  const item: NormalizedOrderItem = { channelProductCode: firstText(row.pdNo, row.prdNo, row.goodsNo, row.itemNo), channelOptionCode: firstText(row.odSeq, row.odDtlSeq, row.optionNo), channelProductName: firstText(row.pdNm, row.prdNm, row.goodsNm, row.itemNm, "롯데ON 주문"), channelOptionName: firstText(row.optnNm, row.optionNm, row.itemOptnNm), sku: firstText(row.slrPdNo, row.sellerProductCode, row.sku), qty: numberValue(row.ordQty || row.odQty || row.qty) || 1, salesAmount: numberValue(row.odAmt || row.saleAmt || row.payAmt) || undefined, raw: row };
+  return { ...base, orderNo: firstText(row.odNo, row.orderNo), bundleOrderNo: firstText(row.odNo, row.pkgNo), orderDate: normalizeDate(firstText(row.odDttm, row.ordDttm, row.payDttm, row.orderDate)), orderStatus: firstText(row.odPrgsStepNm, row.odPrgsStepCd, row.orderStatus, "주문완료"), receiverName: firstText(row.rcvrNm, row.receiverName, row.buyrNm), phone1: firstText(row.rcvrCellNo, row.receiverMobile, row.hpNo), phone2: firstText(row.rcvrTelNo, row.receiverPhone, row.telNo), zipcode: firstText(row.rcvrZipNo, row.zipcode, row.postNo), address: [firstText(row.rcvrBaseAddr, row.receiverAddress, row.addr), firstText(row.rcvrDtlAddr, row.receiverDetailAddress, row.addrDtl)].filter(Boolean).join(" "), deliveryMessage: firstText(row.dlvMsg, row.deliveryMessage), items: [item], raw: row };
+}
+
+export class LotteonChannelAdapter implements SalesChannelAdapter {
+  async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
+    const apiKey = text(params.api_key || params.access_key);
+    if (!apiKey) return { ok: false, data: [], error: "롯데ON OpenAPI Key를 먼저 저장해주세요." };
+    try {
+      const body = { srchStrtDttm: formatDate(params.fromDate, "start"), srchEndDttm: formatDate(params.toDate, "end"), lrtrNo: text(params.sub_partner_no || params.partner_no) };
+      const response = await fetch(`${LOTTEON_BASE_URL}/v1/openapi/order/v1/getSROrderList`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: apiKey, "x-api-key": apiKey }, body: JSON.stringify(body) });
+      const data = await readJson(response); const rows = findRows(data);
+      const base = { channelCode: text(params.channel_code) || "LOTTEON", channelName: text(params.channel_name) || "롯데ON", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
+      return { ok: true, data: rows.map((row) => normalizeRow(row, base)).filter((order) => order.orderNo), message: `롯데ON 주문 ${rows.length}건을 수집했습니다.` };
+    } catch (error) { return { ok: false, data: [], error: error instanceof Error ? error.message : "롯데ON 주문 수집 실패" }; }
+  }
+}

@@ -1,6 +1,10 @@
 import { CoupangChannelAdapter } from "@/lib/channels/coupang";
 import { ElevenstChannelAdapter } from "@/lib/channels/elevenst";
+import { EsmChannelAdapter } from "@/lib/channels/esm";
+import { KakaoChannelAdapter } from "@/lib/channels/kakao";
+import { LotteonChannelAdapter } from "@/lib/channels/lotteon";
 import { NaverChannelAdapter } from "@/lib/channels/naver";
+import { SsgChannelAdapter } from "@/lib/channels/ssg";
 import type { SalesChannelAdapter } from "@/lib/channels/common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -13,6 +17,10 @@ export const ONLINE_ORDER_ADAPTERS: Record<string, SalesChannelAdapter> = {
   NAVER: new NaverChannelAdapter(),
   COUPANG: new CoupangChannelAdapter(),
   ELEVENST: new ElevenstChannelAdapter(),
+  SSG: new SsgChannelAdapter(),
+  ESM: new EsmChannelAdapter(),
+  LOTTEON: new LotteonChannelAdapter(),
+  KAKAO: new KakaoChannelAdapter(),
 };
 
 export const ONLINE_ORDER_UNSUPPORTED_MESSAGE = "자동수집 어댑터 미지원";
@@ -24,6 +32,10 @@ export function onlineOrderAdapterCodeForChannel(channel: AnyRecord) {
   if (code === "NAVER" || code.startsWith("NAVER_") || /NAVER|네이버|스마트스토어|SMARTSTORE/.test(haystack)) return "NAVER";
   if (code === "COUPANG" || code.startsWith("COUPANG_") || /COUPANG|쿠팡|WING/.test(haystack)) return "COUPANG";
   if (code === "ELEVENST" || code === "11ST" || code.startsWith("ELEVENST_") || /11ST|11번가|십일번가|ELEVEN/.test(haystack)) return "ELEVENST";
+  if (code === "SSG" || code.startsWith("SSG_") || /SSG|신세계|쓱/.test(haystack)) return "SSG";
+  if (code === "ESM" || code === "GMARKET" || code === "AUCTION" || /ESM|G마켓|지마켓|옥션|AUCTION|GMARKET/.test(haystack)) return "ESM";
+  if (code === "LOTTEON" || code === "LOTTE" || /롯데ON|롯데온|LOTTEON|LOTTE/.test(haystack)) return "LOTTEON";
+  if (code === "KAKAO" || code === "TALKSTORE" || /카카오|톡스토어|KAKAO|TALKSTORE/.test(haystack)) return "KAKAO";
   return code;
 }
 
