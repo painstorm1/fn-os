@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CoupangChannelAdapter } from "@/lib/channels/coupang";
-import { ElevenstChannelAdapter } from "@/lib/channels/elevenst";
-import { NaverChannelAdapter } from "@/lib/channels/naver";
 import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
-import type { ChannelResult, NormalizedOrder, SalesChannelAdapter } from "@/lib/channels/common/types";
+import type { ChannelResult, NormalizedOrder } from "@/lib/channels/common/types";
+import { onlineOrderAdapterCodeForChannel, onlineOrderAdapterForChannel, ONLINE_ORDER_UNSUPPORTED_MESSAGE } from "@/lib/channels/registry";
 import { createAutomationJob } from "@/lib/automation-jobs";
 import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
 import { readChannelCredentials } from "@/lib/sales-channel-credentials";
@@ -14,12 +12,6 @@ const localBridgeCorsHeaders = {
   "Access-Control-Allow-Origin": "https://fn-os.vercel.app",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
-};
-
-const adapters: Record<string, SalesChannelAdapter> = {
-  NAVER: new NaverChannelAdapter(),
-  COUPANG: new CoupangChannelAdapter(),
-  ELEVENST: new ElevenstChannelAdapter(),
 };
 
 function jsonResponse(body: AnyRecord, init?: ResponseInit) {
@@ -69,16 +61,6 @@ function orderJobType(channelCode: string) {
 
 function orderItemCount(orders: NormalizedOrder[]) {
   return orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
-}
-
-function adapterCodeForChannel(channel: AnyRecord) {
-  const code = text(channel.channel_code).toUpperCase();
-  const name = text(channel.channel_name).toUpperCase();
-  const haystack = `${code} ${name}`;
-  if (code === "NAVER" || code.startsWith("NAVER_") || /NAVER|네이버|스마트스토어|SMARTSTORE/.test(haystack)) return "NAVER";
-  if (code === "COUPANG" || code.startsWith("COUPANG_") || /COUPANG|쿠팡|WING/.test(haystack)) return "COUPANG";
-  if (code === "ELEVENST" || code === "11ST" || code.startsWith("ELEVENST_") || /11ST|11번가|십일번가|ELEVEN/.test(haystack)) return "ELEVENST";
-  return code;
 }
 
 async function logSync(row: AnyRecord) {
@@ -143,11 +125,11 @@ async function persistOrders(channel: AnyRecord, orders: NormalizedOrder[]) {
 
 async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   const channelCode = text(channel.channel_code).toUpperCase();
-  const adapterCode = adapterCodeForChannel(channel);
-  const adapter = adapters[adapterCode];
+  const adapterCode = onlineOrderAdapterCodeForChannel(channel);
+  const adapter = onlineOrderAdapterForChannel(channel);
   const startedAt = new Date().toISOString();
   if (!adapter) {
-    const message = `${text(channel.channel_name) || channelCode} API 어댑터가 아직 준비되지 않았습니다.`;
+    const message = `${text(channel.channel_name) || channelCode} ${ONLINE_ORDER_UNSUPPORTED_MESSAGE}`;
     return { channel, ok: false, orders: [] as NormalizedOrder[], message };
   }
 
@@ -226,8 +208,8 @@ export async function POST(request: NextRequest) {
     };
     if (channelCode) query.channel_code = `eq.${channelCode}`;
     const channels = await selectRows<AnyRecord>("sales_channels", query);
-    const supportedChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
-    const unsupportedChannels = channels.filter((channel) => !adapters[adapterCodeForChannel(channel)]);
+    const supportedChannels = channels.filter((channel) => onlineOrderAdapterForChannel(channel));
+    const unsupportedChannels = channels.filter((channel) => !onlineOrderAdapterForChannel(channel));
     if (!supportedChannels.length && !unsupportedChannels.length) {
       return jsonResponse({
         ok: false,
@@ -259,7 +241,7 @@ export async function POST(request: NextRequest) {
           ok: false,
           skipped: true,
           count: 0,
-          message: adapters[adapterCodeForChannel(channel)] ? "로컬 워커 대기 중입니다." : "자동수집 어댑터 미지원",
+          message: onlineOrderAdapterForChannel(channel) ? "로컬 워커 대기 중입니다." : ONLINE_ORDER_UNSUPPORTED_MESSAGE,
         })),
         orders: [],
         count: 0,
@@ -271,7 +253,7 @@ export async function POST(request: NextRequest) {
       results.push(await collectChannel(channel, body));
     }
     for (const channel of unsupportedChannels) {
-      results.push({ channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: "자동수집 어댑터 미지원" });
+      results.push({ channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: ONLINE_ORDER_UNSUPPORTED_MESSAGE });
     }
     const orders = results.flatMap((result) => result.orders);
     return jsonResponse({
