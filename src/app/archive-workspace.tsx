@@ -16,7 +16,7 @@ import {
   modalSelectClass,
   modalTextareaClass,
 } from "@/components/fn-ui";
-import { cachedJson, invalidateClientCache, readCachedJson } from "@/lib/client-cache";
+import { invalidateClientCache, readCachedJson, refreshCachedJson } from "@/lib/client-cache";
 
 type ArchiveItem = {
   id: string;
@@ -59,12 +59,11 @@ type AutoArchiveDraft = {
 };
 
 type CategoryGroup = "교육" | "업무" | "개인";
-type ActiveMenu = "save" | "all" | "project" | CategoryGroup;
+type ActiveMenu = "save" | "all" | "project" | "date" | CategoryGroup;
 type ArchiveViewMode = "preview" | "list";
 const PROJECT_LINK_TYPE = "archive_project";
 const ARCHIVE_CACHE_URL = "/api/fnos/archive";
 const ARCHIVE_CACHE_KEY = "/api/fnos/archive?v=20260619";
-const ARCHIVE_MEMORY_TTL = 10 * 60_000;
 const ARCHIVE_STORAGE_TTL = 30 * 60_000;
 const ARCHIVE_PREVIEW_INITIAL_RENDER = 80;
 const ARCHIVE_LIST_INITIAL_RENDER = 180;
@@ -290,6 +289,26 @@ function displayDateInput(value: string) {
   return `${year}.${month}.${day}`;
 }
 
+function formatArchiveDateLabel(value: string) {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value || "날짜 없음";
+  return `${year}.${month}.${day}`;
+}
+
+function isArchiveDateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function archiveDropDate(item: ArchiveItem) {
+  const sourceText = `${item.memo || ""} ${item.summary || ""} ${item.description || ""}`;
+  const explicitDate = sourceText.match(/(?:자료투척방|Cooljam|수집분|투척 자료|투척한날|투척일)[^\d]*(\d{4}-\d{2}-\d{2})/)?.[1]
+    || sourceText.match(/(\d{4}-\d{2}-\d{2})\s*(?:수집분|투척|자료)/)?.[1]
+    || "";
+  if (explicitDate) return explicitDate;
+  const createdDate = (item.created_at || "").slice(0, 10);
+  return isArchiveDateValue(createdDate) ? createdDate : "";
+}
+
 function cleanProjectName(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -306,6 +325,7 @@ export default function ArchiveWorkspace() {
   const [manualType, setManualType] = useState<"link" | "file">("link");
   const [activeSubCategory, setActiveSubCategory] = useState("");
   const [activeProject, setActiveProject] = useState("");
+  const [activeArchiveDate, setActiveArchiveDate] = useState("");
   const [localProjects, setLocalProjects] = useState<string[]>([]);
   const [projectCreateTarget, setProjectCreateTarget] = useState<"toolbar" | "manualLink" | "manualFile" | number | null>(null);
   const [projectCreateName, setProjectCreateName] = useState("");
@@ -362,16 +382,28 @@ export default function ArchiveWorkspace() {
     });
     return { categoryCounts, groupCounts };
   }, [categoryById, data.items]);
+  const archiveDateGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    data.items.forEach((item) => {
+      const date = archiveDropDate(item);
+      if (!date) return;
+      map.set(date, (map.get(date) || 0) + 1);
+    });
+    return Array.from(map.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [data.items]);
   const emptyFilters: ArchiveFilters = { q: "", categoryGroup: "", category: "", source: "", dateFrom: "", dateTo: "" };
 
   const categoryFilteredItems = useMemo(() => data.items.filter((item) => {
     if (activeMenu === "project") return activeProjectItemIds.has(item.id);
+    if (activeMenu === "date") return !activeArchiveDate || archiveDropDate(item) === activeArchiveDate;
     if (filters.categoryGroup) return true;
     if (activeMenu === "all" || activeMenu === "save") return true;
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
     const allowed = activeSubCategory ? [activeSubCategory] : categoryNamesForGroup(activeMenu);
     return allowed.includes(categoryName);
-  }), [activeMenu, activeProjectItemIds, activeSubCategory, categoryById, data.items, filters.categoryGroup]);
+  }), [activeArchiveDate, activeMenu, activeProjectItemIds, activeSubCategory, categoryById, data.items, filters.categoryGroup]);
 
   const filteredItems = useMemo(() => categoryFilteredItems.filter((item) => {
     const categoryName = categoryById.get(String(item.category_id || ""))?.category_name || "";
@@ -382,13 +414,22 @@ export default function ArchiveWorkspace() {
     if (filters.categoryGroup && categoryGroupOf(categoryName) !== filters.categoryGroup) return false;
     if (filters.category && categoryName !== filters.category) return false;
     if (filters.source && item.source_type !== filters.source) return false;
-    const createdDate = (item.created_at || "").slice(0, 10);
     const dateFrom = normalizeDateInput(filters.dateFrom);
     const dateTo = normalizeDateInput(filters.dateTo);
+    const createdDate = archiveDropDate(item);
+    if ((dateFrom || dateTo) && !createdDate) return false;
     if (dateFrom && createdDate < dateFrom) return false;
     if (dateTo && createdDate > dateTo) return false;
     return true;
   }), [activeMenu, categoryById, categoryFilteredItems, filters, projectTextByItemId]);
+
+  useEffect(() => {
+    if (activeMenu !== "date") return;
+    const firstDate = archiveDateGroups[0]?.date || "";
+    if (!firstDate || activeArchiveDate && archiveDateGroups.some((group) => group.date === activeArchiveDate)) return;
+    const timer = window.setTimeout(() => setActiveArchiveDate(firstDate), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeArchiveDate, activeMenu, archiveDateGroups]);
 
   const applyArchiveData = useCallback((value: Partial<ArchiveData> | null | undefined) => {
     const normalized = normalizeArchiveData(value);
@@ -414,12 +455,7 @@ export default function ArchiveWorkspace() {
         showedCachedData = true;
       }
       const loadFreshData = async () => {
-        const next = await cachedJson<ArchiveData & { ok?: boolean; error?: string }>(ARCHIVE_CACHE_URL, {
-          ttl: ARCHIVE_MEMORY_TTL,
-          key: ARCHIVE_CACHE_KEY,
-          storageTtl: ARCHIVE_STORAGE_TTL,
-          force: showedCachedData,
-        });
+        const next = await refreshCachedJson<ArchiveData & { ok?: boolean; error?: string }>(ARCHIVE_CACHE_URL, { key: ARCHIVE_CACHE_KEY });
         if (next.ok === false) throw new Error(next.error || "아카이브 조회 실패");
         applyArchiveData(next);
       };
@@ -824,9 +860,14 @@ export default function ArchiveWorkspace() {
     setActiveMenu(menu);
     setActiveSubCategory("");
     if (menu !== "project") setActiveProject("");
+    if (menu !== "date") setActiveArchiveDate("");
     if (menu === "all") {
       setFilters((prev) => ({ ...prev, categoryGroup: "", category: "" }));
     } else if (menu === "project") {
+      setFilters(emptyFilters);
+    } else if (menu === "date") {
+      const firstDate = activeArchiveDate || archiveDateGroups[0]?.date || "";
+      setActiveArchiveDate(firstDate);
       setFilters(emptyFilters);
     } else {
       setFilters((prev) => ({ ...prev, categoryGroup: menu, category: "" }));
@@ -836,6 +877,7 @@ export default function ArchiveWorkspace() {
   const menuItems: Array<[ActiveMenu, string]> = [
     ["save", "F2 새 자료"],
     ["all", "전체"],
+    ["date", "날짜별"],
     ["교육", "교육"],
     ["업무", "업무"],
     ["개인", "개인"],
@@ -849,6 +891,7 @@ export default function ArchiveWorkspace() {
     if (menu === "all") return data.items.length;
     if (menu === "save") return null;
     if (menu === "project") return activeProjectItemIds.size;
+    if (menu === "date") return activeArchiveDate ? archiveDateGroups.find((group) => group.date === activeArchiveDate)?.count || 0 : data.items.length;
     return groupCount(menu);
   }
 
@@ -875,6 +918,17 @@ export default function ArchiveWorkspace() {
               ))}
             </div>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <select className="field-input h-10 !w-44 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "date" ? activeArchiveDate : ""} onChange={(event) => {
+                const date = event.target.value;
+                setActiveArchiveDate(date);
+                setActiveMenu("date");
+                setActiveProject("");
+                setActiveSubCategory("");
+                setFilters(emptyFilters);
+              }}>
+                <option value="">날짜별 보기</option>
+                {archiveDateGroups.map((group) => <option key={group.date} value={group.date}>{formatArchiveDateLabel(group.date)} {group.count}</option>)}
+              </select>
               <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
                 <option value="">프로젝트 바로가기</option>
                 {projects.map((project) => <option key={project} value={project}>{project} {projectCountByName.get(project) || 0}</option>)}
@@ -1088,7 +1142,7 @@ export default function ArchiveWorkspace() {
         </FormModal>
       )}
 
-      {(activeMenu === "all" || activeMenu === "project" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (!loading || data.items.length > 0) && (
+      {(activeMenu === "all" || activeMenu === "project" || activeMenu === "date" || activeMenu === "교육" || activeMenu === "업무" || activeMenu === "개인") && (!loading || data.items.length > 0) && (
         <ArchiveList
           items={filteredItems}
           categoryById={categoryById}
@@ -1101,6 +1155,8 @@ export default function ArchiveWorkspace() {
           onMoveItemsToProject={moveArchiveItemsToProject}
           onDeleteItems={deleteArchiveItems}
           projects={projects}
+          showNumbers={activeMenu === "date" || Boolean(normalizeDateInput(filters.dateFrom) || normalizeDateInput(filters.dateTo))}
+          numberingTitle={activeMenu === "date" && activeArchiveDate ? `${formatArchiveDateLabel(activeArchiveDate)} 투척 자료` : "현재 목록"}
         />
       )}
 
@@ -1161,6 +1217,8 @@ function ArchiveList({
   onMoveItemsToProject,
   onDeleteItems,
   projects,
+  showNumbers,
+  numberingTitle,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
@@ -1173,6 +1231,8 @@ function ArchiveList({
   onMoveItemsToProject: (ids: string[], projectName: string) => Promise<void>;
   onDeleteItems: (ids: string[]) => Promise<void>;
   projects: string[];
+  showNumbers: boolean;
+  numberingTitle: string;
 }) {
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -1317,6 +1377,14 @@ function ArchiveList({
 
   return (
     <div className="space-y-4">
+      {showNumbers && (
+        <section className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-black">{numberingTitle}</span>
+            <span>번호가 표시됩니다. 예: “자료정리 3번 지워”, “5~7번 삭제”.</span>
+          </div>
+        </section>
+      )}
       {selectMode && (
         <section className="flex flex-wrap items-center gap-2 text-xs">
           <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={allSelected} onChange={toggleAllSelected} aria-label={allSelected ? "모두해제" : "모두선택"} title={allSelected ? "모두해제" : "모두선택"} />
@@ -1354,7 +1422,7 @@ function ArchiveList({
 
       {viewMode === "list" ? (
         <section className="grid grid-cols-3 gap-2">
-          {visibleItems.map((item) => {
+          {visibleItems.map((item, index) => {
             const category = categoryById.get(String(item.category_id || ""));
             const href = item.url || item.file_url || "";
             return (
@@ -1372,6 +1440,7 @@ function ArchiveList({
                 onMouseEnter={() => continueListDragSelect(item.id)}
               >
                 {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIdSet.has(item.id)} readOnly aria-label="아카이브 선택" />}
+                {showNumbers && <span className="flex h-6 min-w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 px-2 text-[11px] font-black text-white">#{index + 1}</span>}
                 <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" onClick={(event) => { if (selectMode) event.preventDefault(); }} className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
                 <SourceBadge source={item.source_type} className="max-w-20" />
                 <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
@@ -1388,7 +1457,7 @@ function ArchiveList({
         </section>
       ) : (
       <section className="grid grid-cols-5 gap-3 2xl:grid-cols-10">
-        {visibleItems.map((item) => {
+        {visibleItems.map((item, index) => {
           const category = categoryById.get(String(item.category_id || ""));
           const href = item.url || item.file_url || "";
           const previewUrl = item.preview_image_url || item.thumbnail_url || "";
@@ -1399,6 +1468,7 @@ function ArchiveList({
                   <input type="checkbox" className="h-4 w-4 accent-orange-500" checked={selectedIdSet.has(item.id)} onChange={(event) => toggleSelected(item.id, event.target.checked)} aria-label="아카이브 선택" />
                 </label>
               )}
+              {showNumbers && <span className="absolute right-2 top-2 z-10 flex h-7 min-w-9 items-center justify-center rounded-full bg-slate-950/90 px-2 text-xs font-black text-white shadow-sm">#{index + 1}</span>}
               <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" className="block">
                 <div className="flex aspect-[4/5] w-full items-center justify-center bg-slate-100">
                   {previewUrl ? (
