@@ -21875,6 +21875,87 @@ function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string;
   return <KpiCard label={label} value={value} note={note} tone={nextTone} className="h-full min-h-[88px]" />;
 }
 
+function AdsCollectionStatusCards({ batches }: { batches: AdsMetricRow[] }) {
+  const activeBatches = batches.filter((batch) => String(batch.status || "").toUpperCase() !== "REPLACED");
+  const latestByChannel = new Map<string, AdsMetricRow>();
+  activeBatches.forEach((batch) => {
+    const channel = adNormalizeChannelName(batch.channel || "기타") || "기타";
+    if (!latestByChannel.has(channel)) latestByChannel.set(channel, batch);
+  });
+  const latestBatch = activeBatches[0] || batches[0];
+  const successCount = activeBatches.reduce((sum, batch) => sum + adNumber(batch.success_count), 0);
+  const failCount = activeBatches.reduce((sum, batch) => sum + adNumber(batch.fail_count), 0);
+  const totalCount = activeBatches.reduce((sum, batch) => sum + adNumber(batch.total_count), 0);
+  const latestRows = Array.from(latestByChannel.entries()).slice(0, 5);
+
+  return (
+    <Card className="p-4">
+      <SectionHeader
+        title="최근 수집현황"
+        description="최근 업로드 기준 · 조회 기간 성과와 별도"
+        className="mb-3"
+      />
+      <div className="grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl bg-orange-50 p-3">
+            <p className="text-xs font-black text-orange-600">수집 채널</p>
+            <p className="mt-1 text-xl font-black text-gray-950">{latestByChannel.size.toLocaleString("ko-KR")}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-xs font-black text-slate-500">최근 업로드</p>
+            <p className="mt-1 text-sm font-black text-gray-950">{adUploadDateLabel(latestBatch?.uploaded_at || latestBatch?.created_at)}</p>
+          </div>
+          <div className="rounded-xl bg-emerald-50 p-3">
+            <p className="text-xs font-black text-emerald-600">저장</p>
+            <p className="mt-1 text-xl font-black text-gray-950">{successCount.toLocaleString("ko-KR")}</p>
+          </div>
+          <div className="rounded-xl bg-rose-50 p-3">
+            <p className="text-xs font-black text-rose-600">제외</p>
+            <p className="mt-1 text-xl font-black text-gray-950">{failCount.toLocaleString("ko-KR")}</p>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          {latestRows.map(([channel, batch]) => (
+            <div key={`ad-collection-${channel}`} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
+              <p className="flex items-center gap-1.5 text-xs font-black text-slate-700"><AdChannelLogo channel={channel} />{adChannelDisplayName(channel)}</p>
+              <p className="mt-2 text-xs font-bold text-slate-500">{adUploadDateLabel(batch.uploaded_at || batch.created_at)}</p>
+              <p className="mt-1 text-xs font-black text-slate-800">저장 {adNumber(batch.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(batch.fail_count).toLocaleString("ko-KR")}</p>
+            </div>
+          ))}
+          {!latestRows.length && <EmptyState title="최근 수집 이력이 없습니다." className="min-h-24 sm:col-span-2 xl:col-span-5" />}
+        </div>
+      </div>
+      <p className="mt-2 text-xs font-bold text-slate-400">최근 {activeBatches.length.toLocaleString("ko-KR")}개 업로드 배치 · 원본 {totalCount.toLocaleString("ko-KR")}행 기준</p>
+    </Card>
+  );
+}
+
+function AdsChannelPerformanceCards({ rows }: { rows: ReturnType<typeof adMetricReportRows> }) {
+  const channelRows = rows.filter((row) => row.channel !== "total");
+  return (
+    <Card className="p-4">
+      <SectionHeader title="채널별 성과현황" description="선택 채널 기준 compact view" className="mb-3" />
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+        {channelRows.map((row) => {
+          const tone = row.roas <= 150 ? "border-rose-100 bg-rose-50/60" : row.roas >= 300 ? "border-emerald-100 bg-emerald-50/60" : "border-orange-100 bg-orange-50/60";
+          return (
+            <div key={`ad-channel-performance-${row.channel}`} className={`rounded-xl border p-3 ${tone}`}>
+              <p className="flex items-center gap-1.5 text-xs font-black text-slate-700"><AdChannelLogo channel={row.channel} />{row.label}</p>
+              <p className="mt-2 text-lg font-black text-gray-950">{adPercent(row.roas)}</p>
+              <div className="mt-2 space-y-1 text-xs font-bold text-slate-600">
+                <p className="flex justify-between gap-2"><span>광고비</span><span className="text-gray-950">{krw(row.cost)}</span></p>
+                <p className="flex justify-between gap-2"><span>전환매출</span><span className="text-gray-950">{krw(row.purchaseValue)}</span></p>
+                <p className="flex justify-between gap-2"><span>전환</span><span className="text-gray-950">{row.purchases.toLocaleString("ko-KR")}건</span></p>
+              </div>
+            </div>
+          );
+        })}
+        {!channelRows.length && <EmptyState title="선택된 채널 데이터가 없습니다." className="min-h-24 md:col-span-2 xl:col-span-5" />}
+      </div>
+    </Card>
+  );
+}
+
 const adChannelExternalUrls: Record<string, string> = {
   메타GFA: "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=1604145144225053&business_id=1310111940216086&global_scope_id=1310111940216086&filter_set=campaign.impressions-NUMBER%1EGREATER_THAN%1E0%1DCAMPAIGN_GROUP_DELIVERY_STATUS-STRING_SET%1EIN%1E[%22active%22]&quick_view_id=26159869786986474",
   네이버GFA: "https://ads.naver.com/manage/ad-accounts/1724792/da/dashboard/campaign/1301355?dateRange=2026-06-03%2C2026-06-03&period=yesterday",
@@ -21888,10 +21969,10 @@ function AdsChannelStatus({ rows, selectedChannels }: { rows: AdsMetricRow[]; se
   const orderedRows = adReportChannelOrder
     .filter((channel) => selected.has(channel))
     .map((channel) => {
-      const row = rows.find((item) => String(item.channel || "") === channel) || { channel };
+      const row = rows.find((item) => adChannelsMatch(item.channel, channel)) || { channel };
       return {
         channel,
-        label: adReportChannelNames[channel] || channel,
+        label: adChannelDisplayName(channel),
         cost: adNumber(row.cost),
         roas: adNumber(row.roas),
       };
@@ -22132,8 +22213,24 @@ const adReportChannelNames: Record<string, string> = {
   네이버GFA: "네이버 GFA",
   네이버쇼핑검색: "네이버 검색",
   네이버Advoost: "네이버 AdV",
+  네이버AdV: "네이버 AdV",
   쿠팡: "쿠팡",
 };
+
+function adNormalizeChannelName(channel: unknown) {
+  const value = String(channel || "").replace(/\s+/g, "");
+  if (value === "네이버AdV" || value === "네이버ADV" || value === "네이버ADVoost" || value === "네이버Adboost") return "네이버Advoost";
+  return value;
+}
+
+function adChannelsMatch(left: unknown, right: unknown) {
+  return adNormalizeChannelName(left) === adNormalizeChannelName(right);
+}
+
+function adChannelDisplayName(channel: unknown) {
+  const value = String(channel || "기타");
+  return adReportChannelNames[value] || adReportChannelNames[adNormalizeChannelName(value)] || value;
+}
 
 function AdChannelLogo({ channel }: { channel: string }) {
   if (channel === "total") {
@@ -22156,7 +22253,7 @@ function adMetricReportRows(channels: AdsMetricRow[], selectedChannels: string[]
   const channelRows = adReportChannelOrder
     .filter((channel) => selected.has(channel))
     .map((channel) => {
-      const row = channels.find((item) => String(item.channel || "") === channel) || { channel };
+      const row = channels.find((item) => adChannelsMatch(item.channel, channel)) || { channel };
       const cost = adNumber(row.cost);
       const purchaseValue = adNumber(row.conversion_value);
       const purchases = adNumber(row.conversions);
@@ -22486,6 +22583,8 @@ function AdsAnalysisWorkspace() {
 
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{summary.error}</Card>}
 
+      <AdsCollectionStatusCards batches={summary?.batches || []} />
+
       <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
         <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
@@ -22493,6 +22592,8 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="전환 구매 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
+
+      <AdsChannelPerformanceCards rows={reportRows} />
 
       <Card className="px-3 py-4">
         <SectionHeader
