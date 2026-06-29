@@ -28142,6 +28142,9 @@ function AccountingRightPanel() {
     map.set(key, [...(map.get(key) || []), row]);
     return map;
   }, new Map<string, Array<Record<string, unknown>>>());
+  function upcomingFixedCostDateTotal(rows: Array<Record<string, unknown>>) {
+    return rows.reduce((total, row) => total + asNumber(row.amount), 0);
+  }
   function upcomingFixedCostTitle(row: Record<string, unknown>) {
     const category = String(row.category_middle || row.category_large || (String(row.row_type || "") === "loan" ? "대출 원리금" : "고정비")).trim();
     const title = String(row.title || row.display_title || row.fixed_cost_name || row.loan_name || "-").replace(/^\[[^\]]+\]\s*/, "").trim();
@@ -28234,7 +28237,10 @@ function AccountingRightPanel() {
           <div className="mt-3 space-y-2.5">
             {Array.from(fixedCostGroups.entries()).map(([date, rows]) => (
               <div key={date}>
-                <p className="text-sm font-bold text-red-500">{accountingMonthDayWeekText(date)}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-bold text-red-500">{accountingMonthDayWeekText(date)}</p>
+                  <p className="shrink-0 text-sm font-black tabular-nums text-orange-500">{krw(upcomingFixedCostDateTotal(rows))}</p>
+                </div>
                 <div className="mt-1 space-y-1">
                   {rows.map((row, index) => (
                     (() => {
