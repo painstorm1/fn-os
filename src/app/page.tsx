@@ -259,6 +259,11 @@ const salesSubMenus = [
   { label: "기초관리", section: "master" },
 ];
 
+const adsSubMenus = [
+  { label: "광고 리포트", section: "overview" },
+  { label: "채널별 성과현황", section: "channels" },
+];
+
 const accountingSubMenus = [
   { label: "대시보드", tab: "dashboard" },
   { label: "DB작업실", tab: "db" },
@@ -672,9 +677,10 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { activeMenu: string; importPath: string; salesSection: string; accountingTab: string }) {
+function LeftSidebar({ activeMenu, importPath, salesSection, adsSection, accountingTab }: { activeMenu: string; importPath: string; salesSection: string; adsSection: string; accountingTab: string }) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
+  const [adsOpen, setAdsOpen] = useState(activeMenu === "광고분석");
   const [accountingOpen, setAccountingOpen] = useState(activeMenu === "회계/비용");
 
   useEffect(() => {
@@ -686,6 +692,12 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
   useEffect(() => {
     if (activeMenu !== "매출/재고") return;
     const timer = window.setTimeout(() => setSalesOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== "광고분석") return;
+    const timer = window.setTimeout(() => setAdsOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [activeMenu]);
 
@@ -779,10 +791,19 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
               </Link>
             ) : item === "광고분석" ? (
               <Link
-                href="/?menu=ads"
+                href="/?menu=ads&adsSection=overview"
                 onClick={(event) => {
+                  if (activeMenu === "광고분석") {
+                    event.preventDefault();
+                    if (adsSection !== "overview") {
+                      goToInternal("/?menu=ads&adsSection=overview");
+                      return;
+                    }
+                    setAdsOpen((open) => !open);
+                    return;
+                  }
                   event.preventDefault();
-                  goToInternal("/?menu=ads");
+                  goToInternal("/?menu=ads&adsSection=overview");
                 }}
                 className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
                   item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -865,6 +886,23 @@ function LeftSidebar({ activeMenu, importPath, salesSection, accountingTab }: { 
                       goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
                     }}
                     className={sidebarSubMenuLinkClass(importPath === sub.path)}
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+            {item === "광고분석" && activeMenu === "광고분석" && adsOpen && (
+              <div className={sidebarSubMenuContainerClass}>
+                {adsSubMenus.map((sub) => (
+                  <Link
+                    key={sub.section}
+                    href={`/?menu=ads&adsSection=${sub.section}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToInternal(`/?menu=ads&adsSection=${sub.section}`);
+                    }}
+                    className={sidebarSubMenuLinkClass(adsSection === sub.section)}
                   >
                     {sub.label}
                   </Link>
@@ -22431,11 +22469,188 @@ function AdsReportTable({ rows }: { rows: ReturnType<typeof adMetricReportRows> 
   );
 }
 
+function AdsChannelDetailWorkspace({
+  summary,
+  reportRows,
+  activeChannel,
+  dateFrom,
+  dateTo,
+}: {
+  summary: AdsSummary | null;
+  reportRows: ReturnType<typeof adMetricReportRows>;
+  activeChannel: string;
+  dateFrom: string;
+  dateTo: string;
+}) {
+  const channelRows = reportRows.filter((row) => row.channel !== "total");
+  const currentChannel = channelRows.some((row) => row.channel === activeChannel) ? activeChannel : (channelRows[0]?.channel || adReportChannelOrder[0]);
+  const activeReport = channelRows.find((row) => row.channel === currentChannel) || adMetricReportRows([], [currentChannel])[1];
+  const channelCampaigns = (summary?.campaigns || [])
+    .filter((row) => adChannelsMatch(row.channel, currentChannel))
+    .sort((left, right) => adNumber(right.cost) - adNumber(left.cost))
+    .slice(0, 80);
+  const channelProducts = (summary?.products || [])
+    .filter((row) => adChannelsMatch(row.channel, currentChannel))
+    .sort((left, right) => adNumber(right.cost) - adNumber(left.cost))
+    .slice(0, 80);
+  const channelUnmapped = (summary?.unmapped || []).filter((row) => adChannelsMatch(row.channel, currentChannel)).slice(0, 20);
+  const channelParam = (channel: string) => {
+    const params = new URLSearchParams({ menu: "ads", adsSection: "channels", adsFrom: dateFrom, adsTo: dateTo, adsChannel: channel });
+    return `/?${params.toString()}`;
+  };
+  const metricCells = [
+    { label: "총비용", value: krw(activeReport?.cost || 0) },
+    { label: "전환매출", value: krw(activeReport?.purchaseValue || 0) },
+    { label: "ROAS", value: adPercent(activeReport?.roas || 0) },
+    { label: "전환", value: `${adNumber(activeReport?.purchases).toLocaleString("ko-KR")}건` },
+    { label: "CPA", value: krw(activeReport?.costPerPurchase || 0) },
+    { label: "CTR / CVR", value: `${adPercent2(activeReport?.ctr || 0)} / ${adPercent2(activeReport?.purchaseCvr || 0)}` },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-4">
+        <SectionHeader
+          title="채널별 성과현황"
+          description="왼쪽 광고분석 하위메뉴입니다. 위 탭에서 채널을 바꾸면 캠페인/아이템 세부 지표가 바뀝니다."
+          className="mb-4"
+        />
+        <div className="flex flex-wrap gap-2">
+          {channelRows.map((row) => (
+            <Link
+              key={`ads-channel-tab-${row.channel}`}
+              href={channelParam(row.channel)}
+              onClick={(event) => {
+                event.preventDefault();
+                goToInternal(channelParam(row.channel));
+              }}
+              className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-black transition ${
+                row.channel === currentChannel
+                  ? "border-slate-950 bg-slate-950 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+              }`}
+            >
+              <AdChannelLogo channel={row.channel} />
+              {row.label}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] ${row.channel === currentChannel ? "bg-white/15 text-white" : "bg-slate-100 text-slate-500"}`}>{adPercent(row.roas)}</span>
+            </Link>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {metricCells.map((metric) => (
+            <div key={metric.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[11px] font-black text-slate-500">{metric.label}</p>
+              <p className="mt-1 text-lg font-black text-slate-950">{metric.value}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="px-3 py-4">
+        <SectionHeader title={`${adChannelDisplayName(currentChannel)} 캠페인/소재 세부 지표`} description="현재 저장된 광고 리포트 행 기준" className="mb-3" />
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full min-w-[980px] table-fixed border-collapse text-[12px] tabular-nums">
+            <colgroup>
+              <col className="w-[19%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              <col className="w-[7%]" />
+              <col className="w-[7%]" />
+              <col className="w-[7%]" />
+            </colgroup>
+            <thead className="bg-gray-50 text-gray-700">
+              <tr>
+                {["캠페인", "광고그룹", "소재/아이템", "비용", "전환매출", "ROAS", "전환", "CTR", "등급"].map((label) => (
+                  <th key={label} className="border-b border-r border-gray-200 px-2 py-2 text-left font-black last:border-r-0">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {channelCampaigns.map((row, index) => (
+                <tr key={`ads-campaign-detail-${currentChannel}-${index}`} className="border-b border-gray-100 last:border-b-0">
+                  <td className="border-r border-gray-100 px-2 py-2 font-bold text-gray-800">{String(row.campaign_name || "-")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-gray-600">{String(row.ad_group_name || "-")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-gray-600">{String(row.ad_name || "-")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.cost))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.conversion_value))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black text-orange-700">{adPercent(row.roas)}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adNumber(row.conversions).toLocaleString("ko-KR")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adPercent2(row.ctr)}</td>
+                  <td className="px-2 py-2 text-center font-black">{String(row.grade || "-")}</td>
+                </tr>
+              ))}
+              {!channelCampaigns.length && (
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-sm font-bold text-slate-400">해당 채널 캠페인 데이터가 없습니다.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="px-3 py-4">
+        <SectionHeader title={`${adChannelDisplayName(currentChannel)} 아이템별 현재 데이터`} description="상품 연결, 매출/재고/추정손익 확인용" className="mb-3" />
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full min-w-[960px] table-fixed border-collapse text-[12px] tabular-nums">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[11%]" />
+              <col className="w-[9%]" />
+              <col className="w-[9%]" />
+              <col className="w-[8%]" />
+              <col className="w-[9%]" />
+              <col className="w-[9%]" />
+              <col className="w-[8%]" />
+              <col className="w-[7%]" />
+              <col className="w-[8%]" />
+            </colgroup>
+            <thead className="bg-gray-50 text-gray-700">
+              <tr>
+                {["아이템", "SKU", "광고비", "전환매출", "ROAS", "실매출", "추정손익", "마진", "재고", "판단"].map((label) => (
+                  <th key={label} className="border-b border-r border-gray-200 px-2 py-2 text-left font-black last:border-r-0">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {channelProducts.map((row, index) => (
+                <tr key={`ads-product-detail-${currentChannel}-${index}`} className="border-b border-gray-100 last:border-b-0">
+                  <td className="border-r border-gray-100 px-2 py-2 font-bold text-gray-800">{String(row.product_name || row.product_code || "-")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-gray-600">{String(row.sku || row.product_code || "-")}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.cost))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.conversion_value))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black text-orange-700">{adPercent(row.roas)}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right">{krw(adNumber(row.sales_amount))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.estimated_profit))}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adPercent(row.margin_rate)}</td>
+                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adNumber(row.current_stock).toLocaleString("ko-KR")}</td>
+                  <td className="px-2 py-2 text-center font-black">{String(row.keep_ad || "점검")}</td>
+                </tr>
+              ))}
+              {!channelProducts.length && (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-sm font-bold text-slate-400">상품 연결된 아이템 데이터가 없습니다. 캠페인 세부 지표를 먼저 확인하세요.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {!!channelUnmapped.length && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+            미연결 아이템 {channelUnmapped.length.toLocaleString("ko-KR")}개가 있습니다. 광고 상품매핑을 연결하면 아이템별 손익/재고까지 같이 보입니다.
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function AdsAnalysisWorkspace() {
   const searchParams = useSearchParams();
   const defaultRange = adRangeForPreset("yesterday");
   const dateFrom = searchParams.get("adsFrom") || defaultRange.from;
   const dateTo = searchParams.get("adsTo") || defaultRange.to;
+  const adsSection = searchParams.get("adsSection") || "overview";
+  const activeAdsChannel = searchParams.get("adsChannel") || adReportChannelOrder[0];
   const selectedRange = { from: dateFrom, to: dateTo };
   const graphRange = adChartRange(dateFrom, dateTo);
   const initialSummary = readInitialCachedJson<AdsSummary>(adsSummaryUrl(selectedRange), { storageTtl: ADS_SUMMARY_STORAGE_TTL });
@@ -22586,6 +22801,17 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
+      {adsSection === "channels" ? (
+        <AdsChannelDetailWorkspace
+          summary={summary}
+          reportRows={reportRows}
+          activeChannel={activeAdsChannel}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+        />
+      ) : (
+        <>
+
       <Card className="px-3 py-4">
         <SectionHeader
           title="광고 리포트"
@@ -22616,6 +22842,8 @@ function AdsAnalysisWorkspace() {
         <AdsLineChart rows={daily} from={dateFrom} to={dateTo} />
         <AdsChannelStatus rows={channels} selectedChannels={selectedAdChannels} />
       </section>
+        </>
+      )}
     </div>
   );
 }
@@ -22785,17 +23013,12 @@ function AdsRightPanel() {
     };
   }, [dateFrom, dateTo]);
 
-  const currentSource = summaries["현재"] || summaries["어제"] || summaries["최근 7일"] || summaries["최근 30일"] || {};
-  const currentReportRows = adMetricReportRows(currentSource.channels || [], adReportChannelOrder);
   const uploadSource = summaries["어제"] || summaries["최근 7일"] || summaries["최근 30일"] || {};
   const recentBatches = uploadSource.batches || [];
 
   return (
     <>
       <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
-        <ToolSection title="채널별 성과현황" defaultOpen showChevron>
-          <AdsChannelPerformanceCards rows={currentReportRows} compact />
-        </ToolSection>
         <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
         <div className="space-y-2">
           <label
@@ -30157,6 +30380,7 @@ function HomeContent() {
   const activeMenu = slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
+  const adsSection = searchParams.get("adsSection") || "overview";
   const requestedAccountingTab = searchParams.get("accountingTab") || "dashboard";
   const normalizedAccountingTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card"
     ? "ledger"
@@ -30188,7 +30412,7 @@ function HomeContent() {
         }
       `}</style>
       <div className="flex min-h-screen">
-        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} accountingTab={accountingTab} />
+        <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} adsSection={adsSection} accountingTab={accountingTab} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
