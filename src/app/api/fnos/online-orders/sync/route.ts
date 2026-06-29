@@ -128,6 +128,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   const adapterCode = onlineOrderAdapterCodeForChannel(channel);
   const adapter = onlineOrderAdapterForChannel(channel);
   const startedAt = new Date().toISOString();
+  const dryRun = body.dry_run === true;
   if (!adapter) {
     const message = `${text(channel.channel_name) || channelCode} ${ONLINE_ORDER_UNSUPPORTED_MESSAGE}`;
     return { channel, ok: false, orders: [] as NormalizedOrder[], message };
@@ -155,7 +156,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   try {
     result = await adapter.collectOrders(params);
     const orders = normalizeCollectableOnlineOrders(result.data || []);
-    if (result.ok) {
+    if (result.ok && !dryRun) {
       await persistOrders(channel, orders);
       await patchRows("sales_channels", { id: `eq.${text(channel.id)}` }, {
         last_synced_at: new Date().toISOString(),
@@ -163,7 +164,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
         updated_at: new Date().toISOString(),
       }).catch(() => []);
     }
-    await logSync({
+    if (!dryRun) await logSync({
       channel_id: text(channel.id) || null,
       sync_type: "orders",
       target_type: "online_orders",
@@ -178,7 +179,7 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
     return { channel, ok: result.ok, orders, message: result.message || result.error || "" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "주문 수집 실패";
-    await logSync({
+    if (!dryRun) await logSync({
       channel_id: text(channel.id) || null,
       sync_type: "orders",
       target_type: "online_orders",
@@ -258,6 +259,7 @@ export async function POST(request: NextRequest) {
     const orders = results.flatMap((result) => result.orders);
     return jsonResponse({
       ok: results.some((result) => result.ok),
+      dry_run: body.dry_run === true,
       statuses: results.map((result) => ({
         channel_code: text(result.channel.channel_code),
         channel_name: text(result.channel.channel_name),
