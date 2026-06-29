@@ -1,3 +1,4 @@
+import { readJsonApiResponse } from "../common/api-response";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -30,20 +31,7 @@ function formatSsgDate(value: unknown, boundary: "start" | "end") {
   return formatCompactDate(value, boundary).slice(0, 8);
 }
 async function readBody(response: Response) {
-  const body = await response.text();
-  let data: unknown = {};
-  try {
-    data = body ? JSON.parse(body) : {};
-  } catch {
-    const snippet = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-    throw new Error(`SSG API 응답을 JSON으로 읽을 수 없습니다. HTTP ${response.status}${snippet ? ` - ${snippet}` : ""}`);
-  }
-  const result = record(record(data).result);
-  const resultCode = firstText(result.resultCode, result.code);
-  if (!response.ok || (resultCode && resultCode !== "00")) {
-    throw new Error(firstText(result.resultDesc, result.resultMessage, record(data).message, record(data).error, body) || `SSG API ${response.status}`);
-  }
-  return data;
+  return readJsonApiResponse(response, "SSG", { successCodes: ["00", "0", "SUCCESS", "OK"], resultPaths: [["result", "resultCode"], ["result", "code"], ["code"], ["status"]] });
 }
 function findRows(data: unknown) {
   const direct = arrayAt(data, [["result", "shppDirections"], ["result", "shppDirections", "shppDirection"], ["data"], ["data", "list"], ["data", "items"], ["result", "list"], ["orders"], ["orderList"], ["shppList"], ["listShppDirection"]]);
@@ -94,7 +82,7 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
     if (!apiKey) return { ok: false, data: [], error: "SSG API Key를 먼저 저장해주세요." };
     const baseUrl = text(params.api_base_url) || SSG_BASE_URL;
     const version = text(params.api_version) || SSG_VERSION;
-    const path = `/api/pd/${version.replace(/^v/i, "")}/listShppDirection.ssg`;
+    const path = text(params.orders_path) || `/api/pd/${version.replace(/^v/i, "")}/listShppDirection.ssg`;
     const fromDate = params.fromDate ?? params.from;
     const toDate = params.toDate ?? params.to;
     const body = `<requestShppDirection><perdType>01</perdType><perdStrDts>${formatSsgDate(fromDate, "start")}</perdStrDts><perdEndDts>${formatSsgDate(toDate, "end")}</perdEndDts></requestShppDirection>`;

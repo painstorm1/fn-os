@@ -821,7 +821,7 @@ export async function dashboardSummary() {
     optionalRows("sales", { order: "created_at.desc", limit: 500 }),
     optionalRows("purchases", { order: "created_at.desc", limit: 300 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 300 }),
-    optionalRows("orders", { order: "created_at.desc", limit: 300 }),
+    optionalRows("orders", { order: "collected_at.desc", limit: 300 }),
     optionalRows("order_items", { order: "created_at.desc", limit: 300 }),
     optionalRows("shipments", { order: "created_at.desc", limit: 300 }),
     optionalRows("sales_channels", { order: "channel_code.asc", limit: 100 }),

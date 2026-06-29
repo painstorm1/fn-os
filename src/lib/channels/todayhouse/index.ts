@@ -1,3 +1,4 @@
+import { readJsonApiResponse } from "../common/api-response";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -12,7 +13,7 @@ function first(...values: unknown[]) { for (const value of values) { const next 
 function date(value: unknown, boundary: "start" | "end") { const raw = text(value); const d = raw ? new Date(raw) : new Date(); if (!raw && boundary === "start") d.setDate(d.getDate() - 7); const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000); return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth()+1).padStart(2,"0")}-${String(kst.getUTCDate()).padStart(2,"0")}`; }
 function normalizeDate(value: unknown) { const raw = text(value); const compact = raw.replace(/\D/g, ""); if (compact.length >= 14) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}T${compact.slice(8,10)}:${compact.slice(10,12)}:${compact.slice(12,14)}+09:00`; if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`; return raw; }
 function rowsFrom(data: unknown): AnyRecord[] { const queue = [data]; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); while (queue.length) { const value = queue.shift(); if (!value || seen.has(value) || typeof value !== "object") continue; seen.add(value); if (Array.isArray(value)) { queue.push(...value); continue; } const cur = record(value); if (first(cur.orderId, cur.orderNo, cur.id) && first(cur.productName, cur.name, cur.itemName)) rows.push(cur); else queue.push(...Object.values(cur)); } return rows; }
-async function readJson(response: Response) { const body = await response.text(); let data: unknown = {}; try { data = body ? JSON.parse(body) : {}; } catch { throw new Error(`오늘의집 API 응답을 JSON으로 읽을 수 없습니다. HTTP ${response.status}`); } if (!response.ok) throw new Error(first(record(data).message, record(data).error, body) || `오늘의집 API ${response.status}`); return data; }
+async function readJson(response: Response) { return readJsonApiResponse(response, "오늘의집", { successCodes: ["SUCCESS", "OK", "0", "200"], resultPaths: [["code"], ["status"], ["result", "code"]] }); }
 function normalize(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
   const product = record(row.product || row.production || row.item || row.option);
   const receiver = record(row.receiver || row.shippingAddress || row.delivery || row.recipient);

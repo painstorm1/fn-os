@@ -1,4 +1,5 @@
 import { createHmac } from "crypto";
+import { readJsonApiResponse } from "../common/api-response";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -14,7 +15,7 @@ function date(value: unknown, boundary: "start" | "end") { const raw = text(valu
 function normalizeDate(value: unknown) { const raw = text(value); const compact = raw.replace(/\D/g, ""); if (compact.length >= 14) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}T${compact.slice(8,10)}:${compact.slice(10,12)}:${compact.slice(12,14)}+09:00`; if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`; return raw; }
 function hmac(secret: string, message: string) { return createHmac("sha256", secret).update(message).digest("hex"); }
 function rowsFrom(data: unknown): AnyRecord[] { const queue = [data]; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); while (queue.length) { const value = queue.shift(); if (!value || seen.has(value) || typeof value !== "object") continue; seen.add(value); if (Array.isArray(value)) { queue.push(...value); continue; } const cur = record(value); if (first(cur.orderId, cur.orderNo, cur.id) && first(cur.productName, cur.itemName, cur.name, record(cur.product).name)) rows.push(cur); else queue.push(...Object.values(cur)); } return rows; }
-async function readJson(response: Response) { const body = await response.text(); let data: unknown = {}; try { data = body ? JSON.parse(body) : {}; } catch { throw new Error(`토스 API 응답을 JSON으로 읽을 수 없습니다. HTTP ${response.status}`); } const resultType = first(record(data).resultType, record(data).code, record(data).status); if (!response.ok || /FAIL|ERROR/i.test(resultType)) throw new Error(first(record(data).message, record(data).error, body) || `토스 API ${response.status}`); return data; }
+async function readJson(response: Response) { return readJsonApiResponse(response, "토스", { successCodes: ["SUCCESS", "OK", "0"], resultPaths: [["resultType"], ["code"], ["status"]] }); }
 function normalize(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
   const product = record(row.product || row.orderProduct || row.item || row.productItem);
   const receiver = record(row.receiver || row.shippingAddress || row.delivery || row.recipient);
