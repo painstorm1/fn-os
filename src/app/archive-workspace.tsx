@@ -331,6 +331,7 @@ export default function ArchiveWorkspace() {
   const [projectCreateName, setProjectCreateName] = useState("");
   const [selectMode] = useState(true);
   const [viewMode, setViewMode] = useState<ArchiveViewMode>("preview");
+  const [dateGroupedView, setDateGroupedView] = useState(true);
   const [data, setData] = useState<ArchiveData>(() => initialArchiveData || EMPTY_ARCHIVE_DATA);
   const [loading, setLoading] = useState(() => !initialArchiveData);
   const [message, setMessage] = useState("");
@@ -877,7 +878,6 @@ export default function ArchiveWorkspace() {
   const menuItems: Array<[ActiveMenu, string]> = [
     ["save", "F2 새 자료"],
     ["all", "전체"],
-    ["date", "날짜별"],
     ["교육", "교육"],
     ["업무", "업무"],
     ["개인", "개인"],
@@ -918,17 +918,21 @@ export default function ArchiveWorkspace() {
               ))}
             </div>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-              <select className="field-input h-10 !w-44 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "date" ? activeArchiveDate : ""} onChange={(event) => {
-                const date = event.target.value;
-                setActiveArchiveDate(date);
-                setActiveMenu("date");
-                setActiveProject("");
-                setActiveSubCategory("");
-                setFilters(emptyFilters);
-              }}>
-                <option value="">날짜별 보기</option>
-                {archiveDateGroups.map((group) => <option key={group.date} value={group.date}>{formatArchiveDateLabel(group.date)} {group.count}</option>)}
-              </select>
+              <label className="flex h-10 flex-none items-center gap-2 rounded-md border border-orange-200 bg-orange-50 px-3 text-sm font-black text-orange-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-orange-500"
+                  checked={dateGroupedView}
+                  onChange={(event) => {
+                    setDateGroupedView(event.target.checked);
+                    if (activeMenu === "date") {
+                      setActiveMenu("all");
+                      setActiveArchiveDate("");
+                    }
+                  }}
+                />
+                날짜보기
+              </label>
               <select className="field-input h-10 !w-56 flex-none rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-700" value={activeMenu === "project" ? activeProject : ""} onChange={(event) => openProject(event.target.value)}>
                 <option value="">프로젝트 바로가기</option>
                 {projects.map((project) => <option key={project} value={project}>{project} {projectCountByName.get(project) || 0}</option>)}
@@ -1155,8 +1159,9 @@ export default function ArchiveWorkspace() {
           onMoveItemsToProject={moveArchiveItemsToProject}
           onDeleteItems={deleteArchiveItems}
           projects={projects}
-          showNumbers={activeMenu === "date" || Boolean(normalizeDateInput(filters.dateFrom) || normalizeDateInput(filters.dateTo))}
-          numberingTitle={activeMenu === "date" && activeArchiveDate ? `${formatArchiveDateLabel(activeArchiveDate)} 투척 자료` : "현재 목록"}
+          showNumbers={dateGroupedView || activeMenu === "date" || Boolean(normalizeDateInput(filters.dateFrom) || normalizeDateInput(filters.dateTo))}
+          numberingTitle={dateGroupedView ? "날짜별 투척 자료" : activeMenu === "date" && activeArchiveDate ? `${formatArchiveDateLabel(activeArchiveDate)} 투척 자료` : "현재 목록"}
+          groupByDate={dateGroupedView}
         />
       )}
 
@@ -1219,6 +1224,7 @@ function ArchiveList({
   projects,
   showNumbers,
   numberingTitle,
+  groupByDate,
 }: {
   items: ArchiveItem[];
   categoryById: Map<string, ArchiveCategory>;
@@ -1233,6 +1239,7 @@ function ArchiveList({
   projects: string[];
   showNumbers: boolean;
   numberingTitle: string;
+  groupByDate: boolean;
 }) {
   const [editDraft, setEditDraft] = useState<ArchiveItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -1247,6 +1254,14 @@ function ArchiveList({
   const selectedItems = items.filter((item) => selectedIdSet.has(item.id));
   const visibleItems = items.length > visibleCount ? items.slice(0, visibleCount) : items;
   const allSelected = Boolean(items.length) && selectedIds.length === items.length;
+  const dateGroupedItems = useMemo(() => {
+    const map = new Map<string, ArchiveItem[]>();
+    visibleItems.forEach((item) => {
+      const date = archiveDropDate(item) || "날짜 없음";
+      map.set(date, [...(map.get(date) || []), item]);
+    });
+    return Array.from(map.entries()).map(([date, groupItems]) => ({ date, items: groupItems }));
+  }, [visibleItems]);
   const bulkCategoryOptions = bulkCategoryGroup ? categoryTree[bulkCategoryGroup] : categoryOptionEntries().map((entry) => entry.category);
 
   function startEdit(item: ArchiveItem) {
@@ -1308,6 +1323,15 @@ function ArchiveList({
 
   function toggleAllSelected() {
     setSelectedIds(allSelected ? [] : items.map((item) => item.id));
+  }
+
+  function toggleDateGroupSelected(groupItems: ArchiveItem[], checked: boolean) {
+    const groupIds = groupItems.map((item) => item.id);
+    setSelectedIds((prev) => {
+      if (checked) return Array.from(new Set([...prev, ...groupIds]));
+      const groupIdSet = new Set(groupIds);
+      return prev.filter((id) => !groupIdSet.has(id));
+    });
   }
 
   useEffect(() => {
@@ -1420,7 +1444,68 @@ function ArchiveList({
         </section>
       )}
 
-      {viewMode === "list" ? (
+      {groupByDate ? (
+        <section className="space-y-3">
+          {dateGroupedItems.map((group) => {
+            const allGroupSelected = group.items.length > 0 && group.items.every((item) => selectedIdSet.has(item.id));
+            const someGroupSelected = group.items.some((item) => selectedIdSet.has(item.id));
+            const groupTitle = group.date === "날짜 없음" ? "날짜 없음" : formatArchiveDateLabel(group.date);
+            return (
+              <details key={group.date} open className="rounded-xl border border-orange-100 bg-white shadow-sm">
+                <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl bg-orange-50 px-3 py-2 text-sm font-black text-orange-800 [&::-webkit-details-marker]:hidden">
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-orange-500"
+                      checked={allGroupSelected}
+                      ref={(element) => { if (element) element.indeterminate = !allGroupSelected && someGroupSelected; }}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => toggleDateGroupSelected(group.items, event.target.checked)}
+                      aria-label={`${groupTitle} 전체 선택`}
+                    />
+                  )}
+                  <span>{groupTitle}</span>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs text-orange-600">{group.items.length.toLocaleString("ko-KR")}개</span>
+                </summary>
+                <div className="grid grid-cols-3 gap-2 p-3">
+                  {group.items.map((item, index) => {
+                    const category = categoryById.get(String(item.category_id || ""));
+                    const href = item.url || item.file_url || "";
+                    return (
+                      <div
+                        key={item.id}
+                        data-archive-list-row-id={item.id}
+                        className={`flex min-w-0 select-none items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIdSet.has(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}
+                        onMouseDown={(event) => {
+                          if (!selectMode) return;
+                          const target = event.target as HTMLElement;
+                          if (target.closest("button") || target.closest("input") || target.closest("summary")) return;
+                          event.preventDefault();
+                          beginListDragSelect(item.id);
+                        }}
+                        onMouseEnter={() => continueListDragSelect(item.id)}
+                      >
+                        {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIdSet.has(item.id)} readOnly aria-label="아카이브 선택" />}
+                        {showNumbers && <span className="flex h-6 min-w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 px-2 text-[11px] font-black text-white">#{index + 1}</span>}
+                        <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" onClick={(event) => { if (selectMode) event.preventDefault(); }} className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
+                        <SourceBadge source={item.source_type} className="max-w-20" />
+                        <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
+                        <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+                            <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                            <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
+            );
+          })}
+          {!items.length && <EmptyState title="저장된 아카이브가 없습니다." />}
+        </section>
+      ) : viewMode === "list" ? (
         <section className="grid grid-cols-3 gap-2">
           {visibleItems.map((item, index) => {
             const category = categoryById.get(String(item.category_id || ""));
