@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { deleteRows, selectRows, upsertRows } from "@/lib/fnos-db";
 
-const SECRET_KEYS = new Set(["seller_password", "api_client_secret", "secret_key", "refresh_token"]);
+const SECRET_KEYS = new Set(["seller_password", "api_client_secret", "access_key", "secret_key", "api_key", "auth_code", "refresh_token"]);
 const CREDENTIAL_KEYS = [
   "seller_password",
   "api_client_id",
@@ -14,6 +14,9 @@ const CREDENTIAL_KEYS = [
   "master_id",
   "partner_no",
   "sub_partner_no",
+  "merchant_id",
+  "api_base_url",
+  "orders_path",
   "refresh_token",
 ];
 

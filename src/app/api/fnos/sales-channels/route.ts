@@ -12,8 +12,8 @@ const defaultChannels = [
   ["KAKAO", "카카오톡스토어", "excel", false, "https://store-sell.kakao.com/"],
   ["SSG", "SSG", "excel", false, "https://partners.ssgadm.com/"],
   ["LOTTEON", "롯데ON", "excel", false, "https://store.lotteon.com/"],
-  ["TODAYHOUSE", "오늘의집", "excel", false, "https://partners.ohou.se/"],
-  ["TOSS", "토스", "excel", false, "https://store.toss.im/"],
+  ["TODAYHOUSE", "오늘의집", "api", true, "https://partners.ohou.se/"],
+  ["TOSS", "토스", "api", true, "https://shopping-seller.toss.im/"],
   ["EZWEL", "현대이지웰", "excel", false, ""],
   ["ETC", "기타몰", "excel", false, ""],
 ];
