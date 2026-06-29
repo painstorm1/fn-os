@@ -811,12 +811,13 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const isCardPayment = row.direction === "card_payment";
     const isTransfer = row.direction === "transfer";
     const salaryException = !isCardPayment && !isTransfer ? salaryPrivateWithdrawalException(row, categoryByPath) : null;
-    const forcedReviewReason = !isCardPayment && !isTransfer ? ambiguousReviewReason(row) : "";
-    const rule = forcedReviewReason ? undefined : rules.find((item) => ruleMatches(item, row));
+    const rule = !isCardPayment && !isTransfer ? rules.find((item) => ruleMatches(item, row)) : undefined;
+    const ruleRequiresReview = Boolean(rule?.review_required);
+    const forcedReviewReason = !rule && !isCardPayment && !isTransfer ? ambiguousReviewReason(row) : "";
     const manualPath = forcedReviewReason ? null : manualCategoryPath(row);
     const manualCategory = manualPath ? categoryByPath.get(`${manualPath.large}|${manualPath.middle}|`) : null;
     const historyMatch = !forcedReviewReason && !rule && !manualCategory ? findHistoricalCategoryMatch(row, confirmedRows) : null;
-    const reviewReason = forcedReviewReason || text(rule?.review_reason) || (row.direction === "pending_review" ? "미분류" : "");
+    const reviewReason = forcedReviewReason || (ruleRequiresReview ? text(rule?.review_reason) : "") || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
     const transferLarge = numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금";
     const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? transferLarge : text(salaryException?.category_large) || text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
@@ -1003,6 +1004,7 @@ export async function deactivateAccountingCategory(id: string) {
 export async function upsertAccountingRule(row: RawRow) {
   const id = text(row.id);
   const category = await categoryFor(row);
+  const reviewRequired = row.review_required ?? row.reviewRequired ?? true;
   const payload = {
     priority: numberValue(row.priority) || 100,
     is_active: row.is_active ?? row.isActive ?? true,
@@ -1021,8 +1023,8 @@ export async function upsertAccountingRule(row: RawRow) {
     category_middle: text(category?.category_middle || row.category_middle || row.categoryMiddle),
     category_small: "",
     auto_confirm: row.auto_confirm ?? row.autoConfirm ?? false,
-    review_required: row.review_required ?? row.reviewRequired ?? true,
-    review_reason: text(row.review_reason || row.reviewReason) || null,
+    review_required: reviewRequired,
+    review_reason: reviewRequired ? text(row.review_reason || row.reviewReason) || null : null,
     memo: text(row.memo) || null,
     updated_at: new Date().toISOString(),
   };
