@@ -21925,18 +21925,18 @@ function AdsCollectionStatusSummary({ batches }: { batches: AdsMetricRow[] }) {
   );
 }
 
-function AdsChannelPerformanceCards({ rows }: { rows: ReturnType<typeof adMetricReportRows> }) {
+function AdsChannelPerformanceCards({ rows, compact = false }: { rows: ReturnType<typeof adMetricReportRows>; compact?: boolean }) {
   const channelRows = rows.filter((row) => row.channel !== "total");
   return (
-    <Card className="p-4">
-      <SectionHeader title="채널별 성과현황" description="선택 채널 기준 compact view" className="mb-3" />
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+    <Card className={compact ? "border-0 p-0 shadow-none" : "p-4"}>
+      {!compact && <SectionHeader title="채널별 성과현황" description="선택 채널 기준 compact view" className="mb-3" />}
+      <div className={compact ? "grid gap-2" : "grid gap-2 md:grid-cols-2 xl:grid-cols-5"}>
         {channelRows.map((row) => {
           const tone = row.roas <= 150 ? "border-rose-100 bg-rose-50/60" : row.roas >= 300 ? "border-emerald-100 bg-emerald-50/60" : "border-orange-100 bg-orange-50/60";
           return (
-            <div key={`ad-channel-performance-${row.channel}`} className={`rounded-xl border p-3 ${tone}`}>
+            <div key={`ad-channel-performance-${row.channel}`} className={`rounded-xl border ${compact ? "p-2.5" : "p-3"} ${tone}`}>
               <p className="flex items-center gap-1.5 text-xs font-black text-slate-700"><AdChannelLogo channel={row.channel} />{row.label}</p>
-              <p className="mt-2 text-lg font-black text-gray-950">{adPercent(row.roas)}</p>
+              <p className={`${compact ? "mt-1 text-base" : "mt-2 text-lg"} font-black text-gray-950`}>{adPercent(row.roas)}</p>
               <div className="mt-2 space-y-1 text-xs font-bold text-slate-600">
                 <p className="flex justify-between gap-2"><span>광고비</span><span className="text-gray-950">{krw(row.cost)}</span></p>
                 <p className="flex justify-between gap-2"><span>전환매출</span><span className="text-gray-950">{krw(row.purchaseValue)}</span></p>
@@ -21945,7 +21945,7 @@ function AdsChannelPerformanceCards({ rows }: { rows: ReturnType<typeof adMetric
             </div>
           );
         })}
-        {!channelRows.length && <EmptyState title="선택된 채널 데이터가 없습니다." className="min-h-24 md:col-span-2 xl:col-span-5" />}
+        {!channelRows.length && <EmptyState title="선택된 채널 데이터가 없습니다." className={compact ? "min-h-20 py-5" : "min-h-24 md:col-span-2 xl:col-span-5"} />}
       </div>
     </Card>
   );
@@ -22586,8 +22586,6 @@ function AdsAnalysisWorkspace() {
         <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
       </section>
 
-      <AdsChannelPerformanceCards rows={reportRows} />
-
       <Card className="px-3 py-4">
         <SectionHeader
           title="광고 리포트"
@@ -22773,12 +22771,31 @@ function AdsRightPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    cachedAdsSummary({ from: dateFrom, to: dateTo })
+      .then((data) => {
+        if (alive) setSummaries((prev) => ({ ...prev, "현재": data }));
+      })
+      .catch((error) => {
+        if (alive) setSummaries((prev) => ({ ...prev, "현재": { ok: false, error: error instanceof Error ? error.message : "광고 요약 조회 실패" } }));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [dateFrom, dateTo]);
+
+  const currentSource = summaries["현재"] || summaries["어제"] || summaries["최근 7일"] || summaries["최근 30일"] || {};
+  const currentReportRows = adMetricReportRows(currentSource.channels || [], adReportChannelOrder);
   const uploadSource = summaries["어제"] || summaries["최근 7일"] || summaries["최근 30일"] || {};
   const recentBatches = uploadSource.batches || [];
 
   return (
     <>
       <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+        <ToolSection title="채널별 성과현황" defaultOpen showChevron>
+          <AdsChannelPerformanceCards rows={currentReportRows} compact />
+        </ToolSection>
         <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
         <div className="space-y-2">
           <label
