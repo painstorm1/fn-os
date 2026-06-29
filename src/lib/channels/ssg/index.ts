@@ -82,7 +82,9 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
     const baseUrl = text(params.api_base_url) || SSG_BASE_URL;
     const version = text(params.api_version) || SSG_VERSION;
     const path = `/api/pd/${version}/listShppDirection.ssg`;
-    const search = new URLSearchParams({ startDt: formatCompactDate(params.fromDate, "start"), endDt: formatCompactDate(params.toDate, "end") });
+    const fromDate = params.fromDate ?? params.from;
+    const toDate = params.toDate ?? params.to;
+    const search = new URLSearchParams({ startDt: formatCompactDate(fromDate, "start"), endDt: formatCompactDate(toDate, "end") });
     try {
       const response = await fetch(`${baseUrl}${path}?${search.toString()}`, { headers: { Authorization: apiKey, Accept: "application/json" } });
       const data = await readBody(response);

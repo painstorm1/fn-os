@@ -84,7 +84,7 @@ export function tryDecryptCredential(value: string) {
   try {
     return { value: decryptCredential(value), error: "" };
   } catch {
-    return { value: "", error: "저장된 API 인증값을 현재 서버에서 읽을 수 없습니다. 애플리케이션 ID/시크릿을 다시 저장해주세요." };
+    return { value: "", error: "저장된 API 인증값을 현재 서버에서 읽을 수 없습니다. 기초관리 > 쇼핑몰 코드연결에서 해당 쇼핑몰 API 값을 다시 저장해주세요." };
   }
 }
 

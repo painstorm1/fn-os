@@ -255,6 +255,8 @@ function normalizeElevenstRow(
   const orderNo = firstDeepText(row, ["ordNo", "orderNo"]);
   const ordPrdSeq = firstDeepText(row, ["ordPrdSeq", "orderProductSequence", "ordSeq"]);
   const dlvNo = firstDeepText(row, ["dlvNo", "deliveryNo"]);
+  const placeOrderStatus = fallbackStatus === "결제완료" ? "NOTYET" : "OK";
+  const rawWithCollectableStatus = { ...row, __fnosPlaceOrderStatusType: placeOrderStatus };
   const item: NormalizedOrderItem = {
     channelProductCode: firstDeepText(row, ["prdNo", "productNo", "sellerPrdCd", "sellerProductCode"]),
     channelOptionCode: [ordPrdSeq, dlvNo].filter(Boolean).join("-") || undefined,
@@ -264,7 +266,7 @@ function normalizeElevenstRow(
     qty: numberValue(firstDeepText(row, ["ordQty", "orderQty", "qty", "quantity"])) || 1,
     salesAmount: numberValue(firstDeepText(row, ["ordPayAmt", "payAmt", "selPrc", "salePrice", "productPrice", "prdPrc"])) || undefined,
     settlementAmount: numberValue(firstDeepText(row, ["sttlAmt", "settlementAmount", "expectedSettlementAmount"])) || undefined,
-    raw: row,
+    raw: rawWithCollectableStatus,
   };
   const receiverPhone = firstDeepText(row, ["rcvrPrtblNo", "receiverMobile", "receiverPhone", "rcvrTlphn", "receiverTel"]);
   return {
@@ -283,7 +285,7 @@ function normalizeElevenstRow(
     ].filter(Boolean).join(" "),
     deliveryMessage: firstDeepText(row, ["dlvMsg", "deliveryMessage", "ordDlvReqCont", "shippingMemo"]),
     items: [item],
-    raw: row,
+    raw: rawWithCollectableStatus,
   };
 }
 
