@@ -820,10 +820,10 @@ export async function classifyAccountingTransactions(rows: RawRow[]): Promise<Ra
     const reviewReason = forcedReviewReason || (ruleRequiresReview ? text(rule?.review_reason) : "") || (row.direction === "pending_review" ? "미분류" : "");
     const reviewPath = reviewReason ? REVIEW_CATEGORY_BY_REASON[reviewReason] : null;
     const transferLarge = numberValue(row.credit_amount) > 0 ? "기타 입금" : "기타 출금";
-    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? transferLarge : text(salaryException?.category_large) || text(manualCategory?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
-    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : text(salaryException?.category_middle) || text(manualCategory?.category_middle) || reviewPath?.[1] || text(rule?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
+    const categoryLarge = isCardPayment ? "카드대금" : isTransfer ? transferLarge : text(salaryException?.category_large) || reviewPath?.[0] || text(rule?.category_large) || text(manualCategory?.category_large) || text(row.existing_category_large) || text(defaultReview?.category_large);
+    const categoryMiddle = isCardPayment ? text(row.card_name) || "카드출금" : isTransfer ? "내부이체" : text(salaryException?.category_middle) || reviewPath?.[1] || text(rule?.category_middle) || text(manualCategory?.category_middle) || text(row.existing_category_middle) || text(defaultReview?.category_middle);
     const categorySmall = "";
-    const category = salaryException?.category || manualCategory || categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || defaultReview;
+    const category = salaryException?.category || categoryByPath.get(`${categoryLarge}|${categoryMiddle}|`) || manualCategory || defaultReview;
     const historyCategory = historyMatch ? categoryByPath.get(`${text(historyMatch.row.category_large)}|${text(historyMatch.row.category_middle)}|`) : null;
     const resolvedCategory = historyMatch && !reviewPath ? historyCategory || historyMatch.row : category;
     const needsReview = !salaryException && !manualCategory && !isCardPayment && !isTransfer && (historyMatch ? !historyMatch.autoConfirm : (Boolean(rule?.review_required) || Boolean(reviewReason) || Boolean(resolvedCategory?.default_review_required)));
