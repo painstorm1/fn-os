@@ -3,7 +3,7 @@ import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelA
 type AnyRecord = Record<string, unknown>;
 
 const SSG_BASE_URL = "https://eapi.ssgadm.com";
-const SSG_VERSION = "v1";
+const SSG_VERSION = "1";
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
@@ -26,15 +26,28 @@ function normalizeDate(value: unknown) {
   if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`;
   return raw;
 }
+function formatSsgDate(value: unknown, boundary: "start" | "end") {
+  return formatCompactDate(value, boundary).slice(0, 8);
+}
 async function readBody(response: Response) {
   const body = await response.text();
-  const data = body ? JSON.parse(body) : {};
-  if (!response.ok) throw new Error(firstText(record(data).message, record(data).error, body) || `SSG API ${response.status}`);
+  let data: unknown = {};
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    const snippet = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+    throw new Error(`SSG API 응답을 JSON으로 읽을 수 없습니다. HTTP ${response.status}${snippet ? ` - ${snippet}` : ""}`);
+  }
+  const result = record(record(data).result);
+  const resultCode = firstText(result.resultCode, result.code);
+  if (!response.ok || (resultCode && resultCode !== "00")) {
+    throw new Error(firstText(result.resultDesc, result.resultMessage, record(data).message, record(data).error, body) || `SSG API ${response.status}`);
+  }
   return data;
 }
 function findRows(data: unknown) {
-  const direct = arrayAt(data, [["data"], ["data", "list"], ["data", "items"], ["result"], ["result", "list"], ["orders"], ["orderList"], ["shppList"], ["listShppDirection"]]);
-  if (direct.length) return direct;
+  const direct = arrayAt(data, [["result", "shppDirections"], ["result", "shppDirections", "shppDirection"], ["data"], ["data", "list"], ["data", "items"], ["result", "list"], ["orders"], ["orderList"], ["shppList"], ["listShppDirection"]]);
+  if (direct.length) return direct.map(record).filter((row) => Object.keys(row).length);
   const rows: AnyRecord[] = [];
   const seen = new Set<unknown>();
   function visit(value: unknown) {
@@ -54,22 +67,22 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
     channelProductName: firstText(row.itemNm, row.prdNm, row.productName, "SSG 주문"),
     channelOptionName: firstText(row.uitemNm, row.optNm, row.optionName),
     sku: firstText(row.splItemCd, row.sellerItemCd, row.itemId),
-    qty: numberValue(row.ordQty || row.dircQty || row.qty) || 1,
-    salesAmount: numberValue(row.ordAmt || row.saleAmt || row.payAmt) || undefined,
+    qty: numberValue(row.ordQty || row.dircItemQty || row.dircQty || row.qty) || 1,
+    salesAmount: numberValue(row.rlordAmt || row.sellprc || row.ordAmt || row.saleAmt || row.payAmt) || undefined,
     raw: row,
   };
   return {
     ...base,
     orderNo: firstText(row.ordNo, row.orordNo, row.orderNo),
     bundleOrderNo: firstText(row.ordNo, row.orordNo),
-    orderDate: normalizeDate(firstText(row.ordCmplDt, row.paymtCmplDt, row.ordDt, row.orderDate)),
-    orderStatus: firstText(row.ordItemStat, row.ordStat, row.status, "발송대기"),
+    orderDate: normalizeDate(firstText(row.ordCmplDts, row.ordCmplDt, row.ordRcpDts, row.paymtCmplDt, row.ordDt, row.orderDate)),
+    orderStatus: firstText(row.ordItemStat, row.ordStat, row.shppProgStatDtlCd, row.status, "발송대기"),
     receiverName: firstText(row.rcptpeNm, row.receiverName, row.rcverNm),
     phone1: firstText(row.rcptpeHpno, row.receiverMobile, row.hpno, row.phone1),
     phone2: firstText(row.rcptpeTelno, row.receiverPhone, row.telno, row.phone2),
-    zipcode: firstText(row.zipcd, row.zipcode, row.postNo),
-    address: [firstText(row.addr1, row.baseAddr, row.receiverAddress), firstText(row.addr2, row.dtlAddr, row.receiverDetailAddress)].filter(Boolean).join(" "),
-    deliveryMessage: firstText(row.dlvMsg, row.deliveryMessage),
+    zipcode: firstText(row.shpplocZipcd, row.zipcd, row.zipcode, row.postNo),
+    address: [firstText(row.shpplocAddr, row.addr1, row.baseAddr, row.receiverAddress), firstText(row.addr2, row.dtlAddr, row.receiverDetailAddress)].filter(Boolean).join(" "),
+    deliveryMessage: firstText(row.ordMemoCntt, row.dlvMsg, row.deliveryMessage),
     items: [item],
     raw: row,
   };
@@ -81,12 +94,16 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
     if (!apiKey) return { ok: false, data: [], error: "SSG API Key를 먼저 저장해주세요." };
     const baseUrl = text(params.api_base_url) || SSG_BASE_URL;
     const version = text(params.api_version) || SSG_VERSION;
-    const path = `/api/pd/${version}/listShppDirection.ssg`;
+    const path = `/api/pd/${version.replace(/^v/i, "")}/listShppDirection.ssg`;
     const fromDate = params.fromDate ?? params.from;
     const toDate = params.toDate ?? params.to;
-    const search = new URLSearchParams({ startDt: formatCompactDate(fromDate, "start"), endDt: formatCompactDate(toDate, "end") });
+    const body = `<requestShppDirection><perdType>01</perdType><perdStrDts>${formatSsgDate(fromDate, "start")}</perdStrDts><perdEndDts>${formatSsgDate(toDate, "end")}</perdEndDts></requestShppDirection>`;
     try {
-      const response = await fetch(`${baseUrl}${path}?${search.toString()}`, { headers: { Authorization: apiKey, Accept: "application/json" } });
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: { Authorization: apiKey, Accept: "application/json", "Content-Type": "application/xml" },
+        body,
+      });
       const data = await readBody(response);
       const rows = findRows(data);
       const base = { channelCode: text(params.channel_code) || "SSG", channelName: text(params.channel_name) || "SSG", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
