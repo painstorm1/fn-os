@@ -21875,7 +21875,7 @@ function AdsMetricCard({ label, value, note, tone = "orange" }: { label: string;
   return <KpiCard label={label} value={value} note={note} tone={nextTone} className="h-full min-h-[88px]" />;
 }
 
-function AdsCollectionStatusCards({ batches }: { batches: AdsMetricRow[] }) {
+function AdsCollectionStatusSummary({ batches }: { batches: AdsMetricRow[] }) {
   const activeBatches = batches.filter((batch) => String(batch.status || "").toUpperCase() !== "REPLACED");
   const latestByChannel = new Map<string, AdsMetricRow>();
   activeBatches.forEach((batch) => {
@@ -21889,44 +21889,39 @@ function AdsCollectionStatusCards({ batches }: { batches: AdsMetricRow[] }) {
   const latestRows = Array.from(latestByChannel.entries()).slice(0, 5);
 
   return (
-    <Card className="p-4">
-      <SectionHeader
-        title="최근 수집현황"
-        description="최근 업로드 기준 · 조회 기간 성과와 별도"
-        className="mb-3"
-      />
-      <div className="grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl bg-orange-50 p-3">
-            <p className="text-xs font-black text-orange-600">수집 채널</p>
-            <p className="mt-1 text-xl font-black text-gray-950">{latestByChannel.size.toLocaleString("ko-KR")}</p>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-3">
-            <p className="text-xs font-black text-slate-500">최근 업로드</p>
-            <p className="mt-1 text-sm font-black text-gray-950">{adUploadDateLabel(latestBatch?.uploaded_at || latestBatch?.created_at)}</p>
-          </div>
-          <div className="rounded-xl bg-emerald-50 p-3">
-            <p className="text-xs font-black text-emerald-600">저장</p>
-            <p className="mt-1 text-xl font-black text-gray-950">{successCount.toLocaleString("ko-KR")}</p>
-          </div>
-          <div className="rounded-xl bg-rose-50 p-3">
-            <p className="text-xs font-black text-rose-600">제외</p>
-            <p className="mt-1 text-xl font-black text-gray-950">{failCount.toLocaleString("ko-KR")}</p>
-          </div>
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md bg-orange-50 p-2">
+          <p className="text-[11px] font-black text-orange-600">수집 채널</p>
+          <p className="mt-0.5 text-lg font-black text-gray-950">{latestByChannel.size.toLocaleString("ko-KR")}</p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-          {latestRows.map(([channel, batch]) => (
-            <div key={`ad-collection-${channel}`} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
-              <p className="flex items-center gap-1.5 text-xs font-black text-slate-700"><AdChannelLogo channel={channel} />{adChannelDisplayName(channel)}</p>
-              <p className="mt-2 text-xs font-bold text-slate-500">{adUploadDateLabel(batch.uploaded_at || batch.created_at)}</p>
-              <p className="mt-1 text-xs font-black text-slate-800">저장 {adNumber(batch.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(batch.fail_count).toLocaleString("ko-KR")}</p>
-            </div>
-          ))}
-          {!latestRows.length && <EmptyState title="최근 수집 이력이 없습니다." className="min-h-24 sm:col-span-2 xl:col-span-5" />}
+        <div className="rounded-md bg-slate-50 p-2">
+          <p className="text-[11px] font-black text-slate-500">최근 업로드</p>
+          <p className="mt-1 text-xs font-black text-gray-950">{adUploadDateLabel(latestBatch?.uploaded_at || latestBatch?.created_at)}</p>
+        </div>
+        <div className="rounded-md bg-emerald-50 p-2">
+          <p className="text-[11px] font-black text-emerald-600">저장</p>
+          <p className="mt-0.5 text-lg font-black text-gray-950">{successCount.toLocaleString("ko-KR")}</p>
+        </div>
+        <div className="rounded-md bg-rose-50 p-2">
+          <p className="text-[11px] font-black text-rose-600">제외</p>
+          <p className="mt-0.5 text-lg font-black text-gray-950">{failCount.toLocaleString("ko-KR")}</p>
         </div>
       </div>
-      <p className="mt-2 text-xs font-bold text-slate-400">최근 {activeBatches.length.toLocaleString("ko-KR")}개 업로드 배치 · 원본 {totalCount.toLocaleString("ko-KR")}행 기준</p>
-    </Card>
+      <div className="space-y-1.5">
+        {latestRows.map(([channel, batch]) => (
+          <div key={`ad-collection-${channel}`} className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex min-w-0 items-center gap-1.5 font-black text-slate-700"><AdChannelLogo channel={channel} /><span className="truncate">{adChannelDisplayName(channel)}</span></p>
+              <span className="shrink-0 font-bold text-slate-400">{adUploadDateLabel(batch.uploaded_at || batch.created_at)}</span>
+            </div>
+            <p className="mt-1 font-black text-slate-600">저장 {adNumber(batch.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(batch.fail_count).toLocaleString("ko-KR")}</p>
+          </div>
+        ))}
+        {!latestRows.length && <EmptyState title="최근 수집 이력 없음" className="min-h-20 py-5" />}
+      </div>
+      <p className="text-[11px] font-bold text-slate-400">최근 {activeBatches.length.toLocaleString("ko-KR")}개 배치 · 원본 {totalCount.toLocaleString("ko-KR")}행</p>
+    </div>
   );
 }
 
@@ -22583,8 +22578,6 @@ function AdsAnalysisWorkspace() {
 
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{summary.error}</Card>}
 
-      <AdsCollectionStatusCards batches={summary?.batches || []} />
-
       <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
         <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
         <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
@@ -22935,24 +22928,8 @@ function AdsRightPanel() {
           <p className="rounded-md bg-orange-50 p-3 text-orange-700">ROAS 높음 + 재고 부족은 발주 우선, ROAS 낮음 + 재고 적음은 광고 중단 후보입니다.</p>
         </div>
         </ToolSection>
-        <ToolSection title="최근 업로드" showChevron>
-        <div className="space-y-2">
-          <p className="rounded-md bg-slate-50 p-3 text-xs font-bold text-slate-500">
-            실패는 오류가 아니라 저장 대상에서 제외된 행입니다. 빈 행, 합계 행, 또는 광고비/노출/클릭/구매완료 값이 모두 없는 행이 여기에 잡힙니다.
-          </p>
-          {recentBatches.slice(0, 8).map((row, index) => (
-            <div key={String(row.id || index)} className="rounded-md border border-slate-200 bg-white p-2 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-black text-slate-700">{String(row.channel || "-")}</span>
-                <StatusBadge tone={String(row.status || "").includes("SAVED") ? "success" : String(row.status || "").includes("REPLACED") ? "warning" : "muted"}>{String(row.status || "-")}</StatusBadge>
-              </div>
-              <p className="mt-1 font-bold text-slate-400">업로드 {adUploadDateLabel(row.uploaded_at)}</p>
-              <p className="mt-1 truncate font-bold text-slate-500">{String(row.source_file_name || "-")}</p>
-              <p className="mt-1 font-bold text-slate-600">성공 {adNumber(row.success_count).toLocaleString("ko-KR")} / 제외 {adNumber(row.fail_count).toLocaleString("ko-KR")}</p>
-            </div>
-          ))}
-          {!recentBatches.length && <EmptyState title="업로드 내역 없음" className="min-h-24 py-5" />}
-        </div>
+        <ToolSection title="최근 수집현황" showChevron>
+          <AdsCollectionStatusSummary batches={recentBatches} />
         </ToolSection>
       </aside>
       {replaceConfirm && (
