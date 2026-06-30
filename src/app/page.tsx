@@ -1463,8 +1463,8 @@ const salesChannelPlatformOptions: Array<{
     label: "카카오 톡스토어",
     supported: true,
     requiredKeys: ["api_key"],
-    example: "API Key: 카카오쇼핑 판매채널 정보의 API 인증키",
-    help: "카카오쇼핑 Open API 주문 조회로 톡스토어 주문을 수집합니다. 별도 이용 신청/연동대행사 승인 및 API 인증키가 필요할 수 있습니다.",
+    example: "API Key: 카카오쇼핑판매자센터 > 가입한 판매채널 > 정보관리 > 판매채널 정보 > API 인증키 > 발급하기에서 나온 REST API키",
+    help: "카카오쇼핑 Open API는 ① API 연동 검토 승인 ② 연동대행사용 카카오 디벨로퍼스 앱 생성/등록(Admin키 제출) ③ 판매자센터 API 인증키 발급 ④ 판매자-연동대행사 연결이 모두 끝나야 호출됩니다. FNOS에는 판매자센터에서 발급된 API 인증키(REST API키)를 저장하세요. 'need more information to authenticate'는 보통 앱/연동대행사/판매자 연결이 아직 완료되지 않았거나 다른 키(Admin키 등)를 저장했을 때 발생합니다.",
   },
   {
     code: "TODAYHOUSE",
