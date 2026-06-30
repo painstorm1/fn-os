@@ -584,12 +584,13 @@ function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawR
   const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, dueAnchor);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
   const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
-  const cardSettlement = !actualRow ? matchingCardSettlement(row, settlements, dueDate) : null;
+  const cardSettlement = matchingCardSettlement(row, settlements, dueDate);
   const savedActualDate = isoDate(row.last_actual_date);
   const savedActualInWindow = actualDateInDueWindow(savedActualDate, dueDate, today);
   const actualAmount = actualRow ? transactionAmount(actualRow) : savedActualInWindow ? numberValue(row.last_actual_amount) : 0;
   const settlementAmount = cardSettlement ? cardSettlementAmount(cardSettlement) : 0;
-  const displayAmount = actualAmount || settlementAmount || expectedAmount;
+  const usesCardSettlementAmount = Boolean(fixedCostCardKey(row) && settlementAmount);
+  const displayAmount = usesCardSettlementAmount ? settlementAmount : actualAmount || expectedAmount;
   const daysUntil = Math.round((new Date(`${dueDate}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
   const paid = Boolean(actualRow || savedActualInWindow);
   return {
