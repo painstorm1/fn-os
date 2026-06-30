@@ -7065,10 +7065,6 @@ function progressValue(row: string[], header: string) {
   return index >= 0 ? salesCellText(row[index]) : "";
 }
 
-function isNewOrderWorkStatus(status: string) {
-  return !status || status === "신규주문" || status === "주문확인";
-}
-
 function setProgressValue(row: string[], header: string, value: string) {
   const index = progressIndex(header);
   if (index >= 0) row[index] = value;
@@ -8845,7 +8841,7 @@ function OnlineOrderProgressList({
     .filter((item) => {
       if (!statusFilter || statusFilter === "전체") return true;
       const status = progressValue(item.row, "주문상태");
-      if (statusFilter === "신규주문") return isNewOrderWorkStatus(status);
+      if (statusFilter === "신규주문") return !status || status === "신규주문";
       return status === statusFilter;
     }), [rows, statusFilter, siteFilter]);
   const pageSize = 30;
@@ -11788,7 +11784,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function orderProgressMatchesStatus(row: string[], label: string) {
     if (!label || label === "전체") return true;
     const status = progressValue(row, "주문상태");
-    if (label === "신규주문") return isNewOrderWorkStatus(status);
+    if (label === "신규주문") return !status || status === "신규주문";
     return status === label;
   }
 
