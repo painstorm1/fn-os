@@ -551,7 +551,7 @@ function matchingCardSettlement(fixedCost: RawRow, settlements: RawRow[], dueDat
     .sort((left, right) => text(left.payment_due_date).localeCompare(text(right.payment_due_date)))[0] || null;
 }
 
-function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
+function matchingActualTransactions(fixedCost: RawRow, transactions: RawRow[], dueDate: string, today: string) {
   const keywords = fixedCostKeywords(fixedCost);
   const from = addDays(dueDate, -3);
   const to = addDays(dueDate, 5);
@@ -572,7 +572,8 @@ function matchingActualTransaction(fixedCost: RawRow, transactions: RawRow[], du
       return false;
     })
     .sort((left, right) => isoDate(right.transaction_date).localeCompare(isoDate(left.transaction_date)));
-  return candidates[0] || null;
+  const latestDate = isoDate(candidates[0]?.transaction_date);
+  return latestDate ? candidates.filter((row) => isoDate(row.transaction_date) === latestDate) : [];
 }
 
 function actualDateInDueWindow(actualDate: string, dueDate: string, today: string) {
@@ -583,11 +584,12 @@ function actualDateInDueWindow(actualDate: string, dueDate: string, today: strin
 function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawRow[] = [], dueAnchor = today, settlements: RawRow[] = []) {
   const dueDate = monthDueDate(row.base_day ?? row.payment_day ?? row.due_day, dueAnchor);
   const expectedAmount = numberValue(row.expected_amount ?? row.amount);
-  const actualRow = matchingActualTransaction(row, transactions, dueDate, today);
+  const actualRows = matchingActualTransactions(row, transactions, dueDate, today);
+  const actualRow = actualRows[0] || null;
   const cardSettlement = matchingCardSettlement(row, settlements, dueDate);
   const savedActualDate = isoDate(row.last_actual_date);
   const savedActualInWindow = actualDateInDueWindow(savedActualDate, dueDate, today);
-  const actualAmount = actualRow ? transactionAmount(actualRow) : savedActualInWindow ? numberValue(row.last_actual_amount) : 0;
+  const actualAmount = actualRows.length ? actualRows.reduce((total, item) => total + transactionAmount(item), 0) : savedActualInWindow ? numberValue(row.last_actual_amount) : 0;
   const settlementAmount = cardSettlement ? cardSettlementAmount(cardSettlement) : 0;
   const usesCardSettlementAmount = Boolean(fixedCostCardKey(row) && settlementAmount);
   const displayAmount = usesCardSettlementAmount ? settlementAmount : actualAmount || expectedAmount;
@@ -604,6 +606,7 @@ function fixedCostOccurrence(row: RawRow, today = kstToday(), transactions: RawR
     last_actual_amount: actualAmount || null,
     last_actual_date: actualRow ? isoDate(actualRow.transaction_date) : savedActualInWindow ? savedActualDate : null,
     matched_transaction_id: actualRow?.id || null,
+    matched_transaction_ids: actualRows.map((item) => item.id).filter(Boolean),
     matched_card_settlement_id: cardSettlement?.id || null,
     card_settlement_amount: settlementAmount || null,
     card_settlement_due_date: cardSettlement ? isoDate(cardSettlement.payment_due_date) : null,
