@@ -81,6 +81,12 @@ function coupangSearchStatuses(value: unknown) {
   return ["ACCEPT", "INSTRUCT"];
 }
 
+function coupangOrderStatus(value: unknown) {
+  const status = text(value).toUpperCase();
+  if (status === "ACCEPT" || status === "INSTRUCT") return "신규주문";
+  return text(value);
+}
+
 function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
   const receiver = record(row.receiver);
   const orderer = record(row.orderer);
@@ -111,7 +117,7 @@ function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName
     orderNo: firstText(row.orderId, row.shipmentBoxId, row.orderSheetId),
     bundleOrderNo: firstText(row.shipmentBoxId, row.orderId),
     orderDate: firstText(row.orderedAt, row.orderDate, row.paidAt),
-    orderStatus: firstText(row.status, row.orderStatus),
+    orderStatus: coupangOrderStatus(row.status || row.orderStatus),
     receiverName: firstText(receiver.name, row.receiverName, orderer.name),
     phone1: firstText(receiver.safeNumber, receiver.mobile, row.receiverMobile, row.receiverPhone),
     phone2: firstText(receiver.phone, row.receiverPhone, orderer.phone),
