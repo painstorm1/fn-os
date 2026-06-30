@@ -7065,6 +7065,10 @@ function progressValue(row: string[], header: string) {
   return index >= 0 ? salesCellText(row[index]) : "";
 }
 
+function isNewOrderWorkStatus(status: string) {
+  return !status || status === "신규주문" || status === "주문확인";
+}
+
 function setProgressValue(row: string[], header: string, value: string) {
   const index = progressIndex(header);
   if (index >= 0) row[index] = value;
@@ -7410,7 +7414,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(sale, "FN판매입력", "단가", unitPrice || "");
       setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
       setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "메모", "");
+      setSalesSheetCell(sale, "FN판매입력", "메모", itemKey);
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
@@ -8841,7 +8845,7 @@ function OnlineOrderProgressList({
     .filter((item) => {
       if (!statusFilter || statusFilter === "전체") return true;
       const status = progressValue(item.row, "주문상태");
-      if (statusFilter === "신규주문") return !status || status === "신규주문";
+      if (statusFilter === "신규주문") return isNewOrderWorkStatus(status);
       return status === statusFilter;
     }), [rows, statusFilter, siteFilter]);
   const pageSize = 30;
@@ -11784,7 +11788,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function orderProgressMatchesStatus(row: string[], label: string) {
     if (!label || label === "전체") return true;
     const status = progressValue(row, "주문상태");
-    if (label === "신규주문") return !status || status === "신규주문";
+    if (label === "신규주문") return isNewOrderWorkStatus(status);
     return status === label;
   }
 

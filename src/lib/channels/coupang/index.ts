@@ -56,10 +56,29 @@ async function readJson(response: Response) {
 }
 
 function koreaDate(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
+  const kst = new Date(value.getTime() + 9 * 60 * 60 * 1000);
+  const year = kst.getUTCFullYear();
+  const month = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(kst.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}+09:00`;
+}
+
+function coupangDate(value: unknown, fallback: Date) {
+  const raw = text(value);
+  if (/^\d{4}-\d{2}-\d{2}\+\d{2}:00$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}+09:00`;
+  if (/^\d{8}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}+09:00`;
+  if (raw) {
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return koreaDate(date);
+  }
+  return koreaDate(fallback);
+}
+
+function coupangSearchStatuses(value: unknown) {
+  const raw = text(value);
+  if (raw) return raw.split(",").map((item) => item.trim()).filter(Boolean);
+  return ["ACCEPT", "INSTRUCT"];
 }
 
 function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
@@ -117,25 +136,39 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
 
     try {
       const now = new Date();
-      const fromDate = text(params.fromDate) || koreaDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
-      const toDate = text(params.toDate) || koreaDate(now);
+      const fromDate = coupangDate(params.fromDate ?? params.from, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+      const toDate = coupangDate(params.toDate ?? params.to, now);
       const path = `/v2/providers/openapi/apis/api/v5/vendors/${encodeURIComponent(vendorId)}/ordersheets`;
-      const search = new URLSearchParams({
-        createdAtFrom: fromDate,
-        createdAtTo: toDate,
-        maxPerPage: "50",
-        status: text(params.status) || "ACCEPT",
-      });
-      const query = search.toString();
-      const response = await fetch(`${COUPANG_BASE_URL}${path}?${query}`, {
-        headers: {
-          Authorization: coupangAuthorization("GET", path, query, accessKey, secretKey),
-          "X-Requested-By": vendorId,
-          "Content-Type": "application/json;charset=UTF-8",
-        },
-      });
-      const data = await readJson(response);
-      const rows = arrayAt(data, [["data"], ["content"], ["contents"], ["orderSheets"]]);
+      const rows: AnyRecord[] = [];
+      const seenRows = new Set<string>();
+      for (const status of coupangSearchStatuses(params.status)) {
+        let nextToken = "";
+        do {
+          const search = new URLSearchParams({
+            createdAtFrom: fromDate,
+            createdAtTo: toDate,
+            maxPerPage: "50",
+            status,
+          });
+          if (nextToken) search.set("nextToken", nextToken);
+          const query = search.toString();
+          const response = await fetch(`${COUPANG_BASE_URL}${path}?${query}`, {
+            headers: {
+              Authorization: coupangAuthorization("GET", path, query, accessKey, secretKey),
+              "X-Requested-By": vendorId,
+              "Content-Type": "application/json;charset=UTF-8",
+            },
+          });
+          const data = await readJson(response);
+          arrayAt(data, [["data"], ["content"], ["contents"], ["orderSheets"]]).forEach((row) => {
+            const key = firstText(row.shipmentBoxId, row.orderId, row.orderSheetId, JSON.stringify(row));
+            if (seenRows.has(key)) return;
+            seenRows.add(key);
+            rows.push(row);
+          });
+          nextToken = firstText(record(data).nextToken, record(record(data).data).nextToken);
+        } while (nextToken);
+      }
       const base = {
         channelCode: text(params.channel_code) || "COUPANG",
         channelName: text(params.channel_name) || "쿠팡",
