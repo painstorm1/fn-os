@@ -486,28 +486,48 @@ async function materialInfoForProducts(productIds: Array<number | string>) {
      incoming_summary as (
        select i.product_id as material_id, coalesce(sum(i.quantity), 0) as incoming_qty
          from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
          join ${q(TABLES.products)} mp on mp.id = i.product_id
         where upper(coalesce(mp.item_type, '')) = 'MATERIAL'
+          and (nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is not null or coalesce(o.status, '') = '입고완료')
         group by i.product_id
      ),
-     usage_summary as (
+     consumed_summary as (
        select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as usage_qty
          from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
          join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
          join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
         where upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+          and (nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is not null or coalesce(o.status, '') = '입고완료')
+        group by pm.material_id
+     ),
+     reserved_summary as (
+       select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as reserved_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
+         join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
+         join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
+        where upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+          and nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is null
+          and coalesce(o.status, '') <> '입고완료'
+          and coalesce(o.status, '') not in ('취소', '삭제')
+          and upper(coalesce(o.status, '')) not in ('CANCELLED', 'CANCELED')
         group by pm.material_id
      )
      select pm.*, p.name as material_name, p.material_cost, p.material_unit_cost, p.material_stock_adjust, p.material_initial_qty,
             coalesce(ms.movement_qty, 0) as material_movement_qty,
             coalesce(inc.incoming_qty, 0) as material_incoming_qty,
             coalesce(usg.usage_qty, 0) as material_usage_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
+            coalesce(res.reserved_qty, 0) as material_reserved_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) - coalesce(res.reserved_qty, 0) as material_available_stock
        from ${q(TABLES.productMaterials)} pm
        left join ${q(TABLES.products)} p on p.id = pm.material_id
        left join movement_summary ms on ms.material_id = p.id
        left join incoming_summary inc on inc.material_id = p.id
-       left join usage_summary usg on usg.material_id = p.id
+       left join consumed_summary usg on usg.material_id = p.id
+       left join reserved_summary res on res.material_id = p.id
       where pm.product_id = any($1::bigint[])`,
     [productIds.map(Number)],
   );
@@ -533,29 +553,50 @@ async function materialStats(materialIds: Array<number | string>) {
      incoming_summary as (
        select i.product_id as material_id, coalesce(sum(i.quantity), 0) as incoming_qty
          from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
          join ${q(TABLES.products)} mp on mp.id = i.product_id
         where i.product_id = any($1::bigint[])
           and upper(coalesce(mp.item_type, '')) = 'MATERIAL'
+          and (nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is not null or coalesce(o.status, '') = '입고완료')
         group by i.product_id
      ),
-     usage_summary as (
+     consumed_summary as (
        select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as usage_qty
          from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
          join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
          join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
         where pm.material_id = any($1::bigint[])
           and upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+          and (nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is not null or coalesce(o.status, '') = '입고완료')
+        group by pm.material_id
+     ),
+     reserved_summary as (
+       select pm.material_id, coalesce(sum(i.quantity * coalesce(pm.quantity_per_unit, pm.qty_per_product, 1)), 0) as reserved_qty
+         from ${q(TABLES.orderItems)} i
+         join ${q(TABLES.orders)} o on o.id = i.order_id
+         join ${q(TABLES.products)} ordered_product on ordered_product.id = i.product_id
+         join ${q(TABLES.productMaterials)} pm on pm.product_id = ordered_product.id
+        where pm.material_id = any($1::bigint[])
+          and upper(coalesce(ordered_product.item_type, '')) <> 'MATERIAL'
+          and nullif(btrim(coalesce(o.fn_arrived::text, '')), '') is null
+          and coalesce(o.status, '') <> '입고완료'
+          and coalesce(o.status, '') not in ('취소', '삭제')
+          and upper(coalesce(o.status, '')) not in ('CANCELLED', 'CANCELED')
         group by pm.material_id
      )
      select p.id,
             coalesce(ms.movement_qty, 0) as movement_qty,
             coalesce(inc.incoming_qty, 0) as incoming_qty,
             coalesce(usg.usage_qty, 0) as usage_qty,
-            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock
+            coalesce(res.reserved_qty, 0) as reserved_qty,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) as material_stock,
+            coalesce(p.material_initial_qty, 0) + coalesce(inc.incoming_qty, 0) - coalesce(usg.usage_qty, 0) + coalesce(ms.movement_qty, 0) - coalesce(res.reserved_qty, 0) as material_available_stock
        from ${q(TABLES.products)} p
        left join movement_summary ms on ms.material_id = p.id
        left join incoming_summary inc on inc.material_id = p.id
-       left join usage_summary usg on usg.material_id = p.id
+       left join consumed_summary usg on usg.material_id = p.id
+       left join reserved_summary res on res.material_id = p.id
       where p.id = any($1::bigint[])`,
     [materialIds.map(Number)],
   );
@@ -593,6 +634,12 @@ async function attachProductInfo(products: AnyRecord[]): Promise<AnyRecord[]> {
     material_stock: text(product.item_type).toUpperCase() === "MATERIAL"
       ? numberValue(stats.get(Number(product.id))?.material_stock)
       : numberValue(product.material_initial_qty) + numberValue(product.material_stock_adjust),
+    material_available_stock: text(product.item_type).toUpperCase() === "MATERIAL"
+      ? numberValue(stats.get(Number(product.id))?.material_available_stock)
+      : numberValue(product.material_initial_qty) + numberValue(product.material_stock_adjust),
+    material_reserved_qty: numberValue(stats.get(Number(product.id))?.reserved_qty),
+    material_incoming_qty: numberValue(stats.get(Number(product.id))?.incoming_qty),
+    material_usage_qty: numberValue(stats.get(Number(product.id))?.usage_qty),
     material_movement_qty: numberValue(stats.get(Number(product.id))?.movement_qty),
     material_display_cost: numberValue(product.material_unit_cost) || numberValue(product.material_cost),
   }));

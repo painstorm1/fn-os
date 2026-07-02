@@ -1220,6 +1220,11 @@ type ImportProduct = {
   material_note?: string;
   material_stock_adjust?: number;
   material_stock?: number;
+  material_available_stock?: number;
+  material_reserved_qty?: number;
+  material_incoming_qty?: number;
+  material_usage_qty?: number;
+  material_movement_qty?: number;
   material_incoming?: number;
   material_consumed?: number;
   materials?: ProductMaterialLink[];
@@ -1798,6 +1803,8 @@ type ProductMaterialLink = {
   quantity_per_unit: number;
   qty_per_product?: number;
   material_stock?: number;
+  material_available_stock?: number;
+  material_reserved_qty?: number;
   material_cost?: number;
   material_unit_cost?: number;
 };
@@ -2296,7 +2303,7 @@ function materialNeedSummary(materials: ProductMaterialLink[] | undefined, quant
   return materials
     .map((item) => {
       const need = qty * Number(item.qty_per_product || item.quantity_per_unit || 1);
-      const stock = Number(item.material_stock || 0);
+      const stock = Number(item.material_available_stock ?? item.material_stock ?? 0);
       const shortage = need - stock;
       return shortage > 0
         ? `${item.material_name || "부자재"} ${need.toLocaleString("ko-KR")}개 사용 예정, ${shortage.toLocaleString("ko-KR")}개 부족`
@@ -2307,7 +2314,7 @@ function materialNeedSummary(materials: ProductMaterialLink[] | undefined, quant
 
 function hasMaterialShortage(materials: ProductMaterialLink[] | undefined, quantity: string | number) {
   const qty = Number(quantity || 0);
-  return Boolean(materials?.some((item) => qty * Number(item.qty_per_product || item.quantity_per_unit || 1) > Number(item.material_stock || 0)));
+  return Boolean(materials?.some((item) => qty * Number(item.qty_per_product || item.quantity_per_unit || 1) > Number(item.material_available_stock ?? item.material_stock ?? 0)));
 }
 
 function krw(value?: number) {
@@ -3995,7 +4002,10 @@ function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProduc
               <div className="mt-1 text-xs text-slate-500">{product.factory_name || "-"}</div>
               {isMaterial(product) ? (
                 <div className="mt-2 grid gap-1 text-sm">
-                  <p className="font-black text-orange-600">재고 {Number(product.material_stock || 0).toLocaleString("ko-KR")}개</p>
+                  <p className="font-black text-orange-600">현재고 {Number(product.material_stock || 0).toLocaleString("ko-KR")}개</p>
+                  {Number(product.material_reserved_qty || 0) > 0 && (
+                    <p className="text-xs font-bold text-slate-500">예약 {Number(product.material_reserved_qty || 0).toLocaleString("ko-KR")}개 · 가용 {Number(product.material_available_stock ?? product.material_stock ?? 0).toLocaleString("ko-KR")}개</p>
+                  )}
                   <p className="text-xs font-bold text-slate-500">원가 {krw(product.material_unit_cost || product.material_display_cost || product.material_cost || 0)}</p>
                 </div>
               ) : (
@@ -4109,6 +4119,8 @@ function NativeProductDetail({ id }: { id: number }) {
               {isMaterial(product) ? (
                 <>
                   <Info label="현재고" value={`${Number(product.material_stock || 0).toLocaleString("ko-KR")}개`} />
+                  <Info label="예약사용" value={`${Number(product.material_reserved_qty || 0).toLocaleString("ko-KR")}개`} />
+                  <Info label="가용재고" value={`${Number(product.material_available_stock ?? product.material_stock ?? 0).toLocaleString("ko-KR")}개`} />
                   <Info label="원가" value={krw(product.material_unit_cost || product.material_cost || 0)} />
                 </>
               ) : null}
@@ -4531,7 +4543,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
       if (prev.some((item) => item.material_id === material.id)) {
         return prev.filter((item) => item.material_id !== material.id);
       }
-      return [...prev, { material_id: material.id, material_name: material.name, quantity_per_unit: 1, material_stock: material.material_stock || 0, material_cost: material.material_unit_cost || material.material_display_cost || material.material_cost || 0 }];
+      return [...prev, { material_id: material.id, material_name: material.name, quantity_per_unit: 1, material_stock: material.material_stock || 0, material_available_stock: material.material_available_stock ?? material.material_stock ?? 0, material_reserved_qty: material.material_reserved_qty || 0, material_cost: material.material_unit_cost || material.material_display_cost || material.material_cost || 0 }];
     });
   }
 
@@ -4915,7 +4927,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
                         <input type="checkbox" checked={checked} onChange={() => toggleMaterial(material)} />
                         <span>
                           <b>{material.name}</b>
-                          <span className="ml-2 text-xs font-bold text-slate-500">재고 {Number(material.material_stock || 0).toLocaleString("ko-KR")}</span>
+                          <span className="ml-2 text-xs font-bold text-slate-500">현재 {Number(material.material_stock || 0).toLocaleString("ko-KR")} / 가용 {Number(material.material_available_stock ?? material.material_stock ?? 0).toLocaleString("ko-KR")}</span>
                         </span>
                         <input className="field-input h-8 text-right" inputMode="decimal" disabled={!checked} value={formatCommaNumber(linked?.quantity_per_unit || 1, { decimal: true })} onChange={(event) => setMaterialQty(material.id, normalizeCommaNumberInput(event.target.value, { decimal: true }))} />
                       </label>
