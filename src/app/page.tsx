@@ -7372,6 +7372,21 @@ function onlineOrderFallbackText(order: CollectedOnlineOrder, item: CollectedOnl
   return onlineOrderFirstDeepText(order.raw, keys) || onlineOrderFirstDeepText(item.raw, keys);
 }
 
+function onlineOrderManualRowKey(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
+  const orderRaw = onlineOrderRecord(order.raw);
+  const itemRaw = onlineOrderRecord(item.raw);
+  const source = salesCellText(orderRaw.__manualSource || itemRaw.__manualSource);
+  if (!source) return "";
+  const fileName = salesCellText(orderRaw.__manualFileName || orderRaw.__fileName || itemRaw.__manualFileName || itemRaw.__fileName);
+  const sheetName = salesCellText(orderRaw.__sheetName || itemRaw.__sheetName);
+  const sourceRow = salesCellText(orderRaw.__sourceRow || itemRaw.__sourceRow);
+  const orderProductNo = salesCellText(orderRaw["주문상품번호"] || itemRaw["주문상품번호"]);
+  const orderOptionNo = salesCellText(orderRaw["주문옵션번호"] || itemRaw["주문옵션번호"]);
+  const fallbackOption = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku || orderProductNo || orderOptionNo);
+  const parts = ["manual", source, fileName, sheetName, sourceRow || fallbackOption].filter(Boolean);
+  return parts.length >= 4 ? parts.join("|") : "";
+}
+
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
   const index = salesSheetHeaders[sheet].indexOf(header);
   if (index >= 0) row[index] = salesCellText(value);
@@ -7402,7 +7417,8 @@ function appendCollectedOnlineOrdersToSheets(
     const channelName = salesCellText(order.customerName || order.channelName);
     const channelCode = salesCellText(order.customerCode || order.channelCode);
     (order.items || []).forEach((item, itemIndex) => {
-      const itemKey = [channelName, orderNo, salesCellText(item.channelOptionCode || item.channelProductCode || item.sku), itemIndex + 1].join(" ");
+      const manualRowKey = onlineOrderManualRowKey(order, item);
+      const itemKey = manualRowKey || [channelName, orderNo, salesCellText(item.channelOptionCode || item.channelProductCode || item.sku), itemIndex + 1].join(" ");
       if (existingKeys.has(itemKey)) return;
       existingKeys.add(itemKey);
 

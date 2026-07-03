@@ -126,8 +126,8 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: s
   });
   if (headerIndex >= 0) {
     const headers = matrix[headerIndex].map((cell) => text(cell));
-    return matrix.slice(headerIndex + 1).map((row) => {
-      const next: AnyRecord = { __sheetName: sheetName, __fileName: fileName };
+    return matrix.slice(headerIndex + 1).map((row, index) => {
+      const next: AnyRecord = { __sheetName: sheetName, __fileName: fileName, __sourceRow: headerIndex + index + 2 };
       headers.forEach((header, index) => {
         if (header) next[header] = row[index] ?? "";
       });
@@ -135,7 +135,7 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: s
     }).filter((row) => Object.values(row).some((value) => text(value)));
   }
   return XLSX.utils.sheet_to_json<AnyRecord>(sheet, { defval: "", raw: false })
-    .map((row) => ({ ...row, __sheetName: sheetName, __fileName: fileName }))
+    .map((row, index) => ({ ...row, __sheetName: sheetName, __fileName: fileName, __sourceRow: index + 2 }))
     .filter((row) => Object.values(row).some((value) => text(value)));
 }
 
@@ -305,7 +305,7 @@ function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrde
   if (source === "todayhouse") return makeManualOrder(row, fileName, source, {
     code: "O", name: "오늘의집", orderKeys: ["주문번호"], bundleKeys: ["묶음배송그룹", "주문번호"], dateKeys: ["주문결제완료일", "출고예정일"],
     receiverKeys: ["수취인명"], phoneKeys: ["수취인 연락처"], zipcodeKeys: ["수취인 우편번호"], addressKeys: ["수취인 주소"], detailAddressKeys: ["수취인 주소상세"],
-    memoKeys: ["배송메모", "주문메모"], productCodeKeys: ["상품번호", "상품코드"], optionCodeKeys: ["옵션번호", "옵션ID"], productKeys: ["상품명"], optionKeys: ["옵션명"],
+    memoKeys: ["배송메모", "주문메모"], productCodeKeys: ["상품자체관리코드", "상품아이디", "상품번호", "상품코드"], optionCodeKeys: ["주문옵션번호", "옵션아이디", "주문상품번호", "옵션번호", "옵션ID"], productKeys: ["상품명"], optionKeys: ["옵션명"],
     qtyKeys: ["수량"], amountKeys: ["정산예정금액", "판매가*수량 + 조립비 + 배송비", "판매가 * 수량"],
   });
   if (source === "toss") return makeManualOrder(row, fileName, source, {
