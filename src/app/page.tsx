@@ -9362,7 +9362,7 @@ function OnlineOrderProgressList({
 
   function openProductSearch(rowIndex: number, query: string, initialSearch?: { results: FnOsProductSearchItem[]; searchedQuery: string }) {
     const popupToken = `fnos-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=yes");
+    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=no");
     if (!popup) {
       window.alert("팝업이 차단되었습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.");
       return;
@@ -9385,16 +9385,16 @@ function OnlineOrderProgressList({
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>품목코드 연동</title>
   <style>
-    *{box-sizing:border-box} body{margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif;font-size:14px}
-    .wrap{padding:18px}.head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
-    h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+    *{box-sizing:border-box} html,body{height:100%;overflow:hidden} body{margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif;font-size:14px}
+    .wrap{height:100vh;min-height:0;padding:18px;display:flex;flex-direction:column}.head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
+    h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
     .tab{border:0;border-radius:7px;background:transparent;color:#475569;font-weight:900;padding:8px 11px;cursor:pointer}.tab.active{background:#ff6a00;color:white}
-    .search{display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
+    .search{flex:0 0 auto;display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
     button.primary{height:38px;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}
     button.secondary{height:36px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#334155;font-weight:900;padding:0 14px;cursor:pointer}
-    .panel{max-height:calc(100vh - 150px);overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
+    .panel{flex:1 1 auto;min-height:0;overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
     table{width:100%;border-collapse:collapse;table-layout:fixed} th{background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}
-    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr:hover,tr.active{background:#fff7ed}
+    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
     .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{width:52px;text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
   </style>
 </head>
@@ -9424,9 +9424,8 @@ function OnlineOrderProgressList({
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); if(e.detail >= 2 || e.target.closest('button')) choose(selectedIndex); else render(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     document.getElementById('searchBtn').addEventListener('click', search);
     document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
@@ -12861,7 +12860,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function openOrderProductLinkSearch(index: number, query: string) {
     const popupToken = `fnos-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=yes");
+    const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=no");
     if (!popup) {
       window.alert("팝업이 차단되었습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.");
       return;
@@ -12883,16 +12882,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>품목코드 연동</title>
   <style>
-    *{box-sizing:border-box} body{margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif;font-size:14px}
-    .wrap{padding:18px}.head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
-    h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+    *{box-sizing:border-box} html,body{height:100%;overflow:hidden} body{margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,'Malgun Gothic',sans-serif;font-size:14px}
+    .wrap{height:100vh;min-height:0;padding:18px;display:flex;flex-direction:column}.head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
+    h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
     .tab{border:0;border-radius:7px;background:transparent;color:#475569;font-weight:900;padding:8px 11px;cursor:pointer}.tab.active{background:#ff6a00;color:white}
-    .search{display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;min-width:0;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
+    .search{flex:0 0 auto;display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;min-width:0;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
     button.primary{height:38px;min-width:60px;white-space:nowrap;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}
     button.secondary{height:36px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#334155;font-weight:900;padding:0 14px;cursor:pointer}
-    .panel{max-height:calc(100vh - 150px);overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
+    .panel{flex:1 1 auto;min-height:0;overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
     table{width:100%;border-collapse:collapse;table-layout:fixed} th{background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}
-    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr:hover,tr.active{background:#fff7ed}
+    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
     .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{width:52px;text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
   </style>
 </head>
@@ -12922,9 +12921,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); if(e.detail >= 2 || e.target.closest('button')) choose(selectedIndex); else render(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
     document.getElementById('searchBtn').addEventListener('click', search);
     document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
