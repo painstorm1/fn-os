@@ -33,9 +33,13 @@ function formatSsgDate(value: unknown, boundary: "start" | "end") {
 async function readBody(response: Response) {
   return readJsonApiResponse(response, "SSG", { successCodes: ["00", "0", "SUCCESS", "OK"], resultPaths: [["result", "resultCode"], ["result", "code"], ["code"], ["status"]] });
 }
+function unwrapSsgRow(row: AnyRecord) {
+  const nested = record(row.shppDirection || row.order || row.item);
+  return Object.keys(nested).length ? nested : row;
+}
 function findRows(data: unknown) {
   const direct = arrayAt(data, [["result", "shppDirections"], ["result", "shppDirections", "shppDirection"], ["data"], ["data", "list"], ["data", "items"], ["result", "list"], ["orders"], ["orderList"], ["shppList"], ["listShppDirection"]]);
-  if (direct.length) return direct.map(record).filter((row) => Object.keys(row).length);
+  if (direct.length) return direct.map(record).map(unwrapSsgRow).filter((row) => Object.keys(row).length);
   const rows: AnyRecord[] = [];
   const seen = new Set<unknown>();
   function visit(value: unknown) {
@@ -48,6 +52,15 @@ function findRows(data: unknown) {
   visit(data);
   return rows;
 }
+function ssgOrderStatus(row: AnyRecord) {
+  const named = firstText(row.ordItemStatNm, row.ordStatNm, row.shppProgStatDtlNm, row.statusName);
+  if (named) return named;
+  const code = firstText(row.ordItemStat, row.ordStat, row.shppProgStatDtlCd, row.status);
+  if (["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENT_COMPLETE", "결제완료"].includes(code.toUpperCase())) return "신규주문";
+  if (code) return "주문확인";
+  return "주문확인";
+}
+
 function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
   const item: NormalizedOrderItem = {
     channelProductCode: firstText(row.itemId, row.prdNo, row.productNo),
@@ -61,10 +74,10 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
   };
   return {
     ...base,
-    orderNo: firstText(row.ordNo, row.orordNo, row.orderNo),
-    bundleOrderNo: firstText(row.ordNo, row.orordNo),
+    orderNo: firstText(row.ordNo, row.orordNo, row.orderNo, row.shppNo, row.shppSeq, row.dircNo, row.shppDirectionNo, row.ordItemSeq, row.itemId) || ["SSG", firstText(row.itemId, row.prdNo, row.productNo), firstText(row.uitemId, row.ordItemSeq, row.itemSeq), firstText(row.rcptpeNm, row.receiverName, row.rcverNm), firstText(row.ordCmplDts, row.ordCmplDt, row.ordRcpDts, row.paymtCmplDt, row.ordDt, row.orderDate)].filter(Boolean).join("-"),
+    bundleOrderNo: firstText(row.ordNo, row.orordNo, row.orderNo, row.shppNo, row.shppDirectionNo),
     orderDate: normalizeDate(firstText(row.ordCmplDts, row.ordCmplDt, row.ordRcpDts, row.paymtCmplDt, row.ordDt, row.orderDate)),
-    orderStatus: firstText(row.ordItemStat, row.ordStat, row.shppProgStatDtlCd, row.status, "발송대기"),
+    orderStatus: ssgOrderStatus(row),
     receiverName: firstText(row.rcptpeNm, row.receiverName, row.rcverNm),
     phone1: firstText(row.rcptpeHpno, row.receiverMobile, row.hpno, row.phone1),
     phone2: firstText(row.rcptpeTelno, row.receiverPhone, row.telno, row.phone2),
@@ -74,6 +87,36 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
     items: [item],
     raw: row,
   };
+}
+
+function ssgShippingIds(row: AnyRecord) {
+  const productOrderId = firstText(row.productOrderId, row.product_order_id);
+  const [fromProductShppNo, fromProductShppSeq] = productOrderId.includes("-") ? productOrderId.split("-", 2) : ["", ""];
+  return {
+    shppNo: firstText(row.shipmentBoxId, row.shipment_box_id, row.bundleOrderNo, row.bundle_order_no, row.orderId, row.order_id, row.orderNo, row.order_no, row.shppNo, fromProductShppNo),
+    shppSeq: firstText(row.shppSeq, row.shpp_seq, fromProductShppSeq, row.productOrderId, row.product_order_id) || "1",
+  };
+}
+function ssgRequestRows(params: Record<string, unknown>, key: "confirmProductOrders" | "dispatchProductOrders") { const value = params[key]; return Array.isArray(value) ? value.map(record) : []; }
+function xmlEscape(value: unknown) { return text(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;"); }
+function ssgCarrierCode(value: unknown) {
+  const raw = text(value).toUpperCase();
+  if (/^\d{10}$/.test(raw)) return raw;
+  if (!raw || raw === "CJGLS" || raw === "CJ" || raw.includes("CJ")) return "0000033071";
+  return text(value);
+}
+function ssgDispatchRows(params: Record<string, unknown>) {
+  return ssgRequestRows(params, "dispatchProductOrders")
+    .map((row) => {
+      const ids = ssgShippingIds(row);
+      return {
+        ...ids,
+        trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
+        deliveryCompanyCode: ssgCarrierCode(row.deliveryCompanyCode || row.delivery_company_code),
+        quantity: numberValue(row.quantity || row.qty) || 1,
+      };
+    })
+    .filter((row) => row.shppNo && row.shppSeq && row.trackingNumber);
 }
 
 export class SsgChannelAdapter implements SalesChannelAdapter {
@@ -98,6 +141,67 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
       return { ok: true, data: rows.flatMap((row) => arrayify(row).map((item) => normalizeRow(record(item), base))).filter((order) => order.orderNo), message: `SSG 주문 ${rows.length}건을 수집했습니다.` };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "SSG 주문 수집 실패" };
+    }
+  }
+
+  async confirmOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const apiKey = text(params.api_key || params.access_key);
+    if (!apiKey) return { ok: false, data: null, error: "SSG API Key를 먼저 저장해주세요." };
+    const baseUrl = text(params.api_base_url) || SSG_BASE_URL;
+    const version = text(params.api_version) || SSG_VERSION;
+    const path = text(params.confirm_path) || `/api/pd/${version.replace(/^v/i, "")}/updateOrderSubjectManage.ssg`;
+    const rows = ssgRequestRows(params, "confirmProductOrders")
+      .map(ssgShippingIds)
+      .filter((row) => row.shppNo && row.shppSeq);
+    if (!rows.length) return { ok: false, data: null, error: "SSG 주문확인에 필요한 shppNo/shppSeq가 없습니다." };
+    try {
+      const results = [];
+      for (const row of rows) {
+        const body = `<requestOrderSubjectManage><shppNo>${xmlEscape(row.shppNo)}</shppNo><shppSeq>${xmlEscape(row.shppSeq)}</shppSeq></requestOrderSubjectManage>`;
+        const response = await fetch(`${baseUrl}${path}`, {
+          method: "POST",
+          headers: { Authorization: apiKey, Accept: "application/json", "Content-Type": "application/xml" },
+          body,
+        });
+        results.push(await readBody(response));
+      }
+      return { ok: true, data: results, message: `SSG 주문확인 ${rows.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "SSG 주문확인 실패" };
+    }
+  }
+
+  async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const apiKey = text(params.api_key || params.access_key);
+    if (!apiKey) return { ok: false, data: null, error: "SSG API Key를 먼저 저장해주세요." };
+    const baseUrl = text(params.api_base_url) || SSG_BASE_URL;
+    const version = text(params.api_version) || SSG_VERSION;
+    const waybillPath = text(params.waybill_path || params.dispatch_path) || `/api/pd/${version.replace(/^v/i, "")}/saveWblNo.ssg`;
+    const releasePath = text(params.release_path) || `/api/pd/${version.replace(/^v/i, "")}/saveWhOutCompleteProcess.ssg`;
+    const rows = ssgDispatchRows(params);
+    if (!rows.length) return { ok: false, data: null, error: "SSG 송장등록에 필요한 shppNo/shppSeq/송장번호가 없습니다." };
+    try {
+      const results = [];
+      for (const row of rows) {
+        const waybillBody = `<requestWhOutCompleteProcess><shppNo>${xmlEscape(row.shppNo)}</shppNo><shppSeq>${xmlEscape(row.shppSeq)}</shppSeq><wblNo>${xmlEscape(row.trackingNumber)}</wblNo><delicoVenId>${xmlEscape(row.deliveryCompanyCode)}</delicoVenId><shppTypeCd>20</shppTypeCd><shppTypeDtlCd>22</shppTypeDtlCd></requestWhOutCompleteProcess>`;
+        const waybillResponse = await fetch(`${baseUrl}${waybillPath}`, {
+          method: "POST",
+          headers: { Authorization: apiKey, Accept: "application/json", "Content-Type": "application/xml" },
+          body: waybillBody,
+        });
+        const waybillResult = await readBody(waybillResponse);
+        const releaseBody = `<requestWhOutCompleteProcess><shppNo>${xmlEscape(row.shppNo)}</shppNo><shppSeq>${xmlEscape(row.shppSeq)}</shppSeq><procItemQty>${xmlEscape(row.quantity)}</procItemQty></requestWhOutCompleteProcess>`;
+        const releaseResponse = await fetch(`${baseUrl}${releasePath}`, {
+          method: "POST",
+          headers: { Authorization: apiKey, Accept: "application/json", "Content-Type": "application/xml" },
+          body: releaseBody,
+        });
+        const releaseResult = await readBody(releaseResponse);
+        results.push({ waybill: waybillResult, release: releaseResult });
+      }
+      return { ok: true, data: results, message: `SSG 송장등록/출고처리 ${rows.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "SSG 송장등록/출고처리 실패" };
     }
   }
 }

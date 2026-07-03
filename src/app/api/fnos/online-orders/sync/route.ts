@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fs } from "fs";
+import path from "path";
+import * as XLSX from "xlsx";
 import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
-import type { ChannelResult, NormalizedOrder } from "@/lib/channels/common/types";
+import type { ChannelResult, NormalizedOrder, NormalizedOrderItem } from "@/lib/channels/common/types";
 import { onlineOrderAdapterCodeForChannel, onlineOrderAdapterForChannel, ONLINE_ORDER_UNSUPPORTED_MESSAGE } from "@/lib/channels/registry";
 import { createAutomationJob } from "@/lib/automation-jobs";
 import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
@@ -61,6 +64,138 @@ function orderJobType(channelCode: string) {
 
 function orderItemCount(orders: NormalizedOrder[]) {
   return orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
+}
+
+function orderCount(orders: NormalizedOrder[]) {
+  return orders.length;
+}
+
+const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
+const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
+
+type ManualOrderFileResult = {
+  fileName: string;
+  source: "esm" | "unknown";
+  siteName: string;
+  orders: NormalizedOrder[];
+};
+
+function cleanId(value: unknown) {
+  const raw = text(value);
+  if (/^\d+\.0$/.test(raw)) return raw.replace(/\.0$/, "");
+  return raw;
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const next = text(value);
+    if (next) return next;
+  }
+  return "";
+}
+
+function pick(row: AnyRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && text(value) !== "") return value;
+  }
+  return "";
+}
+
+function workbookRows(buffer: Buffer, fileName: string) {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+  return workbook.SheetNames.flatMap((sheetName) => XLSX.utils.sheet_to_json<AnyRecord>(workbook.Sheets[sheetName], { defval: "", raw: false })
+    .map((row) => ({ ...row, __sheetName: sheetName, __fileName: fileName }))
+    .filter((row) => Object.values(row).some((value) => text(value))));
+}
+
+function isEsmManualRow(row: AnyRecord) {
+  return Boolean(row["판매아이디"] !== undefined && row["주문번호"] !== undefined && (row["배송번호"] !== undefined || row["상품번호"] !== undefined));
+}
+
+function esmSiteName(row: AnyRecord) {
+  const seller = text(row["판매아이디"]);
+  if (/옥션|auction/i.test(seller)) return "옥션";
+  if (/지마켓|g마켓|gmarket/i.test(seller)) return "지마켓";
+  return "ESM";
+}
+
+function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrder | null {
+  const orderNo = cleanId(pick(row, ["주문번호"]));
+  const receiverName = firstText(pick(row, ["수령인명"]), pick(row, ["구매자명"]));
+  const productName = firstText(pick(row, ["상품명"]), "ESM 주문");
+  if (!orderNo || !receiverName || !productName) return null;
+  const siteName = esmSiteName(row);
+  const siteCode = siteName === "옥션" ? "A" : siteName === "지마켓" ? "G" : "ESM";
+  const productNo = cleanId(pick(row, ["상품번호"]));
+  const shipmentNo = cleanId(pick(row, ["배송번호"]));
+  const sellerCode = cleanId(pick(row, ["판매자관리코드", "판매자상세관리코드"]));
+  const item: NormalizedOrderItem = {
+    channelProductCode: sellerCode || productNo || shipmentNo,
+    channelOptionCode: shipmentNo || productNo || sellerCode,
+    channelProductName: productName,
+    channelOptionName: text(pick(row, ["옵션", "추가구성"])),
+    sku: sellerCode || undefined,
+    qty: numberValue(pick(row, ["수량"])) || 1,
+    salesAmount: numberValue(pick(row, ["판매금액", "판매단가"])) || undefined,
+    settlementAmount: numberValue(pick(row, ["정산예정금액", "판매금액"])) || undefined,
+    raw: row,
+  };
+  return {
+    channelCode: siteCode,
+    channelName: siteName,
+    customerCode: siteCode,
+    customerName: siteName,
+    orderNo,
+    bundleOrderNo: cleanId(pick(row, ["장바구니번호(결제번호)", "배송번호", "주문번호"])) || orderNo,
+    orderDate: firstText(pick(row, ["결제일"]), pick(row, ["주문일자(결제확인전)"])),
+    orderStatus: "신규주문",
+    receiverName,
+    phone1: firstText(pick(row, ["수령인 휴대폰"]), pick(row, ["수령인 전화번호"]), pick(row, ["구매자 휴대폰"])),
+    phone2: firstText(pick(row, ["수령인 전화번호"]), pick(row, ["수령인 휴대폰"]), pick(row, ["구매자 전화번호"])),
+    zipcode: text(pick(row, ["우편번호"])),
+    address: text(pick(row, ["주소"])),
+    deliveryMessage: text(pick(row, ["배송시 요구사항"])),
+    items: [item],
+    raw: { ...row, __manualFileName: fileName, __manualSource: "ESM" },
+  };
+}
+
+function parseManualOrderFile(fileName: string, buffer: Buffer): ManualOrderFileResult[] {
+  const rows = workbookRows(buffer, fileName);
+  const esmRows = rows.filter(isEsmManualRow);
+  if (!esmRows.length) return [];
+  const bySite = new Map<string, NormalizedOrder[]>();
+  for (const row of esmRows) {
+    const order = normalizeEsmManualRow(row, fileName);
+    if (!order) continue;
+    const siteName = order.channelName || "ESM";
+    bySite.set(siteName, [...(bySite.get(siteName) || []), order]);
+  }
+  return Array.from(bySite.entries()).map(([siteName, orders]) => ({ fileName, source: "esm" as const, siteName, orders }));
+}
+
+async function collectManualOrderFiles() {
+  let names: string[];
+  try {
+    names = await fs.readdir(MANUAL_ORDER_DIR);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [] as ManualOrderFileResult[];
+    throw error;
+  }
+  const results: ManualOrderFileResult[] = [];
+  for (const name of names) {
+    if (name.startsWith("~$")) continue;
+    const extension = path.extname(name).toLowerCase();
+    if (!MANUAL_ORDER_EXTENSIONS.has(extension)) continue;
+    const filePath = path.join(MANUAL_ORDER_DIR, name);
+    const stat = await fs.stat(filePath).catch(() => null);
+    if (!stat?.isFile()) continue;
+    const buffer = await fs.readFile(filePath);
+    results.push(...parseManualOrderFile(name, buffer));
+  }
+  return results;
 }
 
 async function logSync(row: AnyRecord) {
@@ -211,14 +346,7 @@ export async function POST(request: NextRequest) {
     const channels = await selectRows<AnyRecord>("sales_channels", query);
     const supportedChannels = channels.filter((channel) => onlineOrderAdapterForChannel(channel));
     const unsupportedChannels = channels.filter((channel) => !onlineOrderAdapterForChannel(channel));
-    if (!supportedChannels.length && !unsupportedChannels.length) {
-      return jsonResponse({
-        ok: false,
-        error: "API 사용으로 저장된 네이버/쿠팡/11번가 쇼핑몰이 없습니다. 기초관리 > 쇼핑몰에서 API 정보를 저장해주세요.",
-        statuses: [],
-        orders: [],
-      }, { status: 400 });
-    }
+    // API 사용 채널이 없어도 D:\\FN_Oder_mall 수동 주문파일은 F1에서 함께 수집한다.
 
     if (shouldQueueForLocalWorker(body)) {
       const job = await createAutomationJob({
@@ -256,20 +384,41 @@ export async function POST(request: NextRequest) {
     for (const channel of unsupportedChannels) {
       results.push({ channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: ONLINE_ORDER_UNSUPPORTED_MESSAGE });
     }
-    const orders = results.flatMap((result) => result.orders);
+    const manualResults = await collectManualOrderFiles().catch((error) => {
+      const message = error instanceof Error ? error.message : "수동 주문파일 수집 실패";
+      return [{ fileName: MANUAL_ORDER_DIR, source: "unknown" as const, siteName: "수동 주문수집", orders: [] as NormalizedOrder[], error: message }];
+    });
+    const apiOrders = results.flatMap((result) => result.orders);
+    const manualOrders = manualResults.flatMap((result) => result.orders);
+    const orders = [...apiOrders, ...manualOrders];
     return jsonResponse({
-      ok: results.some((result) => result.ok),
+      ok: results.some((result) => result.ok) || manualOrders.length > 0,
       dry_run: body.dry_run === true,
-      statuses: results.map((result) => ({
-        channel_code: text(result.channel.channel_code),
-        channel_name: text(result.channel.channel_name),
-        ok: result.ok,
-        skipped: Boolean(result.skipped),
-        count: orderItemCount(result.orders),
-        message: result.message,
-      })),
+      statuses: [
+        ...results.map((result) => ({
+          source: "api",
+          channel_code: text(result.channel.channel_code),
+          channel_name: text(result.channel.channel_name),
+          ok: result.ok,
+          skipped: Boolean(result.skipped),
+          count: orderCount(result.orders),
+          item_count: orderItemCount(result.orders),
+          message: result.message,
+        })),
+        ...manualResults.map((result) => ({
+          source: "manual",
+          channel_code: result.source.toUpperCase(),
+          channel_name: `수동 주문수집 - ${result.siteName}`,
+          ok: result.orders.length > 0,
+          skipped: !result.orders.length,
+          count: orderCount(result.orders),
+          item_count: orderItemCount(result.orders),
+          message: "error" in result ? result.error : `${result.fileName} / ${orderCount(result.orders)}건`,
+        })).filter((item) => item.ok || item.message),
+      ],
       orders,
-      count: orderItemCount(orders),
+      count: orderCount(orders),
+      item_count: orderItemCount(orders),
     });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

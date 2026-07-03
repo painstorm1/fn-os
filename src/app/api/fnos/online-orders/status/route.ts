@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { NaverChannelAdapter } from "@/lib/channels/naver";
-import type { SalesChannelAdapter } from "@/lib/channels/common/types";
+import { ONLINE_ORDER_ADAPTERS, onlineOrderAdapterCodeForChannel } from "@/lib/channels/registry";
 import { createAutomationJob } from "@/lib/automation-jobs";
 import { FnosDbError, hasDbConfig, selectRows } from "@/lib/fnos-db";
 import { readChannelCredentials } from "@/lib/sales-channel-credentials";
@@ -12,11 +11,6 @@ const localBridgeCorsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
 };
-
-const adapters: Record<string, SalesChannelAdapter> = {
-  NAVER: new NaverChannelAdapter(),
-};
-
 
 function jsonResponse(body: AnyRecord, init?: ResponseInit) {
   return NextResponse.json(body, {
@@ -37,12 +31,9 @@ function text(value: unknown) {
 }
 
 function adapterCodeForChannel(channel: AnyRecord) {
-  const code = text(channel.channel_code).toUpperCase();
-  const name = text(channel.channel_name).toUpperCase();
-  const haystack = `${code} ${name}`;
-  if (code === "NAVER" || code.startsWith("NAVER_") || /NAVER|SMARTSTORE|네이버|스마트스토어/.test(haystack)) return "NAVER";
-  return code;
+  return onlineOrderAdapterCodeForChannel(channel);
 }
+
 
 function credentialMap(rows: Array<{ key: string; value?: string; error?: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
@@ -125,14 +116,14 @@ export async function POST(request: NextRequest) {
       is_active: "eq.true",
       api_enabled: "eq.true",
     });
-    const activeChannels = channels.filter((channel) => adapters[adapterCodeForChannel(channel)]);
+    const activeChannels = channels.filter((channel) => ONLINE_ORDER_ADAPTERS[adapterCodeForChannel(channel)]);
     const results = [];
 
     for (const channel of activeChannels) {
       const channelRows = rowsForChannel(rows, channel);
       if (!channelRows.length) continue;
       const adapterCode = adapterCodeForChannel(channel);
-      const adapter = adapters[adapterCode];
+      const adapter = ONLINE_ORDER_ADAPTERS[adapterCode];
       const credentialRows = await readChannelCredentials(text(channel.id), true);
       const credentialError = credentialReadError(credentialRows);
       if (credentialError) {
@@ -146,19 +137,32 @@ export async function POST(request: NextRequest) {
         channel_name: text(channel.channel_name),
       };
       if (action === "confirm") {
-        const productOrderIds = Array.from(new Set(channelRows.map(rowProductOrderId).filter(Boolean)));
+        const confirmProductOrders = channelRows.map((row) => ({
+          productOrderId: rowProductOrderId(row),
+          orderId: text(row.orderId || row.order_id || row.orderNo || row.order_no),
+          orderNo: text(row.orderNo || row.order_no),
+          shipmentBoxId: text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no),
+          bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
+          quantity: text(row.quantity || row.qty),
+        })).filter((row) => row.productOrderId || row.orderId || row.shipmentBoxId);
+        const productOrderIds = Array.from(new Set(confirmProductOrders.map((row) => row.productOrderId).filter(Boolean)));
         const result = adapter.confirmOrders
-          ? await adapter.confirmOrders({ ...baseParams, productOrderIds })
+          ? await adapter.confirmOrders({ ...baseParams, productOrderIds, confirmProductOrders })
           : { ok: false, error: "해당 쇼핑몰은 발주확인을 지원하지 않습니다." };
-        results.push({ channel_name: text(channel.channel_name), ok: result.ok, count: productOrderIds.length, message: result.message || result.error || "", raw: result.data });
+        results.push({ channel_name: text(channel.channel_name), ok: result.ok, count: Math.max(productOrderIds.length, confirmProductOrders.length), message: result.message || result.error || "", raw: result.data });
       }
       if (action === "dispatch") {
         const dispatchProductOrders = channelRows.map((row) => ({
           productOrderId: rowProductOrderId(row),
+          orderId: text(row.orderId || row.order_id || row.orderNo || row.order_no),
+          orderNo: text(row.orderNo || row.order_no),
+          shipmentBoxId: text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no),
+          bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
+          quantity: text(row.quantity || row.qty),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
           deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
           trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
-        })).filter((row) => row.productOrderId && row.trackingNumber);
+        })).filter((row) => (row.productOrderId || row.orderId || row.shipmentBoxId) && row.trackingNumber);
         const result = adapter.dispatchOrders
           ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
           : { ok: false, error: "해당 쇼핑몰은 발송처리를 지원하지 않습니다." };

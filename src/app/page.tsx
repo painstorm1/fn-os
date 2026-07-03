@@ -1440,11 +1440,11 @@ const salesChannelPlatformOptions: Array<{
   {
     code: "ESM",
     label: "ESM/G마켓/옥션",
-    supported: true,
-    requiredKeys: ["master_id", "secret_key"],
+    supported: false,
+    requiredKeys: [],
     optionalKeys: ["partner_no", "sub_partner_no", "seller_password"],
-    example: "Master ID: ESM Master ID / Secret Key: API Secret / 거래처 번호: 옥션 ID / 하위 거래처 번호: G마켓 ID",
-    help: "ESM Trading API의 JWT 인증으로 주문을 수집합니다. 옥션/G마켓 판매자 ID 중 하나 이상과 API Secret Key가 필요합니다.",
+    example: "API 사용 신청/승인 전까지 엑셀 또는 수동 처리 대상",
+    help: "현재 FNOS에서는 ESM/G마켓/옥션 API 호출을 사용하지 않습니다. 주문확인/송장입력은 수동 팝업·복사 보조 흐름으로 처리합니다.",
   },
   {
     code: "SSG",
@@ -1466,19 +1466,19 @@ const salesChannelPlatformOptions: Array<{
   {
     code: "KAKAO",
     label: "카카오 톡스토어",
-    supported: true,
-    requiredKeys: ["api_key"],
-    example: "API Key: 카카오쇼핑판매자센터 > 가입한 판매채널 > 정보관리 > 판매채널 정보 > API 인증키 > 발급하기에서 나온 REST API키",
-    help: "카카오쇼핑 Open API는 ① API 연동 검토 승인 ② 연동대행사용 카카오 디벨로퍼스 앱 생성/등록(Admin키 제출) ③ 판매자센터 API 인증키 발급 ④ 판매자-연동대행사 연결이 모두 끝나야 호출됩니다. FNOS에는 판매자센터에서 발급된 API 인증키(REST API키)를 저장하세요. 'need more information to authenticate'는 보통 앱/연동대행사/판매자 연결이 아직 완료되지 않았거나 다른 키(Admin키 등)를 저장했을 때 발생합니다.",
+    supported: false,
+    requiredKeys: [],
+    example: "API 사용 신청/승인 전까지 엑셀 또는 수동 처리 대상",
+    help: "현재 FNOS에서는 카카오/톡스토어 API 호출을 사용하지 않습니다. 주문확인/송장입력은 수동 팝업·복사 보조 흐름으로 처리합니다.",
   },
   {
     code: "TODAYHOUSE",
     label: "오늘의집",
-    supported: true,
-    requiredKeys: ["auth_code"],
+    supported: false,
+    requiredKeys: [],
     optionalKeys: ["api_base_url", "orders_path"],
-    example: "인증 코드: 파트너센터 OpenAPI 인증코드 관리에서 발급한 OTP(72시간 유효)",
-    help: "오늘의집 O.rora OpenAPI 인증코드로 주문을 수집합니다. 인증코드는 72시간 유효하므로 만료 시 재저장해야 합니다.",
+    example: "API/솔루션 승인 전까지 엑셀 또는 수동 처리 대상",
+    help: "현재 FNOS에서는 오늘의집 API 호출을 사용하지 않습니다. O.rora 인증코드 흐름은 공개 self-serve 호출로 확정하지 않고 수동 처리합니다.",
   },
   {
     code: "TOSS",
@@ -6309,9 +6309,9 @@ function StatusPill({ status }: { status?: string }) {
 type SalesSheetName = "발주 진행 단계" | "송장출력용" | "FN송장입력" | "FN판매입력" | "FN구매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
-  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
-  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
+  송장출력용: ["송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  FN송장입력: ["주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
   "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
@@ -6339,6 +6339,15 @@ function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
 }
 
 function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
+  if (sheet === "송장출력용" && row.length === salesSheetHeaders[sheet].length + 1) {
+    return row.slice(1);
+  }
+  if (sheet === "FN송장입력" && row.length === salesSheetHeaders[sheet].length + 1) {
+    return row.slice(1);
+  }
+  if (sheet === "발주 진행 단계" && row.length === salesSheetHeaders[sheet].length + 1) {
+    return [...row.slice(0, 7), ...row.slice(8)];
+  }
   if ((sheet === "FN판매입력" || sheet === "FN구매입력") && row.length === salesSheetHeaders[sheet].length + 1) {
     return [row[0] || "", ...row.slice(2)];
   }
@@ -6396,6 +6405,7 @@ function hasSalesRows(rows: string[][]) {
 function classifyOrderUploadFileName(fileName: string) {
   const lower = fileName.toLowerCase();
   if (/esk\d*m/i.test(fileName) || fileName.toLowerCase().includes("legacy-order")) return "레거시 주문수집";
+  if (fileName.includes("신규주문") || lower.includes("esm") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "ESM/G마켓/옥션";
   if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "현대 이지웰";
   if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "오늘의 집";
   if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "토스";
@@ -6416,6 +6426,7 @@ function salesUploadBadge(fileName: string, kind: "orders" | "invoices") {
   const invoiceType = kind === "invoices" ? classifyInvoiceUploadFileName(fileName) || "송장파일" : "";
   const type = orderType || invoiceType;
   if (type === "레거시 주문수집") return { mark: "E", label: "레거시", className: "border-blue-200 bg-blue-50 text-blue-700" };
+  if (type === "ESM/G마켓/옥션") return { mark: "G", label: "ESM", className: "border-lime-200 bg-lime-50 text-lime-700" };
   if (type === "오늘의 집") return { mark: "O", label: "오늘의 집", className: "border-violet-200 bg-violet-50 text-violet-700" };
   if (type === "현대 이지웰") return { mark: "Z", label: "이지웰", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
   if (type === "토스") return { mark: "T", label: "토스", className: "border-sky-200 bg-sky-50 text-sky-700" };
@@ -6750,11 +6761,11 @@ function normalizeShippingRowForTracking(row: string[]) {
   const expectedLength = salesSheetHeaders.송장출력용.length;
   const legacyWithoutTracking = rowHasValue(row)
     && row.length <= expectedLength - 1
-    && salesCellText(row[1])
-    && looksLikeInvoicePhone(row[2])
-    && looksLikeInvoicePhone(row[3]);
+    && salesCellText(row[0])
+    && looksLikeInvoicePhone(row[1])
+    && looksLikeInvoicePhone(row[2]);
   if (!legacyWithoutTracking) return [...row];
-  return [row[0] || "", "", ...row.slice(1)];
+  return ["", ...row];
 }
 
 const invoiceMallCodeByAlias: Record<string, string> = {
@@ -6815,77 +6826,49 @@ function applyInvoiceTrackingToSheets(
     let alreadyMatchedShipping = 0;
     let alreadyMatchedInvoice = 0;
 
-    const invoiceRowsByMall = new Map<string, number[]>();
-    nextInvoice.forEach((row, index) => {
-      const mallCode = salesCellText(row[0]);
-      if (!mallCode) return;
-      const list = invoiceRowsByMall.get(mallCode) || [];
-      list.push(index);
-      invoiceRowsByMall.set(mallCode, list);
-    });
-
     invoiceRows.forEach((invoiceRow) => {
       const trackingNo = salesCellText(invoiceRow.trackingNo);
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
-      const productKey = invoiceProductCodeKey(invoiceRow.productCode);
-      const shippingIndexByAddress = nextShipping.findIndex((row, index) => {
-        if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[1])) return false;
-        const name = row[2];
-        const phone1 = row[3];
-        const phone2 = row[4];
-        const address = row[6];
+      const shippingIndex = nextShipping.findIndex((row, index) => {
+        if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[0])) return false;
+        const name = row[1];
+        const phone1 = row[2];
+        const phone2 = row[3];
+        const address = row[5];
         return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
       });
-      const shippingIndexByCode = productKey
-        ? nextShipping.findIndex((row, index) => (
-          !usedShipping.has(index)
-          && rowHasValue(row)
-          && !salesCellText(row[1])
-          && invoiceProductCodeKey(row[0]) === productKey
-        ))
-        : -1;
-      const shippingIndex = shippingIndexByAddress >= 0 ? shippingIndexByAddress : shippingIndexByCode;
 
       if (shippingIndex < 0) {
         const alreadyIndex = nextShipping.findIndex((row) => {
-          if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo) return false;
-          const name = row[2];
-          const phone1 = row[3];
-          const phone2 = row[4];
-          const address = row[6];
+          if (!rowHasValue(row) || salesCellText(row[0]) !== trackingNo) return false;
+          const name = row[1];
+          const phone1 = row[2];
+          const phone2 = row[3];
+          const address = row[5];
           return invoiceKey === invoiceMatchKey(name, phone1, address)
-            || invoiceKey === invoiceMatchKey(name, phone2, address)
-            || (productKey && invoiceProductCodeKey(row[0]) === productKey);
+            || invoiceKey === invoiceMatchKey(name, phone2, address);
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
           return;
         }
-        const highlightIndex = productKey
-          ? nextShipping.findIndex((row) => rowHasValue(row) && invoiceProductCodeKey(row[0]) === productKey)
-          : -1;
-        if (highlightIndex >= 0) failedShippingIndexes.add(highlightIndex);
         return;
       }
 
       usedShipping.add(shippingIndex);
-      nextShipping[shippingIndex][1] = trackingNo;
+      nextShipping[shippingIndex][0] = trackingNo;
       matchedShipping += 1;
 
-      const { alias, mallCode, serial } = parseShippingCode(nextShipping[shippingIndex][0]);
-      const candidateIndexes = invoiceRowsByMall.get(mallCode) || [];
-      const invoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes.find((index) => !salesCellText(nextInvoice[index]?.[4]));
-      if (invoiceIndex !== undefined && nextInvoice[invoiceIndex]) {
-        if (salesCellText(nextInvoice[invoiceIndex][4]) === trackingNo) {
+      const invoiceIndex = shippingIndex;
+      if (nextInvoice[invoiceIndex]) {
+        if (salesCellText(nextInvoice[invoiceIndex][3]) === trackingNo) {
           alreadyMatchedInvoice += 1;
         } else {
-          nextInvoice[invoiceIndex][4] = trackingNo;
+          nextInvoice[invoiceIndex][3] = trackingNo;
           matchedInvoice += 1;
         }
-      } else if (!isInvoiceInputExcludedMall(alias || mallCode, invoiceRow.productCode)) {
-        const failedInvoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes[0];
-        if (failedInvoiceIndex !== undefined) failedInvoiceIndexes.add(failedInvoiceIndex);
-        else failedShippingIndexes.add(shippingIndex);
+      } else {
+        failedShippingIndexes.add(shippingIndex);
       }
     });
 
@@ -6895,10 +6878,16 @@ function applyInvoiceTrackingToSheets(
     const failedInvoice = failedInvoiceIndexesList.map((index) => `${index + 1}행`);
 
     const manualRows = nextShipping
-      .filter(rowHasValue)
-      .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
-      .filter((row) => salesCellText(row[1]))
-      .map((row) => `${row[0]} ${row[2]} ${row[1]}`);
+      .map((row, index) => {
+        if (!rowHasValue(row)) return "";
+        const progress = currentSheets["발주 진행 단계"].filter(rowHasValue)[index] || [];
+        const site = [progressValue(progress, "쇼핑몰명"), progressValue(progress, "쇼핑몰(거래처)")].join(" ").toUpperCase();
+        if (!/(ESM|지마켓|옥션|오늘의|이지웰|카카오|톡스토어|KAKAO|G마켓)/i.test(site)) return "";
+        const tracking = salesCellText(row[salesSheetHeaders.송장출력용.indexOf("송장번호")]);
+        if (!tracking) return "";
+        return `${progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)")} ${progressValue(progress, "주문번호")} ${tracking}`.trim();
+      })
+      .filter(Boolean);
 
     return {
       sheets: {
@@ -6918,50 +6907,47 @@ function applyInvoiceTrackingToSheets(
     };
   }
 
-  const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
   const parsedInvoiceRows = (parsedSheets.FN송장입력 || []).filter(rowHasValue);
-  const trackingByShippingCode = new Map<string, string>();
   const trackingByOrderNo = new Map<string, string>();
   const trackingByBundleNo = new Map<string, string>();
 
-  parsedShippingRows.forEach((row) => {
-    const item = salesRowObject("송장출력용", row);
-    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
-  });
   parsedInvoiceRows.forEach((row) => {
     const item = salesRowObject("FN송장입력", row);
-    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
     if (item.주문번호 && item.송장번호) trackingByOrderNo.set(item.주문번호, item.송장번호);
     if (item.묶음주문번호 && item.송장번호) trackingByBundleNo.set(item.묶음주문번호, item.송장번호);
   });
 
   let matchedShipping = 0;
   let matchedInvoice = 0;
-  const nextShipping = currentSheets.송장출력용.map((row) => {
-    if (!rowHasValue(row)) return row;
-    const item = salesRowObject("송장출력용", row);
-    const tracking = trackingByShippingCode.get(item.쇼핑몰코드);
-    if (!tracking || item.송장번호 === tracking) return row;
-    matchedShipping += 1;
-    return row.map((cell, index) => index === 1 ? tracking : cell);
-  });
-
   const nextInvoice = currentSheets.FN송장입력.map((row) => {
     if (!rowHasValue(row)) return row;
     const item = salesRowObject("FN송장입력", row);
     const tracking = trackingByOrderNo.get(item.주문번호)
-      || trackingByBundleNo.get(item.묶음주문번호)
-      || trackingByShippingCode.get(item.쇼핑몰코드);
+      || trackingByBundleNo.get(item.묶음주문번호);
     if (!tracking || item.송장번호 === tracking) return row;
     matchedInvoice += 1;
-    return row.map((cell, index) => index === 4 ? tracking : cell);
+    return row.map((cell, index) => index === 3 ? tracking : cell);
+  });
+  const nextShipping = currentSheets.송장출력용.map((row, index) => {
+    if (!rowHasValue(row)) return row;
+    const tracking = salesCellText(nextInvoice[index]?.[3]);
+    const currentTracking = salesCellText(row[0]);
+    if (!tracking || currentTracking === tracking) return row;
+    matchedShipping += 1;
+    return row.map((cell, cellIndex) => cellIndex === 0 ? tracking : cell);
   });
 
   const manualRows = nextShipping
-    .filter(rowHasValue)
-    .filter((row) => ["T", "Z", "O"].includes(String(row[0] || "").split("-")[1] || ""))
-    .filter((row) => salesCellText(row[1]))
-    .map((row) => `${row[0]} ${row[2]} ${row[1]}`);
+    .map((row, index) => {
+      if (!rowHasValue(row)) return "";
+      const progress = currentSheets["발주 진행 단계"].filter(rowHasValue)[index] || [];
+      const site = [progressValue(progress, "쇼핑몰명"), progressValue(progress, "쇼핑몰(거래처)")].join(" ").toUpperCase();
+      if (!/(ESM|지마켓|옥션|오늘의|이지웰|카카오|톡스토어|KAKAO|G마켓)/i.test(site)) return "";
+      const tracking = salesCellText(row[salesSheetHeaders.송장출력용.indexOf("송장번호")]);
+      if (!tracking) return "";
+      return `${progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)")} ${progressValue(progress, "주문번호")} ${tracking}`.trim();
+    })
+    .filter(Boolean);
 
   return {
     sheets: {
@@ -6982,6 +6968,7 @@ function applyInvoiceTrackingToSheets(
 }
 
 type DirectShippingPartner = "JB" | "케이모아";
+type DirectShippingSourceIndexes = Record<DirectShippingPartner, number[]>;
 type FileSystemWritableLike = {
   write: (data: Blob) => Promise<void>;
   close: () => Promise<void>;
@@ -7008,6 +6995,7 @@ type SalesWorkspaceSnapshot = {
   orderFilePassword: string;
   message: string;
   directShippingRows: Record<DirectShippingPartner, string[][]>;
+  directShippingSourceIndexes?: DirectShippingSourceIndexes;
 };
 
 type CollectedOnlineOrderItem = {
@@ -7152,21 +7140,20 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
   const salesRows = sheets["FN판매입력"].filter(rowHasValue);
   const rows = shippingRows.map((shippingRow, index) => {
     const shipping = salesRowObject("송장출력용", shippingRow);
-    const codeParts = shippingCodeParts(shipping.쇼핑몰코드);
     const invoice = invoiceRows[index] ? salesRowObject("FN송장입력", invoiceRows[index]) : {};
     const sale = salesRows[index] ? salesRowObject("FN판매입력", salesRows[index]) : {};
     const productCode = salesCellText(sale.품목코드);
     const optionText = salesCellText(shipping.주문옵션);
-    const mallProductCode = salesCellText(shipping.쇼핑몰코드);
+    const mallProductCode = salesCellText(sale.메모).split(" ").slice(2, -1).join(" ");
+    const channelName = salesCellText(sale.거래처명 || invoice.묶음주문번호 || "온라인");
     const progress = salesSheetHeaders["발주 진행 단계"].map(() => "");
-    setProgressValue(progress, "쇼핑몰(거래처)", salesCellText(sale.거래처명 || codeParts.mallAlias));
+    setProgressValue(progress, "쇼핑몰(거래처)", channelName);
     setProgressValue(progress, "수집일자", salesCellText(sale.일자) || salesWorkspaceDayKey().replace(/\D/g, ""));
     setProgressValue(progress, "품목코드(ERP)", productCode);
     setProgressValue(progress, "쇼핑몰상품코드", mallProductCode);
     setProgressValue(progress, "품목명(ERP)", salesCellText(sale.품목명));
     setProgressValue(progress, "쇼핑몰품목key", makeShoppingProductKey(mallProductCode, optionText));
-    setProgressValue(progress, "쇼핑몰명", salesCellText(sale.거래처명 || codeParts.mallAlias));
-    setProgressValue(progress, "쇼핑몰코드", salesCellText(invoice.쇼핑몰코드 || shipping.쇼핑몰코드));
+    setProgressValue(progress, "쇼핑몰명", channelName);
     setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
     setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
     setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || "CJGLS");
@@ -7206,26 +7193,17 @@ function applyProgressTrackingToShipping(currentSheets: Record<SalesSheetName, s
 
 function shippingRowsForExcelExport(currentSheets: Record<SalesSheetName, string[][]>) {
   const progressRows = currentSheets["발주 진행 단계"];
-  const shippingCodeIndex = salesSheetHeaders.송장출력용.indexOf("쇼핑몰코드");
   const optionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
   const qtyIndex = salesSheetHeaders.송장출력용.indexOf("수량");
   const settlementIndex = salesSheetHeaders.송장출력용.indexOf("정산예정금액");
-  const counters = new Map<string, number>();
-  const mmdd = todayMmdd();
-  const runCode = onlineOrderRunCode();
 
   return currentSheets.송장출력용.map((row, index) => {
     if (!rowHasValue(row)) return row;
     const next = [...row];
     const progress = progressRows[index] || [];
     const channelName = progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)");
-    const channelCode = progressValue(progress, "쇼핑몰코드");
-    const alias = onlineOrderChannelAlias(channelName, channelCode);
-    const countKey = `${mmdd}-${alias}`;
-    const sequence = (counters.get(countKey) || 0) + 1;
-    counters.set(countKey, sequence);
+    const alias = onlineOrderChannelAlias(channelName, "");
 
-    if (shippingCodeIndex >= 0) next[shippingCodeIndex] = `${countKey}-${runCode}${String(sequence).padStart(3, "0")}`;
     if (optionIndex >= 0) {
       next[optionIndex] = onlineOrderShippingOptionName(
         progressValue(progress, "품목명(ERP)"),
@@ -7426,7 +7404,6 @@ function appendCollectedOnlineOrdersToSheets(
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
-      setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", mallProductCode);
       setSalesSheetCell(shipping, "송장출력용", "수취인", receiverName);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", phone1);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", phone2);
@@ -7439,7 +7416,6 @@ function appendCollectedOnlineOrdersToSheets(
       shippingRows.push(shipping);
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");
-      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", salesCellText(item.channelOptionCode || mallProductCode));
       setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", "CJGLS");
@@ -7465,7 +7441,7 @@ function appendCollectedOnlineOrdersToSheets(
     nextSheets["발주 진행 단계"] = nextSheets["발주 진행 단계"].map((row) => {
       if (!rowHasValue(row)) return row;
       const orderNo = progressValue(row, "주문번호");
-      const productOrderId = progressValue(row, "쇼핑몰코드");
+      const productOrderId = progressValue(row, "쇼핑몰상품코드");
       const status = collectedStatusByKey.get([orderNo, productOrderId].filter(Boolean).join("|"))
         || collectedStatusByKey.get(productOrderId)
         || collectedStatusByKey.get(orderNo);
@@ -7880,7 +7856,7 @@ type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowInd
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
-type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string };
+type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
 type OrderProductLinkDraft = {
   rowIndex: number;
   mallName: string;
@@ -8001,16 +7977,20 @@ function SalesExcelGrid({
   onChange,
   onProductLinked,
   onSelectionChange,
+  onSortRows,
   resetKey = 0,
   highlightedRows = [],
+  copyAssistRows = [],
 }: {
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
   onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
+  onSortRows?: (colIndex: number, dir: "asc" | "desc", rows: string[][]) => boolean | void;
   resetKey?: number;
   highlightedRows?: number[];
+  copyAssistRows?: number[];
 }) {
   const headers = salesSheetHeaders[sheet];
   const displayHeaders = salesSheetDisplayHeaders(sheet);
@@ -8029,6 +8009,8 @@ function SalesExcelGrid({
   const [resize, setResize] = useState<null | { type: "col" | "row"; index: number; start: number; initial: number }>(null);
   const [sortState, setSortState] = useState<SalesGridSort>(null);
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
+  const copyAssistRowSet = useMemo(() => new Set(copyAssistRows), [copyAssistRows.join("|")]);
+  const [copyToast, setCopyToast] = useState<{ row: number; col: number; text: string } | null>(null);
   const isSortableSheet = Boolean(salesSheetHeaders[sheet]);
   const productCodeCol = headers.includes("품목코드(ERP)") ? headers.indexOf("품목코드(ERP)") : headers.indexOf("품목코드");
   const warehouseHeader = sheet === "FN판매입력" ? "출하창고" : sheet === "FN구매입력" ? "입고창고" : "";
@@ -8096,6 +8078,20 @@ function SalesExcelGrid({
       window.removeEventListener("mouseup", onUp);
     };
   }, [resize]);
+
+  function copyAssistCell(rowIndex: number, colIndex: number) {
+    const header = headers[colIndex];
+    const trackingColumn = sheet === "송장출력용" && header === "송장번호";
+    const manualAssistCell = sheet === "송장출력용" && copyAssistRowSet.has(rowIndex) && ["송장번호", "수취인"].includes(header);
+    if (!trackingColumn && !manualAssistCell) return false;
+    const rawValue = salesCellText(rows[rowIndex]?.[colIndex]);
+    const copyValue = header === "송장번호" ? rawValue.replace(/\D/g, "") : rawValue;
+    if (!copyValue) return false;
+    void navigator.clipboard?.writeText(copyValue).catch(() => undefined);
+    setCopyToast({ row: rowIndex, col: colIndex, text: "복사되었습니다" });
+    window.setTimeout(() => setCopyToast((prev) => (prev?.row === rowIndex && prev?.col === colIndex ? null : prev)), 900);
+    return true;
+  }
 
   function updateCell(rowIndex: number, colIndex: number, value: string) {
     const changedHeader = headers[colIndex];
@@ -8251,16 +8247,21 @@ function SalesExcelGrid({
   }
   function sortByColumn(colIndex: number) {
     const dir: "asc" | "desc" = sortState?.col === colIndex && sortState.dir === "asc" ? "desc" : "asc";
-    const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
-    const emptyRows = rows.filter((row) => !row.some((cell) => String(cell || "").trim()));
-    const sortedRows = [...filledRows].sort((a, b) => {
-      const result = compareSalesCellValue(a[colIndex] || "", b[colIndex] || "");
-      return dir === "asc" ? result : -result;
-    });
-    onChange([...sortedRows, ...emptyRows]);
+    const handled = onSortRows?.(colIndex, dir, rows);
+    if (!handled) {
+      const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
+      const emptyRows = rows.filter((row) => !row.some((cell) => String(cell || "").trim()));
+      const sortedRows = [...filledRows].sort((a, b) => {
+        const result = compareSalesCellValue(a[colIndex] || "", b[colIndex] || "");
+        return dir === "asc" ? result : -result;
+      });
+      onChange([...sortedRows, ...emptyRows]);
+    }
     setSortState({ col: colIndex, dir });
+    const sortedLength = rows.filter((row) => row.some((cell) => String(cell || "").trim())).length;
     setAnchor({ row: 0, col: colIndex });
-    setRange({ startRow: 0, endRow: Math.max(0, sortedRows.length - 1), startCol: colIndex, endCol: colIndex });
+    setRange({ startRow: 0, endRow: Math.max(0, sortedLength - 1), startCol: colIndex, endCol: colIndex });
+    setSelectedRows([]);
     setEditing(null);
     gridRef.current?.focus();
   }
@@ -8476,7 +8477,7 @@ function SalesExcelGrid({
         onMouseUp={() => {
           setSelecting(false);
         }}
-        className="max-h-[560px] overflow-auto outline-none"
+        className="max-h-[760px] overflow-auto outline-none"
       >
         <table className="table-fixed border-collapse text-xs" style={{ width: 54 + visibleColIndexes.reduce((sum, colIndex) => sum + (colWidths[colIndex] || 95), 0) }}>
           <colgroup>
@@ -8563,15 +8564,25 @@ function SalesExcelGrid({
                 {visibleColIndexes.map((colIndex) => {
                   const header = headers[colIndex];
                   const lockedCell = isLockedOnlineEntryCell(colIndex);
+                  const copyAssistCellActive = sheet === "송장출력용" && (header === "송장번호" || (copyAssistRowSet.has(rowIndex) && header === "수취인"));
                   return (
                   <td
                     key={`${header}-${colIndex}`}
                     style={{ width: colWidths[colIndex] || 95, maxWidth: colWidths[colIndex] || 95, height: rowHeights[rowIndex] || 30 }}
                     onMouseDown={(event) => {
                       if (event.button !== 0) return;
+                      if (editing?.row === rowIndex && editing?.col === colIndex) {
+                        event.stopPropagation();
+                        return;
+                      }
                       if (event.ctrlKey || event.metaKey) {
                         event.preventDefault();
                         toggleRow(rowIndex);
+                        setSelecting(false);
+                        return;
+                      }
+                      if (copyAssistCell(rowIndex, colIndex)) {
+                        event.preventDefault();
                         setSelecting(false);
                         return;
                       }
@@ -8587,7 +8598,7 @@ function SalesExcelGrid({
                     onDoubleClick={() => {
                       if (!lockedCell) setEditing({ row: rowIndex, col: colIndex });
                     }}
-                    className={`border p-0 align-middle ${lockedCell ? "text-slate-600" : ""} ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : lockedCell ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
+                    className={`relative border p-0 align-middle ${copyAssistCellActive ? "cursor-copy border-emerald-200 bg-emerald-50" : ""} ${lockedCell ? "text-slate-600" : ""} ${isRowSelected ? "border-blue-200 bg-blue-50 ring-1 ring-inset ring-blue-200" : !isRowRangeActive && isSelected(rowIndex, colIndex) ? "border-orange-500 bg-orange-50 ring-1 ring-inset ring-orange-400" : isHighlightedRow ? "border-yellow-200 bg-yellow-50" : lockedCell ? "border-slate-200 bg-slate-50" : copyAssistCellActive ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`}
                   >
                     {editing?.row === rowIndex && editing?.col === colIndex && isOnlineOrderWarehouseCell(colIndex) ? (
                       <select
@@ -8625,6 +8636,11 @@ function SalesExcelGrid({
                       />
                     ) : (
                       <div className={`h-full w-full select-none overflow-hidden px-2 py-1 leading-5 ${sheet === "발주 진행 단계" ? "whitespace-normal break-words" : "whitespace-nowrap"}`}>{row[colIndex] || ""}</div>
+                    )}
+                    {copyToast?.row === rowIndex && copyToast?.col === colIndex && (
+                      <div className="pointer-events-none absolute left-2 top-1 z-20 rounded bg-emerald-600 px-2 py-1 text-[11px] font-black text-white shadow">
+                        {copyToast.text}
+                      </div>
                     )}
                   </td>
                   );
@@ -8778,7 +8794,6 @@ function OnlineOrderProgressList({
     "쇼핑몰상품코드",
     "쇼핑몰품목key",
     "쇼핑몰명",
-    "쇼핑몰코드",
     "주문번호",
     "묶음주문번호",
     "배송방법코드",
@@ -9103,13 +9118,13 @@ function OnlineOrderProgressList({
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="overflow-auto">
+      <div className="h-[760px] max-h-[760px] overflow-auto">
         <table className="w-full table-fixed text-xs" style={{ minWidth: progressTableMinWidth }}>
           <colgroup>
             <col style={{ width: progressColumnWidth("__select") }} />
             {progressTableColumnOrder.map((header) => <col key={header} style={{ width: progressColumnWidth(header) }} />)}
           </colgroup>
-          <thead className="bg-slate-50 text-xs font-black text-slate-500">
+          <thead className="sticky top-0 z-30 bg-slate-50 text-xs font-black text-slate-500">
             <tr className="border-b border-slate-200">
               <ProgressHeaderCell header="__select">
                 <input
@@ -9614,44 +9629,64 @@ function SalesQuickLookupContent() {
   );
 }
 
-function DirectShippingPreviewGrid({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function DirectShippingPreviewGrid({ headers, rows, onDeleteRows }: { headers: string[]; rows: string[][]; onDeleteRows?: (rowIndexes: number[]) => void }) {
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  useEffect(() => setSelectedRows([]), [rows.length]);
+  const selectedSet = useMemo(() => new Set(selectedRows), [selectedRows.join("|")]);
+  function toggleRow(index: number) {
+    setSelectedRows((prev) => prev.includes(index) ? prev.filter((item) => item !== index) : [...prev, index].sort((a, b) => a - b));
+  }
   return (
-    <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-      <table className="w-full min-w-[980px] table-fixed text-xs">
-        <colgroup>
-          <col className="w-[54px]" />
-          {headers.map((header) => <col key={header} className="w-[120px]" />)}
-        </colgroup>
-        <thead className="sticky top-0 z-10 bg-slate-100">
-          <tr>
-            <th className="border border-slate-200 px-2 py-2 text-slate-400">#</th>
-            {headers.map((header) => (
-              <th key={header} className="border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
-                <span className="truncate">{header}</span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="h-8">
-              <td className="border border-slate-200 bg-slate-50 px-2 text-center font-black text-slate-400">{rowIndex + 1}</td>
-              {headers.map((header, colIndex) => (
-                <td key={`${header}-${colIndex}`} className="border border-slate-200 px-2 py-1 align-middle">
-                  <div className="truncate">{row[colIndex] || ""}</div>
-                </td>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-black text-slate-500">선택 {selectedRows.length.toLocaleString("ko-KR")}건</span>
+        <button type="button" className="h-8 rounded-md border border-rose-200 bg-white px-3 text-xs font-black text-rose-700 disabled:text-slate-300" disabled={!selectedRows.length} onClick={() => onDeleteRows?.(selectedRows)}>선택 삭제/복원</button>
+      </div>
+      <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[980px] table-fixed text-xs">
+          <colgroup>
+            <col className="w-[54px]" />
+            {headers.map((header) => <col key={header} className="w-[120px]" />)}
+          </colgroup>
+          <thead className="sticky top-0 z-10 bg-slate-100">
+            <tr>
+              <th className="border border-slate-200 px-2 py-2 text-slate-400">#</th>
+              {headers.map((header) => (
+                <th key={header} className="border border-slate-200 px-2 py-2 text-left font-black text-slate-600">
+                  <span className="truncate">{header}</span>
+                </th>
               ))}
             </tr>
-          ))}
-          {!rows.length && (
-            <tr>
-              <td colSpan={headers.length + 1} className="border border-slate-200 px-4 py-12 text-center text-sm font-bold text-slate-400">
-                생성된 직송파일 데이터가 없습니다.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => {
+              const checked = selectedSet.has(rowIndex);
+              return (
+                <tr key={rowIndex} className={`h-8 ${checked ? "bg-rose-50" : ""}`}>
+                  <td className="border border-slate-200 bg-slate-50 px-2 text-center font-black text-slate-400">
+                    <label className="flex items-center justify-center gap-1">
+                      <input type="checkbox" checked={checked} onChange={() => toggleRow(rowIndex)} />
+                      {rowIndex + 1}
+                    </label>
+                  </td>
+                  {headers.map((header, colIndex) => (
+                    <td key={`${header}-${colIndex}`} className="border border-slate-200 px-2 py-1 align-middle">
+                      <div className="truncate">{row[colIndex] || ""}</div>
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+            {!rows.length && (
+              <tr>
+                <td colSpan={headers.length + 1} className="border border-slate-200 px-4 py-12 text-center text-sm font-bold text-slate-400">
+                  생성된 직송파일 데이터가 없습니다.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -10421,6 +10456,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [orderProgressPage, setOrderProgressPage] = useState(1);
   const [orderProgressStatusFilter, setOrderProgressStatusFilter] = useState("전체");
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
+  const [directShippingSourceIndexes, setDirectShippingSourceIndexes] = useState<DirectShippingSourceIndexes>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
@@ -10510,7 +10546,73 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
   const purchaseSupplyTotal = salesPurchaseAmountTotal(sheets["FN구매입력"]);
-  const shippingPreviewRows = useMemo(() => shippingRowsForExcelExport(applyProgressTrackingToShipping(sheets)).filter((row) => rowHasValue(row)), [sheets]);
+  const shippingPreviewSourceIndexes = useMemo(() => (
+    sheets.송장출력용
+      .map((row, index) => rowHasValue(row) ? index : -1)
+      .filter((index) => index >= 0)
+  ), [sheets]);
+  const shippingPreviewRows = useMemo(() => {
+    const exportRows = shippingRowsForExcelExport(applyProgressTrackingToShipping(sheets));
+    return shippingPreviewSourceIndexes
+      .map((sourceIndex) => exportRows[sourceIndex])
+      .filter((row): row is string[] => Boolean(row && rowHasValue(row)));
+  }, [sheets, shippingPreviewSourceIndexes]);
+
+  function applyShippingPreviewRows(rows: string[][]) {
+    setSheets((prev) => {
+      const nextShipping = prev.송장출력용.map((row) => [...row]);
+      const sourceIndexes = prev.송장출력용
+        .map((row, index) => rowHasValue(row) ? index : -1)
+        .filter((index) => index >= 0);
+      rows.forEach((row, visibleIndex) => {
+        const sourceIndex = sourceIndexes[visibleIndex];
+        if (sourceIndex == null) return;
+        nextShipping[sourceIndex] = salesSheetHeaders.송장출력용.map((_, colIndex) => row[colIndex] || "");
+      });
+      return { ...prev, 송장출력용: padSalesRows("송장출력용", nextShipping) };
+    });
+  }
+
+  function sortOnlineShippingRowsByExportColumn(colIndex: number, dir: "asc" | "desc") {
+    const exportRows = shippingRowsForExcelExport(applyProgressTrackingToShipping(sheets));
+    const filledIndexes = sheets.송장출력용
+      .map((row, index) => rowHasValue(row) ? index : -1)
+      .filter((index) => index >= 0);
+    const emptyIndexes = sheets.송장출력용
+      .map((row, index) => rowHasValue(row) ? -1 : index)
+      .filter((index) => index >= 0);
+    const sortedIndexes = [...filledIndexes].sort((leftIndex, rightIndex) => {
+      const result = compareSalesCellValue(exportRows[leftIndex]?.[colIndex] || "", exportRows[rightIndex]?.[colIndex] || "");
+      return dir === "asc" ? result : -result;
+    });
+    const nextOrder = [...sortedIndexes, ...emptyIndexes];
+    const sourceIndexByPreviousIndex = new Map(nextOrder.map((previousIndex, nextIndex) => [previousIndex, nextIndex]));
+    const reorderSheet = (sourceSheets: Record<SalesSheetName, string[][]>, sheetName: SalesSheetName) => padSalesRows(
+      sheetName,
+      nextOrder.map((rowIndex) => [...(sourceSheets[sheetName][rowIndex] || salesSheetHeaders[sheetName].map(() => ""))]),
+    );
+
+    setSheets((prev) => ({
+      ...prev,
+      "발주 진행 단계": reorderSheet(prev, "발주 진행 단계"),
+      송장출력용: reorderSheet(prev, "송장출력용"),
+      FN송장입력: reorderSheet(prev, "FN송장입력"),
+      "FN판매입력": reorderSheet(prev, "FN판매입력"),
+      "FN구매입력": reorderSheet(prev, "FN구매입력"),
+    }));
+    setDirectShippingSourceIndexes((prev) => ({
+      JB: prev.JB.map((index) => sourceIndexByPreviousIndex.get(index)).filter((index): index is number => typeof index === "number"),
+      케이모아: prev.케이모아.map((index) => sourceIndexByPreviousIndex.get(index)).filter((index): index is number => typeof index === "number"),
+    }));
+    setSalesSheetHighlightedRows((prev) => Object.entries(prev).reduce<Partial<Record<SalesSheetName, number[]>>>((acc, [sheetName, indexes]) => {
+      const sourceIndexes = Array.isArray(indexes) ? indexes : [];
+      acc[sheetName as SalesSheetName] = sourceIndexes
+        .map((index) => sourceIndexByPreviousIndex.get(index))
+        .filter((index): index is number => typeof index === "number");
+      return acc;
+    }, {}));
+  }
+
   const [jsonText, setJsonText] = useState(`[
   {
     "일자": "20260520",
@@ -10778,6 +10880,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setOrderFilePassword(snapshot.orderFilePassword || "");
         setMessage(snapshot.message || "");
         setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
+        setDirectShippingSourceIndexes(snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
         const [storedUploaded, storedOrders, storedInvoices] = await Promise.all([
           loadSalesWorkspaceFiles("uploaded"),
           loadSalesWorkspaceFiles("pendingOrders"),
@@ -10815,6 +10918,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           orderFilePassword,
           message,
           directShippingRows,
+          directShippingSourceIndexes,
         };
         localStorage.setItem(SALES_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
       } catch {
@@ -10822,7 +10926,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [workspaceRestored, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows]);
+  }, [workspaceRestored, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows, directShippingSourceIndexes]);
 
   useEffect(() => {
     if (!workspaceRestored) return;
@@ -11076,13 +11180,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해주세요.");
       }
-      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; message?: string }> : [];
+      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
       setCollectionStatuses(statuses.length
-        ? statuses.map((item) => ({
-            name: salesCellText(item.channel_name) || "쇼핑몰",
-            status: item.ok ? "done" : "failed",
-            message: item.ok ? `${Number(item.count || 0)}건` : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
-          }))
+        ? statuses.map((item) => {
+            const displayCount = Number(item.item_count ?? item.count ?? 0);
+            const orderCount = Number(item.count ?? 0);
+            const itemCount = Number(item.item_count ?? displayCount);
+            const countMessage = itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
+            const isManual = item.source === "manual";
+            return {
+              name: salesCellText(item.channel_name) || (isManual ? "수동 주문수집" : "쇼핑몰"),
+              status: item.ok ? "done" : (item.skipped ? "skipped" : "failed"),
+              message: item.ok ? countMessage : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
+              source: isManual ? "manual" as const : "api" as const,
+            };
+          })
         : [
             {
               name: "쇼핑몰 API",
@@ -11095,6 +11207,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return;
       }
       const orders = Array.isArray(data.orders) ? data.orders as CollectedOnlineOrder[] : [];
+      const collectedOrderCount = orders.length;
       const collectedItemCount = orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
       if (orders.length) {
         const mappings = await loadSalesChannelProductMappings().catch((error) => {
@@ -11105,7 +11218,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setSalesGridResetKey((value) => value + 1);
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
-      setMessage(`최근 ${collectDays}일 쇼핑몰 API 주문 ${collectedItemCount}건을 수집해 온라인 발주 시트에 반영했습니다.`);
+      setMessage(`최근 ${collectDays}일 쇼핑몰 API 주문 ${collectedOrderCount}건(상품 ${collectedItemCount}줄)을 수집해 온라인 발주 시트에 반영했습니다.`);
       window.alert("작업 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : "쇼핑몰 API 주문 수집 실패";
@@ -11125,11 +11238,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
     const exportSheets = applyProgressTrackingToShipping(sheets);
-    const directIndexes = new Set(
-      exportSheets["발주 진행 단계"]
+    const directIndexes = new Set([
+      ...directShippingSourceIndexes.JB,
+      ...directShippingSourceIndexes.케이모아,
+      ...exportSheets["발주 진행 단계"]
         .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
         .filter((index) => index >= 0),
-    );
+    ]);
     const shippingRows = shippingRowsForExcelExport(exportSheets);
     void downloadXlsxFile(`${integratedOrderFileName()}.xlsx`, {
       "발주 진행 단계": exportSheets["발주 진행 단계"],
@@ -11153,47 +11268,69 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
     const exportSheets = applyProgressTrackingToShipping(sheets);
-    const directIndexes = new Set(
-      exportSheets["발주 진행 단계"]
+    const directIndexes = new Set([
+      ...directShippingSourceIndexes.JB,
+      ...directShippingSourceIndexes.케이모아,
+      ...exportSheets["발주 진행 단계"]
         .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
         .filter((index) => index >= 0),
-    );
+    ]);
     const shippingRows = shippingRowsForExcelExport(exportSheets);
     void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)) });
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage("송장출력용 시트를 내보냈습니다. 브라우저 다운로드 폴더에서 확인해 주세요.");
   }
 
+  function shippingExportRowsExcludingDirect() {
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const directIndexes = new Set([
+      ...directShippingSourceIndexes.JB,
+      ...directShippingSourceIndexes.케이모아,
+      ...exportSheets["발주 진행 단계"]
+        .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
+        .filter((index) => index >= 0),
+    ]);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    return shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index));
+  }
+
+  function exportBaseShippingFromModal() {
+    const rows = shippingExportRowsExcludingDirect();
+    if (!rows.length) {
+      window.alert("내보낼 원래 송장엑셀 데이터가 없습니다.");
+      return;
+    }
+    void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: rows });
+    setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
+    setMessage("송장출력용 시트를 내보냈습니다.");
+  }
+
+  function exportDirectShippingFromModal(partner: DirectShippingPartner) {
+    const rows = directShippingRows[partner] || [];
+    if (!rows.length) {
+      window.alert(`${partner} 직송파일 데이터가 없습니다.`);
+      return;
+    }
+    const headers = partner === "JB" ? jbDirectHeaders : kemoreDirectHeaders;
+    void downloadTableXlsx(`${todayMmdd()}_${partner}직송.xlsx`, `${partner}직송`, headers, rows);
+    setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
+    setMessage(`${partner} 직송파일을 내보냈습니다.`);
+  }
+
   function exportShippingBundleFromModal() {
-    if (!hasSalesRows(sheets.송장출력용) && !directShippingRows.JB.length && !directShippingRows.케이모아.length) {
+    const baseRows = shippingExportRowsExcludingDirect();
+    const totalFiles = (baseRows.length ? 1 : 0) + (directShippingRows.JB.length ? 1 : 0) + (directShippingRows.케이모아.length ? 1 : 0);
+    if (!totalFiles) {
       window.alert("내보낼 송장 엑셀 데이터가 없습니다.");
       return;
     }
-    if (completedSalesTasks.exportShipping) {
-      const ok = window.confirm("송장 엑셀을 이미 내보낸 것으로 보입니다. 다시 내보내시겠습니까?");
-      if (!ok) return;
-    } else {
-      const ok = window.confirm("송장출력용과 직송파일을 내보내시겠습니까?");
-      if (!ok) return;
-    }
-    const exportSheets = applyProgressTrackingToShipping(sheets);
-    const directIndexes = new Set(
-      exportSheets["발주 진행 단계"]
-        .map((row, index) => progressValue(row, "직송거래처") ? index : -1)
-        .filter((index) => index >= 0),
-    );
-    const shippingRows = shippingRowsForExcelExport(exportSheets);
-    if (hasSalesRows(shippingRows)) {
-      void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, {
-        송장출력용: shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index)),
-      });
-    }
+    const ok = window.confirm(`현재 생성된 송장엑셀 ${totalFiles}개 파일을 모두 내보내시겠습니까?`);
+    if (!ok) return;
+    if (baseRows.length) void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: baseRows });
     if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
     if (directShippingRows.케이모아.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, directShippingRows.케이모아);
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
-    setMessage("송장 엑셀 내보내기를 실행했습니다.");
-    const toggle = document.getElementById("online-shipping-sheet-toggle");
-    if (toggle instanceof HTMLInputElement) toggle.checked = false;
+    setMessage(`송장 엑셀 ${totalFiles}개 파일 내보내기를 실행했습니다.`);
   }
 
   function exportSalesShipmentList() {
@@ -11237,6 +11374,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!["발주 진행 단계", "송장출력용"].includes(selectedSalesRange.sheet)) return [];
     if (Array.isArray(selectedSalesRange.rowIndexes)) return selectedSalesRange.rowIndexes;
     return Array.from({ length: selectedSalesRange.range.endRow - selectedSalesRange.range.startRow + 1 }, (_, index) => selectedSalesRange.range.startRow + index);
+  }
+
+  function selectShippingPreviewRange(range: SalesGridRange, rowIndexes?: number[]) {
+    const visibleIndexes = rowIndexes?.length
+      ? rowIndexes
+      : Array.from({ length: range.endRow - range.startRow + 1 }, (_, index) => range.startRow + index);
+    const sourceIndexes = visibleIndexes
+      .map((visibleIndex) => shippingPreviewSourceIndexes[visibleIndex])
+      .filter((index): index is number => typeof index === "number" && index >= 0);
+    setSelectedSalesRange({
+      sheet: "송장출력용",
+      range: {
+        startRow: sourceIndexes[0] ?? range.startRow,
+        endRow: sourceIndexes[sourceIndexes.length - 1] ?? range.endRow,
+        startCol: range.startCol,
+        endCol: range.endCol,
+      },
+      rowIndexes: sourceIndexes,
+    });
   }
 
   function openDirectPartnerPicker() {
@@ -11309,37 +11465,42 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const headers = partner === "JB" ? jbDirectHeaders : kemoreDirectHeaders;
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
     const previousRows = directShippingRows[partner] || [];
+    const previousSourceIndexes = directShippingSourceIndexes[partner] || [];
+    const otherPartner: DirectShippingPartner = partner === "JB" ? "케이모아" : "JB";
+    const alreadyDirectIndexes = new Set([...previousSourceIndexes, ...(directShippingSourceIndexes[otherPartner] || [])]);
     const appendRows: string[][] = [];
+    const appendSourceIndexes: number[] = [];
 
-    for (const sourceRow of selectedRows) {
+    selectedRows.forEach((sourceRow, selectedOffset) => {
+      const sourceIndex = selectedIndexes[selectedOffset];
+      if (sourceIndex == null || alreadyDirectIndexes.has(sourceIndex)) return;
       const preview = mapper(sourceRow, previousRows.length + appendRows.length + 1);
       const isDuplicate = previousRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"))
         || appendRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"));
-      if (!isDuplicate) appendRows.push(preview);
-    }
+      if (!isDuplicate) {
+        appendRows.push(preview);
+        appendSourceIndexes.push(sourceIndex);
+      }
+    });
 
     if (!appendRows.length) {
-      window.alert("이미 입력된 값과 일치합니다.");
+      window.alert("이미 직송파일에 들어갔거나 다른 직송거래처로 지정된 주문입니다.");
       setDirectPartnerPickerOpen(false);
       return;
     }
 
-    const nextRows = [...previousRows, ...appendRows];
-    const savedRows = nextRows;
+    const savedRows = [...previousRows, ...appendRows];
+    const savedSourceIndexes = [...previousSourceIndexes, ...appendSourceIndexes];
     setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
+    setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: savedSourceIndexes }));
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      const shippingRows = next.송장출력용.map((row) => [...row]);
       const purchaseRows = next["FN구매입력"].map((row) => [...row]);
-      const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
-      selectedIndexes.forEach((rowIndex, orderIndex) => {
+      appendSourceIndexes.forEach((rowIndex) => {
         if (progressRows[rowIndex]) {
           setProgressValue(progressRows[rowIndex], "직송거래처", partner);
-          setProgressValue(progressRows[rowIndex], "주문상태", "출고대기");
-          setProgressValue(progressRows[rowIndex], "송장번호", partner);
         }
-        if (shippingRows[rowIndex] && trackingIndex >= 0) shippingRows[rowIndex][trackingIndex] = partner;
         const progress = progressRows[rowIndex];
         const purchase = salesSheetHeaders["FN구매입력"].map(() => "");
         const today = salesWorkspaceDayKey().replace(/\D/g, "");
@@ -11363,13 +11524,47 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         purchaseRows[rowIndex] = purchase;
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-      next.송장출력용 = padSalesRows("송장출력용", shippingRows);
       next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
       return next;
     });
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
     setMessage(`${partner} 직송 주문 ${appendRows.length}건을 저장했습니다. 엑셀 내보내기 때 직송파일과 FN구매입력에 반영됩니다.`);
     setDirectPartnerPickerOpen(false);
+  }
+
+  function removeDirectShippingRows(partner: DirectShippingPartner, rowIndexes: number[]) {
+    const targets = new Set(rowIndexes);
+    if (!targets.size) {
+      window.alert("삭제할 직송 주문을 선택해 주세요.");
+      return;
+    }
+    const ok = window.confirm(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 원래 송장엑셀 행으로 복원할까요?`);
+    if (!ok) return;
+    const removedSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => targets.has(index));
+    const nextRows = (directShippingRows[partner] || [])
+      .filter((_, index) => !targets.has(index))
+      .map((row, index) => {
+        const next = [...row];
+        next[0] = directShippingCode(partner, index + 1);
+        return next;
+      });
+    const nextSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => !targets.has(index));
+    setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
+    setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: nextSourceIndexes }));
+    setSheets((prev) => {
+      const next = { ...prev };
+      const progressRows = next["발주 진행 단계"].map((row) => [...row]);
+      const purchaseRows = next["FN구매입력"].map((row) => [...row]);
+      removedSourceIndexes.forEach((sourceIndex) => {
+        if (progressRows[sourceIndex]) setProgressValue(progressRows[sourceIndex], "직송거래처", "");
+        if (purchaseRows[sourceIndex]) purchaseRows[sourceIndex] = salesSheetHeaders["FN구매입력"].map(() => "");
+      });
+      next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+      next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+      return next;
+    });
+    if (!nextRows.length && shippingPreviewTab === partner) setShippingPreviewTab("shipping");
+    setMessage(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 원래 송장엑셀 행으로 복원했습니다.`);
   }
 
   async function enrichOnlineEntryRows(
@@ -11793,6 +11988,23 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)") || "미지정";
   }
 
+  function onlineOrderStatusApiUnsupportedSite(row: string[]) {
+    const site = orderProgressSiteName(row).toUpperCase();
+    const code = salesCellText(progressValue(row, "쇼핑몰코드")).toUpperCase();
+    const haystack = `${site} ${code}`;
+    return /ESM|G마켓|지마켓|옥션|카카오|KAKAO|톡스토어|선물하기|현대이지웰|이지웰|EZWEL|오늘의집|TODAYHOUSE|O\.RORA/.test(haystack);
+  }
+
+  function groupedUnsupportedStatusApiRows(indexes: number[]) {
+    return indexes.reduce<Record<string, number>>((acc, index) => {
+      const row = sheets["발주 진행 단계"][index] || [];
+      if (!onlineOrderStatusApiUnsupportedSite(row)) return acc;
+      const site = orderProgressSiteName(row);
+      acc[site] = (acc[site] || 0) + 1;
+      return acc;
+    }, {});
+  }
+
   function orderProgressMatchesStatus(row: string[], label: string) {
     if (!label || label === "전체") return true;
     const status = progressValue(row, "주문상태");
@@ -11836,7 +12048,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return indexes.map((index) => {
       const row = sheets["발주 진행 단계"][index] || [];
       const channelName = progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)");
-      const productOrderId = progressValue(row, "쇼핑몰코드") || progressValue(row, "주문번호");
+      const productOrderId = progressValue(row, "쇼핑몰품목key") || progressValue(row, "쇼핑몰상품코드") || progressValue(row, "주문번호");
       const orderNo = progressValue(row, "주문번호");
       return {
         rowIndex: index,
@@ -11849,6 +12061,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         product_order_id: productOrderId,
         orderNo,
         order_no: orderNo,
+        bundleOrderNo: progressValue(row, "묶음주문번호"),
+        bundle_order_no: progressValue(row, "묶음주문번호"),
+        quantity: progressValue(row, "수량"),
         deliveryMethod: "DELIVERY",
         deliveryCompanyCode: progressValue(row, "배송방법코드") || "CJGLS",
         trackingNumber: progressValue(row, "송장번호"),
@@ -12036,7 +12251,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     const eligibleIndexes = status === "출고완료"
-      ? indexes.filter((index) => salesCellText(progressValue(sheets["발주 진행 단계"][index], "송장번호")) && !salesCellText(progressValue(sheets["발주 진행 단계"][index], "직송거래처")))
+      ? indexes.filter((index) => salesCellText(progressValue(sheets["발주 진행 단계"][index], "송장번호")))
       : indexes;
     if (!eligibleIndexes.length) {
       window.alert(status === "출고완료" ? "송장번호가 입력된 선택 주문이 없습니다." : "처리할 주문이 없습니다.");
@@ -12058,13 +12273,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       partialBundleWarnings.push(`${bundleIndexes.map((index) => `${index + 1}행`).join(", ")} (${bundleNo})`);
     });
     const statusTargetLabel = status === "주문확인" ? "주문확인으로" : status === "출고대기" ? "출고대기로" : "출고완료로";
-    const ok = partialBundleWarnings.length
-      ? window.confirm(`묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?`)
-      : window.confirm(`${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`);
+    const unsupportedGrouped = groupedUnsupportedStatusApiRows(eligibleIndexes);
+    const unsupportedIndexes = new Set(
+      eligibleIndexes.filter((index) => onlineOrderStatusApiUnsupportedSite(sheets["발주 진행 단계"][index] || [])),
+    );
+    const apiIndexes = eligibleIndexes.filter((index) => !unsupportedIndexes.has(index));
+    const unsupportedMessage = Object.entries(unsupportedGrouped).map(([site, count]) => `${site} ${count}건`).join(", ");
+    const baseConfirmMessage = partialBundleWarnings.length
+      ? `묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?`
+      : `${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`;
+    const ok = unsupportedMessage
+      ? window.confirm(`${baseConfirmMessage}\n\nAPI 미호출 쇼핑몰(${unsupportedMessage})도 FNOS에서만 다음 단계로 넘기시겠습니까?\n※ 해당 쇼핑몰 관리자에서는 직접 주문확인/송장처리가 필요합니다.`)
+      : window.confirm(baseConfirmMessage);
     if (!ok) return;
     try {
-      if (status === "주문확인") await callOnlineOrderStatusApi("confirm", eligibleIndexes);
-      if (status === "출고완료") await callOnlineOrderStatusApi("dispatch", eligibleIndexes);
+      if (status === "주문확인" && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes);
+      if (status === "출고완료" && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes);
     } catch (error) {
       const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
       setCollectionStatuses((prev) => prev.map((item) => ({ ...item, status: "failed", message })));
@@ -12338,6 +12562,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setInvoiceMemoText("");
     setSalesSheetHighlightedRows({});
     setDirectShippingRows({ JB: [], 케이모아: [] });
+    setDirectShippingSourceIndexes({ JB: [], 케이모아: [] });
     directShippingFileHandles.current = {};
     setActiveSheet("발주 진행 단계");
     setSheets(salesInitialSheets());
@@ -12355,6 +12580,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setInvoiceMemoText("");
     setSalesSheetHighlightedRows({});
     setDirectShippingRows({ JB: [], 케이모아: [] });
+    setDirectShippingSourceIndexes({ JB: [], 케이모아: [] });
     directShippingFileHandles.current = {};
     setActiveSheet("발주 진행 단계");
     setSheets(salesInitialSheets());
@@ -14699,15 +14925,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고완료">출고완료</option>
             </select>
             <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={openSelectedOrderProductLinks}>품목 연결</button>
-            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
-              const partner = event.target.value as DirectShippingPartner;
-              if (partner) void makeDirectShippingFile(partner);
-              event.currentTarget.value = "";
-            }}>
-              <option value="">직송 저장</option>
-              <option value="JB">제이비JB</option>
-              <option value="케이모아">케이모아</option>
-            </select>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
             {orderProgressTotalCount > 0 && (
               <div className="flex min-w-[320px] flex-1 items-center justify-center gap-2 whitespace-nowrap text-xs font-black text-slate-600">
@@ -14753,17 +14970,36 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <label htmlFor="online-shipping-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
               </div>
               <div className="min-h-0 flex-1 overflow-auto p-5">
-                {(directShippingRows.JB.length > 0 || directShippingRows.케이모아.length > 0) && <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-                  {directShippingRows.JB.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일</button>}
-                  {directShippingRows.케이모아.length > 0 && <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일</button>}
-                </div>}
-                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={(rows) => setSheets((prev) => ({ ...prev, 송장출력용: rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} />}
-                {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} />}
-                {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} />}
+                <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>원래 송장엑셀</button>
+                  <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
+                  <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
+                  <span className="mx-1 h-5 w-px bg-slate-200" />
+                  <select
+                    className="h-9 rounded-md border border-blue-200 bg-white px-3 text-sm font-black text-blue-700 outline-orange-400"
+                    defaultValue=""
+                    title="선택한 송장 행을 직송파일로 저장"
+                    onChange={(event) => {
+                      const partner = event.currentTarget.value as DirectShippingPartner;
+                      event.currentTarget.value = "";
+                      if (partner) void makeDirectShippingFile(partner);
+                    }}
+                  >
+                    <option value="">선택건 직송저장</option>
+                    <option value="JB">JB 직송저장</option>
+                    <option value="케이모아">케이모아 직송저장</option>
+                  </select>
+                </div>
+                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir) => { sortOnlineShippingRowsByExportColumn(colIndex, dir); return true; }} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} />}
+                {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
+                {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
               </div>
-              <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+                <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>원래 송장 내보내기</button>
+                {directShippingRows.JB.length > 0 && <button type="button" className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-black text-blue-700" onClick={() => exportDirectShippingFromModal("JB")}>JB 직송 내보내기</button>}
+                {directShippingRows.케이모아.length > 0 && <button type="button" className="h-10 rounded-lg border border-violet-200 bg-white px-4 text-sm font-black text-violet-700" onClick={() => exportDirectShippingFromModal("케이모아")}>케이모아 직송 내보내기</button>}
+                <ActionButton type="button" onClick={exportShippingBundleFromModal}>모두 내보내기</ActionButton>
                 <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label>
-                <ActionButton type="button" onClick={exportShippingBundleFromModal}>내보내기</ActionButton>
               </div>
             </div>
           </div>

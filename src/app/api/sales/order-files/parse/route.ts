@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
-type OrderSource = "legacy" | "todayhouse" | "toss" | "ezwell" | "unknown";
+type OrderSource = "legacy" | "esm" | "todayhouse" | "toss" | "ezwell" | "unknown";
 type ParsedInvoiceRow = {
   trackingNo: string;
   recipient: string;
@@ -19,14 +19,20 @@ type ParsedInvoiceRow = {
 const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
-  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  송장출력용: ["송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  FN송장입력: ["주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   FN판매입력: ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
 
 function clean(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function cleanOrderId(value: unknown) {
+  const raw = clean(value);
+  if (/^\d+\.0$/.test(raw)) return raw.replace(/\.0$/, "");
+  return raw;
 }
 
 function cleanContact(value: unknown) {
@@ -130,10 +136,6 @@ function todayMonthDay() {
   return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 }
 
-function orderRunTimeCode() {
-  return new Date().getHours() < 12 ? "A" : "P";
-}
-
 function pick(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -210,6 +212,7 @@ function normalizeOrderOptionText(value: string) {
 function classifyOrderFileName(fileName: string): OrderSource {
   const name = fileName.toLowerCase();
   if (/esk\d*m/i.test(fileName) || name.includes("legacy-order")) return "legacy";
+  if (fileName.includes("신규주문") || fileName.includes("ESM") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "esm";
   if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "todayhouse";
   if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "toss";
   if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "ezwell";
@@ -269,7 +272,6 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
   const shipping: Array<{ sortKey: string; row: string[] }> = [];
   const invoice: string[][] = [];
   const sale: string[][] = [];
-  const runCode = orderRunTimeCode();
 
   for (const source of rows) {
     if (!isValidDownRow(source)) continue;
@@ -300,7 +302,6 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     shipping.push({
       sortKey: `${option}\u0000${countKey}-${String(next).padStart(3, "0")}`,
       row: [
-        `${countKey}-${runCode}${String(next).padStart(3, "0")}`,
         clean(pick(source, ["송장번호"])),
         clean(pick(source, ["수취인"])),
         contact1,
@@ -316,11 +317,10 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
 
     if (shouldIncludeInvoiceRow(alias)) {
       invoice.push([
-        mallCode,
-        clean(pick(source, ["\uC8FC\uBB38\uBC88\uD638"])),
-        clean(pick(source, ["\uBB36\uC74C\uC8FC\uBB38\uBC88\uD638"])),
-        clean(pick(source, ["\uBC30\uC1A1\uBC29\uBC95\uCF54\uB4DC"])),
-        clean(pick(source, ["\uC1A1\uC7A5\uBC88\uD638"])),
+        clean(pick(source, ["주문번호"])),
+        clean(pick(source, ["묶음주문번호"])),
+        clean(pick(source, ["배송방법코드"])),
+        clean(pick(source, ["송장번호"])),
       ]);
     }
 
@@ -365,12 +365,41 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
   if (source === "legacy" || source === "unknown") return rows;
 
   return rows.map((row) => {
+    if (source === "esm") {
+      const seller = clean(pick(row, ["판매아이디"]));
+      const isAuction = /옥션|auction/i.test(seller);
+      const isGmarket = /지마켓|g마켓|gmarket/i.test(seller);
+      const alias = isAuction ? "A" : isGmarket ? "G" : "ESM";
+      const mallName = isAuction ? "옥션" : isGmarket ? "지마켓" : "ESM";
+      const shipmentNo = cleanOrderId(pick(row, ["배송번호"]));
+      const sellerCode = cleanOrderId(pick(row, ["판매자관리코드", "판매자상세관리코드"]));
+      return {
+        __alias: alias,
+        수집일자: pick(row, ["결제일", "주문일자(결제확인전)"]),
+        쇼핑몰명: mallName,
+        주문번호: cleanOrderId(pick(row, ["주문번호"])),
+        묶음주문번호: cleanOrderId(pick(row, ["장바구니번호(결제번호)", "배송번호", "주문번호"])),
+        배송방법코드: "CJGLS",
+        송장번호: pick(row, ["송장번호", "운송장번호"]),
+        수취인: pick(row, ["수령인명", "구매자명"]),
+        수취인연락처1: pick(row, ["수령인 휴대폰", "수령인 전화번호", "구매자 휴대폰"]),
+        수취인연락처2: pick(row, ["수령인 전화번호", "수령인 휴대폰", "구매자 전화번호"]),
+        우편번호: pick(row, ["우편번호"]),
+        주소: pick(row, ["주소"]),
+        주문옵션: joinText(pick(row, ["상품명"]), pick(row, ["옵션"])),
+        수량: pick(row, ["수량"]),
+        배송요청사항: pick(row, ["배송시 요구사항"]),
+        정산예정금액: pick(row, ["정산예정금액", "판매금액", "판매단가"]),
+        품목코드: sellerCode,
+        품목명: pick(row, ["상품명"]),
+      };
+    }
+
     if (source === "todayhouse") {
       return {
         __alias: "O",
         수집일자: pick(row, ["주문결제완료일", "출고예정일"]),
         쇼핑몰명: "오늘의 집",
-        쇼핑몰코드: "O",
         주문번호: pick(row, ["주문번호"]),
         묶음주문번호: pick(row, ["묶음배송그룹", "주문번호"]),
         배송방법코드: pick(row, ["배송방법"]),
@@ -392,7 +421,6 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
         __alias: "T",
         수집일자: pick(row, ["주문일시", "발송기한"]),
         쇼핑몰명: "토스",
-        쇼핑몰코드: "T",
         주문번호: pick(row, ["주문번호"]),
         묶음주문번호: pick(row, ["배송비 묶음 번호", "주문번호"]),
         배송방법코드: pick(row, ["택배사"]),
@@ -413,7 +441,6 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
       __alias: "Z",
       수집일자: pick(row, ["주문일시", "주문확인일시"]),
       쇼핑몰명: "현대이지웰",
-      쇼핑몰코드: "Z",
       주문번호: pick(row, ["주문번호"]),
       묶음주문번호: pick(row, ["장바구니 번호", "주문번호"]),
       배송방법코드: pick(row, ["택배사"]),
@@ -473,6 +500,18 @@ const knownHeaderNames = [
   "수취인 주소",
   "수취인 주소상세",
   "배송메모",
+  "판매아이디",
+  "주문일자(결제확인전)",
+  "구매자명",
+  "상품번호",
+  "수령인명",
+  "판매자관리코드",
+  "수령인 휴대폰",
+  "배송시 요구사항",
+  "배송번호",
+  "장바구니번호(결제번호)",
+  "결제일",
+  "정산예정금액",
 ];
 
 function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
@@ -592,8 +631,9 @@ export async function POST(request: Request) {
         const rows = rowsFromWorksheet(worksheet).filter((row) => Object.values(row).some((value) => clean(value)));
         if (!rows.length) continue;
 
-        if (source !== "unknown" && source !== "legacy") {
-          downRows.push(...toCanonicalRows(rows, source));
+        const detectedSource = source === "unknown" && rows.some((row) => hasKeys(row, ["판매아이디", "배송번호", "장바구니번호(결제번호)"])) ? "esm" : source;
+        if (detectedSource !== "unknown" && detectedSource !== "legacy") {
+          downRows.push(...toCanonicalRows(rows, detectedSource));
           continue;
         }
 

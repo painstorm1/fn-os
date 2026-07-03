@@ -87,6 +87,35 @@ function coupangOrderStatus(value: unknown) {
   return text(value);
 }
 
+function paramsArray(params: Record<string, unknown>, key: string) {
+  const value = params[key];
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
+function productOrderIdsFromParams(params: Record<string, unknown>) {
+  const explicit = Array.isArray(params.productOrderIds) ? params.productOrderIds.map(text).filter(Boolean) : [];
+  if (explicit.length) return explicit;
+  return paramsArray(params, "dispatchProductOrders").map((row) => text(row.productOrderId || row.product_order_id)).filter(Boolean);
+}
+
+function coupangDispatchRows(params: Record<string, unknown>) {
+  return paramsArray(params, "dispatchProductOrders")
+    .map((row) => {
+      const productOrderId = text(row.productOrderId || row.product_order_id);
+      const orderId = text(row.orderId || row.order_id || row.orderNo || row.order_no) || productOrderId;
+      const shipmentBoxId = text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.bundleNo || row.bundle_no) || orderId;
+      const vendorItemId = text(row.vendorItemId || row.vendor_item_id || productOrderId);
+      return {
+        shipmentBoxId,
+        orderId,
+        vendorItemId,
+        deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
+        invoiceNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
+      };
+    })
+    .filter((row) => row.shipmentBoxId && row.orderId && row.vendorItemId && row.invoiceNumber);
+}
+
 function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
   const receiver = record(row.receiver);
   const orderer = record(row.orderer);
@@ -188,6 +217,73 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "쿠팡 주문 수집 실패" };
+    }
+  }
+
+  async confirmOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const accessKey = text(params.access_key);
+    const secretKey = text(params.secret_key);
+    const vendorId = text(params.vendor_id || params.seller_id || params.api_client_id);
+    if (!accessKey || !secretKey || !vendorId) return { ok: false, data: null, error: "쿠팡 Access Key, Secret Key, Vendor ID를 먼저 저장해주세요." };
+    const shipmentBoxIds = Array.from(new Set([
+      ...paramsArray(params, "confirmProductOrders").map((row) => text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.orderId || row.order_id || row.orderNo || row.order_no || row.productOrderId || row.product_order_id)),
+      ...productOrderIdsFromParams(params),
+    ].filter(Boolean)));
+    if (!shipmentBoxIds.length) return { ok: false, data: null, error: "쿠팡 상품준비중 처리할 shipmentBoxId가 없습니다." };
+    try {
+      const path = `/v2/providers/openapi/apis/api/v4/vendors/${encodeURIComponent(vendorId)}/ordersheets/acknowledgement`;
+      const body = { vendorId, shipmentBoxIds: shipmentBoxIds.map((id) => (/^\d+$/.test(id) ? Number(id) : id)) };
+      const response = await fetch(`${COUPANG_BASE_URL}${path}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: coupangAuthorization("PATCH", path, "", accessKey, secretKey),
+          "X-Requested-By": vendorId,
+          "Content-Type": "application/json;charset=UTF-8",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson(response);
+      return { ok: true, data, message: `쿠팡 상품준비중 ${shipmentBoxIds.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "쿠팡 상품준비중 처리 실패" };
+    }
+  }
+
+  async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const accessKey = text(params.access_key);
+    const secretKey = text(params.secret_key);
+    const vendorId = text(params.vendor_id || params.seller_id || params.api_client_id);
+    if (!accessKey || !secretKey || !vendorId) return { ok: false, data: null, error: "쿠팡 Access Key, Secret Key, Vendor ID를 먼저 저장해주세요." };
+    const rows = coupangDispatchRows(params);
+    if (!rows.length) return { ok: false, data: null, error: "쿠팡 송장업로드에 필요한 shipmentBoxId/orderId/vendorItemId/송장번호가 없습니다." };
+    try {
+      const path = `/v2/providers/openapi/apis/api/v4/vendors/${encodeURIComponent(vendorId)}/orders/invoices`;
+      const body = {
+        vendorId,
+        orderSheetInvoiceApplyDtos: rows.map((row) => ({
+          shipmentBoxId: /^\d+$/.test(row.shipmentBoxId) ? Number(row.shipmentBoxId) : row.shipmentBoxId,
+          orderId: /^\d+$/.test(row.orderId) ? Number(row.orderId) : row.orderId,
+          vendorItemId: /^\d+$/.test(row.vendorItemId) ? Number(row.vendorItemId) : row.vendorItemId,
+          deliveryCompanyCode: row.deliveryCompanyCode,
+          invoiceNumber: row.invoiceNumber,
+          splitShipping: false,
+          preSplitShipped: false,
+          estimatedShippingDate: "",
+        })),
+      };
+      const response = await fetch(`${COUPANG_BASE_URL}${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: coupangAuthorization("POST", path, "", accessKey, secretKey),
+          "X-Requested-By": vendorId,
+          "Content-Type": "application/json;charset=UTF-8",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson(response);
+      return { ok: true, data, message: `쿠팡 송장업로드 ${rows.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "쿠팡 송장업로드 실패" };
     }
   }
 }

@@ -1,11 +1,10 @@
 import { CoupangChannelAdapter } from "@/lib/channels/coupang";
 import { ElevenstChannelAdapter } from "@/lib/channels/elevenst";
-import { EsmChannelAdapter } from "@/lib/channels/esm";
-import { KakaoChannelAdapter } from "@/lib/channels/kakao";
+
 import { LotteonChannelAdapter } from "@/lib/channels/lotteon";
 import { NaverChannelAdapter } from "@/lib/channels/naver";
 import { SsgChannelAdapter } from "@/lib/channels/ssg";
-import { TodayhouseChannelAdapter } from "@/lib/channels/todayhouse";
+
 import { TossChannelAdapter } from "@/lib/channels/toss";
 import type { SalesChannelAdapter } from "@/lib/channels/common/types";
 
@@ -20,10 +19,7 @@ export const ONLINE_ORDER_ADAPTERS: Record<string, SalesChannelAdapter> = {
   COUPANG: new CoupangChannelAdapter(),
   ELEVENST: new ElevenstChannelAdapter(),
   SSG: new SsgChannelAdapter(),
-  ESM: new EsmChannelAdapter(),
   LOTTEON: new LotteonChannelAdapter(),
-  KAKAO: new KakaoChannelAdapter(),
-  TODAYHOUSE: new TodayhouseChannelAdapter(),
   TOSS: new TossChannelAdapter(),
 };
 

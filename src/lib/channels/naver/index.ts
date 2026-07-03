@@ -153,7 +153,7 @@ function normalizeDetail(
   const address = record(row.shippingAddress || row.receiverAddress || productOrder.shippingAddress || productOrder.receiverAddress || delivery.address || delivery.shippingAddress || delivery.receiverAddress);
   const placeOrderStatus = firstText(productOrder.placeOrderStatus, row.placeOrderStatus, row.__fnosPlaceOrderStatusType);
   const productOrderId = firstText(productOrder.productOrderId, productOrder.productOrderNo, row.productOrderId);
-  const orderNo = firstText(order.orderId, productOrder.orderId, row.orderId, productOrderId);
+  const naverOrderId = firstText(order.orderId, productOrder.orderId, row.orderId);
   const qty = numberValue(productOrder.quantity || productOrder.productOrderQuantity || row.quantity) || 1;
   const salesAmount = numberValue(
     productOrder.totalPaymentAmount
@@ -178,8 +178,8 @@ function normalizeDetail(
   };
   return {
     ...base,
-    orderNo: orderNo || productOrderId,
-    bundleOrderNo: firstText(order.orderId, row.orderId),
+    orderNo: productOrderId || naverOrderId,
+    bundleOrderNo: naverOrderId || productOrderId,
     orderDate: naverOrderDate(order, productOrder),
     orderStatus: firstText(placeOrderStatus, productOrder.productOrderStatus, productOrder.orderStatus, row.productOrderStatus),
     receiverName: firstText(
@@ -404,10 +404,12 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       };
       const normalizedOrders = shippableRows.map((row) => normalizeDetail(row, base)).filter((order) => order.orderNo);
       const collectableOrders = normalizeCollectableOnlineOrders(normalizedOrders);
+      const mergedOrders = mergeOrders(collectableOrders);
+      const itemCount = collectableOrders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
       return {
         ok: true,
-        data: mergeOrders(collectableOrders),
-        message: `네이버 주문 ${collectableOrders.length}건을 수집했습니다. N배송 ${managedDeliveryCount}건, 배송지 미확정 ${waitingAddressCount}건, 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
+        data: mergedOrders,
+        message: `네이버 주문 ${mergedOrders.length}건(상품 ${itemCount}줄)을 수집했습니다. N배송 ${managedDeliveryCount}건, 배송지 미확정 ${waitingAddressCount}건, 현재 발주 전/발주 후가 아닌 ${Math.max(0, normalizedOrders.length - collectableOrders.length)}건은 제외했습니다.`,
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "네이버 주문 수집 실패" };
