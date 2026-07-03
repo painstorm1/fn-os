@@ -8137,6 +8137,15 @@ type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
+type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
+
+const orderProgressStatusFilterLabels = ["전체", "신규주문", "주문확인", "출고대기", "출고완료"] as const;
+const orderProgressStatusChangeEnabledFilters = new Set<string>(["신규주문", "주문확인", "출고대기"]);
+
+function canChangeOrderProgressStatusFromFilter(filter: string) {
+  return orderProgressStatusChangeEnabledFilters.has(filter);
+}
+
 type OrderProductLinkDraft = {
   rowIndex: number;
   mallName: string;
@@ -12564,7 +12573,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
-  async function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
+  async function changeSelectedOrderStatus(status: OrderProgressStatusChangeTarget) {
+    if (!canChangeOrderProgressStatusFromFilter(orderProgressStatusFilter)) {
+      window.alert("진행상태 변경은 신규주문·주문확인·출고대기 목록에서만 가능합니다.");
+      return;
+    }
     const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
     if (!indexes.length) {
       window.alert("선택값이 없습니다.");
@@ -15182,6 +15195,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const orderProgressStart = orderProgressTotalCount ? (orderProgressCurrentPage - 1) * orderProgressPageSize + 1 : 0;
   const orderProgressEnd = Math.min(orderProgressCurrentPage * orderProgressPageSize, orderProgressTotalCount);
   const orderProgressSelectedCount = selectedSalesRange?.sheet === "발주 진행 단계" ? selectedOrderRowIndexes().length : 0;
+  const orderProgressStatusChangeEnabled = canChangeOrderProgressStatusFromFilter(orderProgressStatusFilter);
 
   return (
     <div className="space-y-4">
@@ -15221,7 +15235,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="online-purchase-sheet-toggle" type="checkbox" className="peer/purchase-sheet hidden" />
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
-              {["전체", "신규주문", "주문확인", "출고대기", "출고완료"].map((label) => (
+              {orderProgressStatusFilterLabels.map((label) => (
                 <button
                   key={label}
                   type="button"
@@ -15245,11 +15259,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             </div>
           </div>
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
-            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700" defaultValue="" onChange={(event) => {
-              const status = event.target.value as "주문확인" | "출고대기" | "출고완료";
-              if (status) void changeSelectedOrderStatus(status);
-              event.currentTarget.value = "";
-            }}>
+            <select
+              className={`h-9 rounded-md border px-3 text-sm font-black ${orderProgressStatusChangeEnabled ? "border-slate-300 bg-white text-slate-700" : "border-slate-200 bg-slate-100 text-slate-400"}`}
+              defaultValue=""
+              disabled={!orderProgressStatusChangeEnabled}
+              title={orderProgressStatusChangeEnabled ? "선택 주문 진행상태 변경" : "진행상태 변경은 신규주문·주문확인·출고대기 목록에서만 가능합니다."}
+              onChange={(event) => {
+                const status = event.target.value as OrderProgressStatusChangeTarget;
+                if (status) void changeSelectedOrderStatus(status);
+                event.currentTarget.value = "";
+              }}>
               <option value="">진행 상태</option>
               <option value="주문확인">주문확인</option>
               <option value="출고대기">출고대기</option>
