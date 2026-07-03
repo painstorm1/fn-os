@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import * as XLSX from "xlsx";
+import officeCrypto from "officecrypto-tool";
 import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem } from "@/lib/channels/common/types";
 import { onlineOrderAdapterCodeForChannel, onlineOrderAdapterForChannel, ONLINE_ORDER_UNSUPPORTED_MESSAGE } from "@/lib/channels/registry";
@@ -72,12 +73,14 @@ function orderCount(orders: NormalizedOrder[]) {
 
 const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
 const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
+type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "unknown";
 
 type ManualOrderFileResult = {
   fileName: string;
-  source: "esm" | "unknown";
+  source: ManualOrderSource;
   siteName: string;
   orders: NormalizedOrder[];
+  error?: string;
 };
 
 function cleanId(value: unknown) {
@@ -94,6 +97,10 @@ function firstText(...values: unknown[]) {
   return "";
 }
 
+function joinText(...values: unknown[]) {
+  return values.map(text).filter(Boolean).join(" ").trim();
+}
+
 function pick(row: AnyRecord, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -102,11 +109,108 @@ function pick(row: AnyRecord, keys: string[]) {
   return "";
 }
 
-function workbookRows(buffer: Buffer, fileName: string) {
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
-  return workbook.SheetNames.flatMap((sheetName) => XLSX.utils.sheet_to_json<AnyRecord>(workbook.Sheets[sheetName], { defval: "", raw: false })
+const manualHeaderHints = [
+  "판매아이디", "주문번호", "배송번호", "상품번호", "상품명", "옵션", "수령인명", "수취인명", "수령자명",
+  "주문배송 내역", "묶음배송그룹", "수취인 연락처", "수취인 우편번호", "수취인 주소", "수취인 주소상세",
+  "주문배송관리-상품준비중", "주문일시", "주문건수", "수령인 연락처", "배송지", "주문금액",
+  "배송목록", "장바구니 번호", "주문수량", "배송수량", "수령자 휴대폰번호", "배송메시지(요청사항)",
+];
+
+function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: string) {
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
+  const headerIndex = matrix.findIndex((row) => {
+    const values = row.map((cell) => text(cell));
+    return values.filter((cell) => manualHeaderHints.includes(cell)).length >= 3;
+  });
+  if (headerIndex >= 0) {
+    const headers = matrix[headerIndex].map((cell) => text(cell));
+    return matrix.slice(headerIndex + 1).map((row) => {
+      const next: AnyRecord = { __sheetName: sheetName, __fileName: fileName };
+      headers.forEach((header, index) => {
+        if (header) next[header] = row[index] ?? "";
+      });
+      return next;
+    }).filter((row) => Object.values(row).some((value) => text(value)));
+  }
+  return XLSX.utils.sheet_to_json<AnyRecord>(sheet, { defval: "", raw: false })
     .map((row) => ({ ...row, __sheetName: sheetName, __fileName: fileName }))
-    .filter((row) => Object.values(row).some((value) => text(value))));
+    .filter((row) => Object.values(row).some((value) => text(value)));
+}
+
+function manualSourceFromFileName(fileName: string): ManualOrderSource {
+  const lower = fileName.toLowerCase();
+  if (fileName.includes("신규주문") || lower.includes("esm") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "esm";
+  if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "todayhouse";
+  if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "toss";
+  if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "ezwel";
+  return "unknown";
+}
+
+function manualSourceSiteName(source: ManualOrderSource) {
+  if (source === "todayhouse") return "오늘의집";
+  if (source === "toss") return "토스";
+  if (source === "ezwel") return "현대이지웰";
+  if (source === "esm") return "ESM";
+  return "수동 주문수집";
+}
+
+function envLocalOrderFilePasswords() {
+  return fs.readFile(path.join(/*turbopackIgnore: true*/ process.cwd(), ".env.local"), "utf8")
+    .then((content) => content.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && line.includes("="))
+      .map((line) => {
+        const [key, ...rest] = line.split("=");
+        if (key.trim() !== "ORDER_FILE_PASSWORD") return "";
+        return rest.join("=").trim().replace(/^['\"]|['\"]$/g, "");
+      })
+      .filter(Boolean))
+    .catch(() => [] as string[]);
+}
+
+function isWorkbookPasswordError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /password|encrypted|encryption|protected|암호/i.test(message);
+}
+
+async function decryptWorkbookBuffer(buffer: Buffer, password: string) {
+  return officeCrypto.decrypt(buffer, { password });
+}
+
+async function readWorkbook(buffer: Buffer) {
+  const read = (input: Buffer) => XLSX.read(input, { type: "buffer", cellDates: false });
+  const candidates = Array.from(new Set([process.env.ORDER_FILE_PASSWORD || "", ...(await envLocalOrderFilePasswords())].filter(Boolean)));
+  const needsPassword = officeCrypto.isEncrypted(buffer);
+  if (needsPassword) {
+    if (!candidates.length) throw new Error("암호화된 엑셀입니다. ORDER_FILE_PASSWORD 환경변수를 설정해 주세요.");
+    for (const password of candidates) {
+      try {
+        return read(await decryptWorkbookBuffer(buffer, password));
+      } catch {
+        // 다음 후보 비밀번호를 시도한다.
+      }
+    }
+    throw new Error("엑셀 비밀번호가 일치하지 않습니다. .env.local의 ORDER_FILE_PASSWORD를 확인해 주세요.");
+  }
+  try {
+    return read(buffer);
+  } catch (error) {
+    if (!isWorkbookPasswordError(error)) throw error;
+    if (!candidates.length) throw new Error("암호화된 엑셀입니다. ORDER_FILE_PASSWORD 환경변수를 설정해 주세요.");
+    for (const password of candidates) {
+      try {
+        return read(await decryptWorkbookBuffer(buffer, password));
+      } catch {
+        // 다음 후보 비밀번호를 시도한다.
+      }
+    }
+    throw new Error("엑셀 비밀번호가 일치하지 않습니다. .env.local의 ORDER_FILE_PASSWORD를 확인해 주세요.");
+  }
+}
+
+async function workbookRows(buffer: Buffer, fileName: string) {
+  const workbook = await readWorkbook(buffer);
+  return workbook.SheetNames.flatMap((sheetName) => rowsFromWorksheet(workbook.Sheets[sheetName], sheetName, fileName));
 }
 
 function isEsmManualRow(row: AnyRecord) {
@@ -161,18 +265,84 @@ function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrde
   };
 }
 
-function parseManualOrderFile(fileName: string, buffer: Buffer): ManualOrderFileResult[] {
-  const rows = workbookRows(buffer, fileName);
-  const esmRows = rows.filter(isEsmManualRow);
-  if (!esmRows.length) return [];
+function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSource, config: {
+  code: string; name: string; orderKeys: string[]; bundleKeys: string[]; dateKeys: string[]; receiverKeys: string[]; phoneKeys: string[];
+  zipcodeKeys: string[]; addressKeys: string[]; detailAddressKeys?: string[]; memoKeys: string[]; productCodeKeys?: string[]; optionCodeKeys?: string[];
+  productKeys: string[]; optionKeys: string[]; qtyKeys: string[]; amountKeys: string[];
+}): NormalizedOrder | null {
+  const orderNo = cleanId(pick(row, config.orderKeys));
+  const receiverName = firstText(pick(row, config.receiverKeys));
+  const productName = firstText(pick(row, config.productKeys), `${config.name} 주문`);
+  if (!orderNo || !receiverName || !productName) return null;
+  const productCode = cleanId(pick(row, config.productCodeKeys || []));
+  const optionCode = cleanId(pick(row, config.optionCodeKeys || []));
+  const item: NormalizedOrderItem = {
+    channelProductCode: productCode || optionCode,
+    channelOptionCode: optionCode || productCode,
+    channelProductName: productName,
+    channelOptionName: text(pick(row, config.optionKeys)),
+    sku: productCode || undefined,
+    qty: numberValue(pick(row, config.qtyKeys)) || 1,
+    salesAmount: numberValue(pick(row, config.amountKeys)) || undefined,
+    settlementAmount: numberValue(pick(row, config.amountKeys)) || undefined,
+    raw: row,
+  };
+  return {
+    channelCode: config.code,
+    channelName: config.name,
+    customerCode: config.code,
+    customerName: config.name,
+    orderNo,
+    bundleOrderNo: cleanId(pick(row, config.bundleKeys)) || orderNo,
+    orderDate: firstText(pick(row, config.dateKeys)),
+    orderStatus: "신규주문",
+    receiverName,
+    phone1: firstText(pick(row, config.phoneKeys)),
+    phone2: firstText(pick(row, config.phoneKeys)),
+    zipcode: text(pick(row, config.zipcodeKeys)),
+    address: joinText(pick(row, config.addressKeys), pick(row, config.detailAddressKeys || [])),
+    deliveryMessage: text(pick(row, config.memoKeys)),
+    items: [item],
+    raw: { ...row, __manualFileName: fileName, __manualSource: source },
+  };
+}
+
+function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrderSource): NormalizedOrder | null {
+  if (source === "esm") return normalizeEsmManualRow(row, fileName);
+  if (source === "todayhouse") return makeManualOrder(row, fileName, source, {
+    code: "O", name: "오늘의집", orderKeys: ["주문번호"], bundleKeys: ["묶음배송그룹", "주문번호"], dateKeys: ["주문결제완료일", "출고예정일"],
+    receiverKeys: ["수취인명"], phoneKeys: ["수취인 연락처"], zipcodeKeys: ["수취인 우편번호"], addressKeys: ["수취인 주소"], detailAddressKeys: ["수취인 주소상세"],
+    memoKeys: ["배송메모", "주문메모"], productCodeKeys: ["상품번호", "상품코드"], optionCodeKeys: ["옵션번호", "옵션ID"], productKeys: ["상품명"], optionKeys: ["옵션명"],
+    qtyKeys: ["수량"], amountKeys: ["정산예정금액", "판매가*수량 + 조립비 + 배송비", "판매가 * 수량"],
+  });
+  if (source === "toss") return makeManualOrder(row, fileName, source, {
+    code: "T", name: "토스", orderKeys: ["주문번호"], bundleKeys: ["배송비 묶음 번호", "주문번호"], dateKeys: ["주문일시", "발송기한"],
+    receiverKeys: ["수령인명", "구매자명"], phoneKeys: ["수령인 연락처", "구매자 연락처"], zipcodeKeys: ["우편번호"], addressKeys: ["배송지"],
+    memoKeys: ["주문요청사항"], productCodeKeys: ["상품번호", "상품코드"], optionCodeKeys: ["주문상품번호", "옵션번호"], productKeys: ["상품명"], optionKeys: ["옵션명"],
+    qtyKeys: ["주문건수", "수량"], amountKeys: ["주문금액"],
+  });
+  if (source === "ezwel") return makeManualOrder(row, fileName, source, {
+    code: "Z", name: "현대이지웰", orderKeys: ["주문번호"], bundleKeys: ["장바구니 번호", "주문번호"], dateKeys: ["주문일시", "주문확인일시"],
+    receiverKeys: ["수령자명", "주문자명"], phoneKeys: ["수령자 휴대폰번호", "주문자 휴대폰번호"], zipcodeKeys: ["우편번호"], addressKeys: ["주소"],
+    memoKeys: ["배송메시지(요청사항)"], productCodeKeys: ["상품코드", "배송번호"], optionCodeKeys: ["배송번호"], productKeys: ["상품명"], optionKeys: ["옵션"],
+    qtyKeys: ["주문수량", "배송수량"], amountKeys: ["매입가", "실주문금액", "판매가격"],
+  });
+  return null;
+}
+
+async function parseManualOrderFile(fileName: string, buffer: Buffer): Promise<ManualOrderFileResult[]> {
+  const rows = await workbookRows(buffer, fileName);
+  let source = manualSourceFromFileName(fileName);
+  if (source === "unknown" && rows.some(isEsmManualRow)) source = "esm";
+  if (source === "unknown") return [];
   const bySite = new Map<string, NormalizedOrder[]>();
-  for (const row of esmRows) {
-    const order = normalizeEsmManualRow(row, fileName);
+  for (const row of rows) {
+    const order = normalizeManualRow(row, fileName, source);
     if (!order) continue;
-    const siteName = order.channelName || "ESM";
+    const siteName = order.channelName || manualSourceSiteName(source);
     bySite.set(siteName, [...(bySite.get(siteName) || []), order]);
   }
-  return Array.from(bySite.entries()).map(([siteName, orders]) => ({ fileName, source: "esm" as const, siteName, orders }));
+  return Array.from(bySite.entries()).map(([siteName, orders]) => ({ fileName, source, siteName, orders }));
 }
 
 async function collectManualOrderFiles() {
@@ -192,8 +362,24 @@ async function collectManualOrderFiles() {
     const filePath = path.join(MANUAL_ORDER_DIR, name);
     const stat = await fs.stat(filePath).catch(() => null);
     if (!stat?.isFile()) continue;
-    const buffer = await fs.readFile(filePath);
-    results.push(...parseManualOrderFile(name, buffer));
+    const source = manualSourceFromFileName(name);
+    try {
+      const buffer = await fs.readFile(filePath);
+      const parsed = await parseManualOrderFile(name, buffer);
+      results.push(...parsed);
+      if (!parsed.length && source !== "unknown") results.push({ fileName: name, source, siteName: manualSourceSiteName(source), orders: [], error: `${name}에서 주문 행을 찾지 못했습니다.` });
+    } catch (error) {
+      const siteName = manualSourceSiteName(source);
+      const message = error instanceof Error ? error.message : "수동 주문파일 수집 실패";
+      const isPassword = /비밀번호|password|encrypted|encryption|protected|암호/i.test(message);
+      results.push({
+        fileName: name,
+        source,
+        siteName,
+        orders: [],
+        error: isPassword ? `${siteName} 엑셀 비밀번호 미매칭: ${message}` : `${siteName} 수동 주문파일 오류: ${message}`,
+      });
+    }
   }
   return results;
 }

@@ -11135,10 +11135,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           name: salesCellText(channel.channel_name || channel.customer_name || channel.channel_code) || "쇼핑몰",
           status: "running" as const,
           message: `최근 ${collectDays}일`,
+          source: "api" as const,
         }));
-      return statuses.length ? statuses : [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일` }];
+      return statuses.length ? statuses : [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일`, source: "api" as const }];
     } catch {
-      return [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일` }];
+      return [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일`, source: "api" as const }];
     }
   }
   async function runOrderCollectionFlow(dayWindow = 4) {
@@ -11149,7 +11150,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const ok = window.confirm(`최근 ${collectDays}일 주문 수집하시겠습니까?`);
     if (!ok) return;
     resetSalesWorkspaceForOrderCollection();
-    setCollectionStatuses([{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]);
+    setCollectionStatuses([{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" }]);
     setCollectionPopupOpen(true);
     void orderCollectionStatusPlaceholders(collectDays).then(setCollectionStatuses);
     setMessage("");
@@ -11172,7 +11173,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
       if (!isLocalPage && data.queued) {
-        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일` }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 서버 연결 중" })));
+        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" as const }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 서버 연결 중" })));
         let localBridgeOrigin = defaultBridgeOrigin;
         if (!savedBridgeOrigin) {
           const typedBridgeOrigin = window.prompt("외부 웹 주문수집은 미니PC/FNOS 주문수집 서버 주소가 필요합니다. 같은 사무실이면 미니PC LAN 주소를, 외부망이면 터널 URL을 입력하세요.", defaultBridgeOrigin);
@@ -11201,8 +11202,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               name: salesCellText(item.channel_name || item.channel_code) || "쇼핑몰",
               status: "running" as const,
               message: salesCellText(item.message) || "수집 대기 중",
+              source: "api" as const,
             }))
-          : [{ name: "쇼핑몰", status: "running" as const, message: "수집 대기 중" }];
+          : [{ name: "쇼핑몰", status: "running" as const, message: "수집 대기 중", source: "api" as const }];
         setCollectionStatuses(waitingStatuses);
         for (let attempt = 0; attempt < 45; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
@@ -11245,6 +11247,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               name: "쇼핑몰 API",
               status: res.ok && data.ok !== false ? "done" : "failed",
               message: res.ok && data.ok !== false ? "" : salesCellText(data.error || data.message || "수집 실패"),
+              source: "api" as const,
             },
           ]);
       if (!res.ok || data.ok === false) {
@@ -15243,22 +15246,43 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               size="lg"
               footer={<ActionButton type="button" onClick={() => setCollectionPopupOpen(false)}>확인</ActionButton>}
             >
-              <div className="grid gap-2 md:grid-cols-2">
-                {collectionStatuses.map((item) => {
-                  const isRunning = item.status === "running" || item.status === "waiting";
-                  const tone = item.status === "done"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : isRunning
-                      ? "border-amber-200 bg-amber-50 text-amber-700"
-                      : "border-rose-200 bg-rose-50 text-rose-700";
-                  const dot = item.status === "done" ? "bg-emerald-500" : isRunning ? "bg-amber-400" : "bg-rose-500";
-                  const label = item.status === "done" ? "수집완료" : isRunning ? "수집중" : "문제";
+              <div className="space-y-4">
+                {[
+                  ["api", "API 연동 사이트"],
+                  ["manual", "API 미연동/수동 업로드 사이트"],
+                ].map(([source, label]) => {
+                  const items = collectionStatuses.filter((item) => (item.source || "api") === source);
+                  if (!items.length) return null;
                   return (
-                    <div key={item.name} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${tone}`}>
-                      <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
-                        <div className="mt-0.5 truncate text-xs font-semibold"><span className="font-black">{label}</span>{item.message ? ` · ${item.message}` : ""}</div>
+                    <div key={source} className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-black text-slate-500">
+                        <span className="h-px flex-1 bg-slate-200" />
+                        <span>{label}</span>
+                        <span className="h-px flex-1 bg-slate-200" />
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {items.map((item) => {
+                          const isRunning = item.status === "running" || item.status === "waiting";
+                          const isSkipped = item.status === "skipped";
+                          const tone = item.status === "done"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : isRunning
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : isSkipped
+                                ? "border-slate-200 bg-slate-50 text-slate-600"
+                                : "border-rose-200 bg-rose-50 text-rose-700";
+                          const dot = item.status === "done" ? "bg-emerald-500" : isRunning ? "bg-amber-400" : isSkipped ? "bg-slate-400" : "bg-rose-500";
+                          const statusLabel = item.status === "done" ? "수집완료" : isRunning ? "수집중" : isSkipped ? "확인필요" : "문제";
+                          return (
+                            <div key={`${source}-${item.name}-${item.message}`} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${tone}`}>
+                              <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} />
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-black text-gray-800">{item.name}</div>
+                                <div className="mt-0.5 truncate text-xs font-semibold"><span className="font-black">{statusLabel}</span>{item.message ? ` · ${item.message}` : ""}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
