@@ -42,6 +42,10 @@ function normalizeInventory(row: AnyRecord) {
   };
 }
 
+function isActiveProduct(row: AnyRecord) {
+  return text(row.status).toLowerCase() !== "deleted" && row.is_active !== false;
+}
+
 async function inventoryForProduct(code: string) {
   const bySku = await selectRows<AnyRecord>("inventory_current", {
     sku: `eq.${code}`,
@@ -107,6 +111,7 @@ export async function POST(request: NextRequest) {
 
     const dbRows = await productRows(Boolean(body.refresh));
     const products = dbRows
+      .filter(isActiveProduct)
       .map(normalizeProduct)
       .filter((row) => includesQuery(row, query))
       .filter((row) => matchesAttribute(row, productAttribute))
