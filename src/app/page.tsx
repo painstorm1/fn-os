@@ -7078,6 +7078,7 @@ type SalesChannelProductMapping = {
 
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
 const ONLINE_ORDER_COMPLETED_FLOW_KEY = "fnos.salesInventory.onlineOrderCompletedFlows.v1";
+const ONLINE_ORDER_MANUAL_FILES_KEY = "fnos.salesInventory.onlineOrderManualFiles.v1";
 const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
 const SALES_WORKSPACE_DB_STORE = "files";
 const SALES_WORKSPACE_FILE_BUCKETS = ["uploaded", "pendingOrders", "pendingInvoices"] as const;
@@ -7545,6 +7546,58 @@ function onlineOrderManualRowKey(order: CollectedOnlineOrder, item: CollectedOnl
   const fallbackOption = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku || orderProductNo || orderOptionNo);
   const parts = ["manual", source, fileName, sheetName, sourceRow || fallbackOption].filter(Boolean);
   return parts.length >= 4 ? parts.join("|") : "";
+}
+
+function onlineOrderManualFileNameFromRaw(raw: unknown) {
+  const record = onlineOrderRecord(raw);
+  const source = salesCellText(record.__manualSource);
+  const fileName = salesCellText(record.__manualFileName || record.__fileName).split(/[\/]/).pop() || "";
+  return source && fileName ? fileName : "";
+}
+
+function collectedOnlineOrderManualFileNames(orders: CollectedOnlineOrder[]) {
+  const names = new Set<string>();
+  orders.forEach((order) => {
+    const orderFile = onlineOrderManualFileNameFromRaw(order.raw);
+    if (orderFile) names.add(orderFile);
+    (order.items || []).forEach((item) => {
+      const itemFile = onlineOrderManualFileNameFromRaw(item.raw);
+      if (itemFile) names.add(itemFile);
+    });
+  });
+  return Array.from(names);
+}
+
+function readPendingOnlineOrderManualFiles() {
+  if (typeof window === "undefined") return [] as string[];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ONLINE_ORDER_MANUAL_FILES_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.map((value) => salesCellText(value)).filter(Boolean) : [];
+  } catch {
+    return [] as string[];
+  }
+}
+
+function rememberPendingOnlineOrderManualFiles(orders: CollectedOnlineOrder[]) {
+  if (typeof window === "undefined") return;
+  const files = collectedOnlineOrderManualFileNames(orders);
+  if (!files.length) return;
+  const merged = Array.from(new Set([...readPendingOnlineOrderManualFiles(), ...files]));
+  window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILES_KEY, JSON.stringify(merged.slice(-50)));
+}
+
+function clearPendingOnlineOrderManualFiles(files: string[]) {
+  if (typeof window === "undefined") return;
+  if (!files.length) return;
+  const removed = new Set(files.map(salesCellText).filter(Boolean));
+  const remaining = readPendingOnlineOrderManualFiles().filter((fileName) => !removed.has(fileName));
+  if (remaining.length) window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILES_KEY, JSON.stringify(remaining));
+  else window.localStorage.removeItem(ONLINE_ORDER_MANUAL_FILES_KEY);
+}
+
+function allOrderProgressRowsCompleted(progressRows: string[][]) {
+  const rows = progressRows.filter(rowHasValue);
+  return rows.length > 0 && rows.every((row) => progressValue(row, "주문상태") === "출고완료");
 }
 
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
@@ -11437,6 +11490,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return;
       }
       const orders = Array.isArray(data.orders) ? data.orders as CollectedOnlineOrder[] : [];
+      rememberPendingOnlineOrderManualFiles(orders);
       const collectedOrderCount = orders.length;
       const collectedItemCount = orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
       if (orders.length) {
@@ -12474,6 +12528,44 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return true;
   }
 
+  async function cleanupPendingManualOrderFilesAfterCompletion() {
+    const files = readPendingOnlineOrderManualFiles();
+    if (!files.length) return;
+    const hostname = window.location.hostname;
+    const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+    const isLocalPage = isLoopbackHost || window.location.port === "3000";
+    const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
+    const cleanupUrl = isLocalPage
+      ? "/api/fnos/online-orders/manual-files/cleanup"
+      : `${(savedBridgeOrigin || "http://192.168.0.27:3000").replace(/\/$/, "")}/api/fnos/online-orders/manual-files/cleanup`;
+    try {
+      const res = await fetch(cleanupUrl, {
+        method: "POST",
+        mode: isLocalPage ? "same-origin" : "cors",
+        credentials: isLocalPage ? "include" : "omit",
+        headers: { "Content-Type": "application/json", ...(isLocalPage ? {} : { "X-FNOS-Local-Bridge": "1" }) },
+        fnosSkipBusyOverlay: true,
+        body: JSON.stringify({ files }),
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(salesCellText(data.error || data.message || "수동 주문파일 정리 실패"));
+      const moved = Array.isArray(data.moved) ? data.moved.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
+      const recycled = Array.isArray(data.recycled) ? data.recycled.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
+      const archived = Array.isArray(data.archived) ? data.archived.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
+      const resolved = Array.isArray(data.results)
+        ? data.results
+          .filter((item: Record<string, unknown>) => ["recycled", "archived", "missing"].includes(salesCellText(item.status)))
+          .map((item: Record<string, unknown>) => salesCellText(item.fileName))
+          .filter(Boolean)
+        : moved;
+      clearPendingOnlineOrderManualFiles(resolved.length ? resolved : files);
+      setMessage((prev) => `${prev ? `${prev}\n` : ""}수동 주문파일 정리 완료: 휴지통 ${recycled.length}개, 보관함 ${archived.length}개`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "수동 주문파일 정리 실패";
+      setMessage((prev) => `${prev ? `${prev}\n` : ""}출고완료는 처리됐지만 수동 주문파일 자동 정리 실패: ${message}`);
+    }
+  }
+
   async function changeSelectedOrderStatus(status: "주문확인" | "출고대기" | "출고완료") {
     const indexes = selectedOrderRowIndexes().filter((index) => rowHasValue(sheets["발주 진행 단계"][index] || []));
     if (!indexes.length) {
@@ -12525,6 +12617,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(error instanceof Error ? error.message : "온라인 주문 처리 실패");
       return;
     }
+    let shouldCleanupManualFiles = false;
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
@@ -12533,9 +12626,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setProgressValue(progressRows[index], "주문상태", status);
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+      shouldCleanupManualFiles = status === "출고완료" && allOrderProgressRowsCompleted(next["발주 진행 단계"]);
       return next;
     });
     setMessage(`${status} 처리 완료: ${eligibleIndexes.length}건`);
+    if (status === "출고완료") {
+      window.setTimeout(() => {
+        if (shouldCleanupManualFiles) void cleanupPendingManualOrderFilesAfterCompletion();
+      }, 0);
+    }
   }
 
   function deleteSelectedOrderRows() {
