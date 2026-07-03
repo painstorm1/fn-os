@@ -12716,6 +12716,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
+  function openOrderProductLinkSearchWithDraftQuery(index: number, primaryValue: string, fallbackValue: string) {
+    openOrderProductLinkSearch(index, salesCellText(primaryValue) || salesCellText(fallbackValue));
+  }
+
   async function searchOrderProductLinkProducts(query: string) {
     const keyword = query.trim();
     if (!keyword) {
@@ -15425,14 +15429,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                             onKeyDown={(event) => {
                               if (event.key !== "Enter") return;
                               event.preventDefault();
-                              const value = salesCellText(event.currentTarget.value);
-                              if (value) {
-                                focusNextOrderProductLink(index);
-                                return;
-                              }
-                              openOrderProductLinkSearch(index, "");
+                              openOrderProductLinkSearchWithDraftQuery(index, event.currentTarget.value, draft.productName);
                             }}
-                            onDoubleClick={() => openOrderProductLinkSearch(index, "")}
+                            onDoubleClick={(event) => openOrderProductLinkSearchWithDraftQuery(index, event.currentTarget.value, draft.productName)}
                           />
                         </td>
                         <td className="px-2 py-2">
@@ -15443,10 +15442,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                             onKeyDown={(event) => {
                               if (event.key === "Enter") {
                                 event.preventDefault();
-                                openOrderProductLinkSearch(index, "");
+                                openOrderProductLinkSearchWithDraftQuery(index, event.currentTarget.value, draft.productCode);
                               }
                             }}
-                            onDoubleClick={() => openOrderProductLinkSearch(index, "")}
+                            onDoubleClick={(event) => openOrderProductLinkSearchWithDraftQuery(index, event.currentTarget.value, draft.productCode)}
                           />
                         </td>
                       </tr>
