@@ -300,13 +300,6 @@ function SourceLogo({ item, className = "" }: { item: ArchiveItem; className?: s
   );
 }
 
-function displayMemo(item: ArchiveItem) {
-  const memo = String(item.memo || "").trim();
-  if (!memo) return "";
-  if (/^\s*[\d,]+\s+likes?\s*,\s*[\d,]+\s+comments?\s*$/i.test(memo)) return "";
-  if (/^\s*좋아요\s*[\d,]+\s*개?\s*,?\s*댓글\s*[\d,]+\s*개?\s*$/i.test(memo)) return "";
-  return memo;
-}
 
 function categoryOptionEntries() {
   return (Object.keys(categoryTree) as CategoryGroup[]).flatMap((group) => categoryTree[group].map((category) => ({ group, category, label: `${group} / ${category}` })));
@@ -1556,8 +1549,12 @@ function ArchiveList({
                           </div>
                         </a>
                         <div className="p-2">
-                          <div className="flex items-start gap-2">
-                            <h2 className="line-clamp-2 min-h-10 min-w-0 flex-1 text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                          <h2 className="line-clamp-3 min-h-[3.75rem] text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <SourceLogo item={item} />
+                              <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
+                            </div>
                             <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                               <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                                 <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -1565,13 +1562,6 @@ function ArchiveList({
                               </svg>
                             </button>
                           </div>
-                          <div className="mt-2">
-                            <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
-                          </div>
-                          <div className="mt-1">
-                            <SourceLogo item={item} />
-                          </div>
-                          <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{displayMemo(item)}</p>
                         </div>
                       </article>
                     );
@@ -1642,8 +1632,12 @@ function ArchiveList({
                 </div>
               </a>
               <div className="p-2">
-                <div className="flex items-start gap-2">
-                  <h2 className="line-clamp-2 min-h-10 min-w-0 flex-1 text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                <h2 className="line-clamp-3 min-h-[3.75rem] text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SourceLogo item={item} />
+                    <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
+                  </div>
                   <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                       <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -1651,13 +1645,6 @@ function ArchiveList({
                     </svg>
                   </button>
                 </div>
-                <div className="mt-2">
-                  <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
-                </div>
-                <div className="mt-1">
-                  <SourceLogo item={item} />
-                </div>
-                <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{displayMemo(item)}</p>
               </div>
             </article>
           );
