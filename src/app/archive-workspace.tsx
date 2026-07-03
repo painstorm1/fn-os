@@ -256,10 +256,46 @@ function sourceBadgeClass(source?: string) {
   return "bg-gray-50 text-gray-700 border-gray-100";
 }
 
-function SourceBadge({ source, className = "" }: { source?: string; className?: string }) {
+function sourceFallbackDomain(source?: string) {
+  const key = String(source || "web").toLowerCase();
+  const domains: Record<string, string> = {
+    instagram: "instagram.com",
+    youtube: "youtube.com",
+    naver: "naver.com",
+    smartstore: "smartstore.naver.com",
+    coupang: "coupang.com",
+    taobao: "taobao.com",
+    "1688": "1688.com",
+    amazon: "amazon.com",
+    rakuten: "rakuten.co.jp",
+    web: "google.com",
+  };
+  return domains[key] || "";
+}
+
+function sourceFaviconUrl(source?: string, url?: string) {
+  let domain = "";
+  try {
+    domain = new URL(url || "").hostname.replace(/^www\./, "");
+  } catch {
+    domain = "";
+  }
+  domain = domain || sourceFallbackDomain(source);
+  if (!domain) return "";
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+}
+
+function SourceLogo({ item, className = "" }: { item: ArchiveItem; className?: string }) {
+  const source = item.source_type || "web";
+  const iconUrl = sourceFaviconUrl(source, item.url || item.original_url || item.file_url || "");
   return (
-    <span className={`inline-flex h-6 max-w-full items-center rounded-full border px-2 text-xs font-bold ${sourceBadgeClass(source)} ${className}`}>
-      <span className="truncate">{source || "-"}</span>
+    <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-white p-1 shadow-sm ${sourceBadgeClass(source)} ${className}`} title={source} aria-label={`소스: ${source}`}>
+      {iconUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- Favicons are small external source logos and do not need Next image optimization.
+        <img src={iconUrl} alt="" loading="lazy" decoding="async" className="h-full w-full rounded-sm object-contain" />
+      ) : (
+        <span className="text-[10px] font-black uppercase">{String(source).slice(0, 1) || "-"}</span>
+      )}
     </span>
   );
 }
@@ -1467,10 +1503,39 @@ function ArchiveList({
                   <span>{groupTitle}</span>
                   <span className="rounded-full bg-white px-2 py-0.5 text-xs text-orange-600">{group.items.length.toLocaleString("ko-KR")}개</span>
                 </summary>
-                <div className="grid grid-cols-5 gap-3 p-3 2xl:grid-cols-10">
+                <div className={viewMode === "list" ? "grid grid-cols-3 gap-2 p-3" : "grid grid-cols-5 gap-3 p-3 2xl:grid-cols-10"}>
                   {group.items.map((item, index) => {
                     const category = categoryById.get(String(item.category_id || ""));
                     const href = item.url || item.file_url || "";
+                    if (viewMode === "list") {
+                      return (
+                        <div
+                          key={item.id}
+                          data-archive-list-row-id={item.id}
+                          className={`flex min-w-0 select-none items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-xs shadow-sm ${selectedIdSet.has(item.id) ? "border-orange-300 ring-1 ring-orange-100" : "border-slate-200"}`}
+                          onMouseDown={(event) => {
+                            if (!selectMode) return;
+                            const target = event.target as HTMLElement;
+                            if (target.closest("button")) return;
+                            event.preventDefault();
+                            beginListDragSelect(item.id);
+                          }}
+                          onMouseEnter={() => continueListDragSelect(item.id)}
+                        >
+                          {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIdSet.has(item.id)} readOnly aria-label="아카이브 선택" />}
+                          {showNumbers && <span className="flex h-6 min-w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 px-2 text-[11px] font-black text-white">#{index + 1}</span>}
+                          <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" onClick={(event) => { if (selectMode) event.preventDefault(); }} className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
+                          <SourceLogo item={item} className="h-6 w-6" />
+                          <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
+                          <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+                              <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                              <path d="M13.5 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                          </button>
+                        </div>
+                      );
+                    }
                     const previewUrl = item.preview_image_url || item.thumbnail_url || "";
                     return (
                       <article key={item.id} className={`relative min-h-[220px] w-full overflow-hidden rounded-xl border bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)] ${selectedIdSet.has(item.id) ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200"}`}>
@@ -1504,7 +1569,7 @@ function ArchiveList({
                             <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                           </div>
                           <div className="mt-1">
-                            <SourceBadge source={item.source_type} />
+                            <SourceLogo item={item} />
                           </div>
                           <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{displayMemo(item)}</p>
                         </div>
@@ -1539,7 +1604,7 @@ function ArchiveList({
                 {selectMode && <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={selectedIdSet.has(item.id)} readOnly aria-label="아카이브 선택" />}
                 {showNumbers && <span className="flex h-6 min-w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 px-2 text-[11px] font-black text-white">#{index + 1}</span>}
                 <a href={href || undefined} target={href ? "_blank" : undefined} rel="noreferrer" onClick={(event) => { if (selectMode) event.preventDefault(); }} className="min-w-0 flex-1 truncate font-black text-slate-950">{item.title || "제목 없음"}</a>
-                <SourceBadge source={item.source_type} className="max-w-20" />
+                <SourceLogo item={item} className="h-6 w-6" />
                 <StatusBadge className="max-w-24 truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => startEdit(item)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
@@ -1590,7 +1655,7 @@ function ArchiveList({
                   <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
                 </div>
                 <div className="mt-1">
-                  <SourceBadge source={item.source_type} />
+                  <SourceLogo item={item} />
                 </div>
                 <p className="mt-1 truncate text-xs font-bold leading-4 text-slate-500">{displayMemo(item)}</p>
               </div>
