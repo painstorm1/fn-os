@@ -2,6 +2,17 @@
 import { FnosDbError, selectRows } from "@/lib/fnos-db";
 
 type AnyRecord = Record<string, unknown>;
+type QuickLookupRequest = {
+  query?: string;
+  productAttribute?: string;
+  limit?: number;
+  includeInventory?: boolean;
+  refresh?: boolean;
+};
+
+const PRODUCT_CACHE_TTL_MS = 30_000;
+let productRowsCache: { rows: AnyRecord[]; expiresAt: number } | null = null;
+let productRowsPromise: Promise<AnyRecord[]> | null = null;
 
 function text(value: unknown) {
   return value === null || value === undefined ? "" : String(value).trim();
@@ -70,26 +81,45 @@ function matchesAttribute(row: ReturnType<typeof normalizeProduct>, attribute: s
   return true;
 }
 
+async function productRows(refresh = false) {
+  const now = Date.now();
+  if (!refresh && productRowsCache && productRowsCache.expiresAt > now) return productRowsCache.rows;
+  if (!refresh && productRowsPromise) return productRowsPromise;
+  productRowsPromise = selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2000 })
+    .then((rows) => {
+      productRowsCache = { rows, expiresAt: Date.now() + PRODUCT_CACHE_TTL_MS };
+      return rows;
+    })
+    .finally(() => {
+      productRowsPromise = null;
+    });
+  return productRowsPromise;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { query?: string; productAttribute?: string };
+    const body = (await request.json().catch(() => ({}))) as QuickLookupRequest;
     const query = text(body.query);
     if (!query) return NextResponse.json({ ok: false, error: "상품명을 입력해 주세요." }, { status: 400 });
     const productAttribute = text(body.productAttribute || "all") || "all";
+    const resultLimit = Math.min(50, Math.max(1, Number(body.limit) || 20));
+    const includeInventory = body.includeInventory !== false;
 
-    const dbRows = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 2000 });
+    const dbRows = await productRows(Boolean(body.refresh));
     const products = dbRows
       .map(normalizeProduct)
       .filter((row) => includesQuery(row, query))
       .filter((row) => matchesAttribute(row, productAttribute))
-      .slice(0, 20);
+      .slice(0, resultLimit);
 
-    const productsWithInventory = await Promise.all(products.map(async (product) => ({
-      ...product,
-      inventory: product.code ? await inventoryForProduct(product.code) : [],
-    })));
+    const productsWithInventory = includeInventory
+      ? await Promise.all(products.map(async (product) => ({
+        ...product,
+        inventory: product.code ? await inventoryForProduct(product.code) : [],
+      })))
+      : products.map((product) => ({ ...product, inventory: [] }));
     const first = productsWithInventory[0] || null;
-    const inventory = first?.inventory || [];
+    const inventory = includeInventory ? first?.inventory || [] : [];
 
     return NextResponse.json({
       ok: true,

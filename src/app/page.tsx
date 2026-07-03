@@ -8134,7 +8134,7 @@ type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
-type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string };
+type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
@@ -9144,6 +9144,12 @@ function OnlineOrderProgressList({
     loading: false,
     error: "",
   });
+  const productInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const productInputFocusValues = useRef<Record<string, string>>({});
+  const pendingProductInputFocus = useRef<{ rowIndex: number; select: boolean } | null>(null);
+  const quickProductSearchCache = useRef<Map<string, FnOsProductSearchItem[]>>(new Map());
+  const quickProductSearchInFlight = useRef<Map<string, Promise<FnOsProductSearchItem[]>>>(new Map());
+  const productEnterResolving = useRef<Set<string>>(new Set());
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const visibleRows = useMemo(() => rows
     .map((row, index) => ({ row, index, key: `progress-${index}` }))
@@ -9209,6 +9215,107 @@ function OnlineOrderProgressList({
     onSelectionChange("발주 진행 단계", { startRow: sorted[0], endRow: sorted[sorted.length - 1], startCol: 0, endCol: headers.length - 1 }, sorted);
   }, [selectedKeys, rows]);
 
+  useEffect(() => {
+    const pending = pendingProductInputFocus.current;
+    if (!pending) return;
+    const input = productInputRefs.current[productInputRefKey("품목코드(ERP)", pending.rowIndex)];
+    if (!input) return;
+    pendingProductInputFocus.current = null;
+    window.setTimeout(() => {
+      input.focus();
+      if (pending.select && input.value) input.select();
+    }, 0);
+  }, [currentPage, rows]);
+
+  function productInputRefKey(header: string, rowIndex: number) {
+    return `${header}::${rowIndex}`;
+  }
+
+  function focusProductCodeInput(rowIndex: number, select = true) {
+    pendingProductInputFocus.current = { rowIndex, select };
+    window.setTimeout(() => {
+      const pending = pendingProductInputFocus.current;
+      if (!pending || pending.rowIndex !== rowIndex) return;
+      const input = productInputRefs.current[productInputRefKey("품목코드(ERP)", rowIndex)];
+      if (!input) return;
+      pendingProductInputFocus.current = null;
+      input.focus();
+      if (select && input.value) input.select();
+    }, 0);
+  }
+
+  function focusNextProgressProductInput(rowIndex: number) {
+    const currentVisibleIndex = visibleRows.findIndex((item) => item.index === rowIndex);
+    const nextVisibleIndex = currentVisibleIndex >= 0 ? currentVisibleIndex + 1 : visibleRows.findIndex((item) => item.index > rowIndex);
+    const next = visibleRows[nextVisibleIndex];
+    if (!next) return;
+    const nextPage = Math.floor(nextVisibleIndex / pageSize) + 1;
+    pendingProductInputFocus.current = { rowIndex: next.index, select: true };
+    if (nextPage !== currentPage) {
+      if (onPageChange) onPageChange(nextPage);
+      else setUncontrolledPage(nextPage);
+      return;
+    }
+    focusProductCodeInput(next.index, true);
+  }
+
+  async function fetchQuickProductMatches(query: string, limit = 20) {
+    const keyword = salesCellText(query);
+    if (!keyword) return [] as FnOsProductSearchItem[];
+    const cacheKey = `${productSearchAttribute}::${limit}::${keyword.toLowerCase()}`;
+    const cached = quickProductSearchCache.current.get(cacheKey);
+    if (cached) return cached;
+    const inFlight = quickProductSearchInFlight.current.get(cacheKey);
+    if (inFlight) return inFlight;
+    const request = fetch("/api/fnos/quick-lookup", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: keyword, productAttribute: productSearchAttribute, includeInventory: false, limit }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || "품목검색 실패");
+        const products = Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [];
+        quickProductSearchCache.current.set(cacheKey, products);
+        return products;
+      })
+      .finally(() => {
+        quickProductSearchInFlight.current.delete(cacheKey);
+      });
+    quickProductSearchInFlight.current.set(cacheKey, request);
+    return request;
+  }
+
+  async function resolveProductInputEnter(rowIndex: number, header: "품목코드(ERP)" | "품목명(ERP)", value: string, fallbackQuery: string) {
+    const keyword = salesCellText(value);
+    const originalValue = salesCellText(productInputFocusValues.current[productInputRefKey(header, rowIndex)]);
+    if (!keyword) {
+      openProductSearch(rowIndex, fallbackQuery);
+      return;
+    }
+    if (originalValue && originalValue === keyword) {
+      focusNextProgressProductInput(rowIndex);
+      return;
+    }
+    const resolvingKey = productInputRefKey(header, rowIndex);
+    if (productEnterResolving.current.has(resolvingKey)) return;
+    productEnterResolving.current.add(resolvingKey);
+    try {
+      const results = await fetchQuickProductMatches(keyword, 20);
+      if (results.length === 1) {
+        linkProductToProgressRow(rowIndex, results[0]);
+        return;
+      }
+      openProductSearch(rowIndex, keyword, { results, searchedQuery: keyword });
+    } catch (error) {
+      console.error(error);
+      openProductSearch(rowIndex, keyword);
+    } finally {
+      productEnterResolving.current.delete(resolvingKey);
+    }
+  }
+
   function updateProgressCell(rowIndex: number, header: string, value: string) {
     onChange(rows.map((row, index) => {
       if (index !== rowIndex) return row;
@@ -9250,9 +9357,10 @@ function OnlineOrderProgressList({
     });
     onChange(nextRows);
     if (linkedRow) onProductLinked?.(rowIndex, linkedRow, item);
+    focusNextProgressProductInput(rowIndex);
   }
 
-  function openProductSearch(rowIndex: number, query: string) {
+  function openProductSearch(rowIndex: number, query: string, initialSearch?: { results: FnOsProductSearchItem[]; searchedQuery: string }) {
     const popupToken = `fnos-product-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const popup = window.open("", "fnos-product-link-popup", "width=800,height=650,left=440,top=190,resizable=yes,scrollbars=yes");
     if (!popup) {
@@ -9268,6 +9376,7 @@ function OnlineOrderProgressList({
     };
     const searchOptions = productSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
     const initialQuery = salesCellText(query);
+    const initialResults = initialSearch && salesCellText(initialSearch.searchedQuery) === initialQuery ? initialSearch.results : [];
     popup.document.open();
     popup.document.write(`<!doctype html>
 <html lang="ko">
@@ -9301,7 +9410,7 @@ function OnlineOrderProgressList({
     const origin = ${JSON.stringify(window.location.origin)};
     const options = ${JSON.stringify(searchOptions)};
     let attribute = ${JSON.stringify(productSearchAttribute)};
-    let results = [];
+    let results = ${JSON.stringify(initialResults)};
     let selectedIndex = 0;
     const tabs = document.getElementById('tabs');
     const query = document.getElementById('query');
@@ -9312,7 +9421,7 @@ function OnlineOrderProgressList({
     function renderTabs(){ tabs.innerHTML = options.map(o => '<button class="tab '+(o.value===attribute?'active':'')+'" data-value="'+o.value+'">'+o.label+'</button>').join(''); }
     function scrollActiveIntoView(){ const active = rows.querySelector('tr.active'); if(active) active.scrollIntoView({ block:'nearest' }); }
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; requestAnimationFrame(scrollActiveIntoView); }
-    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
+    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
     rows.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
@@ -9322,7 +9431,7 @@ function OnlineOrderProgressList({
     document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
     query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
-    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(query.value.trim()) search();
+    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(results.length){ status.textContent=''; render(); } else if(query.value.trim()) search();
   </script>
 </body>
 </html>`);
@@ -9442,12 +9551,14 @@ function OnlineOrderProgressList({
                   <td className={`px-2 py-2 ${frozenProgressCellClass("품목코드(ERP)", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("품목코드(ERP)")}>
                     <input
                       className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-blue-700 outline-orange-400"
+                      ref={(element) => { productInputRefs.current[productInputRefKey("품목코드(ERP)", index)] = element; }}
                       value={progressValue(row, "품목코드(ERP)")}
+                      onFocus={(event) => { productInputFocusValues.current[productInputRefKey("품목코드(ERP)", index)] = event.currentTarget.value; }}
                       onChange={(event) => updateProgressCell(index, "품목코드(ERP)", event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key !== "Enter") return;
                         event.preventDefault();
-                        openProductSearch(index, event.currentTarget.value || progressValue(row, "품목명(ERP)"));
+                        void resolveProductInputEnter(index, "품목코드(ERP)", event.currentTarget.value, progressValue(row, "품목명(ERP)"));
                       }}
                       placeholder="검색"
                     />
@@ -9455,12 +9566,14 @@ function OnlineOrderProgressList({
                   <td className={`px-2 py-2 ${frozenProgressCellClass("품목명(ERP)", selected, highlightedRowSet.has(index), bundleTone)}`} style={frozenProgressCellStyle("품목명(ERP)")}>
                     <input
                       className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-orange-400"
+                      ref={(element) => { productInputRefs.current[productInputRefKey("품목명(ERP)", index)] = element; }}
                       value={progressValue(row, "품목명(ERP)")}
+                      onFocus={(event) => { productInputFocusValues.current[productInputRefKey("품목명(ERP)", index)] = event.currentTarget.value; }}
                       onChange={(event) => updateProgressCell(index, "품목명(ERP)", event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key !== "Enter") return;
                         event.preventDefault();
-                        openProductSearch(index, event.currentTarget.value || progressValue(row, "품목코드(ERP)"));
+                        void resolveProductInputEnter(index, "품목명(ERP)", event.currentTarget.value, progressValue(row, "품목코드(ERP)"));
                       }}
                       placeholder="검색"
                     />
