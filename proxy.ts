@@ -18,11 +18,17 @@ export function proxy(request: NextRequest) {
   const isAutomationAgentApi = pathname.startsWith("/api/automation/");
   const isAutomationJobApi = pathname.startsWith("/api/fnos/automation-jobs");
   const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(request.nextUrl.hostname);
+  const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(request.nextUrl.hostname);
+  const isTrustedLocalBridgeOrigin = request.headers.get("origin") === "https://fn-os.vercel.app";
+  const isLocalOnlineOrderBridgeApi = (isLocalHost || isPrivateIpv4Host)
+    && pathname.startsWith("/api/fnos/online-orders/")
+    && request.headers.get("x-fnos-local-bridge") === "1"
+    && isTrustedLocalBridgeOrigin;
   const isLocalOnlineOrderSyncApi = isLocalHost && pathname === "/api/fnos/online-orders/sync";
   const isSlackCommandApi = pathname === "/api/slack/commands";
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
-  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isLocalOnlineOrderSyncApi || isSlackCommandApi || isPublicAsset) {
+  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isLocalOnlineOrderSyncApi || isLocalOnlineOrderBridgeApi || isSlackCommandApi || isPublicAsset) {
     return NextResponse.next();
   }
 
