@@ -7467,13 +7467,22 @@ function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
   return codeAlias[code] || code || "FN";
 }
 
-function onlineOrderSettlementExportAmount(value: unknown, alias: string, channelName: unknown) {
+function onlineOrderSettlementExportAmount(value: unknown, _alias: string, _channelName: unknown) {
   const amount = salesMoneyValue(value);
   if (!amount) return salesCellText(value);
+  return Math.round(amount).toLocaleString("ko-KR");
+}
+
+function onlineOrderSettlementAmount(item: CollectedOnlineOrderItem, channelName: unknown, channelCode: unknown) {
+  const explicitSettlement = onlineOrderMoney(item.settlementAmount);
+  if (explicitSettlement) return explicitSettlement;
+  const salesAmount = onlineOrderMoney(item.salesAmount);
+  if (!salesAmount) return 0;
+  const alias = onlineOrderChannelAlias(channelName, channelCode);
   const name = salesCellText(channelName);
   const shouldDeduct = ["C", "T", "S", "L", "K"].includes(alias)
     || /쿠팡|토스|신세계|롯데|카카오|톡딜/i.test(name);
-  return shouldDeduct ? Math.round(amount * 0.88).toLocaleString("ko-KR") : Math.round(amount).toLocaleString("ko-KR");
+  return shouldDeduct ? Math.round(salesAmount * 0.88) : salesAmount;
 }
 
 function onlineOrderShippingOptionName(productName: unknown, fallback: unknown, qty: unknown) {
@@ -7640,7 +7649,7 @@ function appendCollectedOnlineOrdersToSheets(
       existingKeys.add(itemKey);
 
       const qty = onlineOrderMoney(item.qty) || 1;
-      const amount = onlineOrderMoney(item.settlementAmount || item.salesAmount);
+      const amount = onlineOrderSettlementAmount(item, channelName, channelCode);
       const unitPrice = qty ? Math.round(amount / qty) : amount;
       const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
@@ -7691,7 +7700,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(shipping, "송장출력용", "주문옵션", mallProductName);
       setSalesSheetCell(shipping, "송장출력용", "수량", qty);
       setSalesSheetCell(shipping, "송장출력용", "배송요청사항", deliveryMessage);
-      setSalesSheetCell(shipping, "송장출력용", "정산예정금액", item.settlementAmount || amount || "");
+      setSalesSheetCell(shipping, "송장출력용", "정산예정금액", amount || "");
       shippingRows.push(shipping);
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");

@@ -128,6 +128,9 @@ function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName
         || itemRow.vendorItemPrice
         || itemRow.instantDiscountedPrice,
     );
+    const salesAmount = amount ? amount * qty : 0;
+    const explicitSettlementAmount = numberValue(itemRow.settlementAmount);
+    const settlementAmount = explicitSettlementAmount || (salesAmount ? Math.round(salesAmount * 0.88) : 0);
     return {
       channelProductCode: firstText(itemRow.sellerProductId, itemRow.vendorItemId, itemRow.productId),
       channelOptionCode: firstText(itemRow.vendorItemId, itemRow.optionId, itemRow.sellerProductItemId),
@@ -135,8 +138,8 @@ function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName
       channelOptionName: firstText(itemRow.sellerProductItemName, itemRow.optionName),
       sku: firstText(itemRow.externalVendorSkuCode, itemRow.sellerProductItemId, itemRow.vendorItemId),
       qty,
-      salesAmount: amount ? amount * qty : undefined,
-      settlementAmount: numberValue(itemRow.settlementAmount) || undefined,
+      salesAmount: salesAmount || undefined,
+      settlementAmount: settlementAmount || undefined,
       raw: itemRow,
     } satisfies NormalizedOrderItem;
   });
