@@ -225,6 +225,7 @@ function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
   if (name.includes("펀앤파인")) return "FF";
   if (name.includes("에프엔") || name.includes("fn")) return "FN";
   if (name.includes("쿠팡")) return "C";
+  if (name.includes("esm") || name.includes("g마켓") || name.includes("지마켓") || name.includes("gmarket") || name.includes("옥션") || name.includes("auction")) return "E";
   if (name.includes("롯데")) return "L";
   if (name.includes("신세계")) return "S";
   if (name.includes("11번가") || name.includes("11st")) return "11";
@@ -237,8 +238,7 @@ function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
     "00002": "FF",
     "00003": "11",
     "00004": "C",
-    "00005": "G",
-    "00006": "A",
+    "2208183676": "E",
     "00007": "K",
     "00008": "S",
     "00009": "L",
@@ -369,17 +369,12 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
 
   return rows.map((row) => {
     if (source === "esm") {
-      const seller = clean(pick(row, ["판매아이디"]));
-      const isAuction = /옥션|auction/i.test(seller);
-      const isGmarket = /지마켓|g마켓|gmarket/i.test(seller);
-      const alias = isAuction ? "A" : isGmarket ? "G" : "ESM";
-      const mallName = isAuction ? "옥션" : isGmarket ? "지마켓" : "ESM";
-      const shipmentNo = cleanOrderId(pick(row, ["배송번호"]));
       const sellerCode = cleanOrderId(pick(row, ["판매자관리코드", "판매자상세관리코드"]));
       return {
-        __alias: alias,
+        __alias: "E",
         수집일자: pick(row, ["결제일", "주문일자(결제확인전)"]),
-        쇼핑몰명: mallName,
+        쇼핑몰명: "ESM이에스엠",
+        쇼핑몰코드: "",
         주문번호: cleanOrderId(pick(row, ["주문번호"])),
         묶음주문번호: cleanOrderId(pick(row, ["장바구니번호(결제번호)", "배송번호", "주문번호"])),
         배송방법코드: "CJGLS",

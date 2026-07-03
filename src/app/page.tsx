@@ -1439,12 +1439,12 @@ const salesChannelPlatformOptions: Array<{
   },
   {
     code: "ESM",
-    label: "ESM/G마켓/옥션",
+    label: "ESM이에스엠",
     supported: false,
     requiredKeys: [],
     optionalKeys: ["partner_no", "sub_partner_no", "seller_password"],
     example: "API 사용 신청/승인 전까지 엑셀 또는 수동 처리 대상",
-    help: "현재 FNOS에서는 ESM/G마켓/옥션 API 호출을 사용하지 않습니다. 주문확인/송장입력은 수동 팝업·복사 보조 흐름으로 처리합니다.",
+    help: "현재 FNOS에서는 ESM API 호출을 사용하지 않습니다. 주문확인/송장입력은 수동 팝업·복사 보조 흐름으로 처리합니다.",
   },
   {
     code: "SSG",
@@ -6405,7 +6405,7 @@ function hasSalesRows(rows: string[][]) {
 function classifyOrderUploadFileName(fileName: string) {
   const lower = fileName.toLowerCase();
   if (/esk\d*m/i.test(fileName) || fileName.toLowerCase().includes("legacy-order")) return "레거시 주문수집";
-  if (fileName.includes("신규주문") || lower.includes("esm") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "ESM/G마켓/옥션";
+  if (fileName.includes("신규주문") || lower.includes("esm") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "ESM이에스엠";
   if (fileName.includes("배송목록") || fileName.includes("현대이지웰") || fileName.includes("이지웰")) return "현대 이지웰";
   if (fileName.includes("주문배송 내역") || fileName.includes("오늘의집") || fileName.includes("오늘의 집")) return "오늘의 집";
   if (fileName.includes("주문배송관리-상품준비중") || fileName.includes("토스")) return "토스";
@@ -6426,7 +6426,7 @@ function salesUploadBadge(fileName: string, kind: "orders" | "invoices") {
   const invoiceType = kind === "invoices" ? classifyInvoiceUploadFileName(fileName) || "송장파일" : "";
   const type = orderType || invoiceType;
   if (type === "레거시 주문수집") return { mark: "E", label: "레거시", className: "border-blue-200 bg-blue-50 text-blue-700" };
-  if (type === "ESM/G마켓/옥션") return { mark: "G", label: "ESM", className: "border-lime-200 bg-lime-50 text-lime-700" };
+  if (type === "ESM이에스엠") return { mark: "E", label: "ESM", className: "border-lime-200 bg-lime-50 text-lime-700" };
   if (type === "오늘의 집") return { mark: "O", label: "오늘의 집", className: "border-violet-200 bg-violet-50 text-violet-700" };
   if (type === "현대 이지웰") return { mark: "Z", label: "이지웰", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
   if (type === "토스") return { mark: "T", label: "토스", className: "border-sky-200 bg-sky-50 text-sky-700" };
@@ -6773,8 +6773,7 @@ const invoiceMallCodeByAlias: Record<string, string> = {
   FF: "00002",
   "11": "00003",
   C: "00004",
-  G: "00005",
-  A: "00006",
+  E: "2208183676",
   K: "00007",
   S: "00008",
   L: "00009",
@@ -6910,7 +6909,7 @@ function applyInvoiceTrackingToSheets(
         if (!rowHasValue(row)) return "";
         const progress = currentSheets["발주 진행 단계"].filter(rowHasValue)[index] || [];
         const site = [progressValue(progress, "쇼핑몰명"), progressValue(progress, "쇼핑몰(거래처)")].join(" ").toUpperCase();
-        if (!/(ESM|지마켓|옥션|오늘의|이지웰|카카오|톡스토어|KAKAO|G마켓)/i.test(site)) return "";
+        if (!/(ESM|오늘의|이지웰|카카오|톡스토어|KAKAO)/i.test(site)) return "";
         const tracking = salesCellText(row[salesSheetHeaders.송장출력용.indexOf("송장번호")]);
         if (!tracking) return "";
         return `${progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)")} ${progressValue(progress, "주문번호")} ${tracking}`.trim();
@@ -6979,7 +6978,7 @@ function applyInvoiceTrackingToSheets(
       if (!rowHasValue(row)) return "";
       const progress = currentSheets["발주 진행 단계"].filter(rowHasValue)[index] || [];
       const site = [progressValue(progress, "쇼핑몰명"), progressValue(progress, "쇼핑몰(거래처)")].join(" ").toUpperCase();
-      if (!/(ESM|지마켓|옥션|오늘의|이지웰|카카오|톡스토어|KAKAO|G마켓)/i.test(site)) return "";
+      if (!/(ESM|오늘의|이지웰|카카오|톡스토어|KAKAO)/i.test(site)) return "";
       const tracking = salesCellText(row[salesSheetHeaders.송장출력용.indexOf("송장번호")]);
       if (!tracking) return "";
       return `${progressValue(progress, "쇼핑몰명") || progressValue(progress, "쇼핑몰(거래처)")} ${progressValue(progress, "주문번호")} ${tracking}`.trim();
@@ -7284,8 +7283,7 @@ function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
   const name = salesCellText(channelName).toLowerCase();
   const code = salesCellText(channelCode).toUpperCase();
   if (name.includes("쿠팡") || code.includes("COUPANG")) return "C";
-  if (name.includes("g마켓") || name.includes("지마켓") || name.includes("gmarket")) return "G";
-  if (name.includes("옥션") || name.includes("auction")) return "A";
+  if (name.includes("esm") || name.includes("g마켓") || name.includes("지마켓") || name.includes("gmarket") || name.includes("옥션") || name.includes("auction") || code === "2208183676") return "E";
   if (name.includes("롯데") || code.includes("LOTTE")) return "L";
   if (name.includes("신세계") || name.includes("ssg") || code.includes("SSG")) return "S";
   if (name.includes("11번가") || name.includes("11st")) return "11";
@@ -7300,8 +7298,7 @@ function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
     "00002": "FF",
     "00003": "11",
     "00004": "C",
-    "00005": "G",
-    "00006": "A",
+    "2208183676": "E",
     "00007": "K",
     "00008": "S",
     "00009": "L",
@@ -12040,7 +12037,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const site = orderProgressSiteName(row).toUpperCase();
     const code = salesCellText(progressValue(row, "쇼핑몰코드")).toUpperCase();
     const haystack = `${site} ${code}`;
-    return /ESM|G마켓|지마켓|옥션|카카오|KAKAO|톡스토어|선물하기|현대이지웰|이지웰|EZWEL|오늘의집|TODAYHOUSE|O\.RORA/.test(haystack);
+    return /ESM|카카오|KAKAO|톡스토어|선물하기|현대이지웰|이지웰|EZWEL|오늘의집|TODAYHOUSE|O\.RORA/.test(haystack);
   }
 
   function groupedUnsupportedStatusApiRows(indexes: number[]) {

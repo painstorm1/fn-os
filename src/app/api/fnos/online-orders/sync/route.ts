@@ -73,6 +73,8 @@ function orderCount(orders: NormalizedOrder[]) {
 
 const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
 const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
+const ESM_CHANNEL_CODE = "2208183676";
+const ESM_CHANNEL_NAME = "ESM이에스엠";
 type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "unknown";
 
 type ManualOrderFileResult = {
@@ -150,7 +152,7 @@ function manualSourceSiteName(source: ManualOrderSource) {
   if (source === "todayhouse") return "오늘의집";
   if (source === "toss") return "토스";
   if (source === "ezwel") return "현대이지웰";
-  if (source === "esm") return "ESM";
+  if (source === "esm") return ESM_CHANNEL_NAME;
   return "수동 주문수집";
 }
 
@@ -217,20 +219,11 @@ function isEsmManualRow(row: AnyRecord) {
   return Boolean(row["판매아이디"] !== undefined && row["주문번호"] !== undefined && (row["배송번호"] !== undefined || row["상품번호"] !== undefined));
 }
 
-function esmSiteName(row: AnyRecord) {
-  const seller = text(row["판매아이디"]);
-  if (/옥션|auction/i.test(seller)) return "옥션";
-  if (/지마켓|g마켓|gmarket/i.test(seller)) return "지마켓";
-  return "ESM";
-}
-
 function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrder | null {
   const orderNo = cleanId(pick(row, ["주문번호"]));
   const receiverName = firstText(pick(row, ["수령인명"]), pick(row, ["구매자명"]));
   const productName = firstText(pick(row, ["상품명"]), "ESM 주문");
   if (!orderNo || !receiverName || !productName) return null;
-  const siteName = esmSiteName(row);
-  const siteCode = siteName === "옥션" ? "A" : siteName === "지마켓" ? "G" : "ESM";
   const productNo = cleanId(pick(row, ["상품번호"]));
   const shipmentNo = cleanId(pick(row, ["배송번호"]));
   const sellerCode = cleanId(pick(row, ["판매자관리코드", "판매자상세관리코드"]));
@@ -246,10 +239,10 @@ function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrde
     raw: row,
   };
   return {
-    channelCode: siteCode,
-    channelName: siteName,
-    customerCode: siteCode,
-    customerName: siteName,
+    channelCode: ESM_CHANNEL_CODE,
+    channelName: ESM_CHANNEL_NAME,
+    customerCode: ESM_CHANNEL_CODE,
+    customerName: ESM_CHANNEL_NAME,
     orderNo,
     bundleOrderNo: cleanId(pick(row, ["장바구니번호(결제번호)", "배송번호", "주문번호"])) || orderNo,
     orderDate: firstText(pick(row, ["결제일"]), pick(row, ["주문일자(결제확인전)"])),
@@ -593,7 +586,7 @@ export async function POST(request: NextRequest) {
         })),
         ...manualResults.map((result) => ({
           source: "manual",
-          channel_code: result.source.toUpperCase(),
+          channel_code: result.source === "esm" ? ESM_CHANNEL_CODE : result.source.toUpperCase(),
           channel_name: `수동 주문수집 - ${result.siteName}`,
           ok: result.orders.length > 0,
           skipped: !result.orders.length,

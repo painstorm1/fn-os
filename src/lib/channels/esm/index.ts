@@ -58,16 +58,15 @@ export class EsmChannelAdapter implements SalesChannelAdapter {
   async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
     const masterId = text(params.master_id || params.api_client_id);
     const secret = text(params.secret_key || params.api_client_secret || params.seller_password);
-    const auctionSellerId = text(params.auction_seller_id || params.partner_no || params.seller_id);
-    const gmarketSellerId = text(params.gmarket_seller_id || params.sub_partner_no || params.seller_id);
-    if (!masterId || !secret || (!auctionSellerId && !gmarketSellerId)) return { ok: false, data: [], error: "ESM Master ID, Secret Key, Auction/Gmarket 판매자 ID를 먼저 저장해주세요." };
-    const ssi = [auctionSellerId ? `A:${auctionSellerId}` : "", gmarketSellerId ? `G:${gmarketSellerId}` : ""].filter(Boolean).join(",");
+    const esmSellerId = text(params.esm_seller_id || params.seller_id || params.partner_no || params.sub_partner_no);
+    if (!masterId || !secret || !esmSellerId) return { ok: false, data: [], error: "ESM Master ID, Secret Key, ESM 판매자 ID를 먼저 저장해주세요." };
+    const ssi = `E:${esmSellerId}`;
     try {
       const body = { SearchDateType: "PayDate", StartDate: formatDate(params.fromDate, "start"), EndDate: formatDate(params.toDate, "end") };
       const response = await fetch(`${ESM_BASE_URL}/shipping/v1/Order/RequestOrders`, { method: "POST", headers: { Authorization: `Bearer ${esmJwt(masterId, secret, ssi)}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await readJson(response);
       const rows = findRows(data);
-      const base = { channelCode: text(params.channel_code) || "ESM", channelName: text(params.channel_name) || "ESM/G마켓/옥션", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
+      const base = { channelCode: text(params.channel_code) || "2208183676", channelName: text(params.channel_name) || "ESM이에스엠", customerCode: text(params.customer_code) || "2208183676", customerName: text(params.customer_name) || "ESM이에스엠" };
       return { ok: true, data: rows.map((row) => normalizeRow(row, base)).filter((order) => order.orderNo), message: `ESM 주문 ${rows.length}건을 수집했습니다.` };
     } catch (error) { return { ok: false, data: [], error: error instanceof Error ? error.message : "ESM 주문 수집 실패" }; }
   }
