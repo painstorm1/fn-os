@@ -136,6 +136,18 @@ function todayMonthDay() {
   return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function invoiceRunCode(date = new Date()) {
+  return date.getHours() < 12 ? "A" : "P";
+}
+
+function invoiceMallCodeSeqWidth(flowPrefix: string) {
+  return flowPrefix.length <= 1 ? 3 : 2;
+}
+
+function makeInvoiceMallCode(datePart: string, alias: string, flowPrefix: string, seq: number) {
+  return `${datePart}-${alias}-${flowPrefix}${String(seq).padStart(invoiceMallCodeSeqWidth(flowPrefix), "0")}`;
+}
+
 function pick(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -280,10 +292,12 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const mallCode = clean(pick(source, ["쇼핑몰코드"]));
     const date = pick(source, ["수집일자", "일자"]);
     const alias = mallAlias(mallName, mallCode, clean(source.__alias));
-    const countKey = `${todayMonthDay()}-${alias}`;
+    const datePart = todayMonthDay();
+    const flowPrefix = invoiceRunCode();
+    const countKey = `${datePart}-${alias}-${flowPrefix}`;
     const next = (counters.get(countKey) || 0) + 1;
     counters.set(countKey, next);
-    const generatedMallCode = mallCode || `${countKey}-${String(next).padStart(3, "0")}`;
+    const generatedMallCode = mallCode || makeInvoiceMallCode(datePart, alias, flowPrefix, next);
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
     const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
@@ -301,7 +315,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const option = makeOrderOption(source);
 
     shipping.push({
-      sortKey: `${option}\u0000${countKey}-${String(next).padStart(3, "0")}`,
+      sortKey: `${option}\u0000${generatedMallCode}`,
       row: [
         generatedMallCode,
         clean(pick(source, ["송장번호"])),

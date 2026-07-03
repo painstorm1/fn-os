@@ -7077,6 +7077,7 @@ type SalesChannelProductMapping = {
 };
 
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
+const ONLINE_ORDER_COMPLETED_FLOW_KEY = "fnos.salesInventory.onlineOrderCompletedFlows.v1";
 const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
 const SALES_WORKSPACE_DB_STORE = "files";
 const SALES_WORKSPACE_FILE_BUCKETS = ["uploaded", "pendingOrders", "pendingInvoices"] as const;
@@ -7279,6 +7280,147 @@ function onlineOrderRunCode(date = new Date()) {
   return date.getHours() < 12 ? "A" : "P";
 }
 
+type OnlineOrderMallCodeParts = {
+  datePart: string;
+  alias: string;
+  flowPrefix: string;
+  seq: number;
+  legacyNumericOnly: boolean;
+};
+
+function parseOnlineOrderMallCode(value: unknown): OnlineOrderMallCodeParts | null {
+  const raw = salesCellText(value).toUpperCase();
+  const withFlow = raw.match(/^(\d{4})-([^-]+)-([AP]+)(\d+)$/);
+  if (withFlow) {
+    return {
+      datePart: withFlow[1],
+      alias: withFlow[2],
+      flowPrefix: withFlow[3],
+      seq: Number(withFlow[4]) || 0,
+      legacyNumericOnly: false,
+    };
+  }
+  const legacy = raw.match(/^(\d{4})-([^-]+)-(\d+)$/);
+  if (legacy) {
+    return {
+      datePart: legacy[1],
+      alias: legacy[2],
+      flowPrefix: "",
+      seq: Number(legacy[3]) || 0,
+      legacyNumericOnly: true,
+    };
+  }
+  return null;
+}
+
+function onlineOrderMallCodeUsesBaseRun(parts: OnlineOrderMallCodeParts, baseRun: string) {
+  if (parts.legacyNumericOnly) return true;
+  return parts.flowPrefix.split("").every((char) => char === baseRun);
+}
+
+function onlineOrderMallCodeSeqWidth(flowPrefix: string) {
+  return flowPrefix.length <= 1 ? 3 : 2;
+}
+
+function makeOnlineOrderMallCode(datePart: string, alias: string, flowPrefix: string, seq: number) {
+  return `${datePart}-${alias}-${flowPrefix}${String(seq).padStart(onlineOrderMallCodeSeqWidth(flowPrefix), "0")}`;
+}
+
+function onlineOrderExistingMallCodes(currentSheets: Record<SalesSheetName, string[][]>) {
+  const codes: string[] = [];
+  currentSheets.송장출력용.filter(rowHasValue).forEach((row) => {
+    codes.push(salesCellText(salesRowObject("송장출력용", row).쇼핑몰코드));
+  });
+  currentSheets.FN송장입력.filter(rowHasValue).forEach((row) => {
+    codes.push(salesCellText(salesRowObject("FN송장입력", row).쇼핑몰코드));
+  });
+  currentSheets["발주 진행 단계"].filter(rowHasValue).forEach((row) => {
+    codes.push(progressValue(row, "쇼핑몰코드"));
+  });
+  return codes.filter(Boolean);
+}
+
+function readArchivedCompletedOnlineOrderMallCodes() {
+  if (typeof window === "undefined") return [] as string[];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ONLINE_ORDER_COMPLETED_FLOW_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.map((value) => salesCellText(value)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCompletedOnlineOrderMallCodes(currentSheets: Record<SalesSheetName, string[][]>) {
+  if (typeof window === "undefined") return;
+  const completedCodes = currentSheets["발주 진행 단계"].filter(rowHasValue).flatMap((row) => {
+    const mallCode = progressValue(row, "쇼핑몰코드");
+    const status = progressValue(row, "주문상태");
+    return mallCode && status === "출고완료" && parseOnlineOrderMallCode(mallCode) ? [mallCode] : [];
+  });
+  if (!completedCodes.length) return;
+  const merged = Array.from(new Set([...readArchivedCompletedOnlineOrderMallCodes(), ...completedCodes]));
+  window.localStorage.setItem(ONLINE_ORDER_COMPLETED_FLOW_KEY, JSON.stringify(merged.slice(-500)));
+}
+
+function onlineOrderInitialMallCodeSeq(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  datePart: string,
+  alias: string,
+  flowPrefix: string,
+) {
+  return onlineOrderExistingMallCodes(currentSheets).reduce((maxSeq, code) => {
+    const parts = parseOnlineOrderMallCode(code);
+    if (!parts || parts.datePart !== datePart || parts.alias !== alias) return maxSeq;
+    if (parts.legacyNumericOnly) return flowPrefix.length <= 1 ? Math.max(maxSeq, parts.seq) : maxSeq;
+    return parts.flowPrefix === flowPrefix ? Math.max(maxSeq, parts.seq) : maxSeq;
+  }, 0);
+}
+
+function onlineOrderFlowPrefixFor(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  datePart: string,
+  alias: string,
+  baseRun: string,
+) {
+  let completedMaxLength = 0;
+  let activeMaxLength = 0;
+  currentSheets["발주 진행 단계"].filter(rowHasValue).forEach((row) => {
+    const parts = parseOnlineOrderMallCode(progressValue(row, "쇼핑몰코드"));
+    if (!parts || parts.datePart !== datePart || parts.alias !== alias || !onlineOrderMallCodeUsesBaseRun(parts, baseRun)) return;
+    const length = parts.legacyNumericOnly ? 1 : parts.flowPrefix.length;
+    if (progressValue(row, "주문상태") === "출고완료") completedMaxLength = Math.max(completedMaxLength, length);
+    else activeMaxLength = Math.max(activeMaxLength, length);
+  });
+  readArchivedCompletedOnlineOrderMallCodes().forEach((code) => {
+    const parts = parseOnlineOrderMallCode(code);
+    if (!parts || parts.datePart !== datePart || parts.alias !== alias || !onlineOrderMallCodeUsesBaseRun(parts, baseRun)) return;
+    completedMaxLength = Math.max(completedMaxLength, parts.legacyNumericOnly ? 1 : parts.flowPrefix.length);
+  });
+  const length = Math.max(1, activeMaxLength > completedMaxLength ? activeMaxLength : completedMaxLength + (completedMaxLength ? 1 : 0));
+  return baseRun.repeat(length);
+}
+
+function orderProgressStatusByMallCode(currentSheets: Record<SalesSheetName, string[][]>) {
+  const byMallCode = new Map<string, string>();
+  currentSheets["발주 진행 단계"].filter(rowHasValue).forEach((row) => {
+    const mallCode = progressValue(row, "쇼핑몰코드");
+    const status = progressValue(row, "주문상태");
+    if (mallCode && status) byMallCode.set(mallCode, status);
+  });
+  return byMallCode;
+}
+
+function preserveExistingOrderProgressStatuses(rows: string[][], statusByMallCode: Map<string, string>) {
+  return rows.map((row) => {
+    if (!rowHasValue(row)) return row;
+    const status = statusByMallCode.get(progressValue(row, "쇼핑몰코드"));
+    if (!status) return row;
+    const next = [...row];
+    setProgressValue(next, "주문상태", status);
+    return next;
+  });
+}
+
 function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
   const name = salesCellText(channelName).toLowerCase();
   const code = salesCellText(channelCode).toUpperCase();
@@ -7396,6 +7538,7 @@ function appendCollectedOnlineOrdersToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
   orders: CollectedOnlineOrder[],
   mappings: SalesChannelProductMapping[] = [],
+  mallCodeReferenceSheets: Record<SalesSheetName, string[][]> = currentSheets,
 ) {
   const nextSheets: Record<SalesSheetName, string[][]> = { ...currentSheets };
   const currentSalesRows = nextSheets["FN판매입력"].filter(rowHasValue);
@@ -7411,6 +7554,9 @@ function appendCollectedOnlineOrdersToSheets(
   const shippingRows: string[][] = [];
   const invoiceRows: string[][] = [];
   const mallCodeCounters = new Map<string, number>();
+  const previousStatusByMallCode = orderProgressStatusByMallCode(currentSheets);
+  const mallCodeDatePart = salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8);
+  const mallCodeBaseRun = onlineOrderRunCode();
 
   orders.forEach((order) => {
     const orderNo = salesCellText(order.orderNo);
@@ -7429,10 +7575,14 @@ function appendCollectedOnlineOrdersToSheets(
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
       const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
       const mallAlias = onlineOrderChannelAlias(channelName, channelCode);
-      const mallCodeKey = `${salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8) || onlineOrderRunCode()}-${mallAlias}`;
+      const mallCodeFlowPrefix = onlineOrderFlowPrefixFor(mallCodeReferenceSheets, mallCodeDatePart, mallAlias, mallCodeBaseRun);
+      const mallCodeKey = `${mallCodeDatePart}-${mallAlias}-${mallCodeFlowPrefix}`;
+      if (!mallCodeCounters.has(mallCodeKey)) {
+        mallCodeCounters.set(mallCodeKey, onlineOrderInitialMallCodeSeq(currentSheets, mallCodeDatePart, mallAlias, mallCodeFlowPrefix));
+      }
       const mallCodeSeq = (mallCodeCounters.get(mallCodeKey) || 0) + 1;
       mallCodeCounters.set(mallCodeKey, mallCodeSeq);
-      const generatedMallCode = `${mallCodeKey}-${String(mallCodeSeq).padStart(3, "0")}`;
+      const generatedMallCode = makeOnlineOrderMallCode(mallCodeDatePart, mallAlias, mallCodeFlowPrefix, mallCodeSeq);
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
@@ -7485,7 +7635,7 @@ function appendCollectedOnlineOrdersToSheets(
   nextSheets["FN판매입력"] = padSalesRows("FN판매입력", [...currentSalesRows, ...saleRows]);
   nextSheets.송장출력용 = padSalesRows("송장출력용", [...currentShippingRows, ...shippingRows]);
   nextSheets.FN송장입력 = padSalesRows("FN송장입력", [...currentInvoiceRows, ...invoiceRows]);
-  nextSheets["발주 진행 단계"] = buildOrderProgressRows(nextSheets);
+  nextSheets["발주 진행 단계"] = preserveExistingOrderProgressStatuses(buildOrderProgressRows(nextSheets), previousStatusByMallCode);
   const collectedStatusByKey = new Map<string, string>();
   orders.forEach((order) => {
     const status = salesCellText(order.orderStatus);
@@ -11162,6 +11312,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setCollectionStatuses([]);
     const ok = window.confirm(`최근 ${collectDays}일 주문 수집하시겠습니까?`);
     if (!ok) return;
+    const mallCodeReferenceSheets = sheets;
     resetSalesWorkspaceForOrderCollection();
     setCollectionStatuses([{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" }]);
     setCollectionPopupOpen(true);
@@ -11275,7 +11426,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 조회 실패");
           return [] as SalesChannelProductMapping[];
         });
-        setSheets((prev) => appendCollectedOnlineOrdersToSheets(prev, orders, mappings));
+        setSheets((prev) => appendCollectedOnlineOrdersToSheets(prev, orders, mappings, mallCodeReferenceSheets));
         setSalesGridResetKey((value) => value + 1);
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
@@ -12614,6 +12765,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("이번 작업의 업로드 파일과 시트 값을 모두 초기화할까요?");
       if (!ok) return;
     }
+    rememberCompletedOnlineOrderMallCodes(sheets);
     setUploadedFiles([]);
     setPendingOrderFiles([]);
     setPendingInvoiceFiles([]);
@@ -12633,6 +12785,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function resetSalesWorkspaceForOrderCollection() {
+    rememberCompletedOnlineOrderMallCodes(sheets);
     setUploadedFiles([]);
     setPendingOrderFiles([]);
     setPendingInvoiceFiles([]);
