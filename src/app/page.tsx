@@ -7118,8 +7118,8 @@ function shippingCodeParts(value: unknown) {
   };
 }
 
-function makeShoppingProductKey(productCode: string, optionText: string) {
-  return `${salesCellText(productCode)}${salesCellText(optionText).replace(/\s+/g, " ")}`.trim();
+function makeShoppingProductKey(_productCode: string, optionText: string) {
+  return salesCellText(optionText).replace(/\s+/g, " ").trim();
 }
 
 function normalizeShoppingProductKeyForMapping(mallProductCode: unknown, mallProductKey: unknown) {
