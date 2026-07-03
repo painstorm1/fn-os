@@ -19,8 +19,8 @@ type ParsedInvoiceRow = {
 const ORDER_FILE_PASSWORD = process.env.ORDER_FILE_PASSWORD || "";
 
 const headers: Record<SheetName, string[]> = {
-  송장출력용: ["송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  FN송장입력: ["주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   FN판매입력: ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
 
@@ -283,6 +283,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const countKey = `${todayMonthDay()}-${alias}`;
     const next = (counters.get(countKey) || 0) + 1;
     counters.set(countKey, next);
+    const generatedMallCode = mallCode || `${countKey}-${String(next).padStart(3, "0")}`;
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
     const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
@@ -302,6 +303,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     shipping.push({
       sortKey: `${option}\u0000${countKey}-${String(next).padStart(3, "0")}`,
       row: [
+        generatedMallCode,
         clean(pick(source, ["송장번호"])),
         clean(pick(source, ["수취인"])),
         contact1,
@@ -317,6 +319,7 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
 
     if (shouldIncludeInvoiceRow(alias)) {
       invoice.push([
+        generatedMallCode,
         clean(pick(source, ["주문번호"])),
         clean(pick(source, ["묶음주문번호"])),
         clean(pick(source, ["배송방법코드"])),

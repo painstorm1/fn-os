@@ -6309,9 +6309,9 @@ function StatusPill({ status }: { status?: string }) {
 type SalesSheetName = "발주 진행 단계" | "송장출력용" | "FN송장입력" | "FN판매입력" | "FN구매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
-  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
-  송장출력용: ["송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
-  FN송장입력: ["주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
+  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
+  송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+  FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
   "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
 };
@@ -6339,14 +6339,14 @@ function makeSheetRows(sheet: SalesSheetName, minRows = 18) {
 }
 
 function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
-  if (sheet === "송장출력용" && row.length === salesSheetHeaders[sheet].length + 1) {
-    return row.slice(1);
+  if (sheet === "송장출력용" && row.length === salesSheetHeaders[sheet].length - 1) {
+    return ["", ...row];
   }
-  if (sheet === "FN송장입력" && row.length === salesSheetHeaders[sheet].length + 1) {
-    return row.slice(1);
+  if (sheet === "FN송장입력" && row.length === salesSheetHeaders[sheet].length - 1) {
+    return ["", ...row];
   }
-  if (sheet === "발주 진행 단계" && row.length === salesSheetHeaders[sheet].length + 1) {
-    return [...row.slice(0, 7), ...row.slice(8)];
+  if (sheet === "발주 진행 단계" && row.length === salesSheetHeaders[sheet].length - 1) {
+    return [...row.slice(0, 7), "", ...row.slice(7)];
   }
   if ((sheet === "FN판매입력" || sheet === "FN구매입력") && row.length === salesSheetHeaders[sheet].length + 1) {
     return [row[0] || "", ...row.slice(2)];
@@ -6761,11 +6761,11 @@ function normalizeShippingRowForTracking(row: string[]) {
   const expectedLength = salesSheetHeaders.송장출력용.length;
   const legacyWithoutTracking = rowHasValue(row)
     && row.length <= expectedLength - 1
-    && salesCellText(row[0])
-    && looksLikeInvoicePhone(row[1])
-    && looksLikeInvoicePhone(row[2]);
+    && salesCellText(row[1])
+    && looksLikeInvoicePhone(row[2])
+    && looksLikeInvoicePhone(row[3]);
   if (!legacyWithoutTracking) return [...row];
-  return ["", ...row];
+  return [row[0] || "", "", ...row.slice(1)];
 }
 
 const invoiceMallCodeByAlias: Record<string, string> = {
@@ -6826,49 +6826,77 @@ function applyInvoiceTrackingToSheets(
     let alreadyMatchedShipping = 0;
     let alreadyMatchedInvoice = 0;
 
+    const invoiceRowsByMall = new Map<string, number[]>();
+    nextInvoice.forEach((row, index) => {
+      const mallCode = salesCellText(row[0]);
+      if (!mallCode) return;
+      const list = invoiceRowsByMall.get(mallCode) || [];
+      list.push(index);
+      invoiceRowsByMall.set(mallCode, list);
+    });
+
     invoiceRows.forEach((invoiceRow) => {
       const trackingNo = salesCellText(invoiceRow.trackingNo);
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
-      const shippingIndex = nextShipping.findIndex((row, index) => {
-        if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[0])) return false;
-        const name = row[1];
-        const phone1 = row[2];
-        const phone2 = row[3];
-        const address = row[5];
+      const productKey = invoiceProductCodeKey(invoiceRow.productCode);
+      const shippingIndexByAddress = nextShipping.findIndex((row, index) => {
+        if (usedShipping.has(index) || !rowHasValue(row) || salesCellText(row[1])) return false;
+        const name = row[2];
+        const phone1 = row[3];
+        const phone2 = row[4];
+        const address = row[6];
         return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
       });
+      const shippingIndexByCode = productKey
+        ? nextShipping.findIndex((row, index) => (
+          !usedShipping.has(index)
+          && rowHasValue(row)
+          && !salesCellText(row[1])
+          && invoiceProductCodeKey(row[0]) === productKey
+        ))
+        : -1;
+      const shippingIndex = shippingIndexByAddress >= 0 ? shippingIndexByAddress : shippingIndexByCode;
 
       if (shippingIndex < 0) {
         const alreadyIndex = nextShipping.findIndex((row) => {
-          if (!rowHasValue(row) || salesCellText(row[0]) !== trackingNo) return false;
-          const name = row[1];
-          const phone1 = row[2];
-          const phone2 = row[3];
-          const address = row[5];
+          if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo) return false;
+          const name = row[2];
+          const phone1 = row[3];
+          const phone2 = row[4];
+          const address = row[6];
           return invoiceKey === invoiceMatchKey(name, phone1, address)
-            || invoiceKey === invoiceMatchKey(name, phone2, address);
+            || invoiceKey === invoiceMatchKey(name, phone2, address)
+            || (productKey && invoiceProductCodeKey(row[0]) === productKey);
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
           return;
         }
+        const highlightIndex = productKey
+          ? nextShipping.findIndex((row) => rowHasValue(row) && invoiceProductCodeKey(row[0]) === productKey)
+          : -1;
+        if (highlightIndex >= 0) failedShippingIndexes.add(highlightIndex);
         return;
       }
 
       usedShipping.add(shippingIndex);
-      nextShipping[shippingIndex][0] = trackingNo;
+      nextShipping[shippingIndex][1] = trackingNo;
       matchedShipping += 1;
 
-      const invoiceIndex = shippingIndex;
-      if (nextInvoice[invoiceIndex]) {
-        if (salesCellText(nextInvoice[invoiceIndex][3]) === trackingNo) {
+      const { alias, mallCode, serial } = parseShippingCode(nextShipping[shippingIndex][0]);
+      const candidateIndexes = invoiceRowsByMall.get(mallCode) || [];
+      const invoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes.find((index) => !salesCellText(nextInvoice[index]?.[4]));
+      if (invoiceIndex !== undefined && nextInvoice[invoiceIndex]) {
+        if (salesCellText(nextInvoice[invoiceIndex][4]) === trackingNo) {
           alreadyMatchedInvoice += 1;
         } else {
-          nextInvoice[invoiceIndex][3] = trackingNo;
+          nextInvoice[invoiceIndex][4] = trackingNo;
           matchedInvoice += 1;
         }
-      } else {
-        failedShippingIndexes.add(shippingIndex);
+      } else if (!isInvoiceInputExcludedMall(alias || mallCode, invoiceRow.productCode)) {
+        const failedInvoiceIndex = candidateIndexes[serial - 1] ?? candidateIndexes[0];
+        if (failedInvoiceIndex !== undefined) failedInvoiceIndexes.add(failedInvoiceIndex);
+        else failedShippingIndexes.add(shippingIndex);
       }
     });
 
@@ -6907,34 +6935,43 @@ function applyInvoiceTrackingToSheets(
     };
   }
 
+  const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
   const parsedInvoiceRows = (parsedSheets.FN송장입력 || []).filter(rowHasValue);
+  const trackingByShippingCode = new Map<string, string>();
   const trackingByOrderNo = new Map<string, string>();
   const trackingByBundleNo = new Map<string, string>();
 
+  parsedShippingRows.forEach((row) => {
+    const item = salesRowObject("송장출력용", row);
+    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
+  });
   parsedInvoiceRows.forEach((row) => {
     const item = salesRowObject("FN송장입력", row);
+    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
     if (item.주문번호 && item.송장번호) trackingByOrderNo.set(item.주문번호, item.송장번호);
     if (item.묶음주문번호 && item.송장번호) trackingByBundleNo.set(item.묶음주문번호, item.송장번호);
   });
 
   let matchedShipping = 0;
   let matchedInvoice = 0;
+  const nextShipping = currentSheets.송장출력용.map((row) => {
+    if (!rowHasValue(row)) return row;
+    const item = salesRowObject("송장출력용", row);
+    const tracking = trackingByShippingCode.get(item.쇼핑몰코드);
+    if (!tracking || item.송장번호 === tracking) return row;
+    matchedShipping += 1;
+    return row.map((cell, index) => index === 1 ? tracking : cell);
+  });
+
   const nextInvoice = currentSheets.FN송장입력.map((row) => {
     if (!rowHasValue(row)) return row;
     const item = salesRowObject("FN송장입력", row);
     const tracking = trackingByOrderNo.get(item.주문번호)
-      || trackingByBundleNo.get(item.묶음주문번호);
+      || trackingByBundleNo.get(item.묶음주문번호)
+      || trackingByShippingCode.get(item.쇼핑몰코드);
     if (!tracking || item.송장번호 === tracking) return row;
     matchedInvoice += 1;
-    return row.map((cell, index) => index === 3 ? tracking : cell);
-  });
-  const nextShipping = currentSheets.송장출력용.map((row, index) => {
-    if (!rowHasValue(row)) return row;
-    const tracking = salesCellText(nextInvoice[index]?.[3]);
-    const currentTracking = salesCellText(row[0]);
-    if (!tracking || currentTracking === tracking) return row;
-    matchedShipping += 1;
-    return row.map((cell, cellIndex) => cellIndex === 0 ? tracking : cell);
+    return row.map((cell, index) => index === 4 ? tracking : cell);
   });
 
   const manualRows = nextShipping
@@ -7154,6 +7191,7 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
     setProgressValue(progress, "품목명(ERP)", salesCellText(sale.품목명));
     setProgressValue(progress, "쇼핑몰품목key", makeShoppingProductKey(mallProductCode, optionText));
     setProgressValue(progress, "쇼핑몰명", channelName);
+    setProgressValue(progress, "쇼핑몰코드", salesCellText(shipping.쇼핑몰코드 || invoice.쇼핑몰코드));
     setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
     setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
     setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || "CJGLS");
@@ -7360,6 +7398,7 @@ function appendCollectedOnlineOrdersToSheets(
   const saleRows: string[][] = [];
   const shippingRows: string[][] = [];
   const invoiceRows: string[][] = [];
+  const mallCodeCounters = new Map<string, number>();
 
   orders.forEach((order) => {
     const orderNo = salesCellText(order.orderNo);
@@ -7376,6 +7415,11 @@ function appendCollectedOnlineOrdersToSheets(
       const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
       const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
+      const mallAlias = onlineOrderChannelAlias(channelName, channelCode);
+      const mallCodeKey = `${salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8) || onlineOrderRunCode()}-${mallAlias}`;
+      const mallCodeSeq = (mallCodeCounters.get(mallCodeKey) || 0) + 1;
+      mallCodeCounters.set(mallCodeKey, mallCodeSeq);
+      const generatedMallCode = `${mallCodeKey}-${String(mallCodeSeq).padStart(3, "0")}`;
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
@@ -7404,6 +7448,7 @@ function appendCollectedOnlineOrdersToSheets(
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
+      setSalesSheetCell(shipping, "송장출력용", "쇼핑몰코드", generatedMallCode);
       setSalesSheetCell(shipping, "송장출력용", "수취인", receiverName);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", phone1);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", phone2);
@@ -7416,6 +7461,7 @@ function appendCollectedOnlineOrdersToSheets(
       shippingRows.push(shipping);
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");
+      setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", generatedMallCode);
       setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", "CJGLS");
@@ -9180,7 +9226,6 @@ function OnlineOrderProgressList({
                   <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰상품코드")}</td>
                   <td className="whitespace-normal break-all px-2 py-2 text-xs leading-snug">{renderText(row, "쇼핑몰품목key")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰명")}</td>
-                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰코드")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "주문번호")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "묶음주문번호")}</td>
                   <td className="px-2 py-2">
