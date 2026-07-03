@@ -1549,12 +1549,10 @@ function ArchiveList({
                           </div>
                         </a>
                         <div className="p-2">
-                          <h2 className="line-clamp-3 min-h-[3.75rem] text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <SourceLogo item={item} />
-                              <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
-                            </div>
+                          <h2 className="line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                          <p className="mt-2 truncate text-xs font-black leading-4 text-orange-700">{categoryDisplayLabel(category?.category_name)}</p>
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <SourceLogo item={item} />
                             <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                               <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                                 <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -1632,12 +1630,10 @@ function ArchiveList({
                 </div>
               </a>
               <div className="p-2">
-                <h2 className="line-clamp-3 min-h-[3.75rem] text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <SourceLogo item={item} />
-                    <StatusBadge className="max-w-full truncate" tone="orange">{categoryDisplayLabel(category?.category_name)}</StatusBadge>
-                  </div>
+                <h2 className="line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-950">{item.title || "제목 없음"}</h2>
+                <p className="mt-2 truncate text-xs font-black leading-4 text-orange-700">{categoryDisplayLabel(category?.category_name)}</p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <SourceLogo item={item} />
                   <button type="button" onClick={() => startEdit(item)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600" aria-label="수정" title="수정">
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                       <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
