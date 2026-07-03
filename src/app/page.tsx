@@ -8137,6 +8137,8 @@ type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
+type CollectionPopupMode = "collection" | "status-change";
+type OrderProgressStatusChangeStage = "api-running" | "fnos-waiting" | "fnos-applying" | "done" | "failed";
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
 
 const orderProgressStatusFilterLabels = ["전체", "신규주문", "주문확인", "출고대기", "출고완료"] as const;
@@ -10865,6 +10867,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
   const [collectionPopupTitle, setCollectionPopupTitle] = useState("주문수집");
+  const [collectionPopupMode, setCollectionPopupMode] = useState<CollectionPopupMode>("collection");
   const [collectionStatuses, setCollectionStatuses] = useState<OnlineApiStatusItem[]>([]);
   const [orderProductLinkOpen, setOrderProductLinkOpen] = useState(false);
   const [orderProductLinkDrafts, setOrderProductLinkDrafts] = useState<OrderProductLinkDraft[]>([]);
@@ -11499,6 +11502,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const collectDays = Math.max(1, Math.floor(dayWindow));
     setCollectionPopupOpen(false);
     setCollectionPopupTitle("주문수집");
+    setCollectionPopupMode("collection");
     setCollectionStatuses([]);
     const ok = window.confirm(`최근 ${collectDays}일 주문 수집하시겠습니까?`);
     if (!ok) return;
@@ -12408,6 +12412,59 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }, {});
   }
 
+  function orderProgressStatusChangeItems(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage): OnlineApiStatusItem[] {
+    const grouped = indexes.reduce<Record<string, { count: number; source: "api" | "manual" }>>((acc, index) => {
+      const row = sheets["발주 진행 단계"][index] || [];
+      const name = orderProgressSiteName(row);
+      const source = onlineOrderStatusApiUnsupportedSite(row) ? "manual" : "api";
+      const key = `${source}:${name}`;
+      const previous = acc[key] || { count: 0, source };
+      acc[key] = { ...previous, count: previous.count + 1 };
+      return acc;
+    }, {});
+
+    const stageStatus: Record<OrderProgressStatusChangeStage, OnlineApiStatusItem["status"]> = {
+      "api-running": "running",
+      "fnos-waiting": "waiting",
+      "fnos-applying": "running",
+      done: "done",
+      failed: "failed",
+    };
+
+    return Object.entries(grouped)
+      .sort(([, left], [, right]) => left.source.localeCompare(right.source) || left.count - right.count)
+      .map(([key, item]) => {
+        const name = key.slice(key.indexOf(":") + 1) || "쇼핑몰";
+        const countText = `${item.count.toLocaleString("ko-KR")}건`;
+        const apiMessage = stage === "api-running"
+          ? `${countText} ${targetStatus} API 호출 중`
+          : stage === "done"
+            ? `${countText} API 호출 및 FNOS 적용 완료`
+            : stage === "failed"
+              ? `${countText} ${targetStatus} 처리 실패`
+              : `${countText} API 호출 완료 · FNOS 적용 대기`;
+        const manualMessage = stage === "done"
+          ? `${countText} FNOS 진행상태 적용 완료`
+          : stage === "failed"
+            ? `${countText} FNOS 진행상태 적용 실패`
+            : `${countText} API 미호출 · FNOS ${targetStatus} 적용 ${stage === "fnos-waiting" ? "대기" : "중"}`;
+        return {
+          name,
+          source: item.source,
+          status: stageStatus[stage],
+          message: item.source === "api" ? apiMessage : manualMessage,
+        };
+      });
+  }
+
+  function openOrderProgressStatusPopup(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage) {
+    const fromLabel = orderProgressStatusFilter === "전체" ? "선택 주문" : orderProgressStatusFilter;
+    setCollectionPopupMode("status-change");
+    setCollectionPopupTitle(`진행상태 변경: ${fromLabel} → ${targetStatus}`);
+    setCollectionStatuses(orderProgressStatusChangeItems(indexes, targetStatus, stage));
+    setCollectionPopupOpen(true);
+  }
+
   function orderProgressMatchesStatus(row: string[], label: string) {
     if (!label || label === "전체") return true;
     const status = progressValue(row, "주문상태");
@@ -12474,8 +12531,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     });
   }
 
-  async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[]) {
+  async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[], extraStatuses: OnlineApiStatusItem[] = []) {
     const rows = onlineOrderApiPayload(indexes);
+    const targetStatus = action === "confirm" ? "주문확인" : "출고완료";
     const grouped = rows.reduce<Record<string, number>>((acc, row) => {
       const name = salesCellText(row.channelName) || "쇼핑몰";
       acc[name] = (acc[name] || 0) + 1;
@@ -12483,11 +12541,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }, {});
     const baseStatuses = Object.entries(grouped).map(([name, count]) => ({
       name,
+      source: "api" as const,
       status: "running" as const,
-      message: `${count.toLocaleString("ko-KR")}건 ${action === "confirm" ? "주문확인" : "출고완료"} 처리 중`,
+      message: `${count.toLocaleString("ko-KR")}건 ${targetStatus} API 호출 중`,
     }));
-    setCollectionPopupTitle(action === "confirm" ? "주문확인 API 처리" : "출고완료 API 처리");
-    setCollectionStatuses(baseStatuses.length ? baseStatuses : [{ name: "쇼핑몰", status: "running", message: "API 처리 중" }]);
+    setCollectionPopupMode("status-change");
+    setCollectionPopupTitle(action === "confirm" ? "진행상태 변경: 주문확인 API 호출" : "진행상태 변경: 출고완료 API 호출");
+    setCollectionStatuses(baseStatuses.length ? [...baseStatuses, ...extraStatuses] : [{ name: "쇼핑몰", source: "api", status: "running", message: "API 호출 중" }, ...extraStatuses]);
     setCollectionPopupOpen(true);
 
     const body = { action, rows };
@@ -12510,7 +12570,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
     if (shouldUseLocalBridgeFallback && data.queued) {
-      setCollectionStatuses(baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })));
+      setCollectionStatuses([...baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })), ...extraStatuses]);
       try {
         res = await postStatus("http://127.0.0.1:3000/api/fnos/online-orders/status", { run_direct: true, use_worker: false }, true);
         data = await res.json().catch(() => ({}));
@@ -12531,21 +12591,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           break;
         }
         if (status === "failed" || status === "cancelled") throw new Error(salesCellText(job.error_message) || "온라인 주문 처리 실패");
-        setCollectionStatuses((prev) => (prev.length ? prev : baseStatuses).map((item) => ({
-          ...item,
-          status: status === "queued" ? "skipped" : "running",
-          message: status === "queued" ? "로컬 워커 대기 중입니다." : "사이트 API 처리 중입니다.",
-        })));
+        setCollectionStatuses((prev) => (prev.length ? prev : [...baseStatuses, ...extraStatuses]).map((item) => {
+          if ((item.source || "api") === "manual") return item;
+          return {
+            ...item,
+            status: status === "queued" ? "skipped" : "running",
+            message: status === "queued" ? "로컬 워커 대기 중입니다." : "사이트 API 호출 중입니다.",
+          };
+        }));
       }
       if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해 주세요.");
     }
     const results = Array.isArray(data.results) ? data.results as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
     if (results.length) {
-      setCollectionStatuses(results.map((item) => ({
-        name: salesCellText(item.channel_name) || "쇼핑몰",
-        status: item.ok ? "done" : "failed",
-        message: item.ok ? `${Number(item.count || 0).toLocaleString("ko-KR")}건 처리 완료` : salesCellText(item.message || "처리 실패"),
-      })));
+      setCollectionStatuses([
+        ...results.map((item) => ({
+          name: salesCellText(item.channel_name) || "쇼핑몰",
+          source: "api" as const,
+          status: item.ok ? "done" as const : "failed" as const,
+          message: item.ok ? `${Number(item.count || 0).toLocaleString("ko-KR")}건 API 호출 완료 · FNOS 적용 대기` : salesCellText(item.message || "처리 실패"),
+        })),
+        ...extraStatuses,
+      ]);
     }
     if (!res.ok || data.ok === false) throw new Error(data.error || data.results?.find((item: { message?: string }) => item.message)?.message || "온라인 주문 처리 실패");
     return data;
@@ -12731,15 +12798,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ? window.confirm(`${baseConfirmMessage}\n\nAPI 미호출 쇼핑몰(${unsupportedMessage})도 FNOS에서만 다음 단계로 넘기시겠습니까?\n※ 해당 쇼핑몰 관리자에서는 직접 주문확인/송장처리가 필요합니다.`)
       : window.confirm(baseConfirmMessage);
     if (!ok) return;
+    const manualWaitingStatuses = orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-waiting").filter((item) => item.source === "manual");
+    openOrderProgressStatusPopup(eligibleIndexes, status, apiIndexes.length ? "api-running" : "fnos-applying");
     try {
-      if (status === "주문확인" && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes);
-      if (status === "출고완료" && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes);
+      if (status === "주문확인" && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses);
+      if (status === "출고완료" && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses);
     } catch (error) {
       const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
-      setCollectionStatuses((prev) => prev.map((item) => ({ ...item, status: "failed", message })));
+      setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
       window.alert(error instanceof Error ? error.message : "온라인 주문 처리 실패");
       return;
     }
+    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying"));
+    await new Promise((resolve) => window.setTimeout(resolve, apiIndexes.length ? 150 : 250));
     let shouldCleanupManualFiles = false;
     setSheets((prev) => {
       const next = { ...prev };
@@ -12752,6 +12823,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       shouldCleanupManualFiles = status === "출고완료" && allOrderProgressRowsCompleted(next["발주 진행 단계"]);
       return next;
     });
+    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "done"));
     setMessage(`${status} 처리 완료: ${eligibleIndexes.length}건`);
     if (status === "출고완료") {
       window.setTimeout(() => {
@@ -15659,8 +15731,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             >
               <div className="space-y-4">
                 {[
-                  ["api", "API 연동 사이트"],
-                  ["manual", "API 미연동/수동 업로드 사이트"],
+                  ["api", collectionPopupMode === "status-change" ? "API 연동 사이트" : "API 연동 사이트"],
+                  ["manual", collectionPopupMode === "status-change" ? "API 미연동/FNOS 적용 사이트" : "API 미연동/수동 업로드 사이트"],
                 ].map(([source, label]) => {
                   const items = collectionStatuses.filter((item) => (item.source || "api") === source);
                   if (!items.length) return null;
@@ -15683,7 +15755,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                                 ? "border-slate-200 bg-slate-50 text-slate-600"
                                 : "border-rose-200 bg-rose-50 text-rose-700";
                           const dot = item.status === "done" ? "bg-emerald-500" : isRunning ? "bg-amber-400" : isSkipped ? "bg-slate-400" : "bg-rose-500";
-                          const statusLabel = item.status === "done" ? "수집완료" : isRunning ? "수집중" : isSkipped ? "확인필요" : "문제";
+                          const statusLabel = collectionPopupMode === "status-change"
+                            ? item.status === "done"
+                              ? "적용완료"
+                              : isRunning
+                                ? "처리중"
+                                : isSkipped
+                                  ? "대기"
+                                  : "문제"
+                            : item.status === "done" ? "수집완료" : isRunning ? "수집중" : isSkipped ? "확인필요" : "문제";
                           return (
                             <div key={`${source}-${item.name}-${item.message}`} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${tone}`}>
                               <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} />
