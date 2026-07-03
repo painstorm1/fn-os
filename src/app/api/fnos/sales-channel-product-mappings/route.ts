@@ -7,16 +7,27 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizeShoppingProductKeyForMapping(mallProductCode: unknown, mallProductKey: unknown) {
+  const key = text(mallProductKey).replace(/\s+/g, " ").trim();
+  const code = text(mallProductCode).replace(/\s+/g, " ").trim();
+  if (!key || !code) return key;
+  if (!key.toLowerCase().startsWith(code.toLowerCase())) return key;
+  const withoutCode = key.slice(code.length).replace(/^[\s:|/_-]+/, "").trim();
+  return withoutCode || key;
+}
+
 function normalizeBody(body: Record<string, unknown>) {
   const productCode = text(body.product_code || body.productCode);
-  const mallProductKey = text(body.mall_product_key || body.mallProductKey);
+  const mallProductCode = text(body.mall_product_code || body.mallProductCode);
+  const rawMallProductKey = text(body.mall_product_key || body.mallProductKey);
+  const mallProductKey = normalizeShoppingProductKeyForMapping(mallProductCode, rawMallProductKey);
   const channelName = text(body.channel_name || body.channelName || body.mall_name || body.mallName);
   return {
     channel_name: channelName,
     channel_code: text(body.channel_code || body.channelCode),
-    mall_product_code: text(body.mall_product_code || body.mallProductCode),
+    mall_product_code: mallProductCode,
     mall_product_key: mallProductKey,
-    mall_product_name: text(body.mall_product_name || body.mallProductName),
+    mall_product_name: text(body.mall_product_name || body.mallProductName) || rawMallProductKey,
     fn_product_id: text(body.fn_product_id || body.fnProductId) || null,
     product_code: productCode,
     product_name: text(body.product_name || body.productName),

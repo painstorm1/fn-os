@@ -7121,8 +7121,17 @@ function makeShoppingProductKey(productCode: string, optionText: string) {
   return `${salesCellText(productCode)}${salesCellText(optionText).replace(/\s+/g, " ")}`.trim();
 }
 
+function normalizeShoppingProductKeyForMapping(mallProductCode: unknown, mallProductKey: unknown) {
+  const key = salesCellText(mallProductKey).replace(/\s+/g, " ").trim();
+  const code = salesCellText(mallProductCode).replace(/\s+/g, " ").trim();
+  if (!key || !code) return key;
+  if (!key.toLowerCase().startsWith(code.toLowerCase())) return key;
+  const withoutCode = key.slice(code.length).replace(/^[\s:|/_-]+/, "").trim();
+  return withoutCode || key;
+}
+
 function mappingText(value: unknown) {
-  return salesCellText(value).toLowerCase();
+  return salesCellText(value).replace(/\s+/g, " ").toLowerCase();
 }
 
 function salesChannelMappingKey(channelName: unknown, mallProductKey: unknown) {
@@ -7140,15 +7149,24 @@ function findSalesChannelMapping(
   const channelCodeText = mappingText(channelCode);
   const productCodeText = mappingText(mallProductCode);
   const productKeyText = mappingText(mallProductKey);
+  const normalizedProductKeyText = mappingText(normalizeShoppingProductKeyForMapping(mallProductCode, mallProductKey));
+  const productKeyCandidates = [normalizedProductKeyText, productKeyText].filter(Boolean);
+  const matchesProductKey = (mapping: SalesChannelProductMapping) => {
+    const mappingKeys = [
+      mappingText(normalizeShoppingProductKeyForMapping(mapping.mall_product_code, mapping.mall_product_key)),
+      mappingText(mapping.mall_product_key),
+    ].filter(Boolean);
+    return productKeyCandidates.some((candidate) => mappingKeys.includes(candidate));
+  };
   return mappings.find((mapping) => (
     mappingText(mapping.channel_name) === channelNameText &&
-    mappingText(mapping.mall_product_key) === productKeyText
+    matchesProductKey(mapping)
   )) || mappings.find((mapping) => (
     mappingText(mapping.channel_code) === channelCodeText &&
     mappingText(mapping.mall_product_code) === productCodeText &&
     productCodeText
   )) || mappings.find((mapping) => (
-    mappingText(mapping.mall_product_key) === productKeyText && productKeyText
+    matchesProductKey(mapping) && productKeyCandidates.length > 0
   ));
 }
 
@@ -12744,11 +12762,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return { ...prev, "발주 진행 단계": nextProgress, "FN판매입력": nextSales };
     });
 
+    const normalizedMallProductKey = normalizeShoppingProductKeyForMapping(progress.쇼핑몰상품코드, progress.쇼핑몰품목key);
+
     void saveSalesChannelProductMapping({
       channel_name: progress.쇼핑몰명 || progress["쇼핑몰(거래처)"],
       channel_code: progress.쇼핑몰코드,
       mall_product_code: progress.쇼핑몰상품코드,
-      mall_product_key: progress.쇼핑몰품목key,
+      mall_product_key: normalizedMallProductKey || progress.쇼핑몰품목key,
       mall_product_name: progress.쇼핑몰품목key,
       product_code: productCode,
       product_name: productName,
