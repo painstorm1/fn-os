@@ -15278,7 +15278,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고대기">출고대기</option>
               <option value="출고완료">출고완료</option>
             </select>
-            <button type="button" className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-white" onClick={openSelectedOrderProductLinks}>품목 연결</button>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
             {orderProgressTotalCount > 0 && (
               <div className="flex min-w-[320px] flex-1 items-center justify-center gap-2 whitespace-nowrap text-xs font-black text-slate-600">
