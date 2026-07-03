@@ -333,42 +333,60 @@ async function issueNaverToken(params: Record<string, unknown>) {
 
 function productOrderIdsFromParams(params: Record<string, unknown>) {
   const raw = params.productOrderIds || params.product_order_ids || [];
-  return (Array.isArray(raw) ? raw : [raw]).map((value) => text(value)).filter(Boolean).slice(0, 30);
+  return Array.from(new Set((Array.isArray(raw) ? raw : [raw]).map((value) => text(value)).filter(Boolean)));
 }
 
-async function fetchConditionalOrders(token: string, from: string, to: string, placeOrderStatusType: "NOT_YET" | "OK") {
-  const url = new URL(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders`);
-  url.searchParams.set("from", from);
-  url.searchParams.set("to", to);
-  url.searchParams.set("rangeType", "PAYED_DATETIME");
-  url.searchParams.set("productOrderStatuses", "PAYED");
-  url.searchParams.set("placeOrderStatusType", placeOrderStatusType);
-  url.searchParams.set("pageSize", "300");
-  url.searchParams.set("page", "1");
-  url.searchParams.set("quantityClaimCompatibility", "true");
-  let data: unknown = {};
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      data = await readJson(await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-      }));
-      break;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (!/요청이 많|too many|429|rate/i.test(message) || attempt === 3) throw error;
-      await wait(1500 * (attempt + 1));
-    }
-  }
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+function naverOrderRows(data: unknown) {
   return arrayAt(data, [
     ["data", "contents"],
     ["data", "productOrders"],
     ["contents"],
     ["productOrders"],
     ["data"],
-  ]).map((row) => ({ ...row, __fnosPlaceOrderStatusType: placeOrderStatusType }));
+  ]);
+}
+
+async function fetchConditionalOrders(token: string, from: string, to: string, placeOrderStatusType: "NOT_YET" | "OK") {
+  const rows: AnyRecord[] = [];
+  const pageSize = 300;
+  for (let page = 1; page <= 100; page += 1) {
+    const url = new URL(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders`);
+    url.searchParams.set("from", from);
+    url.searchParams.set("to", to);
+    url.searchParams.set("rangeType", "PAYED_DATETIME");
+    url.searchParams.set("productOrderStatuses", "PAYED");
+    url.searchParams.set("placeOrderStatusType", placeOrderStatusType);
+    url.searchParams.set("pageSize", String(pageSize));
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("quantityClaimCompatibility", "true");
+    let data: unknown = {};
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        data = await readJson(await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        }));
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (!/요청이 많|too many|429|rate/i.test(message) || attempt === 3) throw error;
+        await wait(1500 * (attempt + 1));
+      }
+    }
+    const pageRows = naverOrderRows(data).map((row) => ({ ...row, __fnosPlaceOrderStatusType: placeOrderStatusType }));
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize) break;
+    await wait(500);
+  }
+  return rows;
 }
 
 export class NaverChannelAdapter implements SalesChannelAdapter {
@@ -421,15 +439,18 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       const productOrderIds = productOrderIdsFromParams(params);
       if (!productOrderIds.length) return { ok: false, data: null, error: "발주확인할 상품주문번호가 없습니다." };
       const token = await issueNaverToken(params);
-      const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/confirm`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ productOrderIds }),
-      }));
-      return { ok: true, data, message: `네이버 발주확인 ${productOrderIds.length}건 요청 완료` };
+      const results = [];
+      for (const batch of chunks(productOrderIds, 30)) {
+        results.push(await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/confirm`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ productOrderIds: batch }),
+        })));
+      }
+      return { ok: true, data: results, message: `네이버 발주확인 ${productOrderIds.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발주확인 실패" };
     }
@@ -443,23 +464,25 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
         .map((row) => ({
           productOrderId: text(row.productOrderId || row.product_order_id),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
-          deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
-          trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
+          deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code),
+          trackingNumber: text(row.trackingNumber || row.tracking_number),
           dispatchDate: text(row.dispatchDate || row.dispatch_date) || formatKstDateTime(new Date()),
         }))
-        .filter((row) => row.productOrderId && row.trackingNumber)
-        .slice(0, 30);
-      if (!dispatchProductOrders.length) return { ok: false, data: null, error: "발송처리할 상품주문번호/송장번호가 없습니다." };
+        .filter((row) => row.productOrderId && row.deliveryCompanyCode && row.trackingNumber);
+      if (!dispatchProductOrders.length) return { ok: false, data: null, error: "발송처리할 상품주문번호/택배사코드/송장번호가 없습니다." };
       const token = await issueNaverToken(params);
-      const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/dispatch`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ dispatchProductOrders }),
-      }));
-      return { ok: true, data, message: `네이버 발송처리 ${dispatchProductOrders.length}건 요청 완료` };
+      const results = [];
+      for (const batch of chunks(dispatchProductOrders, 30)) {
+        results.push(await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/dispatch`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ dispatchProductOrders: batch }),
+        })));
+      }
+      return { ok: true, data: results, message: `네이버 발송처리 ${dispatchProductOrders.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발송처리 실패" };
     }

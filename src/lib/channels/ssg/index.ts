@@ -102,7 +102,7 @@ function xmlEscape(value: unknown) { return text(value).replace(/&/g, "&amp;").r
 function ssgCarrierCode(value: unknown) {
   const raw = text(value).toUpperCase();
   if (/^\d{10}$/.test(raw)) return raw;
-  if (!raw || raw === "CJGLS" || raw === "CJ" || raw.includes("CJ")) return "0000033071";
+  if (!raw || raw === "CJGLS" || raw === "CJ" || raw.includes("CJ")) return "0000033011";
   return text(value);
 }
 function ssgDispatchRows(params: Record<string, unknown>) {

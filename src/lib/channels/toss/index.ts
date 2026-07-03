@@ -13,7 +13,8 @@ function num(value: unknown) { const parsed = Number(String(value ?? "").replace
 function first(...values: unknown[]) { for (const value of values) { const next = text(value); if (next) return next; } return ""; }
 function date(value: unknown, boundary: "start" | "end") { const raw = text(value); const d = raw ? new Date(raw) : new Date(); if (!raw && boundary === "start") d.setDate(d.getDate() - 7); const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000); return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth()+1).padStart(2,"0")}-${String(kst.getUTCDate()).padStart(2,"0")}`; }
 function normalizeDate(value: unknown) { const raw = text(value); const compact = raw.replace(/\D/g, ""); if (compact.length >= 14) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}T${compact.slice(8,10)}:${compact.slice(10,12)}:${compact.slice(12,14)}+09:00`; if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`; return raw; }
-function rowsFrom(data: unknown): AnyRecord[] { const queue = [record(data).success || data]; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); while (queue.length) { const value = queue.shift(); if (!value || seen.has(value) || typeof value !== "object") continue; seen.add(value); if (Array.isArray(value)) { queue.push(...value); continue; } const cur = record(value); if (first(cur.orderId, cur.orderNo, cur.id) && first(cur.productName, cur.itemName, cur.name, record(cur.product).name)) rows.push(cur); else queue.push(...Object.values(cur)); } return rows; }
+function rowsFrom(data: unknown): AnyRecord[] { const queue = [record(data).success || data]; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); while (queue.length) { const value = queue.shift(); if (!value || seen.has(value) || typeof value !== "object") continue; seen.add(value); if (Array.isArray(value)) { queue.push(...value); continue; } const cur = record(value); if (first(cur.orderProductId, cur.orderId, cur.orderNo, cur.id) && first(cur.productName, cur.itemName, cur.name, record(cur.product).name)) rows.push(cur); else queue.push(...Object.values(cur)); } return rows; }
+function tossNextCursor(data: unknown) { return first(record(data).nextCursor, record(record(data).success).nextCursor, record(record(data).data).nextCursor, record(record(data).pagination).nextCursor); }
 async function readJson(response: Response) { return readJsonApiResponse(response, "토스", { successCodes: ["SUCCESS", "OK", "0"], resultPaths: [["resultType"], ["code"], ["status"]] }); }
 async function issueAccessToken(accessKey: string, secretKey: string, tokenUrl: string) {
   const body = new URLSearchParams({ grant_type: "client_credentials", client_id: accessKey, client_secret: secretKey, scope: "toss-shopping-fep:write" });
@@ -40,14 +41,54 @@ export class TossChannelAdapter implements SalesChannelAdapter {
     const tokenUrl = text(params.token_url) || TOSS_TOKEN_URL;
     const startDate = date(params.fromDate ?? params.from, "start");
     const endDate = date(params.toDate ?? params.to, "end");
-    const query = new URLSearchParams({ startDate, endDate, limit: "50", partnerName: "FNOS" });
+    const query = new URLSearchParams({ startDate, endDate, limit: "50", partnerName: text(params.partner_name) || "FNOS" });
+    if (text(params.status)) query.set("status", text(params.status));
+    const rows: AnyRecord[] = [];
     try {
       const token = await issueAccessToken(accessKey, secretKey, tokenUrl);
-      const response = await fetch(`${baseUrl}${path}?${query.toString()}`, { method: "GET", headers: { Accept: "application/json", Authorization: `Bearer ${token}` } });
-      const data = await readJson(response);
-      const rows = rowsFrom(data);
+      for (let page = 0; page < 100; page += 1) {
+        const response = await fetch(`${baseUrl}${path}?${query.toString()}`, { method: "GET", headers: { Accept: "application/json", Authorization: `Bearer ${token}` } });
+        const data = await readJson(response);
+        rows.push(...rowsFrom(data));
+        const nextCursor = tossNextCursor(data);
+        if (!nextCursor) break;
+        query.set("nextCursor", nextCursor);
+      }
       const base = { channelCode: text(params.channel_code) || "TOSS", channelName: text(params.channel_name) || "토스", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
       return { ok: true, data: rows.map((row) => normalize(row, base)).filter((order) => order.orderNo), message: `토스 주문 ${rows.length}건을 수집했습니다.` };
     } catch (error) { return { ok: false, data: [], error: error instanceof Error ? error.message : "토스 주문 수집 실패" }; }
-  }
-}
+    }
+
+    async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const accessKey = first(params.access_key, params.oauth_access_key);
+    const secretKey = first(params.secret_key, params.oauth_secret_key);
+    if (!accessKey || !secretKey) return { ok: false, data: null, error: "토스 Access Key와 Secret Key를 저장해주세요." };
+    const rows = (Array.isArray(params.dispatchProductOrders) ? params.dispatchProductOrders : [])
+    .map(record)
+    .map((row) => ({
+      orderProductId: first(row.orderProductId, row.productOrderId, row.product_order_id, row.channelOptionCode, row.channel_option_code),
+      deliveryCompany: first(row.deliveryCompany, row.deliveryCompanyCode, row.delivery_company_code),
+      trackingNumber: first(row.trackingNumber, row.tracking_number),
+      partnerName: first(row.partnerName, row.partner_name, params.partner_name),
+    }))
+    .filter((row) => row.orderProductId && row.deliveryCompany && row.trackingNumber);
+    if (!rows.length) return { ok: false, data: null, error: "토스 발송처리에 필요한 orderProductId/택배사/송장번호가 없습니다." };
+    try {
+    const baseUrl = text(params.api_base_url) || TOSS_BASE_URL;
+    const tokenUrl = text(params.token_url) || TOSS_TOKEN_URL;
+    const path = text(params.delivery_path) || "/api/v3/shopping-fep/orders/products/delivery";
+    const token = await issueAccessToken(accessKey, secretKey, tokenUrl);
+    const results = [];
+    for (const row of rows) {
+      const body: AnyRecord = {
+        orderProductId: row.orderProductId,
+        deliveryCompany: row.deliveryCompany,
+        trackingNumber: row.trackingNumber,
+      };
+      if (row.partnerName) body.partnerName = row.partnerName;
+      results.push(await readJson(await fetch(`${baseUrl}${path}`, { method: "PUT", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) })));
+    }
+    return { ok: true, data: results, message: `토스 발송처리 ${rows.length}건 요청 완료` };
+    } catch (error) { return { ok: false, data: null, error: error instanceof Error ? error.message : "토스 발송처리 실패" }; }
+    }
+    }
