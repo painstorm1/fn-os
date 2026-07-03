@@ -11297,7 +11297,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function exportBaseShippingFromModal() {
     const rows = shippingExportRowsExcludingDirect();
     if (!rows.length) {
-      window.alert("내보낼 원래 송장엑셀 데이터가 없습니다.");
+      window.alert("내보낼 송장엑셀 데이터가 없습니다.");
       return;
     }
     void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: rows });
@@ -11538,7 +11538,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("삭제할 직송 주문을 선택해 주세요.");
       return;
     }
-    const ok = window.confirm(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 원래 송장엑셀 행으로 복원할까요?`);
+    const ok = window.confirm(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 송장엑셀 행으로 복원할까요?`);
     if (!ok) return;
     const removedSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => targets.has(index));
     const nextRows = (directShippingRows[partner] || [])
@@ -11564,7 +11564,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return next;
     });
     if (!nextRows.length && shippingPreviewTab === partner) setShippingPreviewTab("shipping");
-    setMessage(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 원래 송장엑셀 행으로 복원했습니다.`);
+    setMessage(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 송장엑셀 행으로 복원했습니다.`);
   }
 
   async function enrichOnlineEntryRows(
@@ -14971,7 +14971,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
               <div className="min-h-0 flex-1 overflow-auto p-5">
                 <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
-                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>원래 송장엑셀</button>
+                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>송장엑셀</button>
                   <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
                   <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
                   <span className="mx-1 h-5 w-px bg-slate-200" />
@@ -14995,7 +14995,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
-                <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>원래 송장 내보내기</button>
+                <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>송장 내보내기</button>
                 {directShippingRows.JB.length > 0 && <button type="button" className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-black text-blue-700" onClick={() => exportDirectShippingFromModal("JB")}>JB 직송 내보내기</button>}
                 {directShippingRows.케이모아.length > 0 && <button type="button" className="h-10 rounded-lg border border-violet-200 bg-white px-4 text-sm font-black text-violet-700" onClick={() => exportDirectShippingFromModal("케이모아")}>케이모아 직송 내보내기</button>}
                 <ActionButton type="button" onClick={exportShippingBundleFromModal}>모두 내보내기</ActionButton>
