@@ -7290,7 +7290,13 @@ function onlineOrderDateKey(value: unknown) {
   return raw.replace(/\D/g, "").slice(0, 8) || salesWorkspaceDayKey().replace(/\D/g, "");
 }
 
-function onlineOrderMoney(value: unknown) {
+function onlineOrderMoney(value: unknown): number {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const money = onlineOrderRecord(value);
+    const units = onlineOrderMoney(money.units);
+    const nanos = onlineOrderMoney(money.nanos);
+    if (units || nanos) return units + nanos / 1_000_000_000;
+  }
   const amount = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(amount) ? amount : 0;
 }
@@ -7476,7 +7482,11 @@ function onlineOrderSettlementExportAmount(value: unknown, _alias: string, _chan
 function onlineOrderSettlementAmount(item: CollectedOnlineOrderItem, channelName: unknown, channelCode: unknown) {
   const explicitSettlement = onlineOrderMoney(item.settlementAmount);
   if (explicitSettlement) return explicitSettlement;
-  const salesAmount = onlineOrderMoney(item.salesAmount);
+  const raw = onlineOrderRecord(item.raw);
+  const qty = onlineOrderMoney(item.qty) || onlineOrderMoney(raw.shippingCount || raw.orderCount || raw.quantity) || 1;
+  const rawSalesAmount = onlineOrderMoney(raw.orderPrice)
+    || ((onlineOrderMoney(raw.salesPrice) || onlineOrderMoney(raw.vendorItemPrice) || onlineOrderMoney(raw.instantDiscountedPrice)) * qty);
+  const salesAmount = onlineOrderMoney(item.salesAmount) || rawSalesAmount;
   if (!salesAmount) return 0;
   const alias = onlineOrderChannelAlias(channelName, channelCode);
   const name = salesCellText(channelName);

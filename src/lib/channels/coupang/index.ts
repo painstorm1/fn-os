@@ -9,7 +9,13 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function numberValue(value: unknown) {
+function numberValue(value: unknown): number {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const money = record(value);
+    const units = numberValue(money.units);
+    const nanos = numberValue(money.nanos);
+    if (units || nanos) return units + nanos / 1_000_000_000;
+  }
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -122,13 +128,13 @@ function normalizeOrder(row: AnyRecord, base: { channelCode: string; channelName
   const orderItems = arrayAt(row, [["orderItems"], ["items"], ["vendorItems"]]);
   const items = (orderItems.length ? orderItems : [row]).map((itemRow) => {
     const qty = numberValue(itemRow.shippingCount || itemRow.orderCount || itemRow.quantity) || 1;
-    const amount = numberValue(
-      itemRow.orderPrice
-        || itemRow.salesPrice
+    const orderPrice = numberValue(itemRow.orderPrice);
+    const unitPrice = numberValue(
+      itemRow.salesPrice
         || itemRow.vendorItemPrice
         || itemRow.instantDiscountedPrice,
     );
-    const salesAmount = amount ? amount * qty : 0;
+    const salesAmount = orderPrice || (unitPrice ? unitPrice * qty : 0);
     const explicitSettlementAmount = numberValue(itemRow.settlementAmount);
     const settlementAmount = explicitSettlementAmount || (salesAmount ? Math.round(salesAmount * 0.88) : 0);
     return {
