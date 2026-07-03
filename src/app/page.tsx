@@ -9071,7 +9071,6 @@ function OnlineOrderProgressList({
     "수집일자",
     "품목코드(ERP)",
     "품목명(ERP)",
-    "쇼핑몰상품코드",
     "쇼핑몰품목key",
     "쇼핑몰명",
     "주문번호",
@@ -9457,7 +9456,6 @@ function OnlineOrderProgressList({
                       placeholder="검색"
                     />
                   </td>
-                  <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰상품코드")}</td>
                   <td className="whitespace-normal break-all px-2 py-2 text-xs leading-snug">{renderText(row, "쇼핑몰품목key")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "쇼핑몰명")}</td>
                   <td className="truncate px-2 py-2">{renderText(row, "주문번호")}</td>
