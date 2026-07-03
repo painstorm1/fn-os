@@ -11,6 +11,10 @@ type XmlNode = {
 
 const ELEVENST_BASE_URL = "https://api.11st.co.kr/rest";
 const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000 - 60 * 1000;
+const DEFAULT_ELEVENST_ORDER_ENDPOINTS = [
+  { name: "complete", status: "결제완료" },
+  { name: "packaging", status: "배송준비중" },
+];
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -307,6 +311,43 @@ function mergeOrders(orders: NormalizedOrder[]) {
   return Array.from(byOrder.values());
 }
 
+function configuredElevenstEndpoints(params: Record<string, unknown>) {
+  const raw = text(
+    params.elevenst_order_endpoints
+      || params.order_endpoints
+      || params.elevenst_order_endpoint
+      || params.order_endpoint,
+  );
+  const endpoints = raw
+    ? raw.split(",")
+      .map((item) => {
+        const [name, status] = item.split(/[:=]/, 2).map((part) => text(part));
+        return name ? { name, status: status || endpointStatusLabel(name) } : null;
+      })
+      .filter((item): item is { name: string; status: string } => Boolean(item))
+    : [...DEFAULT_ELEVENST_ORDER_ENDPOINTS];
+
+  const includePackaging = params.include_packaging !== false && text(params.include_packaging).toLowerCase() !== "false";
+  if (includePackaging && !endpoints.some((endpoint) => endpoint.name === "packaging")) {
+    endpoints.push({ name: "packaging", status: "배송준비중" });
+  }
+  const includeShipping = params.include_shipping === true || text(params.include_shipping).toLowerCase() === "true";
+  if (includeShipping && !endpoints.some((endpoint) => endpoint.name === "shipping")) {
+    endpoints.push({ name: "shipping", status: "배송중" });
+  }
+  const unique = new Map<string, { name: string; status: string }>();
+  endpoints.forEach((endpoint) => unique.set(endpoint.name, endpoint));
+  return Array.from(unique.values());
+}
+
+function endpointStatusLabel(endpoint: string) {
+  const compact = endpoint.toLowerCase().replace(/[\s_/-]+/g, "");
+  if (compact === "complete") return "결제완료";
+  if (compact === "packaging") return "배송준비중";
+  if (compact === "shipping") return "배송중";
+  return endpoint;
+}
+
 export class ElevenstChannelAdapter implements SalesChannelAdapter {
   async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
     const apiKey = firstText(params.api_key, params.openapikey, params.openapi_key, params.access_key);
@@ -320,10 +361,7 @@ export class ElevenstChannelAdapter implements SalesChannelAdapter {
         customerCode: text(params.customer_code),
         customerName: text(params.customer_name),
       };
-      const endpoint = text(params.elevenst_order_endpoint || params.order_endpoint) || "complete";
-      const includePackaging = params.include_packaging === true || text(params.include_packaging).toLowerCase() === "true";
-      const endpoints = [{ name: endpoint, status: "결제완료" }];
-      if (includePackaging && endpoint !== "packaging") endpoints.push({ name: "packaging", status: "배송준비중" });
+      const endpoints = configuredElevenstEndpoints(params);
       const rows: Array<{ row: AnyRecord; status: string }> = [];
       const ranges = elevenstRanges(params.from, params.to);
 
@@ -347,7 +385,7 @@ export class ElevenstChannelAdapter implements SalesChannelAdapter {
         }
       }
 
-      if (!rows.length) return { ok: true, data: [], message: "11번가 신규 주문이 없습니다." };
+      if (!rows.length) return { ok: true, data: [], message: "11번가 수집 대상 주문이 없습니다." };
       const normalized = rows
         .map(({ row, status }) => normalizeElevenstRow(row, base, status))
         .filter((order) => order.orderNo && order.items.length);
