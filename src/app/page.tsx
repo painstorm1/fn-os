@@ -7582,6 +7582,12 @@ function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnline
     const vendorItemId = onlineOrderFallbackText(order, item, ["vendorItemId", "vendor_item_id"]) || salesCellText(item.channelOptionCode || item.channelProductCode);
     return { apiOrderId: orderId, apiProductOrderId: vendorItemId, apiShipmentId: shipmentBoxId, apiExtraId: "" };
   }
+  if (alias === "11") {
+    const ordNo = onlineOrderFallbackText(order, item, ["ordNo", "orderNo", "order_no"]) || orderId;
+    const ordPrdSeq = onlineOrderFallbackText(order, item, ["ordPrdSeq", "orderProductSequence", "ord_prd_seq"]) || salesCellText(item.channelOptionCode).split("-")[0] || productId;
+    const dlvNo = onlineOrderFallbackText(order, item, ["dlvNo", "deliveryNo", "dlv_no"]) || salesCellText(item.channelOptionCode).split("-").slice(1).join("-") || bundleId || ordNo;
+    return { apiOrderId: ordNo, apiProductOrderId: ordPrdSeq, apiShipmentId: dlvNo, apiExtraId: "" };
+  }
   return { apiOrderId: orderId, apiProductOrderId: productId, apiShipmentId: bundleId, apiExtraId: "" };
 }
 

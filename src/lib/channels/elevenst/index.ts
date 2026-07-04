@@ -348,13 +348,131 @@ function endpointStatusLabel(endpoint: string) {
   return endpoint;
 }
 
+
+function uniqueNonEmpty(values: unknown[]) {
+  return Array.from(new Set(values.map(text).filter(Boolean)));
+}
+
+function elevenstApiKey(params: Record<string, unknown>) {
+  return firstText(params.api_key, params.openapikey, params.openapi_key, params.access_key);
+}
+
+function elevenstBaseUrl(params: Record<string, unknown>) {
+  return (firstText(params.api_base_url, params.base_url) || ELEVENST_BASE_URL).replace(/\/$/, "");
+}
+
+function fillElevenstPathTemplate(template: string, row: AnyRecord) {
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key: string) => encodeURIComponent(text(row[key])));
+}
+
+function queryString(payload: AnyRecord) {
+  const search = new URLSearchParams();
+  Object.entries(payload).forEach(([key, value]) => {
+    const next = text(value);
+    if (next) search.set(key, next);
+  });
+  return search.toString();
+}
+
+function normalizeElevenstConfirmRows(params: Record<string, unknown>) {
+  const rawRows = Array.isArray(params.confirmProductOrders) ? params.confirmProductOrders.map(record) : [];
+  const fromRows = rawRows.map((row) => ({
+    ordNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no, row.productOrderId, row.product_order_id),
+    ordPrdSeq: firstText(row.productOrderId, row.product_order_id, row.ordPrdSeq, row.ord_prd_seq),
+    dlvNo: firstText(row.shipmentBoxId, row.shipment_box_id, row.dlvNo, row.dlv_no, row.bundleOrderNo, row.bundle_order_no),
+  })).filter((row) => row.ordNo);
+  if (fromRows.length) return fromRows;
+  return uniqueNonEmpty(Array.isArray(params.productOrderIds) ? params.productOrderIds : [])
+    .map((ordNo) => ({ ordNo, ordPrdSeq: "", dlvNo: "" }));
+}
+
+function normalizeElevenstDispatchRows(params: Record<string, unknown>) {
+  const rawRows = Array.isArray(params.dispatchProductOrders) ? params.dispatchProductOrders.map(record) : [];
+  return rawRows.map((row) => {
+    const trackingNumber = firstText(row.trackingNumber, row.tracking_number, row.invoiceNo, row.invoice_no, row.invcNo, row.invc_no).replace(/\D/g, "");
+    return {
+      ordNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no),
+      ordPrdSeq: firstText(row.productOrderId, row.product_order_id, row.ordPrdSeq, row.ord_prd_seq),
+      dlvNo: firstText(row.shipmentBoxId, row.shipment_box_id, row.dlvNo, row.dlv_no, row.bundleOrderNo, row.bundle_order_no),
+      deliveryCompanyCode: firstText(row.deliveryCompanyCode, row.delivery_company_code, row.dlvEtprsCd, row.dlv_etprs_cd) || "CJGLS",
+      trackingNumber,
+    };
+  }).filter((row) => (row.dlvNo || row.ordNo) && row.trackingNumber);
+}
+
+function elevenstRequestPayload(row: AnyRecord, mode: "confirm" | "dispatch") {
+  if (mode === "confirm") {
+    return {
+      ordNo: row.ordNo,
+      orderNo: row.ordNo,
+      ordPrdSeq: row.ordPrdSeq,
+      dlvNo: row.dlvNo,
+    };
+  }
+  return {
+    ordNo: row.ordNo,
+    orderNo: row.ordNo,
+    ordPrdSeq: row.ordPrdSeq,
+    dlvNo: row.dlvNo,
+    deliveryNo: row.dlvNo,
+    dlvEtprsCd: row.deliveryCompanyCode,
+    deliveryCompanyCode: row.deliveryCompanyCode,
+    invcNo: row.trackingNumber,
+    invoiceNo: row.trackingNumber,
+    trackingNumber: row.trackingNumber,
+  };
+}
+
+async function callElevenstOrderMutation(
+  params: Record<string, unknown>,
+  row: AnyRecord,
+  mode: "confirm" | "dispatch",
+) {
+  const apiKey = elevenstApiKey(params);
+  const defaultPath = mode === "confirm" ? "/ordservices/confirm" : "/ordservices/shipping";
+  const configuredPath = firstText(
+    mode === "confirm"
+      ? (params.confirm_path || params.elevenst_confirm_path || params.order_confirm_path)
+      : (params.dispatch_path || params.elevenst_dispatch_path || params.shipping_path || params.delivery_path),
+  ) || defaultPath;
+  const method = (firstText(
+    mode === "confirm"
+      ? (params.confirm_method || params.elevenst_confirm_method)
+      : (params.dispatch_method || params.elevenst_dispatch_method),
+  ) || "POST").toUpperCase();
+  const path = fillElevenstPathTemplate(configuredPath, row);
+  const payload = elevenstRequestPayload(row, mode);
+  const encoded = queryString(payload);
+  const separator = path.includes("?") ? "&" : "?";
+  const fullPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${elevenstBaseUrl(params)}${fullPath}${method === "GET" && encoded ? `${separator}${encoded}` : ""}`;
+  const response = await fetch(url, {
+    method,
+    headers: {
+      openapikey: apiKey,
+      accept: "application/xml, text/xml; q=0.9, application/json; q=0.8",
+      ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" }),
+    },
+    body: method === "GET" ? undefined : encoded,
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const bodyText = contentType.includes("json") ? await response.text() : decodeMaybeEucKr(await response.arrayBuffer());
+  if (!response.ok) throw new Error(`11번가 ${mode === "confirm" ? "발주확인" : "배송처리"} API HTTP ${response.status}: ${bodyText.slice(0, 300)}`);
+  const parsed = contentType.includes("json") ? JSON.parse(bodyText || "null") : parseXml(bodyText);
+  const status = resultStatus(parsed);
+  if (status.code && !["0", "1", "100", "200"].includes(status.code)) {
+    throw new Error(`11번가 ${mode === "confirm" ? "발주확인" : "배송처리"} API result_code=${status.code}${status.message ? ` - ${status.message}` : ""}`);
+  }
+  return { request: { method, path, payload }, response: parsed };
+}
+
 export class ElevenstChannelAdapter implements SalesChannelAdapter {
   async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
-    const apiKey = firstText(params.api_key, params.openapikey, params.openapi_key, params.access_key);
+    const apiKey = elevenstApiKey(params);
     if (!apiKey) return { ok: false, data: [], error: "11번가 API Key를 먼저 저장해주세요." };
 
     try {
-      const baseUrl = firstText(params.api_base_url, params.base_url) || ELEVENST_BASE_URL;
+      const baseUrl = elevenstBaseUrl(params);
       const base = {
         channelCode: text(params.channel_code) || "ELEVENST",
         channelName: text(params.channel_name) || "11번가",
@@ -397,6 +515,38 @@ export class ElevenstChannelAdapter implements SalesChannelAdapter {
       };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "11번가 주문 수집 실패" };
+    }
+  }
+
+  async confirmOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const apiKey = elevenstApiKey(params);
+    if (!apiKey) return { ok: false, data: null, error: "11번가 API Key를 먼저 저장해주세요." };
+    try {
+      const rows = normalizeElevenstConfirmRows(params);
+      if (!rows.length) return { ok: false, data: null, error: "11번가 발주확인에 필요한 주문번호가 없습니다." };
+      const results = [];
+      for (const row of rows) {
+        results.push(await callElevenstOrderMutation(params, row, "confirm"));
+      }
+      return { ok: true, data: results, message: `11번가 발주확인 ${rows.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "11번가 발주확인 실패" };
+    }
+  }
+
+  async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
+    const apiKey = elevenstApiKey(params);
+    if (!apiKey) return { ok: false, data: null, error: "11번가 API Key를 먼저 저장해주세요." };
+    try {
+      const rows = normalizeElevenstDispatchRows(params);
+      if (!rows.length) return { ok: false, data: null, error: "11번가 배송처리에 필요한 배송번호/주문번호와 송장번호가 없습니다." };
+      const results = [];
+      for (const row of rows) {
+        results.push(await callElevenstOrderMutation(params, row, "dispatch"));
+      }
+      return { ok: true, data: results, message: `11번가 배송처리 ${rows.length}건 요청 완료` };
+    } catch (error) {
+      return { ok: false, data: null, error: error instanceof Error ? error.message : "11번가 배송처리 실패" };
     }
   }
 }
