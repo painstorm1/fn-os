@@ -6309,7 +6309,7 @@ function StatusPill({ status }: { status?: string }) {
 type SalesSheetName = "발주 진행 단계" | "송장출력용" | "FN송장입력" | "FN판매입력" | "FN구매입력";
 
 const salesSheetHeaders: Record<SalesSheetName, string[]> = {
-  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처"],
+  "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"],
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
@@ -7213,6 +7213,8 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
     setProgressValue(progress, "쇼핑몰코드", salesCellText(shipping.쇼핑몰코드 || invoice.쇼핑몰코드));
     setProgressValue(progress, "주문번호", salesCellText(invoice.주문번호));
     setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
+    setProgressValue(progress, "API주문ID", salesCellText(invoice.주문번호));
+    setProgressValue(progress, "API배송묶음ID", salesCellText(invoice.묶음주문번호));
     setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || "CJGLS");
     setProgressValue(progress, "송장번호", salesCellText(shipping.송장번호 || invoice.송장번호));
     setProgressValue(progress, "주문상태", salesCellText(invoice.송장번호 || shipping.송장번호) ? "출고대기" : "신규주문");
@@ -7552,6 +7554,37 @@ function onlineOrderFallbackText(order: CollectedOnlineOrder, item: CollectedOnl
   return onlineOrderFirstDeepText(order.raw, keys) || onlineOrderFirstDeepText(item.raw, keys);
 }
 
+function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
+  const orderId = salesCellText(order.orderNo);
+  const productId = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku);
+  const bundleId = salesCellText(order.bundleOrderNo);
+  const channelName = salesCellText(order.customerName || order.channelName);
+  const channelCode = salesCellText(order.customerCode || order.channelCode);
+  const alias = onlineOrderChannelAlias(channelName, channelCode);
+
+  if (alias === "S") {
+    const shppNo = onlineOrderFallbackText(order, item, ["shppNo", "shipmentBoxId", "shipment_box_id"]) || bundleId || orderId;
+    const shppSeq = onlineOrderFallbackText(order, item, ["shppSeq", "shpp_seq"]) || salesCellText(item.channelOptionCode) || "1";
+    return { apiOrderId: shppNo, apiProductOrderId: shppSeq, apiShipmentId: shppNo, apiExtraId: "" };
+  }
+  if (alias === "L") {
+    const odNo = onlineOrderFallbackText(order, item, ["odNo", "orderNo", "orderId", "od_no"]) || orderId;
+    const odSeq = onlineOrderFallbackText(order, item, ["odSeq", "odDtlSeq", "od_seq"]) || salesCellText(item.channelOptionCode) || "1";
+    const procSeq = onlineOrderFallbackText(order, item, ["procSeq", "proc_seq"]) || "1";
+    return { apiOrderId: odNo, apiProductOrderId: odSeq, apiShipmentId: bundleId || odNo, apiExtraId: procSeq };
+  }
+  if (alias === "T") {
+    const orderProductId = onlineOrderFallbackText(order, item, ["orderProductId", "order_product_id"]) || salesCellText(item.channelOptionCode) || productId;
+    return { apiOrderId: orderId, apiProductOrderId: orderProductId, apiShipmentId: bundleId || orderId, apiExtraId: "" };
+  }
+  if (alias === "C") {
+    const shipmentBoxId = onlineOrderFallbackText(order, item, ["shipmentBoxId", "shipment_box_id"]) || bundleId || orderId;
+    const vendorItemId = onlineOrderFallbackText(order, item, ["vendorItemId", "vendor_item_id"]) || salesCellText(item.channelOptionCode || item.channelProductCode);
+    return { apiOrderId: orderId, apiProductOrderId: vendorItemId, apiShipmentId: shipmentBoxId, apiExtraId: "" };
+  }
+  return { apiOrderId: orderId, apiProductOrderId: productId, apiShipmentId: bundleId, apiExtraId: "" };
+}
+
 function onlineOrderManualRowKey(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
   const orderRaw = onlineOrderRecord(order.raw);
   const itemRaw = onlineOrderRecord(item.raw);
@@ -7644,6 +7677,7 @@ function appendCollectedOnlineOrdersToSheets(
   const shippingRows: string[][] = [];
   const invoiceRows: string[][] = [];
   const mallCodeCounters = new Map<string, number>();
+  const appendedActionIds: Array<{ apiOrderId: string; apiProductOrderId: string; apiShipmentId: string; apiExtraId: string }> = [];
   const previousStatusByMallCode = orderProgressStatusByMallCode(currentSheets);
   const mallCodeDatePart = salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8);
   const mallCodeBaseRun = onlineOrderRunCode();
@@ -7666,6 +7700,7 @@ function appendCollectedOnlineOrdersToSheets(
       const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
       const mallAlias = onlineOrderChannelAlias(channelName, channelCode);
       const mallCodeFlowPrefix = onlineOrderFlowPrefixFor(mallCodeReferenceSheets, mallCodeDatePart, mallAlias, mallCodeBaseRun);
+      const actionIds = onlineOrderActionIds(order, item);
       const mallCodeKey = `${mallCodeDatePart}-${mallAlias}-${mallCodeFlowPrefix}`;
       if (!mallCodeCounters.has(mallCodeKey)) {
         mallCodeCounters.set(mallCodeKey, onlineOrderInitialMallCodeSeq(currentSheets, mallCodeDatePart, mallAlias, mallCodeFlowPrefix));
@@ -7715,10 +7750,11 @@ function appendCollectedOnlineOrdersToSheets(
 
       const invoice = salesSheetHeaders.FN송장입력.map(() => "");
       setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", generatedMallCode);
-      setSalesSheetCell(invoice, "FN송장입력", "주문번호", orderNo);
-      setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", order.bundleOrderNo || orderNo);
+      setSalesSheetCell(invoice, "FN송장입력", "주문번호", actionIds.apiOrderId || orderNo);
+      setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", actionIds.apiShipmentId || order.bundleOrderNo || orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", "CJGLS");
       invoiceRows.push(invoice);
+      appendedActionIds.push(actionIds);
     });
   });
 
@@ -7726,6 +7762,14 @@ function appendCollectedOnlineOrdersToSheets(
   nextSheets.송장출력용 = padSalesRows("송장출력용", [...currentShippingRows, ...shippingRows]);
   nextSheets.FN송장입력 = padSalesRows("FN송장입력", [...currentInvoiceRows, ...invoiceRows]);
   nextSheets["발주 진행 단계"] = preserveExistingOrderProgressStatuses(buildOrderProgressRows(nextSheets), previousStatusByMallCode);
+  appendedActionIds.forEach((actionIds, offset) => {
+    const progress = nextSheets["발주 진행 단계"][currentShippingRows.length + offset];
+    if (!progress) return;
+    setProgressValue(progress, "API주문ID", actionIds.apiOrderId);
+    setProgressValue(progress, "API상품주문ID", actionIds.apiProductOrderId);
+    setProgressValue(progress, "API배송묶음ID", actionIds.apiShipmentId);
+    setProgressValue(progress, "API보조ID", actionIds.apiExtraId);
+  });
   const collectedStatusByKey = new Map<string, string>();
   orders.forEach((order) => {
     const status = salesCellText(order.orderStatus);
@@ -12527,8 +12571,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return indexes.map((index) => {
       const row = sheets["발주 진행 단계"][index] || [];
       const channelName = progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)");
-      const productOrderId = progressValue(row, "쇼핑몰품목key") || progressValue(row, "쇼핑몰상품코드") || progressValue(row, "주문번호");
-      const orderNo = progressValue(row, "주문번호");
+      const productOrderId = progressValue(row, "API상품주문ID") || progressValue(row, "쇼핑몰상품코드") || progressValue(row, "주문번호");
+      const orderNo = progressValue(row, "API주문ID") || progressValue(row, "주문번호");
       return {
         rowIndex: index,
         channelName,
@@ -12540,8 +12584,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         product_order_id: productOrderId,
         orderNo,
         order_no: orderNo,
-        bundleOrderNo: progressValue(row, "묶음주문번호"),
-        bundle_order_no: progressValue(row, "묶음주문번호"),
+        bundleOrderNo: progressValue(row, "API배송묶음ID") || progressValue(row, "묶음주문번호"),
+        bundle_order_no: progressValue(row, "API배송묶음ID") || progressValue(row, "묶음주문번호"),
+        shipmentBoxId: progressValue(row, "API배송묶음ID"),
+        shipment_box_id: progressValue(row, "API배송묶음ID"),
+        vendorItemId: productOrderId,
+        vendor_item_id: productOrderId,
+        shppNo: progressValue(row, "API주문ID"),
+        shppSeq: progressValue(row, "API상품주문ID"),
+        odSeq: progressValue(row, "API상품주문ID"),
+        procSeq: progressValue(row, "API보조ID"),
         quantity: progressValue(row, "수량"),
         deliveryMethod: "DELIVERY",
         deliveryCompanyCode: progressValue(row, "배송방법코드") || "CJGLS",

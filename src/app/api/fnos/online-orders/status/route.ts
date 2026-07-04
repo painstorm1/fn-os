@@ -74,8 +74,16 @@ function rowsForChannel(rows: AnyRecord[], channel: AnyRecord) {
 
 function rowProductOrderId(row: AnyRecord) {
   return text(
-    row.productOrderId
+    row.apiProductOrderId
+      || row.api_product_order_id
+      || row.productOrderId
       || row.product_order_id
+      || row.shppSeq
+      || row.shpp_seq
+      || row.odSeq
+      || row.od_seq
+      || row.vendorItemId
+      || row.vendor_item_id
       || row.channelOptionCode
       || row.channel_option_code
       || row.mallProductCode
@@ -83,6 +91,18 @@ function rowProductOrderId(row: AnyRecord) {
       || row.orderNo
       || row.order_no,
   );
+}
+
+function rowOrderId(row: AnyRecord) {
+  return text(row.apiOrderId || row.api_order_id || row.orderId || row.order_id || row.shppNo || row.shpp_no || row.odNo || row.od_no || row.orderNo || row.order_no);
+}
+
+function rowShipmentId(row: AnyRecord) {
+  return text(row.apiShipmentId || row.api_shipment_id || row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no);
+}
+
+function rowApiExtraId(row: AnyRecord) {
+  return text(row.apiExtraId || row.api_extra_id || row.procSeq || row.proc_seq);
 }
 
 export async function POST(request: NextRequest) {
@@ -139,11 +159,12 @@ export async function POST(request: NextRequest) {
       if (action === "confirm") {
         const confirmProductOrders = channelRows.map((row) => ({
           productOrderId: rowProductOrderId(row),
-          orderId: text(row.orderId || row.order_id || row.orderNo || row.order_no),
+          orderId: rowOrderId(row),
           orderNo: text(row.orderNo || row.order_no),
-          shipmentBoxId: text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no),
+          shipmentBoxId: rowShipmentId(row),
           bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
           quantity: text(row.quantity || row.qty),
+          procSeq: rowApiExtraId(row),
         })).filter((row) => row.productOrderId || row.orderId || row.shipmentBoxId);
         const productOrderIds = Array.from(new Set(confirmProductOrders.map((row) => row.productOrderId).filter(Boolean)));
         const result = adapter.confirmOrders
@@ -154,11 +175,12 @@ export async function POST(request: NextRequest) {
       if (action === "dispatch") {
         const dispatchProductOrders = channelRows.map((row) => ({
           productOrderId: rowProductOrderId(row),
-          orderId: text(row.orderId || row.order_id || row.orderNo || row.order_no),
+          orderId: rowOrderId(row),
           orderNo: text(row.orderNo || row.order_no),
-          shipmentBoxId: text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no),
+          shipmentBoxId: rowShipmentId(row),
           bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
           quantity: text(row.quantity || row.qty),
+          procSeq: rowApiExtraId(row),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
           deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
           trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
@@ -171,7 +193,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!results.length) return jsonResponse({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
-    return jsonResponse({ ok: results.some((result) => result.ok), results });
+    return jsonResponse({ ok: results.every((result) => result.ok), results }, { status: results.every((result) => result.ok) ? 200 : 502 });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 처리 실패" }, { status });
