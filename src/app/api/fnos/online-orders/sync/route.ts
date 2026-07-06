@@ -118,8 +118,26 @@ const manualHeaderHints = [
   "배송목록", "장바구니 번호", "주문수량", "배송수량", "수령자 휴대폰번호", "배송메시지(요청사항)",
 ];
 
+function effectiveWorksheetRange(sheet: XLSX.WorkSheet) {
+  const cellKeys = Object.keys(sheet).filter((key) => /^[A-Z]+\d+$/.test(key));
+  if (!cellKeys.length) return sheet["!ref"];
+  let minR = Number.POSITIVE_INFINITY;
+  let minC = Number.POSITIVE_INFINITY;
+  let maxR = 0;
+  let maxC = 0;
+  for (const key of cellKeys) {
+    const cell = XLSX.utils.decode_cell(key);
+    minR = Math.min(minR, cell.r);
+    minC = Math.min(minC, cell.c);
+    maxR = Math.max(maxR, cell.r);
+    maxC = Math.max(maxC, cell.c);
+  }
+  return XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
+}
+
 function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: string) {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
+  const range = effectiveWorksheetRange(sheet);
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1, range });
   const headerIndex = matrix.findIndex((row) => {
     const values = row.map((cell) => text(cell));
     return values.filter((cell) => manualHeaderHints.includes(cell)).length >= 3;
@@ -134,7 +152,7 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: s
       return next;
     }).filter((row) => Object.values(row).some((value) => text(value)));
   }
-  return XLSX.utils.sheet_to_json<AnyRecord>(sheet, { defval: "", raw: false })
+  return XLSX.utils.sheet_to_json<AnyRecord>(sheet, { defval: "", raw: false, range })
     .map((row, index) => ({ ...row, __sheetName: sheetName, __fileName: fileName, __sourceRow: index + 2 }))
     .filter((row) => Object.values(row).some((value) => text(value)));
 }

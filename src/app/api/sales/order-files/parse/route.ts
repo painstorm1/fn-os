@@ -544,14 +544,32 @@ const knownHeaderNames = [
   "정산예정금액",
 ];
 
+function effectiveWorksheetRange(sheet: XLSX.WorkSheet) {
+  const cellKeys = Object.keys(sheet).filter((key) => /^[A-Z]+\d+$/.test(key));
+  if (!cellKeys.length) return sheet["!ref"];
+  let minR = Number.POSITIVE_INFINITY;
+  let minC = Number.POSITIVE_INFINITY;
+  let maxR = 0;
+  let maxC = 0;
+  for (const key of cellKeys) {
+    const cell = XLSX.utils.decode_cell(key);
+    minR = Math.min(minR, cell.r);
+    minC = Math.min(minC, cell.c);
+    maxR = Math.max(maxR, cell.r);
+    maxC = Math.max(maxC, cell.c);
+  }
+  return XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
+}
+
 function rowsFromWorksheet(sheet: XLSX.WorkSheet) {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
+  const range = effectiveWorksheetRange(sheet);
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1, range });
   const headerIndex = matrix.findIndex((row) => {
     const values = row.map((cell) => clean(cell));
     return values.filter((cell) => knownHeaderNames.includes(cell)).length >= 3;
   });
   if (headerIndex < 0) {
-    return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+    return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false, range });
   }
   const headerRow = matrix[headerIndex].map((cell) => clean(cell));
   return matrix.slice(headerIndex + 1).map((row) => {
