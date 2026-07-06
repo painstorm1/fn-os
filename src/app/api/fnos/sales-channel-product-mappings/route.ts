@@ -45,6 +45,91 @@ function productName(row: AnyRecord) {
   return text(row.product_name || row.prod_name);
 }
 
+function customerCode(row: AnyRecord) {
+  return text(row.customer_code || row.cust_code);
+}
+
+function customerName(row: AnyRecord) {
+  return text(row.customer_name || row.cust_name);
+}
+
+function normalizeCustomerType(value: unknown) {
+  const normalized = text(value).toLowerCase();
+  if (["shopping", "mall", "shop", "쇼핑몰"].includes(normalized)) return "shopping";
+  return "general";
+}
+
+function isActiveCustomer(row: AnyRecord) {
+  return text(row.status).toLowerCase() !== "deleted" && row.is_active !== false;
+}
+
+function isActiveChannel(row: AnyRecord) {
+  return row.is_active !== false && !["deleted", "미사용", "중단"].includes(text(row.status || row["사용구분"]).toLowerCase());
+}
+
+function findShoppingCustomer(row: AnyRecord, customers: AnyRecord[]) {
+  const customerId = text(row.customer_id);
+  const code = text(row.customer_code || row["거래처코드"]);
+  const name = text(row.customer_name || row["거래처명"] || row.channel_name || row["쇼핑몰명"]);
+  return customers.find((customer) => {
+    if (!isActiveCustomer(customer)) return false;
+    if (normalizeCustomerType(customer.customer_type || customer.cust_type) !== "shopping") return false;
+    if (customerId && text(customer.id) === customerId) return true;
+    if (code && customerCode(customer) === code) return true;
+    if (name && customerName(customer) === name) return true;
+    return false;
+  }) || null;
+}
+
+function channelCode(row: AnyRecord) {
+  return text(row.channel_code || row["쇼핑몰코드"]);
+}
+
+function channelName(row: AnyRecord) {
+  return text(row.channel_name || row["쇼핑몰명"] || row.customer_name || row["거래처명"]);
+}
+
+function channelWithCurrentCustomer(channel: AnyRecord, customers: AnyRecord[]) {
+  const customer = findShoppingCustomer(channel, customers);
+  if (!customer) return channel;
+  const currentName = customerName(customer);
+  return {
+    ...channel,
+    customer_id: text(customer.id) || channel.customer_id || null,
+    customer_code: customerCode(customer) || channel.customer_code || null,
+    customer_name: currentName || channel.customer_name || null,
+    channel_name: currentName || channelName(channel),
+  };
+}
+
+async function activeChannelLookup() {
+  const [channels, customers] = await Promise.all([
+    selectRows<AnyRecord>("sales_channels", { order: "channel_name.asc", limit: 5000 }).catch(() => []),
+    selectRows<AnyRecord>("customers", { order: "customer_name.asc", limit: 5000 }).catch(() => []),
+  ]);
+  const byCode = new Map<string, AnyRecord>();
+  const byName = new Map<string, AnyRecord>();
+  channels.filter(isActiveChannel).forEach((channel) => {
+    const current = channelWithCurrentCustomer(channel, customers);
+    const code = channelCode(current);
+    if (code) byCode.set(code, current);
+    [channelName(channel), text(channel.customer_name), channelName(current), text(current.customer_name)]
+      .filter(Boolean)
+      .forEach((name) => byName.set(name, current));
+  });
+  return { byCode, byName };
+}
+
+function mappingWithCurrentChannel(mapping: AnyRecord, lookup: Awaited<ReturnType<typeof activeChannelLookup>>) {
+  const channel = lookup.byCode.get(text(mapping.channel_code)) || lookup.byName.get(text(mapping.channel_name));
+  if (!channel) return mapping;
+  return {
+    ...mapping,
+    channel_code: channelCode(channel) || text(mapping.channel_code),
+    channel_name: channelName(channel) || text(mapping.channel_name),
+  };
+}
+
 async function activeProductLookup() {
   const products = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 10000 }).catch(() => []);
   const byId = new Map<string, AnyRecord>();
@@ -58,22 +143,30 @@ async function activeProductLookup() {
   return { byId, byCode };
 }
 
-function mappingHasActiveProduct(mapping: AnyRecord, lookup: Awaited<ReturnType<typeof activeProductLookup>>) {
-  const linkedById = lookup.byId.get(text(mapping.fn_product_id));
-  const linkedByCode = lookup.byCode.get(text(mapping.product_code));
-  const product = linkedById || linkedByCode;
-  if (!product) return false;
-  const mappedCode = text(mapping.product_code);
-  const currentCode = productCode(product);
-  if (mappedCode && currentCode && mappedCode !== currentCode) return false;
-  const mappedName = text(mapping.product_name);
-  const currentName = productName(product);
-  return !mappedName || !currentName || mappedName === currentName;
+function currentProductForMapping(mapping: AnyRecord, lookup: Awaited<ReturnType<typeof activeProductLookup>>) {
+  return lookup.byId.get(text(mapping.fn_product_id)) || lookup.byCode.get(text(mapping.product_code)) || null;
+}
+
+function mappingWithCurrentProduct(mapping: AnyRecord, lookup: Awaited<ReturnType<typeof activeProductLookup>>): AnyRecord | null {
+  const product = currentProductForMapping(mapping, lookup);
+  if (!product) return null;
+  const currentId = text(product.id) || text(mapping.fn_product_id);
+  const currentCode = productCode(product) || text(mapping.product_code);
+  const currentName = productName(product) || text(mapping.product_name);
+  return {
+    ...mapping,
+    fn_product_id: currentId || null,
+    product_code: currentCode,
+    product_name: currentName,
+  };
 }
 
 async function visibleMappings(rows: AnyRecord[]) {
-  const lookup = await activeProductLookup();
-  return rows.filter((row) => mappingHasActiveProduct(row, lookup));
+  const [productLookup, channelLookup] = await Promise.all([activeProductLookup(), activeChannelLookup()]);
+  return rows
+    .map((row) => mappingWithCurrentProduct(row, productLookup))
+    .filter((row): row is AnyRecord => Boolean(row))
+    .map((row) => mappingWithCurrentChannel(row, channelLookup));
 }
 
 async function readFallbackMappings() {
@@ -133,7 +226,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const row = normalizeBody(body);
+  let row = normalizeBody(body);
   if (!row.channel_name || !row.mall_product_key || !row.product_code) {
     return NextResponse.json({ ok: false, error: "쇼핑몰명, 쇼핑몰품목key, 품목코드가 필요합니다." }, { status: 400 });
   }
@@ -142,11 +235,23 @@ export async function POST(request: NextRequest) {
     if (!hasDbConfig()) {
       return NextResponse.json({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
     }
+    const lookup = await activeProductLookup();
+    const currentRow = mappingWithCurrentProduct(row, lookup);
+    if (!currentRow) {
+      return NextResponse.json({ ok: false, error: "활성 품목에서 해당 품목코드를 찾을 수 없습니다." }, { status: 400 });
+    }
+    row = currentRow as ReturnType<typeof normalizeBody>;
     const saved = await upsertRows("sales_channel_product_mappings", row, "channel_name,mall_product_key");
     return NextResponse.json({ ok: true, mapping: saved[0] || row });
   } catch (error) {
     if (isMappingTableUnavailable(error)) {
       try {
+        const lookup = await activeProductLookup();
+        const currentRow = mappingWithCurrentProduct(row, lookup);
+        if (!currentRow) {
+          return NextResponse.json({ ok: false, error: "활성 품목에서 해당 품목코드를 찾을 수 없습니다." }, { status: 400 });
+        }
+        row = currentRow as ReturnType<typeof normalizeBody>;
         const rows = await readFallbackMappings();
         const saved = {
           id: text(body.id) || crypto.randomUUID(),

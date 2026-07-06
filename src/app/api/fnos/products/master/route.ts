@@ -223,6 +223,72 @@ async function clearFallbackSalesChannelProductMappingsForProduct(product: AnyRe
   return rows.length - nextRows.length;
 }
 
+async function syncFallbackSalesChannelProductMappingsForProduct(previous: AnyRecord | null, saved: AnyRecord | null, extraCode = "") {
+  const productId = text(saved?.id || previous?.id);
+  const previousCodes = Array.from(new Set([productCode(previous || {}), text(extraCode)].filter(Boolean)));
+  const nextCode = productCode(saved || {});
+  const nextName = productName(saved || {});
+  if (!productId && !previousCodes.length) return 0;
+  const rows = await readFallbackSalesChannelProductMappings();
+  if (!rows.length) return 0;
+  let changed = 0;
+  const nextRows = rows.map((row) => {
+    const matchesId = productId && text(row.fn_product_id) === productId;
+    const matchesCode = previousCodes.includes(text(row.product_code));
+    if (!matchesId && !matchesCode) return row;
+    changed += 1;
+    return {
+      ...row,
+      fn_product_id: productId || text(row.fn_product_id) || null,
+      product_code: nextCode || text(row.product_code),
+      product_name: nextName || text(row.product_name),
+      updated_at: nowIso(),
+    };
+  });
+  if (changed) await writeFallbackSalesChannelProductMappings(nextRows);
+  return changed;
+}
+
+async function syncSalesChannelProductMappingsForProduct(previous: AnyRecord | null, saved: AnyRecord | null, extraCode = "") {
+  const productId = text(saved?.id || previous?.id);
+  const previousCodes = Array.from(new Set([productCode(previous || {}), text(extraCode)].filter(Boolean)));
+  const nextCode = productCode(saved || {});
+  const nextName = productName(saved || {});
+  const values = {
+    fn_product_id: productId || null,
+    product_code: nextCode,
+    product_name: nextName,
+    updated_at: nowIso(),
+  };
+  let syncedCount = 0;
+  let fallbackChecked = false;
+  async function syncFallbackOnce() {
+    if (fallbackChecked) return;
+    fallbackChecked = true;
+    syncedCount += await syncFallbackSalesChannelProductMappingsForProduct(previous, saved, extraCode);
+  }
+  if (productId) {
+    try {
+      const synced = await patchRows<AnyRecord>("sales_channel_product_mappings", { fn_product_id: `eq.${productId}` }, values);
+      syncedCount += synced.length;
+    } catch (error) {
+      if (!isOptionalMappingCleanupError(error)) throw error;
+      await syncFallbackOnce();
+    }
+  }
+  for (const code of previousCodes) {
+    if (!code) continue;
+    try {
+      const synced = await patchRows<AnyRecord>("sales_channel_product_mappings", { product_code: `eq.${code}` }, values);
+      syncedCount += synced.length;
+    } catch (error) {
+      if (!isOptionalMappingCleanupError(error)) throw error;
+      await syncFallbackOnce();
+    }
+  }
+  return syncedCount;
+}
+
 async function clearSalesChannelProductMappingsForProduct(product: AnyRecord | null, extraCode = "") {
   const productId = text(product?.id);
   const codes = Array.from(new Set([productCode(product || {}), text(extraCode)].filter(Boolean)));
@@ -467,8 +533,8 @@ export async function POST(request: NextRequest) {
       saved = rows[0];
     }
 
-    const unlinkedMappingCount = productIdentityChanged(previousProduct, values)
-      ? await clearSalesChannelProductMappingsForProduct(previousProduct)
+    const syncedMappingCount = productIdentityChanged(previousProduct, values)
+      ? await syncSalesChannelProductMappingsForProduct(previousProduct, saved, code)
       : 0;
 
     const productId = text(saved?.id);
@@ -607,7 +673,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, product: saved, inventory_count: inventory.length, unlinked_mapping_count: unlinkedMappingCount });
+    return NextResponse.json({ ok: true, product: saved, inventory_count: inventory.length, synced_mapping_count: syncedMappingCount });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "품목 저장 실패" }, { status });

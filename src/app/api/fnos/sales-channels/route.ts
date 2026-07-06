@@ -78,16 +78,36 @@ function findShoppingCustomer(row: AnyRecord, customers: AnyRecord[]) {
   }) || null;
 }
 
+function channelWithCurrentCustomer(channel: AnyRecord, customers: AnyRecord[]) {
+  const customer = findShoppingCustomer(channel, customers);
+  if (!customer) return channel;
+  const currentCode = customerCode(customer);
+  const currentName = customerName(customer);
+  return {
+    ...channel,
+    customer_id: clean(customer.id) || channel.customer_id || null,
+    customer_code: currentCode || channel.customer_code || null,
+    customer_name: currentName || channel.customer_name || null,
+    channel_name: currentName || clean(channel.channel_name || channel["쇼핑몰명"]),
+  };
+}
+
 export async function GET() {
   try {
     if (!hasDbConfig()) {
       return NextResponse.json({ ok: false, error: "Supabase environment variables are not configured.", channels: [] }, { status: 503 });
     }
-    const channels = await selectRows<AnyRecord>("sales_channels", { order: "channel_code.asc", limit: 200 });
+    const [channels, customers] = await Promise.all([
+      selectRows<AnyRecord>("sales_channels", { order: "channel_code.asc", limit: 200 }),
+      selectRows<AnyRecord>("customers", { order: "customer_name.asc", limit: 5000 }).catch(() => []),
+    ]);
     const summaries = await credentialSummary(channels.map((channel) => clean(channel.id)).filter(Boolean));
     return NextResponse.json({
       ok: true,
-      channels: channels.map((channel) => publicChannel(channel, summaries.get(clean(channel.id)) || [])),
+      channels: channels.map((channel) => {
+        const currentChannel = channelWithCurrentCustomer(channel, customers);
+        return publicChannel(currentChannel, summaries.get(clean(channel.id)) || []);
+      }),
     });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;

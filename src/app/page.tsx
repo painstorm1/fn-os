@@ -7816,6 +7816,62 @@ function appendCollectedOnlineOrdersToSheets(
   return nextSheets;
 }
 
+function applySalesChannelMappingsToExistingOnlineSheets(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  mappings: SalesChannelProductMapping[],
+) {
+  let changedCount = 0;
+  const nextProgress = currentSheets["발주 진행 단계"].map((row) => {
+    if (!rowHasValue(row)) return row;
+    const progress = salesRowObject("발주 진행 단계", row);
+    const mallProductCode = salesCellText(progress.쇼핑몰상품코드);
+    const mallProductKey = salesCellText(progress.쇼핑몰품목key);
+    if (!mallProductCode && !mallProductKey) return row;
+    const mapping = findSalesChannelMapping(
+      mappings,
+      progress.쇼핑몰명 || progress["쇼핑몰(거래처)"],
+      "",
+      mallProductCode,
+      mallProductKey,
+    );
+    const productCode = salesCellText(mapping?.product_code);
+    const productName = salesCellText(mapping?.product_name);
+    const currentCode = progressValue(row, "품목코드(ERP)");
+    const currentName = progressValue(row, "품목명(ERP)");
+    if (!mapping) return row;
+    if (currentCode === productCode && currentName === productName) return row;
+    changedCount += 1;
+    const next = [...row];
+    setProgressValue(next, "품목코드(ERP)", productCode);
+    setProgressValue(next, "품목명(ERP)", productName);
+    return next;
+  });
+
+  if (!changedCount) return { sheets: currentSheets, changedCount: 0 };
+
+  const nextSales = currentSheets["FN판매입력"].map((row, rowIndex) => {
+    const progress = nextProgress[rowIndex];
+    if (!progress || !rowHasValue(row)) return row;
+    const productCode = progressValue(progress, "품목코드(ERP)");
+    const productName = progressValue(progress, "품목명(ERP)");
+    const sale = salesRowObject("FN판매입력", row);
+    if (salesCellText(sale.품목코드) === productCode && salesCellText(sale.품목명) === productName) return row;
+    const next = [...row];
+    setSalesSheetCell(next, "FN판매입력", "품목코드", productCode);
+    setSalesSheetCell(next, "FN판매입력", "품목명", productName);
+    return productCode ? normalizeSalesEntryRow("FN판매입력", next, "품목코드") : next;
+  });
+
+  return {
+    sheets: {
+      ...currentSheets,
+      "발주 진행 단계": padSalesRows("발주 진행 단계", nextProgress),
+      "FN판매입력": padSalesRows("FN판매입력", nextSales),
+    },
+    changedCount,
+  };
+}
+
 function openSalesWorkspaceDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(SALES_WORKSPACE_DB_NAME, 1);
@@ -11043,6 +11099,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
+  const sheetsRef = useRef<Record<SalesSheetName, string[][]>>(sheets);
+  useEffect(() => {
+    sheetsRef.current = sheets;
+  }, [sheets]);
   const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
   const purchaseSupplyTotal = salesPurchaseAmountTotal(sheets["FN구매입력"]);
   const shippingPreviewSourceIndexes = useMemo(() => (
@@ -11138,6 +11198,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     invalidateClientCache("/api/fnos/products/master");
     invalidateClientCache("/api/fnos/products/search");
     invalidateClientCache("/api/fnos/products");
+    invalidateClientCache("/api/fnos/customers");
+    invalidateClientCache("/api/fnos/sales-channels");
+    invalidateClientCache("/api/fnos/sales-channel-product-mappings");
     invalidateClientCache("/api/fnos/orders");
   }
 
@@ -11435,6 +11498,46 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       saveSalesWorkspaceFiles("pendingInvoices", pendingInvoiceFiles),
     ]).catch(() => undefined);
   }, [workspaceRestored, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles]);
+
+  async function refreshOnlineProductMappings(silent = true) {
+    if (section !== "online") return;
+    try {
+      const mappings = await loadSalesChannelProductMappings();
+      const result = applySalesChannelMappingsToExistingOnlineSheets(sheetsRef.current, mappings);
+      if (!result.changedCount) return;
+      sheetsRef.current = result.sheets;
+      setSheets(result.sheets);
+      setSalesGridResetKey((value) => value + 1);
+      if (!silent) {
+        setMessage(`품목 마스터/쇼핑몰코드연결 최신값을 온라인 발주 ${result.changedCount.toLocaleString("ko-KR")}건에 반영했습니다.`);
+      }
+    } catch (error) {
+      if (!silent) setMessage(error instanceof Error ? error.message : "온라인 발주 품목 최신화 실패");
+    }
+  }
+
+  useEffect(() => {
+    if (!workspaceRestored || section !== "online") return;
+    void refreshOnlineProductMappings(false);
+  }, [workspaceRestored, section]);
+
+  useEffect(() => {
+    if (!workspaceRestored || section !== "online") return undefined;
+    let lastRefresh = 0;
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastRefresh < 3_000) return;
+      lastRefresh = now;
+      void refreshOnlineProductMappings(true);
+    };
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [workspaceRestored, section]);
 
   async function postRows(kind: "sales" | "purchases") {
     setMessage("");
