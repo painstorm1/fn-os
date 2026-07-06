@@ -9196,6 +9196,7 @@ function OnlineOrderProgressList({
   onChange,
   onProductLinked,
   onSelectionChange,
+  selectedRowIndexes,
   resetKey = 0,
   highlightedRows = [],
   page,
@@ -9207,6 +9208,7 @@ function OnlineOrderProgressList({
   onChange: (rows: string[][]) => void;
   onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem, targetIndexes?: number[]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
+  selectedRowIndexes?: number[];
   resetKey?: number;
   highlightedRows?: number[];
   page?: number;
@@ -9327,6 +9329,7 @@ function OnlineOrderProgressList({
   const selectedIndexes = selectedKeys
     .map((key) => visibleRows.find((item) => item.key === key)?.index)
     .filter((index): index is number => typeof index === "number");
+  const controlledSelectionKey = selectedRowIndexes?.join("|") ?? "";
   const frozenProgressHeaders = ["__select", "쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "품목명(ERP)"];
 
   useEffect(() => {
@@ -9335,6 +9338,19 @@ function OnlineOrderProgressList({
     else setUncontrolledPage(1);
     setProductSearch((prev) => ({ ...prev, open: false, row: 0, col: progressIndex("품목코드(ERP)"), query: "", searchedQuery: "", results: [], selectedIndex: 0, loading: false, error: "" }));
   }, [resetKey]);
+
+  useEffect(() => {
+    if (!selectedRowIndexes) return;
+    const visibleKeySet = new Set(visibleRows.map((item) => item.key));
+    const nextKeys = selectedRowIndexes
+      .map((index) => `progress-${index}`)
+      .filter((key) => visibleKeySet.has(key));
+    setSelectedKeys((prev) => (
+      prev.length === nextKeys.length && prev.every((key, index) => key === nextKeys[index])
+        ? prev
+        : nextKeys
+    ));
+  }, [controlledSelectionKey, selectedRowIndexes, visibleRows]);
 
   useEffect(() => {
     const clampedPage = Math.min(Math.max(1, requestedPage), totalPages);
@@ -12044,6 +12060,26 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return Array.from({ length: selectedSalesRange.range.endRow - selectedSalesRange.range.startRow + 1 }, (_, index) => selectedSalesRange.range.startRow + index);
   }
 
+  function toggleAllOrderProgressRowsSelection() {
+    const allIndexes = filteredOrderProgressRowIndexes();
+    if (!allIndexes.length) {
+      window.alert("선택할 주문건이 없습니다.");
+      return;
+    }
+    const currentIndexes = selectedSalesRange?.sheet === "발주 진행 단계" ? selectedOrderRowIndexes() : [];
+    const currentSet = new Set(currentIndexes);
+    const allSelected = allIndexes.every((index) => currentSet.has(index));
+    if (allSelected) {
+      setSelectedSalesRange(null);
+      return;
+    }
+    setSelectedSalesRange({
+      sheet: "발주 진행 단계",
+      range: { startRow: allIndexes[0], endRow: allIndexes[allIndexes.length - 1], startCol: 0, endCol: salesSheetHeaders["발주 진행 단계"].length - 1 },
+      rowIndexes: allIndexes,
+    });
+  }
+
   function selectShippingPreviewRange(range: SalesGridRange, rowIndexes?: number[]) {
     const visibleIndexes = rowIndexes?.length
       ? rowIndexes
@@ -12743,6 +12779,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return orderProgressRows().filter((row) => (
       orderProgressMatchesStatus(row, orderProgressStatusFilter)
     ));
+  }
+
+  function filteredOrderProgressRowIndexes() {
+    return sheets["발주 진행 단계"]
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => rowHasValue(row) && orderProgressMatchesStatus(row, orderProgressStatusFilter))
+      .map(({ index }) => index);
   }
 
   function orderStatusCount(label: string) {
@@ -15743,7 +15786,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);
   const orderProgressStart = orderProgressTotalCount ? (orderProgressCurrentPage - 1) * orderProgressPageSize + 1 : 0;
   const orderProgressEnd = Math.min(orderProgressCurrentPage * orderProgressPageSize, orderProgressTotalCount);
-  const orderProgressSelectedCount = selectedSalesRange?.sheet === "발주 진행 단계" ? selectedOrderRowIndexes().length : 0;
+  const selectedOrderProgressRowIndexes = selectedSalesRange?.sheet === "발주 진행 단계" ? selectedOrderRowIndexes() : [];
+  const orderProgressSelectedCount = selectedOrderProgressRowIndexes.length;
+  const orderProgressFilteredRowIndexes = filteredOrderProgressRowIndexes();
+  const orderProgressFilteredSet = new Set(selectedOrderProgressRowIndexes);
+  const orderProgressAllSelected = Boolean(orderProgressFilteredRowIndexes.length) && orderProgressFilteredRowIndexes.every((index) => orderProgressFilteredSet.has(index));
   const orderProgressStatusChangeEnabled = canChangeOrderProgressStatusFromFilter(orderProgressStatusFilter);
 
   return (
@@ -15792,6 +15839,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   onClick={() => {
                     setOrderProgressStatusFilter(label);
                     setOrderProgressPage(1);
+                    setSelectedSalesRange(null);
                   }}
                 >
                   <span className={`block text-sm ${orderProgressStatusFilter === label ? "text-[#ff6a00]" : "text-blue-600"}`}>{orderStatusCount(label)}</span>
@@ -15823,6 +15871,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <option value="출고대기">출고대기</option>
               <option value="출고완료">출고완료</option>
             </select>
+            <button
+              type="button"
+              className={`h-9 rounded-md border px-3 text-sm font-black ${orderProgressAllSelected ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100" : "border-slate-300 bg-white text-slate-700 hover:bg-orange-50"}`}
+              onClick={toggleAllOrderProgressRowsSelection}
+              disabled={!orderProgressTotalCount}
+              title="현재 진행상태 목록의 모든 페이지 주문건을 선택/해제합니다."
+            >
+              {orderProgressAllSelected ? "주문건 전체해제" : "주문건 전체선택"}
+            </button>
             <button type="button" className="h-9 rounded-md border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 hover:bg-rose-50" onClick={deleteSelectedOrderRows}>선택 삭제</button>
             {orderProgressTotalCount > 0 && (
               <div className="flex min-w-[320px] flex-1 items-center justify-center gap-2 whitespace-nowrap text-xs font-black text-slate-600">
@@ -15855,6 +15912,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             onChange={(rows) => setSheets((prev) => ({ ...prev, "발주 진행 단계": rows }))}
             onProductLinked={syncProgressProductToSales}
             onSelectionChange={(sheet, range, rowIndexes) => setSelectedSalesRange({ sheet, range, rowIndexes })}
+            selectedRowIndexes={selectedOrderProgressRowIndexes}
             resetKey={salesGridResetKey}
             highlightedRows={salesSheetHighlightedRows["발주 진행 단계"] || []}
             page={orderProgressCurrentPage}
