@@ -378,10 +378,28 @@ function joinText(...values: unknown[]) {
   return values.map(clean).filter(Boolean).join(" ").trim();
 }
 
+function fillOrderCarryForwardRows(rows: Record<string, unknown>[], source: OrderSource) {
+  const keysBySource: Partial<Record<OrderSource, string[]>> = {
+    ezwell: ["주문일시", "주문확인일시", "주문번호", "ASP 주문번호", "장바구니 번호", "주문자명", "주문자 휴대폰번호", "우편번호", "주소", "배송메시지(요청사항)"],
+    todayhouse: ["주문번호", "묶음배송그룹", "주문결제완료일", "출고예정일", "수취인명", "수취인 연락처", "수취인 우편번호", "수취인 주소", "수취인 주소상세", "배송메모", "주문메모"],
+  };
+  const keys = keysBySource[source] || [];
+  if (!keys.length) return rows;
+  const previous: Record<string, unknown> = {};
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const key of keys) {
+      if (clean(next[key])) previous[key] = next[key];
+      else if (clean(previous[key])) next[key] = previous[key];
+    }
+    return next;
+  });
+}
+
 function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
   if (source === "legacy" || source === "unknown") return rows;
 
-  return rows.map((row) => {
+  return fillOrderCarryForwardRows(rows, source).map((row) => {
     if (source === "esm") {
       const sellerCode = cleanOrderId(pick(row, ["판매자관리코드", "판매자상세관리코드"]));
       return {

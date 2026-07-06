@@ -139,6 +139,25 @@ function rowsFromWorksheet(sheet: XLSX.WorkSheet, sheetName: string, fileName: s
     .filter((row) => Object.values(row).some((value) => text(value)));
 }
 
+const manualCarryForwardKeys: Partial<Record<ManualOrderSource, string[]>> = {
+  ezwel: ["주문일시", "주문확인일시", "주문번호", "ASP 주문번호", "장바구니 번호", "주문자명", "주문자 휴대폰번호", "우편번호", "주소", "배송메시지(요청사항)"],
+  todayhouse: ["주문번호", "묶음배송그룹", "주문결제완료일", "출고예정일", "수취인명", "수취인 연락처", "수취인 우편번호", "수취인 주소", "수취인 주소상세", "배송메모", "주문메모"],
+};
+
+function fillManualCarryForwardRows(rows: AnyRecord[], source: ManualOrderSource) {
+  const keys = manualCarryForwardKeys[source] || [];
+  if (!keys.length) return rows;
+  const previous: AnyRecord = {};
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const key of keys) {
+      if (text(next[key])) previous[key] = next[key];
+      else if (text(previous[key])) next[key] = previous[key];
+    }
+    return next;
+  });
+}
+
 function manualSourceFromFileName(fileName: string): ManualOrderSource {
   const lower = fileName.toLowerCase();
   if (fileName.includes("신규주문") || lower.includes("esm") || fileName.includes("지마켓") || fileName.includes("G마켓") || fileName.includes("옥션")) return "esm";
@@ -324,10 +343,11 @@ function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrde
 }
 
 async function parseManualOrderFile(fileName: string, buffer: Buffer): Promise<ManualOrderFileResult[]> {
-  const rows = await workbookRows(buffer, fileName);
+  const rawRows = await workbookRows(buffer, fileName);
   let source = manualSourceFromFileName(fileName);
-  if (source === "unknown" && rows.some(isEsmManualRow)) source = "esm";
+  if (source === "unknown" && rawRows.some(isEsmManualRow)) source = "esm";
   if (source === "unknown") return [];
+  const rows = fillManualCarryForwardRows(rawRows, source);
   const bySite = new Map<string, NormalizedOrder[]>();
   for (const row of rows) {
     const order = normalizeManualRow(row, fileName, source);

@@ -37,19 +37,40 @@ function unwrapSsgRow(row: AnyRecord) {
   const nested = record(row.shppDirection || row.order || row.item);
   return Object.keys(nested).length ? nested : row;
 }
+function isSsgOrderRow(row: AnyRecord) {
+  const identifiers = firstText(row.ordNo, row.orordNo, row.orderNo, row.shppNo, row.shppDirectionNo, row.ordItemSeq, row.itemId);
+  const item = firstText(row.itemNm, row.prdNm, row.productName, row.uitemNm, row.uitemId, row.splVenItemId, row.uSplVenItemId);
+  return Boolean(identifiers && item);
+}
+
+function ssgRowKey(row: AnyRecord) {
+  return [firstText(row.shppNo, row.ordNo, row.orordNo, row.orderNo), firstText(row.shppSeq, row.ordItemSeq, row.orordItemSeq, row.uitemId, row.itemId)].filter(Boolean).join("|");
+}
+
 function findRows(data: unknown) {
   const direct = arrayAt(data, [["result", "shppDirections"], ["result", "shppDirections", "shppDirection"], ["data"], ["data", "list"], ["data", "items"], ["result", "list"], ["orders"], ["orderList"], ["shppList"], ["listShppDirection"]]);
-  if (direct.length) return direct.map(record).map(unwrapSsgRow).filter((row) => Object.keys(row).length);
+  const roots = direct.length ? direct : [data];
   const rows: AnyRecord[] = [];
-  const seen = new Set<unknown>();
-  function visit(value: unknown) {
-    if (!value || seen.has(value)) return; if (typeof value !== "object") return; seen.add(value);
-    if (Array.isArray(value)) { value.forEach(visit); return; }
-    const current = record(value);
-    if (firstText(current.ordNo, current.orordNo, current.orderNo) && firstText(current.itemNm, current.prdNm, current.uitemNm, current.itemId)) { rows.push(current); return; }
-    Object.values(current).forEach(visit);
+  const seenObjects = new Set<unknown>();
+  const seenRows = new Set<string>();
+  function pushRow(row: AnyRecord) {
+    const key = ssgRowKey(row) || JSON.stringify(row).slice(0, 500);
+    if (seenRows.has(key)) return;
+    seenRows.add(key);
+    rows.push(row);
   }
-  visit(data);
+  function visit(value: unknown) {
+    if (!value || seenObjects.has(value)) return;
+    if (typeof value !== "object") return;
+    seenObjects.add(value);
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    const current = unwrapSsgRow(record(value));
+    if (isSsgOrderRow(current)) { pushRow(current); return; }
+    const nested = record(value);
+    for (const key of ["shppDirection", "shppDirections", "orders", "orderList", "list", "items"]) visit(nested[key]);
+    Object.values(nested).forEach(visit);
+  }
+  roots.forEach(visit);
   return rows;
 }
 function ssgOrderStatus(row: AnyRecord) {
