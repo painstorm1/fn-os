@@ -85,10 +85,13 @@ function findRows(data: unknown) {
 function ssgOrderStatus(row: AnyRecord) {
   const named = firstText(row.ordItemStatNm, row.ordStatNm, row.shppProgStatDtlNm, row.statusName);
   if (named) return named;
-  const code = firstText(row.ordItemStat, row.ordStat, row.shppProgStatDtlCd, row.status);
+  const code = firstText(row.shppProgStatDtlCd, row.ordItemStat, row.ordStat, row.ordStatCd, row.shppStatCd, row.status);
   const compact = code.replace(/[\s_()/.-]+/g, "").toUpperCase();
-  if (["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"].includes(compact)) return "신규주문";
-  if (["PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"].includes(compact)) return "주문확인";
+
+  // SSG listShppDirection can return only numeric shipment-progress codes.
+  // 현장 확인: shppProgStatDtlCd=11 is still the marketplace 신규주문/발주전 row.
+  if (["11", "011", "PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"].includes(compact)) return "신규주문";
+  if (["12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"].includes(compact)) return "주문확인";
   if (code) return code;
   return "신규주문";
 }
