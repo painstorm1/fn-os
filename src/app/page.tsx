@@ -9573,19 +9573,32 @@ function OnlineOrderProgressList({
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; updateSelectionUi(); }
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; selectedIndex=-1; searchedQuery=''; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; applyBtn.disabled = true; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); searchedQuery = keyword; if(!res.ok || data.ok === false){ results=[]; selectedIndex=-1; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=-1; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; selectedIndex=-1; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
-    function applySelected(){ if(selectedIndex < 0) return; choose(selectedIndex); }
+    function applySelected(){ if(selectedIndex < 0 || !results[selectedIndex]) return; choose(selectedIndex); }
     function selectRow(index){ if(!results.length) return; selectedIndex = Math.max(0, Math.min(results.length - 1, index)); updateSelectionUi(); }
+    function applyIndex(index){ selectRow(index); choose(selectedIndex); }
     function moveSelection(delta){ if(!results.length) return; if(selectedIndex < 0){ selectedIndex = delta > 0 ? 0 : results.length - 1; } else { selectedIndex = Math.max(0, Math.min(results.length - 1, selectedIndex + delta)); } updateSelectionUi(); }
+    function handleShortcut(e){
+      if(e.key==='Escape'){ e.preventDefault(); window.close(); return; }
+      if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); return; }
+      if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); return; }
+      if(e.key==='Enter'){
+        e.preventDefault();
+        const keyword = query.value.trim();
+        if(e.target === query && keyword && keyword !== searchedQuery){ search(); return; }
+        if(selectedIndex >= 0){ applySelected(); return; }
+        if(keyword){ search(); }
+      }
+    }
     function startResize(event){ const handle = event.target.closest('.resize-handle'); if(!handle) return; event.preventDefault(); const index = Number(handle.dataset.col || 0); const startX = event.clientX; const startWidth = colWidths[index]; document.body.classList.add('resizing'); function onMove(moveEvent){ colWidths[index] = Math.max(colMinWidths[index], startWidth + moveEvent.clientX - startX); renderCols(); } function onUp(){ document.body.classList.remove('resizing'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); } document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; applyIndex(Number(tr.dataset.index || 0)); });
     rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
     table.addEventListener('mousedown', startResize);
     document.getElementById('searchBtn').addEventListener('click', search);
     applyBtn.addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
     query.addEventListener('input', () => { if(query.value.trim() !== searchedQuery && selectedIndex !== -1){ selectedIndex=-1; updateSelectionUi(); } });
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); const keyword = query.value.trim(); if(selectedIndex >= 0 && keyword && keyword === searchedQuery){ applySelected(); } else { search(); } } if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); } if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); } });
+    document.addEventListener('keydown', handleShortcut);
     renderTabs(); query.value = ${JSON.stringify(initialQuery)}; searchedQuery = results.length ? query.value.trim() : ''; renderCols(); query.focus(); if(results.length){ status.textContent=''; render(); } else if(query.value.trim()) search();
   </script>
 </body>
@@ -11100,6 +11113,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const sheetsRef = useRef<Record<SalesSheetName, string[][]>>(sheets);
+  const productMappingSaveInFlight = useRef(0);
+  const productMappingRefreshHoldUntil = useRef(0);
   useEffect(() => {
     sheetsRef.current = sheets;
   }, [sheets]);
@@ -11501,6 +11516,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function refreshOnlineProductMappings(silent = true) {
     if (section !== "online") return;
+    if (productMappingSaveInFlight.current > 0 || Date.now() < productMappingRefreshHoldUntil.current) return;
     try {
       const mappings = await loadSalesChannelProductMappings();
       const result = applySalesChannelMappingsToExistingOnlineSheets(sheetsRef.current, mappings);
@@ -13194,19 +13210,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; updateSelectionUi(); }
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; selectedIndex=-1; searchedQuery=''; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; applyBtn.disabled = true; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); searchedQuery = keyword; if(!res.ok || data.ok === false){ results=[]; selectedIndex=-1; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=-1; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; selectedIndex=-1; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
-    function applySelected(){ if(selectedIndex < 0) return; choose(selectedIndex); }
+    function applySelected(){ if(selectedIndex < 0 || !results[selectedIndex]) return; choose(selectedIndex); }
     function selectRow(index){ if(!results.length) return; selectedIndex = Math.max(0, Math.min(results.length - 1, index)); updateSelectionUi(); }
+    function applyIndex(index){ selectRow(index); choose(selectedIndex); }
     function moveSelection(delta){ if(!results.length) return; if(selectedIndex < 0){ selectedIndex = delta > 0 ? 0 : results.length - 1; } else { selectedIndex = Math.max(0, Math.min(results.length - 1, selectedIndex + delta)); } updateSelectionUi(); }
+    function handleShortcut(e){
+      if(e.key==='Escape'){ e.preventDefault(); window.close(); return; }
+      if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); return; }
+      if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); return; }
+      if(e.key==='Enter'){
+        e.preventDefault();
+        const keyword = query.value.trim();
+        if(e.target === query && keyword && keyword !== searchedQuery){ search(); return; }
+        if(selectedIndex >= 0){ applySelected(); return; }
+        if(keyword){ search(); }
+      }
+    }
     function startResize(event){ const handle = event.target.closest('.resize-handle'); if(!handle) return; event.preventDefault(); const index = Number(handle.dataset.col || 0); const startX = event.clientX; const startWidth = colWidths[index]; document.body.classList.add('resizing'); function onMove(moveEvent){ colWidths[index] = Math.max(colMinWidths[index], startWidth + moveEvent.clientX - startX); renderCols(); } function onUp(){ document.body.classList.remove('resizing'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); } document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; applyIndex(Number(tr.dataset.index || 0)); });
     rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
     table.addEventListener('mousedown', startResize);
     document.getElementById('searchBtn').addEventListener('click', search);
     applyBtn.addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
     query.addEventListener('input', () => { if(query.value.trim() !== searchedQuery && selectedIndex !== -1){ selectedIndex=-1; updateSelectionUi(); } });
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); const keyword = query.value.trim(); if(selectedIndex >= 0 && keyword && keyword === searchedQuery){ applySelected(); } else { search(); } } if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); } if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); } });
+    document.addEventListener('keydown', handleShortcut);
     renderTabs(); query.value = ${JSON.stringify(initialQuery)}; renderCols(); query.focus(); if(query.value.trim()) search();
   </script>
 </body>
@@ -13249,6 +13278,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const productName = salesCellText(item.name || progress["품목명(ERP)"]);
     if (!productCode) return;
 
+    productMappingRefreshHoldUntil.current = Date.now() + 5_000;
     setSheets((prev) => {
       const nextProgress = prev["발주 진행 단계"].map((row, index) => {
         if (index !== rowIndex) return row;
@@ -13264,11 +13294,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setSalesSheetCell(next, "FN판매입력", "품목명", productName);
         return normalizeSalesEntryRow("FN판매입력", next, "품목코드");
       });
-      return { ...prev, "발주 진행 단계": nextProgress, "FN판매입력": nextSales };
+      const nextSheets = { ...prev, "발주 진행 단계": nextProgress, "FN판매입력": nextSales };
+      sheetsRef.current = nextSheets;
+      return nextSheets;
     });
 
     const normalizedMallProductKey = normalizeShoppingProductKeyForMapping(progress.쇼핑몰상품코드, progress.쇼핑몰품목key);
 
+    productMappingSaveInFlight.current += 1;
     void saveSalesChannelProductMapping({
       channel_name: progress.쇼핑몰명 || progress["쇼핑몰(거래처)"],
       channel_code: "",
@@ -13282,6 +13315,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setMessage(`${progress.쇼핑몰명 || progress["쇼핑몰(거래처)"] || "쇼핑몰"} 품목 연결을 저장했습니다.`);
     }).catch((error) => {
       setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 저장 실패");
+    }).finally(() => {
+      productMappingSaveInFlight.current = Math.max(0, productMappingSaveInFlight.current - 1);
+      productMappingRefreshHoldUntil.current = Date.now() + 500;
     });
   }
 
