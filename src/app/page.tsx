@@ -7074,6 +7074,7 @@ type SalesChannelProductMapping = {
   mall_product_name?: string;
   product_code?: string;
   product_name?: string;
+  fn_product_id?: string;
 };
 
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
@@ -8215,7 +8216,7 @@ type SalesGridCell = { row: number; col: number };
 type SalesGridRange = { startRow: number; endRow: number; startCol: number; endCol: number };
 type SalesGridSelection = { sheet: SalesSheetName; range: SalesGridRange; rowIndexes?: number[] };
 type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
-type FnOsProductSearchItem = { code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
+type FnOsProductSearchItem = { id?: string; code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
 type CollectionPopupMode = "collection" | "status-change";
@@ -13144,10 +13145,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
     void saveSalesChannelProductMapping({
       channel_name: progress.쇼핑몰명 || progress["쇼핑몰(거래처)"],
-      channel_code: progress.쇼핑몰코드,
+      channel_code: "",
       mall_product_code: progress.쇼핑몰상품코드,
       mall_product_key: normalizedMallProductKey || progress.쇼핑몰품목key,
       mall_product_name: progress.쇼핑몰품목key,
+      fn_product_id: salesCellText(item.id),
       product_code: productCode,
       product_name: productName,
     }).then(() => {
@@ -18690,7 +18692,7 @@ function ChannelProductMappingPanel() {
   }
 
   function mappingMallKey(row: ChannelProductMappingRow) {
-    return salesCellText(row.mallCode || row.mallName || "미지정").toLowerCase();
+    return salesCellText(row.mallName || row.mallCode || "미지정").toLowerCase();
   }
 
   const mallOptions = useMemo(() => {
@@ -18698,7 +18700,7 @@ function ChannelProductMappingPanel() {
     channels.forEach((channel) => {
       const code = salesCellText(channel.channel_code);
       const name = salesCellText(channel.channel_name || channel.customer_name || code || "미지정");
-      const key = salesCellText(code || name || "미지정").toLowerCase();
+      const key = salesCellText(name || code || "미지정").toLowerCase();
       const customerName = salesCellText(channel.customer_name);
       optionMap.set(key, {
         key,
@@ -18786,27 +18788,39 @@ function ChannelProductMappingPanel() {
       />
       {panelMessage && <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{panelMessage}</p>}
       <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-black text-slate-500">거래처 &gt; 쇼핑몰별 보기</p>
-          <span className="text-xs font-bold text-slate-400">총 {rows.length.toLocaleString("ko-KR")}건</span>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black text-slate-500">쇼핑몰 사이트 목록</p>
+            <p className="mt-1 text-[11px] font-bold text-slate-400">사이트 {mallOptions.length.toLocaleString("ko-KR")}개 · 연결 {rows.length.toLocaleString("ko-KR")}건</p>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-black text-slate-500">
+            보기
+            <select
+              className="h-9 min-w-[220px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-orange-400"
+              value={selectedMallKey}
+              onChange={(event) => setSelectedMallKey(event.target.value)}
+            >
+              <option value="all">전체보기 ({rows.length.toLocaleString("ko-KR")})</option>
+              {mallOptions.map((mall) => (
+                <option key={mall.key} value={mall.key}>{mall.label} ({mall.count.toLocaleString("ko-KR")})</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setSelectedMallKey("all")}
-            className={`rounded-full border px-3 py-1.5 text-xs font-black ${selectedMallKey === "all" ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50"}`}
-          >
-            전체 <span className="opacity-75">{rows.length.toLocaleString("ko-KR")}</span>
-          </button>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {mallOptions.map((mall) => (
             <button
               key={mall.key}
               type="button"
               onClick={() => setSelectedMallKey(mall.key)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-black ${selectedMallKey === mall.key ? "border-orange-500 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-orange-200 hover:bg-orange-50"}`}
+              className={`rounded-xl border px-3 py-2 text-left transition ${selectedMallKey === mall.key ? "border-orange-500 bg-orange-50 shadow-sm" : "border-slate-200 bg-white hover:border-orange-200 hover:bg-orange-50"}`}
               title={mall.code || mall.label}
             >
-              {mall.label} <span className="opacity-75">{mall.count.toLocaleString("ko-KR")}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs font-black text-slate-800">{mall.label}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${selectedMallKey === mall.key ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-500"}`}>{mall.count.toLocaleString("ko-KR")}</span>
+              </div>
+              <div className="mt-1 truncate text-[11px] font-bold text-slate-400">{mall.code || "쇼핑몰코드 미지정"}</div>
             </button>
           ))}
         </div>

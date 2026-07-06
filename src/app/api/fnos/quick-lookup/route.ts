@@ -20,6 +20,7 @@ function text(value: unknown) {
 
 function normalizeProduct(row: AnyRecord) {
   return {
+    id: text(row.id),
     code: text(row.product_code || row.sku || row.prod_cd || row.PROD_CD),
     name: text(row.product_name || row.prod_name || row.PROD_DES || row.PROD_NAME),
     size: text(row.option_name || row.size_des || row.SIZE_DES),

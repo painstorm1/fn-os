@@ -3,6 +3,8 @@ import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows
 
 type AnyRecord = Record<string, unknown>;
 
+const SALES_CHANNEL_PRODUCT_MAPPINGS_FALLBACK_KEY = "sales_channel_product_mappings_fallback";
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -154,6 +156,102 @@ async function saveProductRows(product: AnyRecord, values: AnyRecord, createdAt:
     }
   }
   throw new FnosDbError("품목 저장 가능한 컬럼 확인에 실패했습니다.", 500);
+}
+
+async function existingProductForSave(product: AnyRecord, code: string) {
+  const id = text(product.id);
+  if (id) {
+    const rows = await selectRows<AnyRecord>("products", { id: `eq.${id}`, limit: 1 });
+    if (rows[0]) return rows[0];
+  }
+  if (code) {
+    const rows = await selectRows<AnyRecord>("products", { product_code: `eq.${code}`, limit: 1 });
+    return rows[0] || null;
+  }
+  return null;
+}
+
+function productIdentityChanged(previous: AnyRecord | null, nextValues: AnyRecord) {
+  if (!previous) return false;
+  const previousCode = productCode(previous);
+  const previousName = productName(previous);
+  const nextCode = text(nextValues.product_code || nextValues.prod_cd || nextValues.sku);
+  const nextName = text(nextValues.product_name || nextValues.prod_name);
+  return Boolean((previousCode && nextCode && previousCode !== nextCode) || (previousName && nextName && previousName !== nextName));
+}
+
+function isOptionalMappingCleanupError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const status = error instanceof FnosDbError ? error.status : 0;
+  return status === 404 || /sales_channel_product_mappings|DB 테이블|schema_sales_inventory|Could not find the table|schema cache|fn_product_id|product_code/i.test(message);
+}
+
+async function readFallbackSalesChannelProductMappings() {
+  const rows = await selectRows<{ setting_value?: string }>("fnos_settings", {
+    setting_key: `eq.${SALES_CHANNEL_PRODUCT_MAPPINGS_FALLBACK_KEY}`,
+    limit: 1,
+  }).catch(() => []);
+  const raw = rows[0]?.setting_value || "[]";
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as AnyRecord[] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeFallbackSalesChannelProductMappings(rows: AnyRecord[]) {
+  await upsertRows("fnos_settings", {
+    setting_key: SALES_CHANNEL_PRODUCT_MAPPINGS_FALLBACK_KEY,
+    setting_value: JSON.stringify(rows),
+    memo: "쇼핑몰 코드연결 fallback 저장소",
+    updated_at: nowIso(),
+  }, "setting_key").catch(() => []);
+}
+
+async function clearFallbackSalesChannelProductMappingsForProduct(product: AnyRecord | null, codes: string[]) {
+  const productId = text(product?.id);
+  const codeSet = new Set(codes.filter(Boolean));
+  const rows = await readFallbackSalesChannelProductMappings();
+  if (!rows.length) return 0;
+  const nextRows = rows.filter((row) => {
+    if (productId && text(row.fn_product_id) === productId) return false;
+    if (codeSet.has(text(row.product_code))) return false;
+    return true;
+  });
+  if (nextRows.length !== rows.length) await writeFallbackSalesChannelProductMappings(nextRows);
+  return rows.length - nextRows.length;
+}
+
+async function clearSalesChannelProductMappingsForProduct(product: AnyRecord | null, extraCode = "") {
+  const productId = text(product?.id);
+  const codes = Array.from(new Set([productCode(product || {}), text(extraCode)].filter(Boolean)));
+  let deletedCount = 0;
+  let fallbackChecked = false;
+  async function clearFallbackOnce() {
+    if (fallbackChecked) return;
+    fallbackChecked = true;
+    deletedCount += await clearFallbackSalesChannelProductMappingsForProduct(product, codes);
+  }
+  if (productId) {
+    try {
+      const deleted = await deleteRows<AnyRecord>("sales_channel_product_mappings", { fn_product_id: `eq.${productId}` });
+      deletedCount += deleted.length;
+    } catch (error) {
+      if (!isOptionalMappingCleanupError(error)) throw error;
+      await clearFallbackOnce();
+    }
+  }
+  for (const code of codes) {
+    try {
+      const deleted = await deleteRows<AnyRecord>("sales_channel_product_mappings", { product_code: `eq.${code}` });
+      deletedCount += deleted.length;
+    } catch (error) {
+      if (!isOptionalMappingCleanupError(error)) throw error;
+      await clearFallbackOnce();
+    }
+  }
+  return deletedCount;
 }
 
 export async function GET(request: NextRequest) {
@@ -360,6 +458,7 @@ export async function POST(request: NextRequest) {
       updated_at: now,
     };
 
+    const previousProduct = await existingProductForSave(product, code);
     let saved: AnyRecord | undefined;
     const rows = await saveProductRows(product, values, now);
     saved = rows[0];
@@ -367,6 +466,10 @@ export async function POST(request: NextRequest) {
       const rows = await selectRows<AnyRecord>("products", { product_code: `eq.${code}`, limit: 1 });
       saved = rows[0];
     }
+
+    const unlinkedMappingCount = productIdentityChanged(previousProduct, values)
+      ? await clearSalesChannelProductMappingsForProduct(previousProduct)
+      : 0;
 
     const productId = text(saved?.id);
     const warehouses = await warehouseRows();
@@ -504,7 +607,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, product: saved, inventory_count: inventory.length });
+    return NextResponse.json({ ok: true, product: saved, inventory_count: inventory.length, unlinked_mapping_count: unlinkedMappingCount });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "품목 저장 실패" }, { status });
@@ -527,6 +630,10 @@ export async function DELETE(request: NextRequest) {
       updated_at: nowIso(),
     });
     const deletedIds = rows.map((row) => text(row.id)).filter(Boolean);
+    let unlinkedMappingCount = 0;
+    for (const row of rows) {
+      unlinkedMappingCount += await clearSalesChannelProductMappingsForProduct(row, code);
+    }
     for (const productId of deletedIds) {
       await deleteRows("import_product_sku_links", { product_id: `eq.${productId}` }).catch(() => []);
       const boms = await selectRows<AnyRecord>("product_boms", { parent_product_id: `eq.${productId}`, limit: 500 }).catch(() => []);
@@ -536,7 +643,7 @@ export async function DELETE(request: NextRequest) {
       await deleteRows("product_boms", { parent_product_id: `eq.${productId}` }).catch(() => []);
       await deleteRows("product_bom_items", { component_product_id: `eq.${productId}` }).catch(() => []);
     }
-    return NextResponse.json({ ok: true, deleted: rows.length });
+    return NextResponse.json({ ok: true, deleted: rows.length, unlinked_mapping_count: unlinkedMappingCount });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "품목 삭제 실패" }, { status });

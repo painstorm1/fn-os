@@ -3,6 +3,8 @@ import { FnosDbError, deleteRows, hasDbConfig, selectRows, upsertRows } from "@/
 
 const FALLBACK_SETTING_KEY = "sales_channel_product_mappings_fallback";
 
+type AnyRecord = Record<string, unknown>;
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -29,6 +31,49 @@ function isMappingTableUnavailable(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const status = error instanceof FnosDbError ? error.status : 0;
   return status === 404 || /sales_channel_product_mappings|DB 테이블|schema_sales_inventory|Could not find the table|schema cache/i.test(message);
+}
+
+function isActiveProduct(row: AnyRecord) {
+  return text(row.status).toLowerCase() !== "deleted" && row.is_active !== false;
+}
+
+function productCode(row: AnyRecord) {
+  return text(row.product_code || row.prod_cd || row.sku);
+}
+
+function productName(row: AnyRecord) {
+  return text(row.product_name || row.prod_name);
+}
+
+async function activeProductLookup() {
+  const products = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 10000 }).catch(() => []);
+  const byId = new Map<string, AnyRecord>();
+  const byCode = new Map<string, AnyRecord>();
+  products.filter(isActiveProduct).forEach((product) => {
+    const id = text(product.id);
+    const code = productCode(product);
+    if (id) byId.set(id, product);
+    if (code) byCode.set(code, product);
+  });
+  return { byId, byCode };
+}
+
+function mappingHasActiveProduct(mapping: AnyRecord, lookup: Awaited<ReturnType<typeof activeProductLookup>>) {
+  const linkedById = lookup.byId.get(text(mapping.fn_product_id));
+  const linkedByCode = lookup.byCode.get(text(mapping.product_code));
+  const product = linkedById || linkedByCode;
+  if (!product) return false;
+  const mappedCode = text(mapping.product_code);
+  const currentCode = productCode(product);
+  if (mappedCode && currentCode && mappedCode !== currentCode) return false;
+  const mappedName = text(mapping.product_name);
+  const currentName = productName(product);
+  return !mappedName || !currentName || mappedName === currentName;
+}
+
+async function visibleMappings(rows: AnyRecord[]) {
+  const lookup = await activeProductLookup();
+  return rows.filter((row) => mappingHasActiveProduct(row, lookup));
 }
 
 async function readFallbackMappings() {
@@ -64,16 +109,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Supabase environment variables are not configured." }, { status: 503 });
     }
     const limit = request.nextUrl.searchParams.get("limit") || "5000";
-    const rows = await selectRows("sales_channel_product_mappings", {
+    const rows = await selectRows<AnyRecord>("sales_channel_product_mappings", {
       order: "updated_at.desc",
       limit,
     });
-    return NextResponse.json({ ok: true, mappings: rows });
+    const mappings = await visibleMappings(rows);
+    return NextResponse.json({ ok: true, mappings, hidden_stale_count: rows.length - mappings.length });
   } catch (error) {
     if (isMappingTableUnavailable(error)) {
       try {
         const rows = await readFallbackMappings();
-        return NextResponse.json({ ok: true, mappings: rows, fallback: true });
+        const mappings = await visibleMappings(rows);
+        return NextResponse.json({ ok: true, mappings, hidden_stale_count: rows.length - mappings.length, fallback: true });
       } catch {
         return NextResponse.json({ ok: true, mappings: [], fallback: true });
       }
