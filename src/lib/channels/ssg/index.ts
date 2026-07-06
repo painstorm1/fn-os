@@ -44,7 +44,16 @@ function isSsgOrderRow(row: AnyRecord) {
 }
 
 function ssgRowKey(row: AnyRecord) {
-  return [firstText(row.shppNo, row.ordNo, row.orordNo, row.orderNo), firstText(row.shppSeq, row.ordItemSeq, row.orordItemSeq, row.uitemId, row.itemId)].filter(Boolean).join("|");
+  const orderIdentity = firstText(row.shppNo, row.shppDirectionNo, row.ordNo, row.orordNo, row.orderNo, row.dircNo);
+  const lineIdentity = firstText(row.shppSeq, row.ordItemSeq, row.orordItemSeq, row.itemSeq, row.uitemId, row.uSplVenItemId, row.splVenItemId);
+  const productIdentity = [
+    firstText(row.itemId, row.prdNo, row.productNo, row.splItemCd, row.sellerItemCd),
+    firstText(row.uitemId, row.uitemNm, row.optNm, row.optionName),
+    firstText(row.itemNm, row.prdNm, row.productName),
+    firstText(row.rcptpeNm, row.receiverName, row.rcverNm),
+    firstText(row.ordCmplDts, row.ordCmplDt, row.ordRcpDts, row.paymtCmplDt, row.ordDt, row.orderDate),
+  ].filter(Boolean).join("|");
+  return [orderIdentity, lineIdentity || productIdentity].filter(Boolean).join("|");
 }
 
 function findRows(data: unknown) {
@@ -85,15 +94,17 @@ function ssgOrderStatus(row: AnyRecord) {
 }
 
 function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
+  const rowKey = ssgRowKey(row);
+  const rawRow = { ...row, __fnosRowKey: rowKey };
   const item: NormalizedOrderItem = {
     channelProductCode: firstText(row.itemId, row.prdNo, row.productNo),
-    channelOptionCode: firstText(row.uitemId, row.ordItemSeq, row.itemSeq),
+    channelOptionCode: firstText(row.shppSeq, row.ordItemSeq, row.orordItemSeq, row.uitemId, row.itemSeq) || rowKey,
     channelProductName: firstText(row.itemNm, row.prdNm, row.productName, "SSG 주문"),
     channelOptionName: firstText(row.uitemNm, row.optNm, row.optionName),
     sku: firstText(row.splItemCd, row.sellerItemCd, row.itemId),
     qty: numberValue(row.ordQty || row.dircItemQty || row.dircQty || row.qty) || 1,
     salesAmount: numberValue(row.rlordAmt || row.sellprc || row.ordAmt || row.saleAmt || row.payAmt) || undefined,
-    raw: row,
+    raw: rawRow,
   };
   return {
     ...base,
@@ -108,7 +119,7 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
     address: [firstText(row.shpplocAddr, row.addr1, row.baseAddr, row.receiverAddress), firstText(row.addr2, row.dtlAddr, row.receiverDetailAddress)].filter(Boolean).join(" "),
     deliveryMessage: firstText(row.ordMemoCntt, row.dlvMsg, row.deliveryMessage),
     items: [item],
-    raw: row,
+    raw: rawRow,
   };
 }
 

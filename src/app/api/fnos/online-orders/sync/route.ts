@@ -71,6 +71,23 @@ function orderCount(orders: NormalizedOrder[]) {
   return orders.length;
 }
 
+function normalizedOrderStage(order: NormalizedOrder) {
+  const stage = text(order.orderStatus);
+  return stage || "신규주문";
+}
+
+function orderStageSummaries(orders: NormalizedOrder[]) {
+  const summaries = new Map<string, { count: number; item_count: number }>();
+  orders.forEach((order) => {
+    const stage = normalizedOrderStage(order);
+    const current = summaries.get(stage) || { count: 0, item_count: 0 };
+    current.count += 1;
+    current.item_count += Math.max(1, Array.isArray(order.items) ? order.items.length : 0);
+    summaries.set(stage, current);
+  });
+  return Array.from(summaries.entries()).map(([order_status, summary]) => ({ order_status, ...summary }));
+}
+
 const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
 const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
 const ESM_CHANNEL_CODE = "2208183676";
@@ -612,26 +629,60 @@ export async function POST(request: NextRequest) {
       ok: results.some((result) => result.ok) || manualOrders.length > 0,
       dry_run: body.dry_run === true,
       statuses: [
-        ...results.map((result) => ({
-          source: "api",
-          channel_code: text(result.channel.channel_code),
-          channel_name: text(result.channel.channel_name),
-          ok: result.ok,
-          skipped: Boolean(result.skipped),
-          count: orderCount(result.orders),
-          item_count: orderItemCount(result.orders),
-          message: result.message,
-        })),
-        ...manualResults.map((result) => ({
-          source: "manual",
-          channel_code: result.source === "esm" ? ESM_CHANNEL_CODE : result.source.toUpperCase(),
-          channel_name: `수동 주문수집 - ${result.siteName}`,
-          ok: result.orders.length > 0,
-          skipped: !result.orders.length,
-          count: orderCount(result.orders),
-          item_count: orderItemCount(result.orders),
-          message: "error" in result ? result.error : `${result.fileName} / ${orderCount(result.orders)}건`,
-        })).filter((item) => item.ok || item.message),
+        ...results.flatMap((result) => {
+          const channelCodeText = text(result.channel.channel_code);
+          const channelNameText = text(result.channel.channel_name) || channelCodeText;
+          const stageSummaries = result.orders.length ? orderStageSummaries(result.orders) : [];
+          if (!stageSummaries.length) {
+            return [{
+              source: "api",
+              channel_code: channelCodeText,
+              channel_name: channelNameText,
+              ok: result.ok,
+              skipped: Boolean(result.skipped),
+              count: 0,
+              item_count: 0,
+              message: result.message,
+            }];
+          }
+          return stageSummaries.map((summary) => ({
+            source: "api",
+            channel_code: channelCodeText,
+            channel_name: `${channelNameText} · ${summary.order_status} 수집`,
+            order_status: summary.order_status,
+            ok: result.ok,
+            skipped: Boolean(result.skipped),
+            count: summary.count,
+            item_count: summary.item_count,
+            message: result.message,
+          }));
+        }),
+        ...manualResults.flatMap((result) => {
+          const stageSummaries = result.orders.length ? orderStageSummaries(result.orders) : [];
+          if (!stageSummaries.length) {
+            return [{
+              source: "manual",
+              channel_code: result.source === "esm" ? ESM_CHANNEL_CODE : result.source.toUpperCase(),
+              channel_name: `수동 주문수집 - ${result.siteName}`,
+              ok: false,
+              skipped: true,
+              count: 0,
+              item_count: 0,
+              message: "error" in result ? result.error : "",
+            }];
+          }
+          return stageSummaries.map((summary) => ({
+            source: "manual",
+            channel_code: result.source === "esm" ? ESM_CHANNEL_CODE : result.source.toUpperCase(),
+            channel_name: `수동 주문수집 - ${result.siteName} · ${summary.order_status} 수집`,
+            order_status: summary.order_status,
+            ok: true,
+            skipped: false,
+            count: summary.count,
+            item_count: summary.item_count,
+            message: "error" in result ? result.error : `${result.fileName} / ${summary.item_count}건`,
+          }));
+        }).filter((item) => item.ok || item.message),
       ],
       orders,
       count: orderCount(orders),

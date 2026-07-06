@@ -7606,6 +7606,17 @@ function onlineOrderManualRowKey(order: CollectedOnlineOrder, item: CollectedOnl
   return parts.length >= 4 ? parts.join("|") : "";
 }
 
+function onlineOrderApiRowKey(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
+  const orderRaw = onlineOrderRecord(order.raw);
+  const itemRaw = onlineOrderRecord(item.raw);
+  const rowKey = salesCellText(orderRaw.__fnosRowKey || itemRaw.__fnosRowKey);
+  if (!rowKey) return "";
+  const channelName = salesCellText(order.customerName || order.channelName);
+  const channelCode = salesCellText(order.customerCode || order.channelCode);
+  const alias = onlineOrderChannelAlias(channelName, channelCode) || channelName || channelCode || "api";
+  return ["api", alias, rowKey].filter(Boolean).join("|");
+}
+
 function onlineOrderManualFileNameFromRaw(raw: unknown) {
   const record = onlineOrderRecord(raw);
   const source = salesCellText(record.__manualSource);
@@ -7694,7 +7705,8 @@ function appendCollectedOnlineOrdersToSheets(
     const channelCode = salesCellText(order.customerCode || order.channelCode);
     (order.items || []).forEach((item, itemIndex) => {
       const manualRowKey = onlineOrderManualRowKey(order, item);
-      const itemKey = manualRowKey || [channelName, orderNo, salesCellText(item.channelOptionCode || item.channelProductCode || item.sku), itemIndex + 1].join(" ");
+      const apiRowKey = onlineOrderApiRowKey(order, item);
+      const itemKey = manualRowKey || apiRowKey || [channelName, orderNo, salesCellText(item.channelOptionCode || item.channelProductCode || item.sku), itemIndex + 1].join(" ");
       if (existingKeys.has(itemKey)) return;
       existingKeys.add(itemKey);
 
