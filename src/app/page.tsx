@@ -8414,7 +8414,7 @@ function SalesExcelGrid({
   sheet: SalesSheetName;
   rows: string[][];
   onChange: (rows: string[][]) => void;
-  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem) => void;
+  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem, targetIndexes?: number[]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   onSortRows?: (colIndex: number, dir: "asc" | "desc", rows: string[][]) => boolean | void;
   resetKey?: number;
@@ -9205,7 +9205,7 @@ function OnlineOrderProgressList({
 }: {
   rows: string[][];
   onChange: (rows: string[][]) => void;
-  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem) => void;
+  onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem, targetIndexes?: number[]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
   resetKey?: number;
   highlightedRows?: number[];
@@ -9399,10 +9399,10 @@ function OnlineOrderProgressList({
     focusProductCodeInput(next.index, true);
   }
 
-  async function fetchQuickProductMatches(query: string, limit = 20) {
+  async function fetchQuickProductMatches(query: string, limit = 20, attribute: ProductSearchAttributeFilter = productSearchAttribute) {
     const keyword = salesCellText(query);
     if (!keyword) return [] as FnOsProductSearchItem[];
-    const cacheKey = `${productSearchAttribute}::${limit}::${keyword.toLowerCase()}`;
+    const cacheKey = `${attribute}::${limit}::${keyword.toLowerCase()}`;
     const cached = quickProductSearchCache.current.get(cacheKey);
     if (cached) return cached;
     const inFlight = quickProductSearchInFlight.current.get(cacheKey);
@@ -9411,8 +9411,9 @@ function OnlineOrderProgressList({
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: keyword, productAttribute: productSearchAttribute, includeInventory: false, limit }),
-    })
+      fnosSkipBusyOverlay: true,
+      body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit }),
+    } as RequestInit & { fnosSkipBusyOverlay: boolean })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) throw new Error(data.error || "품목검색 실패");
@@ -9425,6 +9426,21 @@ function OnlineOrderProgressList({
       });
     quickProductSearchInFlight.current.set(cacheKey, request);
     return request;
+  }
+
+  async function fetchAutoProductMatches(query: string) {
+    const [plainMatches, setMatches] = await Promise.all([
+      fetchQuickProductMatches(query, 20, "plain"),
+      fetchQuickProductMatches(query, 20, "set"),
+    ]);
+    const seen = new Set<string>();
+    return [...plainMatches, ...setMatches].filter((item) => {
+      const key = salesCellText(item.id) || salesCellText(item.code) || `${salesCellText(item.name)}::${salesCellText(item.size)}`;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   async function resolveProductInputEnter(rowIndex: number, header: "품목코드(ERP)" | "품목명(ERP)", value: string, fallbackQuery: string) {
@@ -9442,12 +9458,12 @@ function OnlineOrderProgressList({
     if (productEnterResolving.current.has(resolvingKey)) return;
     productEnterResolving.current.add(resolvingKey);
     try {
-      const results = await fetchQuickProductMatches(keyword, 20);
+      const results = await fetchAutoProductMatches(keyword);
       if (results.length === 1) {
         linkProductToProgressRow(rowIndex, results[0]);
         return;
       }
-      openProductSearch(rowIndex, keyword, { results, searchedQuery: keyword });
+      openProductSearch(rowIndex, keyword);
     } catch (error) {
       console.error(error);
       openProductSearch(rowIndex, keyword);
@@ -9484,19 +9500,46 @@ function OnlineOrderProgressList({
     }));
   }
 
+  function productBulkTargetIndexes(rowIndex: number) {
+    const baseRow = rows[rowIndex] || [];
+    const baseDate = entryDateFilterKey(progressValue(baseRow, "수집일자"));
+    const baseMall = mappingText(progressValue(baseRow, "쇼핑몰명") || progressValue(baseRow, "쇼핑몰(거래처)"));
+    const baseProductKey = mappingText(normalizeShoppingProductKeyForMapping(progressValue(baseRow, "쇼핑몰상품코드"), progressValue(baseRow, "쇼핑몰품목key")) || progressValue(baseRow, "쇼핑몰품목key"));
+    if (!baseMall || !baseProductKey) return [rowIndex];
+    const matches = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => rowHasValue(row))
+      .filter(({ row }) => {
+        const currentDate = entryDateFilterKey(progressValue(row, "수집일자"));
+        const currentMall = mappingText(progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)"));
+        const currentProductKey = mappingText(normalizeShoppingProductKeyForMapping(progressValue(row, "쇼핑몰상품코드"), progressValue(row, "쇼핑몰품목key")) || progressValue(row, "쇼핑몰품목key"));
+        if (baseDate && currentDate !== baseDate) return false;
+        return currentMall === baseMall && currentProductKey === baseProductKey;
+      })
+      .map(({ index }) => index);
+    return matches.includes(rowIndex) ? matches : [rowIndex, ...matches];
+  }
+
   function linkProductToProgressRow(rowIndex: number, item: FnOsProductSearchItem) {
     if (!item.code) return;
+    let targetIndexes = productBulkTargetIndexes(rowIndex);
+    const duplicateCount = targetIndexes.filter((index) => index !== rowIndex).length;
+    if (duplicateCount > 0) {
+      const ok = window.confirm(`오늘 주문건에 같은 쇼핑몰-쇼핑몰품목key가 ${duplicateCount.toLocaleString("ko-KR")}건 존재합니다.\n모두 같은 조건으로 매칭입력-저장 하시겠습니까?`);
+      if (!ok) targetIndexes = [rowIndex];
+    }
+    const targetSet = new Set(targetIndexes);
     let linkedRow: string[] | null = null;
     const nextRows = rows.map((row, index) => {
-      if (index !== rowIndex) return row;
+      if (!targetSet.has(index)) return row;
       const next = [...row];
       setProgressValue(next, "품목코드(ERP)", item.code || "");
       setProgressValue(next, "품목명(ERP)", item.name || "");
-      linkedRow = next;
+      if (index === rowIndex) linkedRow = next;
       return next;
     });
     onChange(nextRows);
-    if (linkedRow) onProductLinked?.(rowIndex, linkedRow, item);
+    if (linkedRow) onProductLinked?.(rowIndex, linkedRow, item, targetIndexes);
     focusNextProgressProductInput(rowIndex);
   }
 
@@ -9514,7 +9557,7 @@ function OnlineOrderProgressList({
       if (payload?.token !== popupToken || !payload.item) return;
       linkProductToProgressRow(rowIndex, payload.item);
     };
-    const searchOptions = productSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
+    const searchOptions = productLinkSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
     const initialQuery = salesCellText(query);
     const initialResults = initialSearch && salesCellText(initialSearch.searchedQuery) === initialQuery ? initialSearch.results : [];
     popup.document.open();
@@ -10417,6 +10460,8 @@ const productSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter
   { value: "import", label: "수입연동" },
   { value: "all", label: "전체" },
 ];
+const productLinkSearchAttributeOptions: Array<{ value: ProductSearchAttributeFilter; label: string }> = productSearchAttributeOptions
+  .filter((option) => option.value !== "import");
 
 function entryDateFromDate(date: Date) {
   const year = date.getFullYear();
@@ -11523,7 +11568,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!result.changedCount) return;
       sheetsRef.current = result.sheets;
       setSheets(result.sheets);
-      setSalesGridResetKey((value) => value + 1);
       if (!silent) {
         setMessage(`품목 마스터/쇼핑몰코드연결 최신값을 온라인 발주 ${result.changedCount.toLocaleString("ko-KR")}건에 반영했습니다.`);
       }
@@ -12212,8 +12256,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ query }),
-      })
+      } as RequestInit & { fnosSkipBusyOverlay: boolean })
         .then((res) => res.json())
         .then((data) => {
           const rows = Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [];
@@ -12854,8 +12899,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ query }),
-      })
+      } as RequestInit & { fnosSkipBusyOverlay: boolean })
         .then((res) => res.json())
         .then((data) => Array.isArray(data.products) ? data.products as FnOsProductSearchItem[] : data.product ? [data.product as FnOsProductSearchItem] : [])
         .catch(() => [] as FnOsProductSearchItem[]);
@@ -12994,7 +13040,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(status === "출고완료" ? "송장번호가 입력된 선택 주문이 없습니다." : "처리할 주문이 없습니다.");
       return;
     }
-    if (!await validateAndNormalizeProgressProducts(eligibleIndexes)) return;
     const eligibleSet = new Set(eligibleIndexes);
     const partialBundleWarnings: string[] = [];
     const checkedBundles = new Set<string>();
@@ -13037,7 +13082,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const ok = window.confirm(baseConfirmMessage);
     if (!ok) return;
     const manualWaitingStatuses = orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-waiting").filter((item) => item.source === "manual");
-    openOrderProgressStatusPopup(eligibleIndexes, status, shouldCallApi ? "api-running" : "fnos-applying", fnosOnlyStatusMove);
+    openOrderProgressStatusPopup(eligibleIndexes, status, shouldCallApi ? "api-running" : "fnos-waiting", fnosOnlyStatusMove);
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    const validated = await validateAndNormalizeProgressProducts(eligibleIndexes);
+    if (!validated) {
+      setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed", fnosOnlyStatusMove));
+      return;
+    }
+    if (!shouldCallApi) setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove));
     try {
       if (shouldConfirmApi && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses);
       if (shouldDispatchApi && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses);
@@ -13182,7 +13234,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (payload?.token !== popupToken || !payload.item) return;
       applyOrderProductLinkItemToDraft(index, payload.item);
     };
-    const searchOptions = productSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
+    const searchOptions = productLinkSearchAttributeOptions.map((option) => ({ value: option.value, label: option.label }));
     const initialQuery = salesCellText(query);
     popup.document.open();
     popup.document.write(`<!doctype html>
@@ -13323,17 +13375,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return matches.includes(rowIndex) ? matches : [rowIndex, ...matches];
   }
 
-  function syncProgressProductToSales(rowIndex: number, progressRow: string[], item: FnOsProductSearchItem) {
+  function syncProgressProductToSales(rowIndex: number, progressRow: string[], item: FnOsProductSearchItem, linkedTargetIndexes?: number[]) {
     const progress = salesRowObject("발주 진행 단계", progressRow);
     const productCode = salesCellText(item.code || progress["품목코드(ERP)"]);
     const productName = salesCellText(item.name || progress["품목명(ERP)"]);
     if (!productCode) return;
 
-    let targetIndexes = onlineProductBulkMatchIndexes(rowIndex, progressRow);
-    const duplicateCount = targetIndexes.filter((index) => index !== rowIndex).length;
-    if (duplicateCount > 0) {
-      const ok = window.confirm(`오늘 주문건에 같은 쇼핑몰-쇼핑몰품목key가 ${duplicateCount.toLocaleString("ko-KR")}건 존재합니다.\n모두 같은 조건으로 매칭입력-저장 하시겠습니까?`);
-      if (!ok) targetIndexes = [rowIndex];
+    let targetIndexes = linkedTargetIndexes?.length ? linkedTargetIndexes : onlineProductBulkMatchIndexes(rowIndex, progressRow);
+    if (!linkedTargetIndexes?.length) {
+      const duplicateCount = targetIndexes.filter((index) => index !== rowIndex).length;
+      if (duplicateCount > 0) {
+        const ok = window.confirm(`오늘 주문건에 같은 쇼핑몰-쇼핑몰품목key가 ${duplicateCount.toLocaleString("ko-KR")}건 존재합니다.\n모두 같은 조건으로 매칭입력-저장 하시겠습니까?`);
+        if (!ok) targetIndexes = [rowIndex];
+      }
     }
     const targetSet = new Set(targetIndexes);
     const appliedCount = targetSet.size;

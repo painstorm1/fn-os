@@ -79,8 +79,8 @@ function includesQuery(row: ReturnType<typeof normalizeProduct>, query: string) 
 function matchesAttribute(row: ReturnType<typeof normalizeProduct>, attribute: string) {
   if (!attribute || attribute === "all") return true;
   const normalized = row.productAttribute.toLowerCase();
-  if (attribute === "plain") return (!normalized || normalized === "plain" || normalized === "general") && !row.name.startsWith("[SET]") && !row.name.startsWith("[RG]");
-  if (attribute === "set") return normalized === "set" || row.name.startsWith("[SET]");
+  if (attribute === "plain") return (!normalized || ["plain", "general", "일반", "일반제품", "일반 제품"].includes(normalized)) && !row.name.startsWith("[SET]") && !row.name.startsWith("[RG]");
+  if (attribute === "set") return ["set", "세트"].includes(normalized) || row.name.startsWith("[SET]");
   if (attribute === "rg") return normalized === "rg" || row.name.startsWith("[RG]");
   if (attribute === "import") return row.importLinked || ["import", "import_linked", "수입연동"].includes(normalized);
   return true;
