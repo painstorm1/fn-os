@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+const BUSY_OVERLAY_SHOW_DELAY_MS = 1000;
+
 type BusyState = {
   count: number;
   listeners: Set<(active: boolean) => void>;
@@ -81,11 +83,10 @@ export default function GlobalBusyOverlay() {
   }, []);
 
   useEffect(() => {
-    if (!active) {
-      setVisible(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setVisible(true), 180);
+    const timer = window.setTimeout(
+      () => setVisible(active),
+      active ? BUSY_OVERLAY_SHOW_DELAY_MS : 0,
+    );
     return () => window.clearTimeout(timer);
   }, [active]);
 
