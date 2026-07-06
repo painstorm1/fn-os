@@ -9473,21 +9473,22 @@ function OnlineOrderProgressList({
     .wrap{height:100vh;min-height:0;padding:18px;display:flex;flex-direction:column}.head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dbe3ee;padding-bottom:12px;margin-bottom:14px}
     h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
     .tab{border:0;border-radius:7px;background:transparent;color:#475569;font-weight:900;padding:8px 11px;cursor:pointer}.tab.active{background:#ff6a00;color:white}
-    .search{flex:0 0 auto;display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
-    button.primary{height:38px;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}
+    .search{flex:0 0 auto;display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;min-width:0;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
+    button.primary{height:38px;min-width:60px;white-space:nowrap;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}button.primary:disabled{cursor:not-allowed;opacity:.45}
     button.secondary{height:36px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#334155;font-weight:900;padding:0 14px;cursor:pointer}
     .panel{flex:1 1 auto;min-height:0;overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
-    table{width:100%;border-collapse:collapse;table-layout:fixed} th{background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}
-    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
-    .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{width:52px;text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
+    table{width:max-content;min-width:100%;border-collapse:collapse;table-layout:fixed} th{position:relative;background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-right:1px solid #dbe3ee;border-bottom:1px solid #e2e8f0;user-select:none}
+    td{padding:10px;border-right:1px solid #eef2f7;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
+    .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
+    .resize-handle{position:absolute;right:-4px;top:0;z-index:2;width:8px;height:100%;cursor:col-resize}.resize-handle:hover,.resizing .resize-handle{background:#fdba74}.resizing{cursor:col-resize;user-select:none}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="head"><div><h1>품목코드 연동</h1><p class="hint">뒤의 발주 자료를 보면서 이 창에서 FN OS 품목을 검색해 선택합니다.</p></div><button class="secondary" id="closeBtn">닫기</button></div>
     <div class="tabs" id="tabs"></div>
-    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button><button class="primary" id="applyBtn">적용</button></div>
-    <div class="panel"><table><thead><tr><th class="pick">선택</th><th style="width:150px">품목코드</th><th>품목명</th><th class="num" style="width:120px">입고단가</th><th class="num" style="width:120px">출고단가</th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
+    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button><button class="primary" id="applyBtn" disabled>적용</button></div>
+    <div class="panel"><table id="resultTable"><colgroup id="colgroup"></colgroup><thead><tr><th class="pick">선택<span class="resize-handle" data-col="0"></span></th><th>품목코드<span class="resize-handle" data-col="1"></span></th><th>품목명<span class="resize-handle" data-col="2"></span></th><th class="num">입고단가<span class="resize-handle" data-col="3"></span></th><th class="num">출고단가<span class="resize-handle" data-col="4"></span></th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
   </div>
   <script>
     const token = ${JSON.stringify(popupToken)};
@@ -9495,26 +9496,41 @@ function OnlineOrderProgressList({
     const options = ${JSON.stringify(searchOptions)};
     let attribute = ${JSON.stringify(productSearchAttribute)};
     let results = ${JSON.stringify(initialResults)};
-    let selectedIndex = 0;
+    let selectedIndex = -1;
+    let searchedQuery = '';
     const tabs = document.getElementById('tabs');
     const query = document.getElementById('query');
     const rows = document.getElementById('rows');
     const status = document.getElementById('status');
+    const applyBtn = document.getElementById('applyBtn');
+    const panel = document.querySelector('.panel');
+    const table = document.getElementById('resultTable');
+    const colgroup = document.getElementById('colgroup');
+    const colMinWidths = [48, 90, 220, 90, 90];
+    const fixedColWidth = 52 + 150 + 120 + 120;
+    let colWidths = [52, 150, Math.max(360, (panel ? panel.clientWidth : 900) - fixedColWidth), 120, 120];
     const krw = new Intl.NumberFormat('ko-KR', { style:'currency', currency:'KRW', maximumFractionDigits:0 });
     function money(value){ const n = Number(String(value ?? '').replace(/[^\\d.-]/g,'')); return Number.isFinite(n) && n ? krw.format(n) : '-'; }
     function renderTabs(){ tabs.innerHTML = options.map(o => '<button class="tab '+(o.value===attribute?'active':'')+'" data-value="'+o.value+'">'+o.label+'</button>').join(''); }
+    function renderCols(){ const total = colWidths.reduce((sum, width) => sum + width, 0); colgroup.innerHTML = colWidths.map(width => '<col style="width:'+width+'px" />').join(''); table.style.width = total + 'px'; }
     function scrollActiveIntoView(){ const active = rows.querySelector('tr.active'); if(active) active.scrollIntoView({ block:'nearest' }); }
-    function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; requestAnimationFrame(scrollActiveIntoView); }
-    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
+    function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; applyBtn.disabled = selectedIndex < 0 || !results[selectedIndex] || !results[selectedIndex].code; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; if(selectedIndex >= 0) requestAnimationFrame(scrollActiveIntoView); }
+    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; selectedIndex=-1; searchedQuery=''; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; applyBtn.disabled = true; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); searchedQuery = keyword; if(!res.ok || data.ok === false){ results=[]; selectedIndex=-1; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=-1; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; selectedIndex=-1; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
+    function applySelected(){ if(selectedIndex < 0) return; choose(selectedIndex); }
+    function selectRow(index){ if(!results.length) return; selectedIndex = Math.max(0, Math.min(results.length - 1, index)); render(); }
+    function moveSelection(delta){ if(!results.length) return; if(selectedIndex < 0){ selectedIndex = delta > 0 ? 0 : results.length - 1; } else { selectedIndex = Math.max(0, Math.min(results.length - 1, selectedIndex + delta)); } render(); }
+    function startResize(event){ const handle = event.target.closest('.resize-handle'); if(!handle) return; event.preventDefault(); const index = Number(handle.dataset.col || 0); const startX = event.clientX; const startWidth = colWidths[index]; document.body.classList.add('resizing'); function onMove(moveEvent){ colWidths[index] = Math.max(colMinWidths[index], startWidth + moveEvent.clientX - startX); renderCols(); } function onUp(){ document.body.classList.remove('resizing'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); } document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
+    table.addEventListener('mousedown', startResize);
     document.getElementById('searchBtn').addEventListener('click', search);
-    document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
+    applyBtn.addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
-    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(results.length){ status.textContent=''; render(); } else if(query.value.trim()) search();
+    query.addEventListener('input', () => { if(query.value.trim() !== searchedQuery && selectedIndex !== -1){ selectedIndex=-1; render(); } });
+    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); const keyword = query.value.trim(); if(selectedIndex >= 0 && keyword && keyword === searchedQuery){ applySelected(); } else { search(); } } if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); } if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); } });
+    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; searchedQuery = results.length ? query.value.trim() : ''; renderCols(); query.focus(); if(results.length){ status.textContent=''; render(); } else if(query.value.trim()) search();
   </script>
 </body>
 </html>`);
@@ -13032,20 +13048,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     h1{margin:0;font-size:22px}.hint{margin:4px 0 0;color:#64748b;font-weight:700;font-size:12px}.tabs{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
     .tab{border:0;border-radius:7px;background:transparent;color:#475569;font-weight:900;padding:8px 11px;cursor:pointer}.tab.active{background:#ff6a00;color:white}
     .search{flex:0 0 auto;display:flex;gap:8px;margin-bottom:12px}.search input{height:38px;min-width:0;flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:0 12px;font-weight:800;outline-color:#ff6a00}
-    button.primary{height:38px;min-width:60px;white-space:nowrap;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}
+    button.primary{height:38px;min-width:60px;white-space:nowrap;border:0;border-radius:8px;background:#ff6a00;color:white;font-weight:900;padding:0 18px;cursor:pointer}button.primary:disabled{cursor:not-allowed;opacity:.45}
     button.secondary{height:36px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#334155;font-weight:900;padding:0 14px;cursor:pointer}
     .panel{flex:1 1 auto;min-height:0;overflow:auto;background:white;border:1px solid #dbe3ee;border-radius:10px}.status{padding:16px;text-align:center;color:#64748b;font-weight:900}
-    table{width:100%;border-collapse:collapse;table-layout:fixed} th{background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}
-    td{padding:10px;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
-    .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{width:52px;text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
+    table{width:max-content;min-width:100%;border-collapse:collapse;table-layout:fixed} th{position:relative;background:#f1f5f9;color:#64748b;font-size:12px;text-align:left;padding:10px;border-right:1px solid #dbe3ee;border-bottom:1px solid #e2e8f0;user-select:none}
+    td{padding:10px;border-right:1px solid #eef2f7;border-bottom:1px solid #eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} tr{cursor:pointer} tr.active{background:#fff7ed}
+    .num{text-align:right}.code{font-weight:900;color:#1d4ed8}.pick{text-align:center}.pick button{min-width:26px;height:24px;border:1px solid #cbd5e1;border-radius:6px;background:white;font-size:12px;font-weight:900;cursor:pointer}.active .pick button{background:#2563eb;color:white;border-color:#2563eb}
+    .resize-handle{position:absolute;right:-4px;top:0;z-index:2;width:8px;height:100%;cursor:col-resize}.resize-handle:hover,.resizing .resize-handle{background:#fdba74}.resizing{cursor:col-resize;user-select:none}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="head"><div><h1>품목코드 연동</h1><p class="hint">뒤의 발주 자료를 보면서 이 창에서 FN OS 품목을 검색해 선택합니다.</p></div><button class="secondary" id="closeBtn">닫기</button></div>
     <div class="tabs" id="tabs"></div>
-    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button><button class="primary" id="applyBtn">적용</button></div>
-    <div class="panel"><table><thead><tr><th class="pick">선택</th><th style="width:150px">품목코드</th><th>품목명</th><th class="num" style="width:120px">입고단가</th><th class="num" style="width:120px">출고단가</th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
+    <div class="search"><input id="query" placeholder="품목명 또는 품목코드" /><button class="primary" id="searchBtn">찾기</button><button class="primary" id="applyBtn" disabled>적용</button></div>
+    <div class="panel"><table id="resultTable"><colgroup id="colgroup"></colgroup><thead><tr><th class="pick">선택<span class="resize-handle" data-col="0"></span></th><th>품목코드<span class="resize-handle" data-col="1"></span></th><th>품목명<span class="resize-handle" data-col="2"></span></th><th class="num">입고단가<span class="resize-handle" data-col="3"></span></th><th class="num">출고단가<span class="resize-handle" data-col="4"></span></th></tr></thead><tbody id="rows"></tbody></table><div class="status" id="status">검색어를 입력하고 Enter 또는 찾기를 누르세요.</div></div>
   </div>
   <script>
     const token = ${JSON.stringify(popupToken)};
@@ -13053,26 +13070,41 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const options = ${JSON.stringify(searchOptions)};
     let attribute = "plain";
     let results = [];
-    let selectedIndex = 0;
+    let selectedIndex = -1;
+    let searchedQuery = '';
     const tabs = document.getElementById('tabs');
     const query = document.getElementById('query');
     const rows = document.getElementById('rows');
     const status = document.getElementById('status');
+    const applyBtn = document.getElementById('applyBtn');
+    const panel = document.querySelector('.panel');
+    const table = document.getElementById('resultTable');
+    const colgroup = document.getElementById('colgroup');
+    const colMinWidths = [48, 90, 220, 90, 90];
+    const fixedColWidth = 52 + 150 + 120 + 120;
+    let colWidths = [52, 150, Math.max(360, (panel ? panel.clientWidth : 900) - fixedColWidth), 120, 120];
     const krw = new Intl.NumberFormat('ko-KR', { style:'currency', currency:'KRW', maximumFractionDigits:0 });
     function money(value){ const n = Number(String(value ?? '').replace(/[^\\d.-]/g,'')); return Number.isFinite(n) && n ? krw.format(n) : '-'; }
     function renderTabs(){ tabs.innerHTML = options.map(o => '<button class="tab '+(o.value===attribute?'active':'')+'" data-value="'+o.value+'">'+o.label+'</button>').join(''); }
+    function renderCols(){ const total = colWidths.reduce((sum, width) => sum + width, 0); colgroup.innerHTML = colWidths.map(width => '<col style="width:'+width+'px" />').join(''); table.style.width = total + 'px'; }
     function scrollActiveIntoView(){ const active = rows.querySelector('tr.active'); if(active) active.scrollIntoView({ block:'nearest' }); }
-    function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; requestAnimationFrame(scrollActiveIntoView); }
-    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
+    function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; applyBtn.disabled = selectedIndex < 0 || !results[selectedIndex] || !results[selectedIndex].code; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; if(selectedIndex >= 0) requestAnimationFrame(scrollActiveIntoView); }
+    async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; selectedIndex=-1; searchedQuery=''; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; applyBtn.disabled = true; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); searchedQuery = keyword; if(!res.ok || data.ok === false){ results=[]; selectedIndex=-1; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=-1; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; selectedIndex=-1; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
+    function applySelected(){ if(selectedIndex < 0) return; choose(selectedIndex); }
+    function selectRow(index){ if(!results.length) return; selectedIndex = Math.max(0, Math.min(results.length - 1, index)); render(); }
+    function moveSelection(delta){ if(!results.length) return; if(selectedIndex < 0){ selectedIndex = delta > 0 ? 0 : results.length - 1; } else { selectedIndex = Math.max(0, Math.min(results.length - 1, selectedIndex + delta)); } render(); }
+    function startResize(event){ const handle = event.target.closest('.resize-handle'); if(!handle) return; event.preventDefault(); const index = Number(handle.dataset.col || 0); const startX = event.clientX; const startWidth = colWidths[index]; document.body.classList.add('resizing'); function onMove(moveEvent){ colWidths[index] = Math.max(colMinWidths[index], startWidth + moveEvent.clientX - startX); renderCols(); } function onUp(){ document.body.classList.remove('resizing'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); } document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
+    table.addEventListener('mousedown', startResize);
     document.getElementById('searchBtn').addEventListener('click', search);
-    document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
+    applyBtn.addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
-    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(query.value.trim()) search();
+    query.addEventListener('input', () => { if(query.value.trim() !== searchedQuery && selectedIndex !== -1){ selectedIndex=-1; render(); } });
+    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); const keyword = query.value.trim(); if(selectedIndex >= 0 && keyword && keyword === searchedQuery){ applySelected(); } else { search(); } } if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); } if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); } });
+    renderTabs(); query.value = ${JSON.stringify(initialQuery)}; renderCols(); query.focus(); if(query.value.trim()) search();
   </script>
 </body>
 </html>`);
