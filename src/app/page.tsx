@@ -12481,11 +12481,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }, {});
   }
 
-  function orderProgressStatusChangeItems(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage): OnlineApiStatusItem[] {
+  function orderProgressStatusChangeItems(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage, fnosOnly = false): OnlineApiStatusItem[] {
     const grouped = indexes.reduce<Record<string, { count: number; source: "api" | "manual" }>>((acc, index) => {
       const row = sheets["발주 진행 단계"][index] || [];
       const name = orderProgressSiteName(row);
-      const source = onlineOrderStatusApiUnsupportedSite(row) ? "manual" : "api";
+      const source = fnosOnly || onlineOrderStatusApiUnsupportedSite(row) ? "manual" : "api";
       const key = `${source}:${name}`;
       const previous = acc[key] || { count: 0, source };
       acc[key] = { ...previous, count: previous.count + 1 };
@@ -12526,11 +12526,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       });
   }
 
-  function openOrderProgressStatusPopup(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage) {
+  function openOrderProgressStatusPopup(indexes: number[], targetStatus: OrderProgressStatusChangeTarget, stage: OrderProgressStatusChangeStage, fnosOnly = false) {
     const fromLabel = orderProgressStatusFilter === "전체" ? "선택 주문" : orderProgressStatusFilter;
     setCollectionPopupMode("status-change");
     setCollectionPopupTitle(`진행상태 변경: ${fromLabel} → ${targetStatus}`);
-    setCollectionStatuses(orderProgressStatusChangeItems(indexes, targetStatus, stage));
+    setCollectionStatuses(orderProgressStatusChangeItems(indexes, targetStatus, stage, fnosOnly));
     setCollectionPopupOpen(true);
   }
 
@@ -12862,32 +12862,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       partialBundleWarnings.push(`${bundleIndexes.map((index) => `${index + 1}행`).join(", ")} (${bundleNo})`);
     });
     const statusTargetLabel = status === "주문확인" ? "주문확인으로" : status === "출고대기" ? "출고대기로" : "출고완료로";
-    const unsupportedGrouped = groupedUnsupportedStatusApiRows(eligibleIndexes);
-    const unsupportedIndexes = new Set(
-      eligibleIndexes.filter((index) => onlineOrderStatusApiUnsupportedSite(sheets["발주 진행 단계"][index] || [])),
-    );
-    const apiIndexes = eligibleIndexes.filter((index) => !unsupportedIndexes.has(index));
-    const unsupportedMessage = Object.entries(unsupportedGrouped).map(([site, count]) => `${site} ${count}건`).join(", ");
+    const fnosOnlyStatusMove = true;
     const baseConfirmMessage = partialBundleWarnings.length
       ? `묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?`
-      : `${eligibleIndexes.length}건에 대하여 ${status}을 실행하시겠습니까?`;
-    const ok = unsupportedMessage
-      ? window.confirm(`${baseConfirmMessage}\n\nAPI 미호출 쇼핑몰(${unsupportedMessage})도 FNOS에서만 다음 단계로 넘기시겠습니까?\n※ 해당 쇼핑몰 관리자에서는 직접 주문확인/송장처리가 필요합니다.`)
-      : window.confirm(baseConfirmMessage);
+      : `${eligibleIndexes.length}건에 대하여 FNOS 진행상태만 ${statusTargetLabel} 변경하시겠습니까?\n※ 진행상태 변경 중에는 쇼핑몰 주문조회/주문확인/송장 API를 호출하지 않습니다.`;
+    const ok = window.confirm(baseConfirmMessage);
     if (!ok) return;
-    const manualWaitingStatuses = orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-waiting").filter((item) => item.source === "manual");
-    openOrderProgressStatusPopup(eligibleIndexes, status, apiIndexes.length ? "api-running" : "fnos-applying");
-    try {
-      if (status === "주문확인" && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses);
-      if (status === "출고완료" && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
-      setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
-      window.alert(error instanceof Error ? error.message : "온라인 주문 처리 실패");
-      return;
-    }
-    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying"));
-    await new Promise((resolve) => window.setTimeout(resolve, apiIndexes.length ? 150 : 250));
+    openOrderProgressStatusPopup(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove);
+    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove));
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
     let shouldCleanupManualFiles = false;
     setSheets((prev) => {
       const next = { ...prev };
@@ -12900,7 +12883,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       shouldCleanupManualFiles = status === "출고완료" && allOrderProgressRowsCompleted(next["발주 진행 단계"]);
       return next;
     });
-    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "done"));
+    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "done", fnosOnlyStatusMove));
     setMessage(`${status} 처리 완료: ${eligibleIndexes.length}건`);
     if (status === "출고완료") {
       window.setTimeout(() => {

@@ -89,7 +89,8 @@ function coupangSearchStatuses(value: unknown) {
 
 function coupangOrderStatus(value: unknown) {
   const status = text(value).toUpperCase();
-  if (status === "ACCEPT" || status === "INSTRUCT") return "신규주문";
+  if (status === "ACCEPT") return "신규주문";
+  if (status === "INSTRUCT") return "주문확인";
   return text(value);
 }
 

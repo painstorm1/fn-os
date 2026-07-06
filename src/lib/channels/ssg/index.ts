@@ -77,9 +77,11 @@ function ssgOrderStatus(row: AnyRecord) {
   const named = firstText(row.ordItemStatNm, row.ordStatNm, row.shppProgStatDtlNm, row.statusName);
   if (named) return named;
   const code = firstText(row.ordItemStat, row.ordStat, row.shppProgStatDtlCd, row.status);
-  if (["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENT_COMPLETE", "결제완료"].includes(code.toUpperCase())) return "신규주문";
-  if (code) return "주문확인";
-  return "주문확인";
+  const compact = code.replace(/[\s_()/.-]+/g, "").toUpperCase();
+  if (["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"].includes(compact)) return "신규주문";
+  if (["PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"].includes(compact)) return "주문확인";
+  if (code) return code;
+  return "신규주문";
 }
 
 function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
