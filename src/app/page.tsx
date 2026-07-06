@@ -13010,15 +13010,45 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       partialBundleWarnings.push(`${bundleIndexes.map((index) => `${index + 1}행`).join(", ")} (${bundleNo})`);
     });
     const statusTargetLabel = status === "주문확인" ? "주문확인으로" : status === "출고대기" ? "출고대기로" : "출고완료로";
-    const fnosOnlyStatusMove = true;
+    const unsupportedGrouped = groupedUnsupportedStatusApiRows(eligibleIndexes);
+    const unsupportedIndexes = new Set(
+      eligibleIndexes.filter((index) => onlineOrderStatusApiUnsupportedSite(sheets["발주 진행 단계"][index] || [])),
+    );
+    const apiIndexes = eligibleIndexes.filter((index) => !unsupportedIndexes.has(index));
+    const shouldConfirmApi = status === "주문확인" || (status === "출고대기" && orderProgressStatusFilter === "신규주문");
+    const shouldDispatchApi = status === "출고완료";
+    const shouldCallApi = apiIndexes.length > 0 && (shouldConfirmApi || shouldDispatchApi);
+    const fnosOnlyStatusMove = !shouldCallApi;
+    const unsupportedMessage = Object.entries(unsupportedGrouped).map(([site, count]) => `${site} ${count}건`).join(", ");
+    const apiActionText = shouldDispatchApi
+      ? "송장/발송처리 API를 먼저 호출한 뒤"
+      : shouldConfirmApi
+        ? "주문확인 API를 먼저 호출한 뒤"
+        : "쇼핑몰 API 호출 없이";
+    const apiMessage = shouldCallApi
+      ? `API 연동 쇼핑몰 ${apiIndexes.length}건은 ${apiActionText} FNOS 진행상태를 ${statusTargetLabel} 변경합니다.`
+      : `${eligibleIndexes.length}건에 대하여 FNOS 진행상태만 ${statusTargetLabel} 변경합니다.\n※ 이번 변경은 쇼핑몰 주문조회/주문확인/송장 API를 호출하지 않습니다.`;
+    const manualMessage = unsupportedMessage
+      ? `\n\nAPI 미호출 쇼핑몰(${unsupportedMessage})은 FNOS에서만 다음 단계로 넘깁니다.\n※ 해당 쇼핑몰 관리자에서는 직접 주문확인/송장처리가 필요합니다.`
+      : "";
     const baseConfirmMessage = partialBundleWarnings.length
-      ? `묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?`
-      : `${eligibleIndexes.length}건에 대하여 FNOS 진행상태만 ${statusTargetLabel} 변경하시겠습니까?\n※ 진행상태 변경 중에는 쇼핑몰 주문조회/주문확인/송장 API를 호출하지 않습니다.`;
+      ? `묶음 주문번호가 같은 주문이 있습니다.\n${partialBundleWarnings.join("\n")}\n\n선택한 행만 개별로 ${statusTargetLabel} 하시겠습니까?\n\n${apiMessage}${manualMessage}`
+      : `${apiMessage}${manualMessage}`;
     const ok = window.confirm(baseConfirmMessage);
     if (!ok) return;
-    openOrderProgressStatusPopup(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove);
+    const manualWaitingStatuses = orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-waiting").filter((item) => item.source === "manual");
+    openOrderProgressStatusPopup(eligibleIndexes, status, shouldCallApi ? "api-running" : "fnos-applying", fnosOnlyStatusMove);
+    try {
+      if (shouldConfirmApi && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses);
+      if (shouldDispatchApi && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
+      setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
+      window.alert(message);
+      return;
+    }
     setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove));
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
     let shouldCleanupManualFiles = false;
     setSheets((prev) => {
       const next = { ...prev };
