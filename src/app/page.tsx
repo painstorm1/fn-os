@@ -9506,13 +9506,15 @@ function OnlineOrderProgressList({
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; requestAnimationFrame(scrollActiveIntoView); }
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute, includeInventory: false, limit: 50 }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
+    function applySelected(){ choose(selectedIndex); }
+    function selectRow(index){ selectedIndex = Math.max(0, Math.min(results.length - 1, index)); render(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
     document.getElementById('searchBtn').addEventListener('click', search);
-    document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
+    document.getElementById('applyBtn').addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
+    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ applySelected(); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
     renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(results.length){ status.textContent=''; render(); } else if(query.value.trim()) search();
   </script>
 </body>
@@ -13064,18 +13066,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     function render(){ rows.innerHTML = results.map((item,index) => '<tr class="'+(index===selectedIndex?'active':'')+'" data-index="'+index+'"><td class="pick"><button>'+(index+1)+'</button></td><td class="code">'+(item.code||'-')+'</td><td title="'+(item.name||'')+'">'+(item.name||'-')+'</td><td class="num">'+money(item.inPrice)+'</td><td class="num">'+money(item.outPrice)+'</td></tr>').join(''); status.style.display = results.length ? 'none' : 'block'; if(!results.length && !status.textContent) status.textContent = '검색 결과가 없습니다.'; requestAnimationFrame(scrollActiveIntoView); }
     async function search(){ const keyword = query.value.trim(); if(!keyword){ results=[]; status.textContent='검색어를 입력해주세요.'; render(); return; } status.style.display='block'; status.textContent='검색 중입니다.'; rows.innerHTML=''; try { const res = await fetch(origin + '/api/fnos/quick-lookup', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: keyword, productAttribute: attribute }) }); const data = await res.json().catch(() => ({})); if(!res.ok || data.ok === false){ results=[]; status.textContent=data.error || '품목검색 실패'; render(); return; } results = Array.isArray(data.products) ? data.products : data.product ? [data.product] : []; selectedIndex=0; status.textContent = results.length ? '' : '검색 결과가 없습니다.'; render(); } catch(error){ results=[]; status.textContent=error && error.message ? error.message : '품목검색 실패'; render(); } }
     function choose(index){ const item = results[index]; if(!item || !item.code) return; if(window.opener && !window.opener.closed && window.opener.__fnosSelectOnlineOrderProduct){ window.opener.__fnosSelectOnlineOrderProduct({ token, item }); } window.close(); }
+    function applySelected(){ choose(selectedIndex); }
+    function selectRow(index){ selectedIndex = Math.max(0, Math.min(results.length - 1, index)); render(); }
     tabs.addEventListener('click', e => { const btn = e.target.closest('button[data-value]'); if(!btn) return; attribute = btn.dataset.value; renderTabs(); if(query.value.trim()) search(); });
-    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(tr) choose(Number(tr.dataset.index || 0)); });
-    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectedIndex = Number(tr.dataset.index || 0); render(); });
+    rows.addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); applySelected(); });
+    rows.addEventListener('click', e => { const tr = e.target.closest('tr[data-index]'); if(!tr) return; selectRow(Number(tr.dataset.index || 0)); });
     document.getElementById('searchBtn').addEventListener('click', search);
-    document.getElementById('applyBtn').addEventListener('click', () => choose(selectedIndex));
+    document.getElementById('applyBtn').addEventListener('click', applySelected);
     document.getElementById('closeBtn').addEventListener('click', () => window.close());
-    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ choose(selectedIndex); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
+    query.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); if(results.length && query.value.trim()){ applySelected(); } else search(); } if(e.key==='ArrowDown'){ e.preventDefault(); selectedIndex=Math.min(results.length-1, selectedIndex+1); render(); } if(e.key==='ArrowUp'){ e.preventDefault(); selectedIndex=Math.max(0, selectedIndex-1); render(); } });
     renderTabs(); query.value = ${JSON.stringify(initialQuery)}; query.focus(); if(query.value.trim()) search();
   </script>
 </body>
 </html>`);
     popup.document.close();
+  }
+
+  function applySelectedOrderProductSearchResult(index = orderProductSearch.selectedIndex) {
+    const item = orderProductSearch.results[Math.max(0, Math.min(index, orderProductSearch.results.length - 1))];
+    if (item) applyOrderProductLinkSearchItem(item);
   }
 
   function applyOrderProductLinkSearchItem(item: FnOsProductSearchItem) {
@@ -15738,8 +15747,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                         const keyword = orderProductSearch.query.trim();
                         const canSelect = keyword && keyword === orderProductSearch.searchedQuery.trim() && orderProductSearch.results.length;
                         if (canSelect) {
-                          const item = orderProductSearch.results[Math.max(0, Math.min(orderProductSearch.selectedIndex, orderProductSearch.results.length - 1))];
-                          if (item) applyOrderProductLinkSearchItem(item);
+                          applySelectedOrderProductSearchResult();
                           return;
                         }
                         void searchOrderProductLinkProducts(orderProductSearch.query);
@@ -15768,7 +15776,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                           ref={(node) => { orderProductSearchRowRefs.current[index] = node; }}
                           className={`cursor-pointer border-b border-slate-100 hover:bg-orange-50 ${index === orderProductSearch.selectedIndex ? "bg-orange-50" : ""}`}
                           onMouseEnter={() => setOrderProductSearch((prev) => ({ ...prev, selectedIndex: index }))}
-                          onDoubleClick={() => applyOrderProductLinkSearchItem(item)}
+                          onDoubleClick={() => {
+                            setOrderProductSearch((prev) => ({ ...prev, selectedIndex: index }));
+                            applySelectedOrderProductSearchResult(index);
+                          }}
                         >
                           <td className="px-2 py-2 text-center">{index + 1}</td>
                           <td className="px-2 py-2 font-black text-blue-700">{item.code}</td>
@@ -15786,10 +15797,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 </div>
                 <div className="flex justify-end gap-2">
                   <button type="button" className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700" onClick={() => setOrderProductSearch((prev) => ({ ...prev, open: false }))}>닫기</button>
-                  <ActionButton type="button" disabled={!orderProductSearch.results.length} onClick={() => {
-                    const item = orderProductSearch.results[Math.max(0, Math.min(orderProductSearch.selectedIndex, orderProductSearch.results.length - 1))];
-                    if (item) applyOrderProductLinkSearchItem(item);
-                  }}>선택</ActionButton>
+                  <ActionButton type="button" disabled={!orderProductSearch.results.length} onClick={() => applySelectedOrderProductSearchResult()}>선택</ActionButton>
                 </div>
               </div>
             </SelectionModal>
