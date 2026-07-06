@@ -13272,23 +13272,53 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage(`선택 주문 ${drafts.length.toLocaleString("ko-KR")}건의 품목 연결을 저장했습니다.`);
   }
 
+  function onlineProductBulkMatchIndexes(rowIndex: number, progressRow: string[]) {
+    const progress = salesRowObject("발주 진행 단계", progressRow);
+    const baseDate = entryDateFilterKey(progress.수집일자);
+    const baseMall = mappingText(progress.쇼핑몰명 || progress["쇼핑몰(거래처)"]);
+    const baseProductKey = mappingText(normalizeShoppingProductKeyForMapping(progress.쇼핑몰상품코드, progress.쇼핑몰품목key) || progress.쇼핑몰품목key);
+    if (!baseMall || !baseProductKey) return [rowIndex];
+    const matches = sheetsRef.current["발주 진행 단계"]
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => rowHasValue(row))
+      .filter(({ row }) => {
+        const current = salesRowObject("발주 진행 단계", row);
+        const currentDate = entryDateFilterKey(current.수집일자);
+        const currentMall = mappingText(current.쇼핑몰명 || current["쇼핑몰(거래처)"]);
+        const currentProductKey = mappingText(normalizeShoppingProductKeyForMapping(current.쇼핑몰상품코드, current.쇼핑몰품목key) || current.쇼핑몰품목key);
+        if (baseDate && currentDate !== baseDate) return false;
+        return currentMall === baseMall && currentProductKey === baseProductKey;
+      })
+      .map(({ index }) => index);
+    return matches.includes(rowIndex) ? matches : [rowIndex, ...matches];
+  }
+
   function syncProgressProductToSales(rowIndex: number, progressRow: string[], item: FnOsProductSearchItem) {
     const progress = salesRowObject("발주 진행 단계", progressRow);
     const productCode = salesCellText(item.code || progress["품목코드(ERP)"]);
     const productName = salesCellText(item.name || progress["품목명(ERP)"]);
     if (!productCode) return;
 
+    let targetIndexes = onlineProductBulkMatchIndexes(rowIndex, progressRow);
+    const duplicateCount = targetIndexes.filter((index) => index !== rowIndex).length;
+    if (duplicateCount > 0) {
+      const ok = window.confirm(`오늘 주문건에 같은 쇼핑몰-쇼핑몰품목key가 ${duplicateCount.toLocaleString("ko-KR")}건 존재합니다.\n모두 같은 조건으로 매칭입력-저장 하시겠습니까?`);
+      if (!ok) targetIndexes = [rowIndex];
+    }
+    const targetSet = new Set(targetIndexes);
+    const appliedCount = targetSet.size;
+
     productMappingRefreshHoldUntil.current = Date.now() + 5_000;
     setSheets((prev) => {
       const nextProgress = prev["발주 진행 단계"].map((row, index) => {
-        if (index !== rowIndex) return row;
+        if (!targetSet.has(index)) return row;
         const next = [...row];
         setProgressValue(next, "품목코드(ERP)", productCode);
         setProgressValue(next, "품목명(ERP)", productName);
         return next;
       });
       const nextSales = prev["FN판매입력"].map((row, index) => {
-        if (index !== rowIndex) return row;
+        if (!targetSet.has(index)) return row;
         const next = [...row];
         setSalesSheetCell(next, "FN판매입력", "품목코드", productCode);
         setSalesSheetCell(next, "FN판매입력", "품목명", productName);
@@ -13312,7 +13342,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       product_code: productCode,
       product_name: productName,
     }).then(() => {
-      setMessage(`${progress.쇼핑몰명 || progress["쇼핑몰(거래처)"] || "쇼핑몰"} 품목 연결을 저장했습니다.`);
+      const channelName = progress.쇼핑몰명 || progress["쇼핑몰(거래처)"] || "쇼핑몰";
+      setMessage(appliedCount > 1
+        ? `${channelName} 품목 연결을 ${appliedCount.toLocaleString("ko-KR")}건에 반영하고 저장했습니다.`
+        : `${channelName} 품목 연결을 저장했습니다.`);
     }).catch((error) => {
       setMessage(error instanceof Error ? error.message : "쇼핑몰 코드연결 저장 실패");
     }).finally(() => {
