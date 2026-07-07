@@ -14,7 +14,7 @@ const workerId = process.env.FN_WORKER_ID || `${os.hostname()}-fn-worker`;
 const pollMs = Math.max(1000, Number(process.env.FN_WORKER_POLL_MS || 5_000));
 const jobType = process.env.FN_WORKER_JOB_TYPE || "";
 const once = args.has("--once") || process.env.FN_WORKER_ONCE === "1";
-const localApiKey = envValue("FN_OS_API_KEY") || envValue("FN_OS_AUTH_TOKEN") || envValue("FN_OS_PASSWORD");
+const localApiKey = envValue("FN_OS_API_KEY") || envValue("FN_OS_AUTH_TOKEN") || envValue("FN_OS_PASSWORD") || "fnos-local-dev";
 const productionEnv = readEnvFile(path.join(repoRoot, ".env.vercel.production.local"));
 const remoteApiKey = text(productionEnv.FN_OS_API_KEY || productionEnv.FN_OS_AUTH_TOKEN || productionEnv.FN_OS_PASSWORD) || localApiKey;
 
@@ -108,6 +108,7 @@ async function runStubHandler(job) {
     const requestedChannelCode = text(input.channel_code);
     const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/sync", {
       method: "POST",
+      headers: { "x-fnos-worker-direct": "1" },
       body: JSON.stringify({
         ...input,
         ...(requestedChannelCode ? { channel_code: requestedChannelCode } : {}),
@@ -133,6 +134,7 @@ async function runStubHandler(job) {
   if (job.job_type === "online_order_status_update") {
     const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/status", {
       method: "POST",
+      headers: { "x-fnos-worker-direct": "1" },
       body: JSON.stringify({
         ...input,
         worker_direct: true,
@@ -193,8 +195,10 @@ async function processOne() {
   try {
     const values = await runStubHandler(job);
     const data = await patchJob(job, values);
-    console.log(`[${now()}] updated ${job.id} -> ${data.job?.status || values.status}`);
-    console.log(jsonPreview(data.job?.result_json || values.result_json));
+    const result = data.job?.result_json || values.result_json || {};
+    const count = Number(result.count || (Array.isArray(result.orders) ? result.orders.length : 0));
+    const itemCount = Number(result.item_count || 0);
+    console.log(`[${now()}] updated ${job.id} -> ${data.job?.status || values.status} count=${count} item_count=${itemCount}`);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Worker execution failed.";
