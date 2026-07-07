@@ -44,14 +44,6 @@ function readEnvFile(filePath) {
   return env;
 }
 
-function jsonPreview(value) {
-  try {
-    return JSON.stringify(value ?? {}, null, 2);
-  } catch {
-    return "{}";
-  }
-}
-
 function appendLog(job, line) {
   return [text(job?.log_text), `[${now()}] ${line}`].filter(Boolean).join("\n");
 }
