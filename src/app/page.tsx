@@ -11796,10 +11796,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const hostname = window.location.hostname;
       const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-      const isPrivateIpv4HostSync = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
       const isLocalPage = isLoopbackHost || window.location.port === "3000";
-      // API 채널 수집은 Vercel에서도 직접 실행 가능; LAN IP 접속 시만 미니PC 브릿지 사용
-      const shouldRunDirectSync = isLocalPage || !isPrivateIpv4HostSync;
       const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
       const defaultBridgeOrigin = savedBridgeOrigin || "http://192.168.0.27:3000";
       let res = await fetch("/api/fnos/online-orders/sync", {
@@ -11807,10 +11804,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         fnosSkipBusyOverlay: true,
-        body: JSON.stringify(shouldRunDirectSync ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
+        body: JSON.stringify(isLocalPage ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
-      if (!isLocalPage && !shouldRunDirectSync && data.queued) {
+      if (!isLocalPage && data.queued) {
         setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" as const }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 서버 연결 중" })));
         let localBridgeOrigin = defaultBridgeOrigin;
         if (!savedBridgeOrigin) {
@@ -12880,20 +12877,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
     const hostname = window.location.hostname;
     const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-    const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
     const isLocalPage = isLoopbackHost || window.location.port === "3000";
-    // 주문상태 변경은 순수 외부 API 호출이므로 LAN IP 접근이 아닌 경우(로컬 or 공개 URL) 직접 실행 가능
-    const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
-    const shouldUseLocalBridgeFallback = !isLocalPage && isPrivateIpv4Host;
-    let res = await postStatus("/api/fnos/online-orders/status", shouldRunDirect ? { run_direct: true, use_worker: false } : {});
+    let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
-    if (shouldUseLocalBridgeFallback && data.queued) {
+    if (!isLocalPage && data.queued) {
       setCollectionStatuses([...baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })), ...extraStatuses]);
+      const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
+      const defaultBridgeOrigin = savedBridgeOrigin || "http://192.168.0.27:3000";
+      let localBridgeOrigin = defaultBridgeOrigin;
+      if (!savedBridgeOrigin) {
+        const typedBridgeOrigin = window.prompt("외부 웹 주문상태 변경은 미니PC/FNOS 주문수집 서버 주소가 필요합니다. 같은 사무실이면 미니PC LAN 주소를, 외부망이면 터널 URL을 입력하세요.", defaultBridgeOrigin);
+        if (!typedBridgeOrigin) throw new Error("미니PC 주문처리 서버 주소가 설정되지 않아 처리를 중단했습니다.");
+        localBridgeOrigin = typedBridgeOrigin.trim();
+        window.localStorage.setItem("fnosLocalBridgeOrigin", localBridgeOrigin);
+      }
       try {
-        res = await postStatus("http://127.0.0.1:3000/api/fnos/online-orders/status", { run_direct: true, use_worker: false }, true);
+        res = await postStatus(`${localBridgeOrigin.replace(/\/$/, "")}/api/fnos/online-orders/status`, { run_direct: true, use_worker: false }, true);
         data = await res.json().catch(() => ({}));
       } catch {
-        throw new Error("로컬 API 브릿지에 연결하지 못했습니다. localhost:3000을 켠 뒤 다시 시도해 주세요.");
+        throw new Error(`미니PC 주문처리 서버에 연결하지 못했습니다. 저장된 주소(${localBridgeOrigin})가 현재 브라우저에서 열리는지 확인하거나, 브라우저 콘솔에서 localStorage.setItem('fnosLocalBridgeOrigin', 'http://미니PC-IP:3000') 또는 터널 URL로 다시 설정해 주세요.`);
       }
     }
     if (data.queued && data.job_id) {
