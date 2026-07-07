@@ -7438,6 +7438,17 @@ function orderProgressStatusByMallCode(currentSheets: Record<SalesSheetName, str
   return byMallCode;
 }
 
+// 수집된 상태는 앞 단계로만 되돌리지 않는다. 롯데ON처럼 발송 후에도 조회에 계속 나오는 채널이
+// 출고대기/출고완료 행을 주문확인으로 되돌리는 것을 막는다.
+const orderProgressStatusRank: Record<string, number> = { 신규주문: 0, 주문확인: 1, 출고대기: 2, 출고완료: 3 };
+
+function isOrderProgressStatusAdvance(currentStatus: string, collectedStatus: string) {
+  const currentRank = orderProgressStatusRank[currentStatus];
+  const collectedRank = orderProgressStatusRank[collectedStatus];
+  if (currentRank === undefined || collectedRank === undefined) return true;
+  return collectedRank > currentRank;
+}
+
 function preserveExistingOrderProgressStatuses(rows: string[][], statusByMallCode: Map<string, string>) {
   return rows.map((row) => {
     if (!rowHasValue(row)) return row;
@@ -7808,6 +7819,7 @@ function appendCollectedOnlineOrdersToSheets(
         || collectedStatusByKey.get(productOrderId)
         || collectedStatusByKey.get(orderNo);
       if (!status) return row;
+      if (!isOrderProgressStatusAdvance(progressValue(row, "주문상태"), status)) return row;
       const next = [...row];
       setProgressValue(next, "주문상태", status);
       return next;
