@@ -115,11 +115,12 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const explicitStatusCode = text(params.odPrgsStepCd || params.order_status_code);
       // 공식 스펙: 조회 odPrgsStepCd는 11(출고지시)/23(회수지시)만 존재.
       // 신규/주문확인 구분은 ifCplYN(연동완료여부)로 한다: 빈 값=신규생성 주문, Y=연동완료(주문확인) 주문.
+      // 주문확인(Y)을 먼저 조회해야 두 조회에 겹치는 주문이 신규주문으로 잘못 라벨링되지 않는다(중복제거는 선착순).
       const stageQueries = explicitStatusCode
         ? [{ ifCplYN: text(params.ifCplYN || params.if_cpl_yn), stage: "", statusCode: explicitStatusCode }]
         : [
-          { ifCplYN: "", stage: "신규주문", statusCode: "11" },
           { ifCplYN: "Y", stage: "주문확인", statusCode: "11" },
+          { ifCplYN: "", stage: "신규주문", statusCode: "11" },
         ];
       const extra: AnyRecord = {};
       const lrtrNo = text(params.sub_partner_no);
