@@ -61,6 +61,25 @@ async function readJson(response: Response) {
   return data;
 }
 
+// HTTP 200이어도 data.responseCode=1(부분 실패) + responseList[].succeed=false로 올 수 있다.
+function coupangFailureMessage(data: unknown) {
+  const root = record(record(data).data);
+  const responseCode = text(root.responseCode);
+  const failures = (Array.isArray(root.responseList) ? root.responseList.map(record) : [])
+    .filter((row) => row.succeed === false || text(row.succeed).toUpperCase() === "FALSE");
+  if (!failures.length && (!responseCode || responseCode === "0")) return "";
+  if (!failures.length) return text(root.responseMessage) || `쿠팡 처리 실패 (responseCode=${responseCode})`;
+  return failures
+    .map((row) => [firstText(row.shipmentBoxId), firstText(row.resultCode, row.resultMessage)].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(" / ") || `쿠팡 처리 실패 ${failures.length}건`;
+}
+
+// 16자리 이상 ID는 Number 변환 시 정밀도가 깨지므로 안전한 범위만 숫자로 보낸다.
+function coupangIdValue(value: string) {
+  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : value;
+}
+
 function koreaDate(value: Date) {
   const kst = new Date(value.getTime() + 9 * 60 * 60 * 1000);
   const year = kst.getUTCFullYear();
@@ -242,18 +261,28 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
     if (!shipmentBoxIds.length) return { ok: false, data: null, error: "쿠팡 상품준비중 처리할 shipmentBoxId가 없습니다." };
     try {
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${encodeURIComponent(vendorId)}/ordersheets/acknowledgement`;
-      const body = { vendorId, shipmentBoxIds: shipmentBoxIds.map((id) => (/^\d+$/.test(id) ? Number(id) : id)) };
-      const response = await fetch(`${COUPANG_BASE_URL}${path}`, {
-        method: "PATCH",
-        headers: {
-          Authorization: coupangAuthorization("PATCH", path, "", accessKey, secretKey),
-          "X-Requested-By": vendorId,
-          "Content-Type": "application/json;charset=UTF-8",
-        },
-        body: JSON.stringify(body),
-      });
-      const data = await readJson(response);
-      return { ok: true, data, message: `쿠팡 상품준비중 ${shipmentBoxIds.length}건 요청 완료` };
+      const results = [];
+      const failureMessages: string[] = [];
+      // 쿠팡 문서 권고: shipmentBoxIds는 50개 미만으로 요청
+      for (let index = 0; index < shipmentBoxIds.length; index += 40) {
+        const batch = shipmentBoxIds.slice(index, index + 40);
+        const body = { vendorId, shipmentBoxIds: batch.map(coupangIdValue) };
+        const response = await fetch(`${COUPANG_BASE_URL}${path}`, {
+          method: "PUT",
+          headers: {
+            Authorization: coupangAuthorization("PUT", path, "", accessKey, secretKey),
+            "X-Requested-By": vendorId,
+            "Content-Type": "application/json;charset=UTF-8",
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await readJson(response);
+        const failureMessage = coupangFailureMessage(data);
+        if (failureMessage) failureMessages.push(failureMessage);
+        results.push(data);
+      }
+      if (failureMessages.length) return { ok: false, data: results, error: `쿠팡 상품준비중 일부 실패: ${failureMessages.join(" / ")}` };
+      return { ok: true, data: results, message: `쿠팡 상품준비중 ${shipmentBoxIds.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "쿠팡 상품준비중 처리 실패" };
     }
@@ -271,9 +300,9 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
       const body = {
         vendorId,
         orderSheetInvoiceApplyDtos: rows.map((row) => ({
-          shipmentBoxId: /^\d+$/.test(row.shipmentBoxId) ? Number(row.shipmentBoxId) : row.shipmentBoxId,
-          orderId: /^\d+$/.test(row.orderId) ? Number(row.orderId) : row.orderId,
-          vendorItemId: /^\d+$/.test(row.vendorItemId) ? Number(row.vendorItemId) : row.vendorItemId,
+          shipmentBoxId: coupangIdValue(row.shipmentBoxId),
+          orderId: coupangIdValue(row.orderId),
+          vendorItemId: coupangIdValue(row.vendorItemId),
           deliveryCompanyCode: row.deliveryCompanyCode,
           invoiceNumber: row.invoiceNumber,
           splitShipping: false,
@@ -291,6 +320,8 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
         body: JSON.stringify(body),
       });
       const data = await readJson(response);
+      const failureMessage = coupangFailureMessage(data);
+      if (failureMessage) return { ok: false, data, error: `쿠팡 송장업로드 일부 실패: ${failureMessage}` };
       return { ok: true, data, message: `쿠팡 송장업로드 ${rows.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "쿠팡 송장업로드 실패" };

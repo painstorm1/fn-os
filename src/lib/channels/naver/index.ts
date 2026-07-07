@@ -342,6 +342,16 @@ function chunks<T>(items: T[], size: number) {
   return result;
 }
 
+// 발주확인/발송처리는 HTTP 200이어도 data.failProductOrderInfos에 건별 실패가 섞여 온다.
+function naverFailureMessage(data: unknown) {
+  const failures = arrayAt(data, [["data", "failProductOrderInfos"], ["failProductOrderInfos"]]).map(record);
+  if (!failures.length) return "";
+  return failures
+    .map((row) => [text(row.productOrderId), firstText(row.message, row.code)].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(" / ") || `네이버 처리 실패 ${failures.length}건`;
+}
+
 function naverOrderRows(data: unknown) {
   return arrayAt(data, [
     ["data", "contents"],
@@ -440,16 +450,21 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       if (!productOrderIds.length) return { ok: false, data: null, error: "발주확인할 상품주문번호가 없습니다." };
       const token = await issueNaverToken(params);
       const results = [];
+      const failureMessages: string[] = [];
       for (const batch of chunks(productOrderIds, 30)) {
-        results.push(await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/confirm`, {
+        const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/confirm`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ productOrderIds: batch }),
-        })));
+        }));
+        const failureMessage = naverFailureMessage(data);
+        if (failureMessage) failureMessages.push(failureMessage);
+        results.push(data);
       }
+      if (failureMessages.length) return { ok: false, data: results, error: `네이버 발주확인 일부 실패: ${failureMessages.join(" / ")}` };
       return { ok: true, data: results, message: `네이버 발주확인 ${productOrderIds.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발주확인 실패" };
@@ -472,16 +487,21 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       if (!dispatchProductOrders.length) return { ok: false, data: null, error: "발송처리할 상품주문번호/택배사코드/송장번호가 없습니다." };
       const token = await issueNaverToken(params);
       const results = [];
+      const failureMessages: string[] = [];
       for (const batch of chunks(dispatchProductOrders, 30)) {
-        results.push(await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/dispatch`, {
+        const data = await readJson(await fetch(`${NAVER_BASE_URL}/v1/pay-order/seller/product-orders/dispatch`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ dispatchProductOrders: batch }),
-        })));
+        }));
+        const failureMessage = naverFailureMessage(data);
+        if (failureMessage) failureMessages.push(failureMessage);
+        results.push(data);
       }
+      if (failureMessages.length) return { ok: false, data: results, error: `네이버 발송처리 일부 실패: ${failureMessages.join(" / ")}` };
       return { ok: true, data: results, message: `네이버 발송처리 ${dispatchProductOrders.length}건 요청 완료` };
     } catch (error) {
       return { ok: false, data: null, error: error instanceof Error ? error.message : "네이버 발송처리 실패" };

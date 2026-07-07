@@ -374,52 +374,103 @@ function queryString(payload: AnyRecord) {
   return search.toString();
 }
 
+// 11번가 dlvEtprsCd(택배사 코드): 5자리 숫자 체계. CJ대한통운 00034, 로젠 00002, 우체국 00007, 한진 00011, 롯데 00012, CU 00061
+const ELEVENST_CARRIER_CODES: Array<[string, string]> = [
+  ["CJ", "00034"],
+  ["KGB", "00002"],
+  ["LOGEN", "00002"],
+  ["로젠", "00002"],
+  ["POST", "00007"],
+  ["우체국", "00007"],
+  ["HANJIN", "00011"],
+  ["한진", "00011"],
+  ["LOTTE", "00012"],
+  ["HYUNDAI", "00012"],
+  ["롯데", "00012"],
+  ["CUPOST", "00061"],
+];
+function elevenstCarrierCode(value: unknown) {
+  const raw = text(value).toUpperCase();
+  if (/^\d{5}$/.test(raw)) return raw;
+  for (const [alias, code] of ELEVENST_CARRIER_CODES) {
+    if (raw.includes(alias)) return code;
+  }
+  return "00034";
+}
+
+function elevenstSendDt() {
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${kst.getUTCFullYear()}${pad(kst.getUTCMonth() + 1)}${pad(kst.getUTCDate())}${pad(kst.getUTCHours())}${pad(kst.getUTCMinutes())}`;
+}
+
+// 수집 시 channelOptionCode를 "ordPrdSeq-dlvNo"로 저장하므로 여기서 되돌린다.
+function splitElevenstOptionCode(value: string) {
+  if (!value.includes("-")) return { ordPrdSeq: value, dlvNo: "" };
+  const [ordPrdSeq, dlvNo] = value.split("-", 2);
+  return { ordPrdSeq, dlvNo };
+}
+
+function elevenstDeliveryNo(row: AnyRecord, ordNo: string, parsedDlvNo: string) {
+  // bundleOrderNo에는 주문번호가 들어오므로 주문번호와 같은 값은 배송번호로 쓰지 않는다.
+  return [
+    firstText(row.dlvNo, row.dlv_no),
+    parsedDlvNo,
+    firstText(row.shipmentBoxId, row.shipment_box_id, row.bundleOrderNo, row.bundle_order_no),
+  ].map(text).find((value) => value && value !== ordNo) || "";
+}
+
 function normalizeElevenstConfirmRows(params: Record<string, unknown>) {
   const rawRows = Array.isArray(params.confirmProductOrders) ? params.confirmProductOrders.map(record) : [];
-  const fromRows = rawRows.map((row) => ({
-    ordNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no, row.productOrderId, row.product_order_id),
-    ordPrdSeq: firstText(row.productOrderId, row.product_order_id, row.ordPrdSeq, row.ord_prd_seq),
-    dlvNo: firstText(row.shipmentBoxId, row.shipment_box_id, row.dlvNo, row.dlv_no, row.bundleOrderNo, row.bundle_order_no),
-  })).filter((row) => row.ordNo);
-  if (fromRows.length) return fromRows;
-  return uniqueNonEmpty(Array.isArray(params.productOrderIds) ? params.productOrderIds : [])
-    .map((ordNo) => ({ ordNo, ordPrdSeq: "", dlvNo: "" }));
+  return rawRows.map((row) => {
+    const optionCode = splitElevenstOptionCode(firstText(row.productOrderId, row.product_order_id));
+    const ordNo = firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no);
+    return {
+      ordNo,
+      ordPrdSeq: firstText(row.ordPrdSeq, row.ord_prd_seq, optionCode.ordPrdSeq) || "1",
+      dlvNo: elevenstDeliveryNo(row, ordNo, optionCode.dlvNo),
+      addPrdYn: firstText(row.addPrdYn, row.add_prd_yn) || "N",
+      addPrdNo: firstText(row.addPrdNo, row.add_prd_no) || "null",
+    };
+  }).filter((row) => row.ordNo && row.dlvNo);
 }
 
 function normalizeElevenstDispatchRows(params: Record<string, unknown>) {
   const rawRows = Array.isArray(params.dispatchProductOrders) ? params.dispatchProductOrders.map(record) : [];
   return rawRows.map((row) => {
+    const optionCode = splitElevenstOptionCode(firstText(row.productOrderId, row.product_order_id));
+    const ordNo = firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no);
     const trackingNumber = firstText(row.trackingNumber, row.tracking_number, row.invoiceNo, row.invoice_no, row.invcNo, row.invc_no).replace(/\D/g, "");
     return {
-      ordNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.ordNo, row.ord_no),
-      ordPrdSeq: firstText(row.productOrderId, row.product_order_id, row.ordPrdSeq, row.ord_prd_seq),
-      dlvNo: firstText(row.shipmentBoxId, row.shipment_box_id, row.dlvNo, row.dlv_no, row.bundleOrderNo, row.bundle_order_no),
-      deliveryCompanyCode: firstText(row.deliveryCompanyCode, row.delivery_company_code, row.dlvEtprsCd, row.dlv_etprs_cd) || "CJGLS",
-      trackingNumber,
+      ordNo,
+      ordPrdSeq: firstText(row.ordPrdSeq, row.ord_prd_seq, optionCode.ordPrdSeq) || "1",
+      dlvNo: elevenstDeliveryNo(row, ordNo, optionCode.dlvNo),
+      sendDt: firstText(row.sendDt, row.send_dt, row.dispatchDate, row.dispatch_date).replace(/\D/g, "").slice(0, 12) || elevenstSendDt(),
+      dlvMthdCd: firstText(row.dlvMthdCd, row.dlv_mthd_cd) || "01",
+      dlvEtprsCd: elevenstCarrierCode(firstText(row.deliveryCompanyCode, row.delivery_company_code, row.dlvEtprsCd, row.dlv_etprs_cd)),
+      invcNo: trackingNumber,
     };
-  }).filter((row) => (row.dlvNo || row.ordNo) && row.trackingNumber);
+  }).filter((row) => row.dlvNo && row.invcNo);
 }
 
 function elevenstRequestPayload(row: AnyRecord, mode: "confirm" | "dispatch") {
   if (mode === "confirm") {
     return {
       ordNo: row.ordNo,
-      orderNo: row.ordNo,
       ordPrdSeq: row.ordPrdSeq,
+      addPrdYn: row.addPrdYn,
+      addPrdNo: row.addPrdNo,
       dlvNo: row.dlvNo,
     };
   }
   return {
     ordNo: row.ordNo,
-    orderNo: row.ordNo,
     ordPrdSeq: row.ordPrdSeq,
     dlvNo: row.dlvNo,
-    deliveryNo: row.dlvNo,
-    dlvEtprsCd: row.deliveryCompanyCode,
-    deliveryCompanyCode: row.deliveryCompanyCode,
-    invcNo: row.trackingNumber,
-    invoiceNo: row.trackingNumber,
-    trackingNumber: row.trackingNumber,
+    sendDt: row.sendDt,
+    dlvMthdCd: row.dlvMthdCd,
+    dlvEtprsCd: row.dlvEtprsCd,
+    invcNo: row.invcNo,
   };
 }
 
@@ -429,7 +480,10 @@ async function callElevenstOrderMutation(
   mode: "confirm" | "dispatch",
 ) {
   const apiKey = elevenstApiKey(params);
-  const defaultPath = mode === "confirm" ? "/ordservices/confirm" : "/ordservices/shipping";
+  // 공식 스펙: 발주확인 reqpackaging, 발송처리 reqdelivery — 모두 path 파라미터 GET 방식
+  const defaultPath = mode === "confirm"
+    ? "/ordservices/reqpackaging/{ordNo}/{ordPrdSeq}/{addPrdYn}/{addPrdNo}/{dlvNo}"
+    : "/ordservices/reqdelivery/{sendDt}/{dlvMthdCd}/{dlvEtprsCd}/{invcNo}/{dlvNo}";
   const configuredPath = firstText(
     mode === "confirm"
       ? (params.confirm_path || params.elevenst_confirm_path || params.order_confirm_path)
@@ -439,9 +493,10 @@ async function callElevenstOrderMutation(
     mode === "confirm"
       ? (params.confirm_method || params.elevenst_confirm_method)
       : (params.dispatch_method || params.elevenst_dispatch_method),
-  ) || "POST").toUpperCase();
+  ) || "GET").toUpperCase();
+  const isPathTemplate = configuredPath.includes("{");
   const path = fillElevenstPathTemplate(configuredPath, row);
-  const payload = elevenstRequestPayload(row, mode);
+  const payload = isPathTemplate ? {} : elevenstRequestPayload(row, mode);
   const encoded = queryString(payload);
   const separator = path.includes("?") ? "&" : "?";
   const fullPath = path.startsWith("/") ? path : `/${path}`;
@@ -451,9 +506,9 @@ async function callElevenstOrderMutation(
     headers: {
       openapikey: apiKey,
       accept: "application/xml, text/xml; q=0.9, application/json; q=0.8",
-      ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" }),
+      ...(method === "GET" || !encoded ? {} : { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" }),
     },
-    body: method === "GET" ? undefined : encoded,
+    body: method === "GET" || !encoded ? undefined : encoded,
   });
   const contentType = response.headers.get("content-type") || "";
   const bodyText = contentType.includes("json") ? await response.text() : decodeMaybeEucKr(await response.arrayBuffer());
@@ -523,7 +578,7 @@ export class ElevenstChannelAdapter implements SalesChannelAdapter {
     if (!apiKey) return { ok: false, data: null, error: "11번가 API Key를 먼저 저장해주세요." };
     try {
       const rows = normalizeElevenstConfirmRows(params);
-      if (!rows.length) return { ok: false, data: null, error: "11번가 발주확인에 필요한 주문번호가 없습니다." };
+      if (!rows.length) return { ok: false, data: null, error: "11번가 발주확인에 필요한 주문번호/배송번호(dlvNo)가 없습니다." };
       const results = [];
       for (const row of rows) {
         results.push(await callElevenstOrderMutation(params, row, "confirm"));
@@ -539,7 +594,7 @@ export class ElevenstChannelAdapter implements SalesChannelAdapter {
     if (!apiKey) return { ok: false, data: null, error: "11번가 API Key를 먼저 저장해주세요." };
     try {
       const rows = normalizeElevenstDispatchRows(params);
-      if (!rows.length) return { ok: false, data: null, error: "11번가 배송처리에 필요한 배송번호/주문번호와 송장번호가 없습니다." };
+      if (!rows.length) return { ok: false, data: null, error: "11번가 배송처리에 필요한 배송번호(dlvNo)와 송장번호가 없습니다." };
       const results = [];
       for (const row of rows) {
         results.push(await callElevenstOrderMutation(params, row, "dispatch"));
