@@ -323,6 +323,8 @@ export async function mainDashboardSummary() {
     adDailyMetrics,
     expenses,
     legacyExpenses,
+    accountingTransactions,
+    accountingImportBatches,
     payables,
     fixedCosts,
     importPurchaseOrders,
@@ -341,6 +343,8 @@ export async function mainDashboardSummary() {
     optionalRows("ad_daily_metrics", { order: "metric_date.desc", limit: 500 }),
     optionalRows("expenses", { order: "expense_date.desc", limit: 700 }),
     optionalRows("expense_entries", { order: "expense_date.desc", limit: 500 }),
+    optionalRows("accounting_transactions", { is_active: "eq.true", order: "transaction_date.desc", limit: 1000 }),
+    optionalRows("accounting_import_batches", { order: "created_at.desc", limit: 100 }),
     optionalRows("customer_payables", { order: "due_date.asc", limit: 100 }),
     optionalRows("accounting_fixed_costs", { is_active: "eq.true", order: "sort_order.asc", limit: 300 }),
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 120 }),
@@ -371,9 +375,11 @@ export async function mainDashboardSummary() {
   const adConversionSales = (row: Row) => row.conversion_value ?? row.purchase_conversion_value;
   const expenseRows = expenses.length ? expenses : legacyExpenses;
   const expenseDate = (row: Row) => row.expense_date ?? row.created_at;
-  const factoryById = new Map(importErpFactories.map((row) => [String(row.id), text(row.name)]));
-  const productById = new Map(importErpProducts.map((row) => [text(row.id), row]));
-  const importRateMap = new Map(importErpRates.map((row) => [text(row.currency), numberValue(row.rate)]));
+  const accountingTransactionDate = (row: Row) => row.transaction_date ?? row.created_at;
+  const accountingBatchDate = (row: Row) => row.updated_at ?? row.created_at;
+  const factoryById = new Map(importErpFactories.map((row): [string, string] => [String(row.id), text(row.name)]));
+  const productById = new Map(importErpProducts.map((row): [string, Row] => [text(row.id), row]));
+  const importRateMap = new Map(importErpRates.map((row): [string, number] => [text(row.currency), numberValue(row.rate)]));
   const itemsByOrder = new Map<string, Row[]>();
   for (const item of importErpItems) {
     const key = text(item.order_id);
@@ -409,6 +415,15 @@ export async function mainDashboardSummary() {
   const latestAdDate = latestDate(adRows, adDate);
   const latestOrderDate = latestDate(orders, orderDate);
   const latestExpenseDate = latestDate(expenseRows, expenseDate);
+  const latestAccountingTransactionDate = latestDate(accountingTransactions, accountingTransactionDate);
+  const latestAccountingBatchDate = latestDate(
+    accountingImportBatches.filter((row) => text(row.status) === "uploaded" && numberValue(row.new_count ?? row.total_count) > 0),
+    accountingBatchDate,
+  );
+  const latestAccountingDate = [latestExpenseDate, latestAccountingTransactionDate, latestAccountingBatchDate]
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
   const latestImportDate = latestDate(importOrders, importDate);
   const adSevenDayStart = dateOffsetKey(latestAdDate, -6);
   const recentImportOrders = [...importOrders].sort((left, right) => dateKey(importDate(right)).localeCompare(dateKey(importDate(left))));
@@ -458,7 +473,7 @@ export async function mainDashboardSummary() {
     latestSalesDate && { label: "매출", date: iso(latestSalesDate) },
     latestOrderDate && { label: "온라인 발주", date: iso(latestOrderDate) },
     latestAdDate && { label: "광고분석", date: iso(latestAdDate) },
-    latestExpenseDate && { label: "회계/비용", date: iso(latestExpenseDate) },
+    latestAccountingDate && { label: "회계/비용", date: iso(latestAccountingDate) },
     latestImportDate && { label: "수입관리", date: iso(latestImportDate) },
   ].filter(Boolean);
 
@@ -487,7 +502,7 @@ export async function mainDashboardSummary() {
     collection_dates: {
       orders: iso(latestOrderDate),
       ads: iso(latestAdDate),
-      accounting: iso(latestExpenseDate),
+      accounting: iso(latestAccountingDate),
     },
     last_collected_date: collectedItems.map((row) => text((row as Row).date)).sort().at(-1) || "",
     last_collected_items: collectedItems,
