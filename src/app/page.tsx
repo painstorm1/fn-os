@@ -11796,16 +11796,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const hostname = window.location.hostname;
       const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+      const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
       const isLocalPage = isLoopbackHost || window.location.port === "3000";
+      const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
       let res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         fnosSkipBusyOverlay: true,
-        body: JSON.stringify(isLocalPage ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
+        body: JSON.stringify(shouldRunDirect ? { ...requestBody, run_direct: true, use_worker: false } : requestBody),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
-      if (!isLocalPage && data.queued) {
+      if (!isLocalPage && !shouldRunDirect && data.queued) {
         setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" as const }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 워커 대기 중" })));
       }
       if (data.queued && data.job_id) {
@@ -12856,10 +12858,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
     const hostname = window.location.hostname;
     const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+    const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
     const isLocalPage = isLoopbackHost || window.location.port === "3000";
-    let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
+    const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
+    let res = await postStatus("/api/fnos/online-orders/status", shouldRunDirect ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
-    if (!isLocalPage && data.queued) {
+    if (!isLocalPage && !shouldRunDirect && data.queued) {
       setCollectionStatuses([...baseStatuses.map((item) => ({ ...item, message: "미니PC 주문처리 워커 대기 중" })), ...extraStatuses]);
     }
     if (data.queued && data.job_id) {
