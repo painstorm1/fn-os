@@ -80,7 +80,8 @@ function lotteonProgressPayload(rows: AnyRecord[], odPrgsStepCd: "12" | "13") {
         dvRtrvDvsCd: "DV",
       };
       if (odPrgsStepCd === "13") {
-        item.invcNbr = trackingNumber;
+        // invcNbr은 송장개수(숫자) 필드. 송장번호 문자열을 넣으면 "[송장개수] 데이터(타입,사이즈) 오류"로 거절된다.
+        item.invcNbr = 1;
         item.invcNo = trackingNumber;
         item.dvCoCd = lotteonCarrierCode(source.deliveryCompanyCode || source.delivery_company_code);
         item.invcNoList = [trackingNumber];
