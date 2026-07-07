@@ -89,11 +89,17 @@ async function patchJob(job, values) {
 }
 
 async function claimJob() {
-  const data = await request("/api/fnos/automation-jobs/claim", {
-    method: "POST",
-    body: JSON.stringify({ worker_id: workerId, ...(jobType ? { job_type: jobType } : {}) }),
-  });
-  return data.job || null;
+  const preferredJobTypes = jobType
+    ? [jobType]
+    : ["collect_smartstore_orders", "collect_coupang_orders", "online_order_status_update", ""];
+  for (const preferredJobType of preferredJobTypes) {
+    const data = await request("/api/fnos/automation-jobs/claim", {
+      method: "POST",
+      body: JSON.stringify({ worker_id: workerId, ...(preferredJobType ? { job_type: preferredJobType } : {}) }),
+    });
+    if (data.job) return data.job;
+  }
+  return null;
 }
 
 async function runStubHandler(job) {

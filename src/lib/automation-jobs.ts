@@ -568,9 +568,10 @@ export async function claimNextAutomationJob(body: AnyRecord = {}) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase 환경변수가 설정되지 않았습니다.", 503);
   const jobType = text(body.job_type);
   const workerId = text(body.worker_id || body.workerId || "mini-pc-worker");
+  const isOrderWorkerJob = ["collect_smartstore_orders", "collect_coupang_orders", "online_order_status_update"].includes(jobType);
   const query: Record<string, string | number> = {
     status: "eq.queued",
-    order: "created_at.asc",
+    order: isOrderWorkerJob ? "created_at.desc" : "created_at.asc",
     limit: 10,
   };
   if (jobType && isAutomationJobType(jobType)) query.job_type = `eq.${jobType}`;
