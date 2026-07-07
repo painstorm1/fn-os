@@ -18,10 +18,10 @@ function findRows(data: unknown) { const direct = arrayAt(data, [["deliveryOrder
 async function readJson(response: Response) { return readJsonApiResponse(response, "롯데ON", { successCodes: ["0000", "0", "SUCCESS", "OK"], resultPaths: [["returnCode"], ["code"], ["resultCode"], ["status"]] }); }
 function lotteonShipmentStarted(row: AnyRecord) {
   return Boolean(firstText(
-    row.owhoDttm,
-    row.hpDvDttm,
     row.invoiceNo,
     row.invNo,
+    row.invcNo,
+    row.invcNbr,
     row.waybillNo,
     row.dvpWaybilNo,
     row.trackingNo,
