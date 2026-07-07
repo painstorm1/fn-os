@@ -69,7 +69,8 @@ function lotteonProgressPayload(rows: AnyRecord[], odPrgsStepCd: "12" | "13") {
         dvRtrvDvsCd: "DV",
       };
       if (odPrgsStepCd === "13") {
-        item.invcNbr = 1;
+        item.invcNbr = trackingNumber;
+        item.invcNo = trackingNumber;
         item.dvCoCd = lotteonCarrierCode(source.deliveryCompanyCode || source.delivery_company_code);
         item.invcNoList = [trackingNumber];
       }
