@@ -63,7 +63,13 @@ async function requestFrom(baseUrl, path, init = {}) {
       ...(init.headers || {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let data = {};
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    data = {};
+  }
   if (!response.ok || data?.ok === false) {
     const statusMessages = Array.isArray(data?.statuses)
       ? data.statuses.map((item) => text(item?.message)).filter(Boolean).join(" / ")
@@ -71,7 +77,10 @@ async function requestFrom(baseUrl, path, init = {}) {
     const resultMessages = Array.isArray(data?.results)
       ? data.results.map((item) => text(item?.message || item?.error)).filter(Boolean).join(" / ")
       : "";
-    throw new Error(data?.error || resultMessages || statusMessages || `${init.method || "GET"} ${path} failed: ${response.status}`);
+    const fallbackMessage = responseText
+      ? `${init.method || "GET"} ${path} failed: ${response.status} ${responseText.slice(0, 500)}`
+      : `${init.method || "GET"} ${path} failed: ${response.status}`;
+    throw new Error(data?.error || resultMessages || statusMessages || fallbackMessage);
   }
   return data;
 }
