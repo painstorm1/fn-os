@@ -60,7 +60,7 @@ function lotteonCarrierCode(value: unknown) {
   const raw = text(value).toUpperCase();
   if (/^\d{4}$/.test(raw)) return raw;
   if (!raw || raw.includes("CJ")) return "0002";
-  if (raw.includes("LOTTE") || raw.includes("롯데")) return "0001";
+  if (raw.includes("LOTTE") || raw.includes("HYUNDAI") || raw.includes("롯데")) return "0001";
   if (raw.includes("POST") || raw.includes("우체국")) return "0004";
   if (raw === "KGB" || raw.includes("LOGEN") || raw.includes("로젠")) return "0005";
   if (raw.includes("HANJIN") || raw.includes("한진")) return "0006";

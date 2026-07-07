@@ -136,10 +136,13 @@ function ssgShippingIds(row: AnyRecord) {
 }
 function ssgRequestRows(params: Record<string, unknown>, key: "confirmProductOrders" | "dispatchProductOrders") { const value = params[key]; return Array.isArray(value) ? value.map(record) : []; }
 function xmlEscape(value: unknown) { return text(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;"); }
+// SSG delicoVenId: CJ대한통운 0000033011, 롯데택배 0000033073, 우체국택배 0000033052
 function ssgCarrierCode(value: unknown) {
   const raw = text(value).toUpperCase();
   if (/^\d{10}$/.test(raw)) return raw;
-  if (!raw || raw === "CJGLS" || raw === "CJ" || raw.includes("CJ")) return "0000033011";
+  if (!raw || raw.includes("CJ")) return "0000033011";
+  if (raw.includes("LOTTE") || raw.includes("HYUNDAI") || raw.includes("롯데")) return "0000033073";
+  if (raw.includes("POST") || raw.includes("우체국")) return "0000033052";
   return text(value);
 }
 function ssgDispatchRows(params: Record<string, unknown>) {
