@@ -54,6 +54,17 @@ function lotteonIds(row: AnyRecord) {
   };
 }
 function lotteonCarrierCode(value: unknown) { const raw = text(value).toUpperCase(); if (!raw || raw === "CJGLS" || raw === "CJ" || raw.includes("CJ")) return "CJGLS"; return text(value); }
+function lotteonFailList(data: unknown) {
+  return arrayAt(data, [["failList"], ["data", "failList"], ["result", "failList"]]);
+}
+function lotteonFailureMessage(data: unknown) {
+  const failures = lotteonFailList(data);
+  if (!failures.length) return "";
+  return failures
+    .map((row) => firstText(row.rsltMsg, row.resultMessage, row.message, row.errorMessage, row.rsltCd))
+    .filter(Boolean)
+    .join(" / ") || `롯데ON 처리 실패 ${failures.length}건`;
+}
 function lotteonProgressPayload(rows: AnyRecord[], odPrgsStepCd: "12" | "13") {
   return {
     deliveryProgressStateList: rows.map((source) => {
@@ -131,6 +142,8 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const path = text(params.status_path) || "/v1/openapi/delivery/v2/SellerDeliveryProgressStateInform";
       const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(lotteonProgressPayload(rows, "12")) });
       const data = await readJson(response);
+      const failureMessage = lotteonFailureMessage(data);
+      if (failureMessage) return { ok: false, data, error: failureMessage };
       return { ok: true, data, message: `롯데ON 상품준비 ${rows.length}건 요청 완료` };
     } catch (error) { return { ok: false, data: null, error: error instanceof Error ? error.message : "롯데ON 상품준비 처리 실패" }; }
   }
@@ -145,6 +158,8 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const path = text(params.status_path) || "/v1/openapi/delivery/v2/SellerDeliveryProgressStateInform";
       const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(lotteonProgressPayload(rows, "13")) });
       const data = await readJson(response);
+      const failureMessage = lotteonFailureMessage(data);
+      if (failureMessage) return { ok: false, data, error: failureMessage };
       return { ok: true, data, message: `롯데ON 발송완료 ${rows.length}건 요청 완료` };
     } catch (error) { return { ok: false, data: null, error: error instanceof Error ? error.message : "롯데ON 발송완료 처리 실패" }; }
   }
