@@ -87,15 +87,26 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const path = text(params.orders_path) || "/v1/openapi/delivery/v1/SellerDeliveryOrdersSearch";
       const start = formatDate(params.fromDate ?? params.from, "start");
       const end = formatDate(params.toDate ?? params.to, "end");
-      const extra: AnyRecord = { odPrgsStepCd: text(params.odPrgsStepCd || params.order_status_code) || "11" };
+      const explicitStatusCode = text(params.odPrgsStepCd || params.order_status_code);
+      const statusCodes = explicitStatusCode ? [explicitStatusCode] : ["10", "11"];
+      const extra: AnyRecord = {};
       const lrtrNo = text(params.sub_partner_no);
       if (lrtrNo) extra.lrtrNo = lrtrNo;
       const rows: AnyRecord[] = [];
-      for (const body of dailySearchBodies(start, end, extra)) {
-        const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
-        const data = await readJson(response);
-        rows.push(...findRows(data));
+      const seenRowKeys = new Set<string>();
+      for (const statusCode of statusCodes) {
+        for (const body of dailySearchBodies(start, end, { ...extra, odPrgsStepCd: statusCode })) {
+          const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+          const data = await readJson(response);
+          for (const row of findRows(data)) {
+            const key = [row.odNo, row.orderNo, row.odSeq, row.odDtlSeq, row.procSeq, row.spdNo, row.pdNo, row.sitmNo].map(text).join("|");
+            if (key && seenRowKeys.has(key)) continue;
+            if (key) seenRowKeys.add(key);
+            rows.push(row);
+          }
+        }
       }
+
       const base = { channelCode: text(params.channel_code) || "LOTTEON", channelName: text(params.channel_name) || "롯데ON", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
       const collectableRows = rows.filter((row) => !lotteonShipmentStarted(row));
       const excludedShipmentCount = rows.length - collectableRows.length;
