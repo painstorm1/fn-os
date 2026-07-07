@@ -11796,9 +11796,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const requestBody = { from: formatDateKey(fromDate), to: formatDateKey(todayDate) };
       const hostname = window.location.hostname;
       const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-      const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
       const isLocalPage = isLoopbackHost || window.location.port === "3000";
-      const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
+      const shouldRunDirect = isLocalPage;
       let res = await fetch("/api/fnos/online-orders/sync", {
         method: "POST",
         credentials: "include",
@@ -12858,9 +12857,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
     const hostname = window.location.hostname;
     const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-    const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
     const isLocalPage = isLoopbackHost || window.location.port === "3000";
-    const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
+    const shouldRunDirect = isLocalPage;
     let res = await postStatus("/api/fnos/online-orders/status", shouldRunDirect ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
     if (!isLocalPage && !shouldRunDirect && data.queued) {
