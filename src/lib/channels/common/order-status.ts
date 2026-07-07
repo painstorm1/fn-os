@@ -64,11 +64,14 @@ const confirmedOrderStatusPatterns = [
   "READYFORDELIVERY",
   "WAITINGDELIVERY",
   "WAITINGSHIPMENT",
+  "PREPARINGPRODUCT",
+  "PRODUCTPREPARE",
   "발주후",
   "발주확인",
   "주문확인",
   "발송대기",
   "배송준비",
+  "상품준비",
   "출고대기",
 ];
 
