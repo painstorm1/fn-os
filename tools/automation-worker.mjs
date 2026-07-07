@@ -68,7 +68,10 @@ async function requestFrom(baseUrl, path, init = {}) {
     const statusMessages = Array.isArray(data?.statuses)
       ? data.statuses.map((item) => text(item?.message)).filter(Boolean).join(" / ")
       : "";
-    throw new Error(data?.error || statusMessages || `${init.method || "GET"} ${path} failed: ${response.status}`);
+    const resultMessages = Array.isArray(data?.results)
+      ? data.results.map((item) => text(item?.message || item?.error)).filter(Boolean).join(" / ")
+      : "";
+    throw new Error(data?.error || resultMessages || statusMessages || `${init.method || "GET"} ${path} failed: ${response.status}`);
   }
   return data;
 }

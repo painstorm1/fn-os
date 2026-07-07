@@ -193,7 +193,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!results.length) return jsonResponse({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
-    return jsonResponse({ ok: results.every((result) => result.ok), results }, { status: results.every((result) => result.ok) ? 200 : 502 });
+    const failedResults = results.filter((result) => !result.ok);
+    const error = failedResults
+      .map((result) => [text(result.channel_name), text(result.message)].filter(Boolean).join(": "))
+      .filter(Boolean)
+      .join(" / ") || "온라인 주문 처리 실패";
+    return jsonResponse({ ok: failedResults.length === 0, error: failedResults.length ? error : "", results }, { status: failedResults.length ? 502 : 200 });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 처리 실패" }, { status });
