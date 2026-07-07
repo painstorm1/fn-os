@@ -12879,8 +12879,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
     const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(hostname);
     const isLocalPage = isLoopbackHost || window.location.port === "3000";
+    // 주문상태 변경은 순수 외부 API 호출이므로 LAN IP 접근이 아닌 경우(로컬 or 공개 URL) 직접 실행 가능
+    const shouldRunDirect = isLocalPage || !isPrivateIpv4Host;
     const shouldUseLocalBridgeFallback = !isLocalPage && isPrivateIpv4Host;
-    let res = await postStatus("/api/fnos/online-orders/status", isLocalPage ? { run_direct: true, use_worker: false } : {});
+    let res = await postStatus("/api/fnos/online-orders/status", shouldRunDirect ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
     if (shouldUseLocalBridgeFallback && data.queued) {
       setCollectionStatuses([...baseStatuses.map((item) => ({ ...item, message: "로컬 API 브릿지 연결 중" })), ...extraStatuses]);
