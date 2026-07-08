@@ -6650,7 +6650,7 @@ function aggregateSalesEntryRows(
       existing.supply += supply;
       existing.total += total;
       existing.tax += tax;
-      if (salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
+      if (mode !== "sales" && salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
       return;
     }
     byLine.set(lineKey, {
@@ -6668,7 +6668,7 @@ function aggregateSalesEntryRows(
       supply,
       total,
       tax,
-      memo: new Set([salesCellText(item.메모 || item.적요)].filter(Boolean)),
+      memo: new Set(mode === "sales" ? [] : [salesCellText(item.메모 || item.적요)].filter(Boolean)),
       statementKey,
     });
   });
@@ -6683,7 +6683,7 @@ function aggregateSalesEntryRows(
       세액: entry.tax ? String(Math.round(entry.tax)) : "",
       공급가액: String(Math.round(entry.supply)),
       합계금액: String(Math.round(entry.total)),
-      메모: Array.from(entry.memo).join(" / "),
+      메모: mode === "sales" ? "" : Array.from(entry.memo).join(" / "),
     } as Record<string, string>;
   });
 }
@@ -7711,7 +7711,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(sale, "FN판매입력", "단가", unitPrice || "");
       setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
       setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "메모", itemKey);
+      setSalesSheetCell(sale, "FN판매입력", "메모", "");
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
       const shipping = salesSheetHeaders.송장출력용.map(() => "");
@@ -11421,7 +11421,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       qty: "1",
       price: "0",
       supply_amt: "0",
-      remarks: mode === "sales" ? "웹 판매입력" : "웹 구매입력",
+      remarks: mode === "sales" ? "" : "웹 구매입력",
     };
   }
 
@@ -12718,18 +12718,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
-  async function applyFnParcelSheet() {
-    const exportSheets = applyProgressTrackingToShipping(sheets);
+  function fnParcelTargetRows(currentSheets: Record<SalesSheetName, string[][]>) {
+    const exportSheets = applyProgressTrackingToShipping(currentSheets);
     const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
-    const shippingRows = shippingRowsForExcelExport(exportSheets)
+    return shippingRowsForExcelExport(exportSheets)
       .filter((row) => row.some((cell) => String(cell || "").trim()))
       .filter((row) => trackingIndex < 0 || salesCellText(row[trackingIndex]));
+  }
+
+  async function applyFnParcelSheet() {
+    const shippingRows = fnParcelTargetRows(sheetsRef.current);
     if (!shippingRows.length) {
-      window.alert("FN_택배시트에 반영할 송장번호 입력 행이 없습니다.");
+      window.alert("FN_택배시트에 반영할 송장엑셀 행이 없습니다. 송장번호 입력 여부를 확인해 주세요.");
       return;
     }
     const targetSheet = fnParcelSheetName();
-    const ok = window.confirm(`송장번호가 입력된 ${shippingRows.length}개 행을 FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 구글시트에 반영합니다. 계속할까요?`);
+    const ok = window.confirm(`선택된 주문건과 관계없이 송장엑셀 전체에서 송장번호가 입력된 ${shippingRows.length}개 행을 FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 구글시트에 반영합니다. 계속할까요?`);
     if (!ok) return;
     try {
       const rows = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || ""));
