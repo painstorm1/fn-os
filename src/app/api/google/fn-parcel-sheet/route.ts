@@ -49,11 +49,19 @@ function normalizeAmount(value: unknown): string | number {
   return Number.isFinite(number) ? number : String(value ?? "");
 }
 
+function hasValidTrackingNo(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  if (/[가-힣]/.test(text)) return false;
+  return text.replace(/\D/g, "").length >= 6;
+}
+
 function cleanParcelRow(row: unknown[]) {
   const cleaned: (string | number)[] = Array.from({ length: 11 }, (_, index) => {
     const value = row[index];
     return typeof value === "number" ? value : String(value ?? "");
   });
+  if (!hasValidTrackingNo(cleaned[1])) cleaned[1] = "";
   cleaned[10] = normalizeAmount(cleaned[10]);
   return cleaned;
 }
@@ -235,9 +243,8 @@ type RepeatCellRequest = {
 
 async function highlightBlankTrackingRows(spreadsheetId: string, sheetId: number, startRow: number, rows: unknown[][]) {
   const requests = rows.reduce<RepeatCellRequest[]>((acc, row, index) => {
-    const trackingNo = String(row[1] ?? "").trim();
     const lastColumn = lastValueColumn(row);
-    if (trackingNo || lastColumn <= 0) return acc;
+    if (hasValidTrackingNo(row[1]) || lastColumn <= 0) return acc;
     const rowIndex = startRow + index - 1;
     acc.push({
       repeatCell: {

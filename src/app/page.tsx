@@ -12752,7 +12752,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const duplicateCount = Number(data.duplicateCount || 0);
       const highlightedBlankTrackingCount = Number(data.highlightedBlankTrackingCount || 0);
       const highlightSuffix = highlightedBlankTrackingCount > 0
-        ? ` 송장번호 빈 직송 주문 ${highlightedBlankTrackingCount.toLocaleString("ko-KR")}개 행은 주황색으로 표시했습니다.`
+        ? ` 송장번호 빈/거래처명 직송 주문 ${highlightedBlankTrackingCount.toLocaleString("ko-KR")}개 행은 주황색으로 표시했습니다.`
         : "";
       const resultMessage = reflectedCount === 0 && duplicateCount > 0
         ? "새로운 행이 없습니다. 모든 행이 이미 구글시트에 있습니다."
