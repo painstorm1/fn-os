@@ -7972,17 +7972,21 @@ async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapsho
   }
 }
 
-const jbDirectHeaders = salesSheetHeaders.송장출력용.filter((header) => header !== "정산예정금액" && header !== "송장번호");
+const jbDirectHeaders = [
+  "쇼핑몰코드",
+  "거래처",
+  ...salesSheetHeaders.송장출력용.filter((header) => !["쇼핑몰코드", "정산예정금액", "송장번호"].includes(header)),
+];
 const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
 
-function mapJbDirectRow(source: string[], sequence: number) {
-  const mmdd = todayMmdd();
+function mapJbDirectRow(source: string[], _sequence: number) {
   const get = (header: string) => {
     const sourceIndex = salesSheetHeaders.송장출력용.indexOf(header);
     return sourceIndex >= 0 ? source[sourceIndex] || "" : "";
   };
   return jbDirectHeaders.map((header) => {
-    if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
+    if (header === "쇼핑몰코드") return get("쇼핑몰코드");
+    if (header === "거래처") return "JB";
     if (header === "수량") return "1";
     if (header === "주문옵션") return get("주문옵션");
     return get(header);
@@ -12167,10 +12171,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function currentDirectShippingRows(partner: DirectShippingPartner) {
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
-    const sourceIndexes = directShippingSourceIndexes[partner] || [];
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    const storedSourceIndexes = directShippingSourceIndexes[partner] || [];
+    const sourceIndexes = storedSourceIndexes.length
+      ? storedSourceIndexes
+      : exportSheets["발주 진행 단계"]
+          .map((row, index) => progressValue(row, "직송거래처") === partner ? index : -1)
+          .filter((index) => index >= 0);
     const currentRows = sourceIndexes
       .map((sourceIndex, index) => {
-        const sourceRow = sheets.송장출력용[sourceIndex];
+        const sourceRow = shippingRows[sourceIndex];
         return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
       })
       .filter((row): row is string[] => Array.isArray(row));
