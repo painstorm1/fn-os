@@ -54,7 +54,7 @@ function Test-WorkerRunning {
 if (-not (Test-LocalPort -TargetPort $Port)) {
   Start-Process `
     -FilePath $NodeExe `
-    -ArgumentList @("node_modules\next\dist\bin\next", "dev", "-H", "127.0.0.1", "-p", "$Port") `
+    -ArgumentList @("node_modules\next\dist\bin\next", "dev", "-H", "0.0.0.0", "-p", "$Port") `
     -WorkingDirectory $RepoRoot.Path `
     -WindowStyle Hidden
 }
