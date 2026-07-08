@@ -36,6 +36,10 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function record(value: unknown): AnyRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {};
+}
+
 function numberValue(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -86,6 +90,109 @@ function orderStageSummaries(orders: NormalizedOrder[]) {
     summaries.set(stage, current);
   });
   return Array.from(summaries.entries()).map(([order_status, summary]) => ({ order_status, ...summary }));
+}
+
+const orderStatusRank: Record<string, number> = { 신규주문: 0, 주문확인: 1, 출고대기: 2, 출고완료: 3 };
+
+function orderStatusAdvanceRank(value: unknown) {
+  return orderStatusRank[text(value)] ?? -1;
+}
+
+function kstYmd(date = new Date()) {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
+}
+
+function orderNoFilterValue(value: string) {
+  return value.replace(/"/g, "\\\"");
+}
+
+async function existingOrdersByNo(channel: AnyRecord, orderNos: string[]) {
+  const uniqueNos = Array.from(new Set(orderNos.map(text).filter(Boolean)));
+  if (!uniqueNos.length) return new Map<string, AnyRecord>();
+  const rows = await selectRows<AnyRecord>("orders", {
+    channel_name: `eq.${text(channel.channel_name)}`,
+    order_no: `in.(${uniqueNos.map((orderNo) => `"${orderNoFilterValue(orderNo)}"`).join(",")})`,
+    limit: Math.max(1, uniqueNos.length),
+  }).catch(() => []);
+  return new Map(rows.map((row) => [text(row.order_no), row]));
+}
+
+async function recentlyDispatchedOrderNos(channel: AnyRecord) {
+  const rows = await selectRows<AnyRecord>("automation_jobs", {
+    job_type: "eq.online_order_status_update",
+    status: "eq.success",
+    order: "created_at.desc",
+    limit: 20,
+  }).catch(() => []);
+  const channelName = text(channel.channel_name);
+  const dispatched = new Set<string>();
+  rows.forEach((job) => {
+    const input = record(job.input_json);
+    if (text(input.action) !== "dispatch") return;
+    const jobRows = Array.isArray(input.rows) ? input.rows.map(record) : [];
+    jobRows.forEach((row) => {
+      const rowChannel = firstText(row.channelName, row.channel_name, row.mallName, row.mall_name);
+      if (rowChannel && channelName && rowChannel !== channelName) return;
+      const orderNo = firstText(row.orderNo, row.order_no, row.orderId, row.order_id);
+      if (orderNo) dispatched.add(orderNo);
+    });
+  });
+  return dispatched;
+}
+
+async function ssgFallbackConfirmedOrders(channel: AnyRecord) {
+  const today = kstYmd();
+  const rows = await selectRows<AnyRecord>("orders", {
+    channel_name: `eq.${text(channel.channel_name)}`,
+    order_date: `gte.${today}`,
+    order: "updated_at.desc",
+    limit: 20,
+  }).catch(() => []);
+  const activeRows = rows.filter((row) => orderStatusAdvanceRank(row.order_status) < orderStatusRank["출고완료"]);
+  if (!activeRows.length) return [] as NormalizedOrder[];
+  const itemRows = await selectRows<AnyRecord>("order_items", {
+    order_id: `in.(${activeRows.map((row) => text(row.id)).filter(Boolean).join(",")})`,
+    limit: 1000,
+  }).catch(() => []);
+  const itemsByOrderId = new Map<string, AnyRecord[]>();
+  itemRows.forEach((row) => {
+    const orderId = text(row.order_id);
+    itemsByOrderId.set(orderId, [...(itemsByOrderId.get(orderId) || []), row]);
+  });
+  return activeRows.map((row) => {
+    const raw = record(row.raw_payload);
+    const items = (itemsByOrderId.get(text(row.id)) || []).map((item) => ({
+      channelProductCode: text(item.channel_product_code),
+      channelOptionCode: text(item.channel_option_code),
+      channelProductName: text(item.channel_product_name) || "SSG 주문",
+      channelOptionName: text(item.channel_option_name),
+      sku: text(item.sku),
+      qty: numberValue(item.qty) || 1,
+      salesAmount: numberValue(item.sales_amount) || undefined,
+      settlementAmount: numberValue(item.settlement_amount) || undefined,
+      raw: record(item.raw_payload),
+    }));
+    return {
+      channelCode: text(channel.channel_code) || "SSG",
+      channelName: text(row.channel_name) || text(channel.channel_name) || "SSG신세계",
+      customerCode: text(channel.customer_code),
+      customerName: text(channel.customer_name),
+      orderNo: text(row.order_no),
+      bundleOrderNo: text(row.bundle_order_no),
+      orderDate: text(row.order_date),
+      // SSG listShppDirection은 발주확인 후 빈 목록을 반환하므로, 당일 기존 수집건은 주문확인으로 유지해 F1 재수집에서 0건으로 사라지지 않게 한다.
+      orderStatus: "주문확인",
+      receiverName: text(row.receiver_name),
+      phone1: text(row.phone1),
+      phone2: text(row.phone2),
+      zipcode: text(row.zipcode),
+      address: text(row.address),
+      deliveryMessage: text(row.delivery_message),
+      items: items.length ? items : [{ channelProductName: "SSG 주문", qty: 1, raw }],
+      raw,
+    } satisfies NormalizedOrder;
+  });
 }
 
 const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
@@ -524,7 +631,21 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
   let result: ChannelResult<NormalizedOrder[]>;
   try {
     result = await adapter.collectOrders(params);
-    const orders = normalizeCollectableOnlineOrders(result.data || []);
+    let orders: NormalizedOrder[] = normalizeCollectableOnlineOrders(result.data || []);
+    if (result.ok && adapterCode === "LOTTEON" && orders.length) {
+      const [existingByNo, dispatchedOrderNos] = await Promise.all([
+        existingOrdersByNo(channel, orders.map((order) => order.orderNo)),
+        recentlyDispatchedOrderNos(channel),
+      ]);
+      orders = orders.filter((order) => {
+        if (dispatchedOrderNos.has(order.orderNo)) return false;
+        const existing = existingByNo.get(order.orderNo) as AnyRecord | undefined;
+        return orderStatusAdvanceRank(existing?.order_status) <= orderStatusAdvanceRank(order.orderStatus);
+      });
+    }
+    if (result.ok && adapterCode === "SSG" && !orders.length) {
+      orders = await ssgFallbackConfirmedOrders(channel);
+    }
     if (result.ok && !dryRun) {
       await persistOrders(channel, orders);
       await patchRows("sales_channels", { id: `eq.${text(channel.id)}` }, {
