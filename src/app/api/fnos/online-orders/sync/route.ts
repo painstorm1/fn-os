@@ -118,6 +118,54 @@ async function existingOrdersByNo(channel: AnyRecord, orderNos: string[]) {
   return new Map(rows.map((row) => [text(row.order_no), row]));
 }
 
+function addIdentity(set: Set<string>, value: unknown) {
+  const next = text(value);
+  // SSG shppSeq/productOrderId can be "1"; single-digit values are too broad to use as order identity.
+  if (next && next.length > 2) set.add(next);
+}
+
+function statusJobRowIdentities(row: AnyRecord) {
+  const ids = new Set<string>();
+  [
+    row.orderNo,
+    row.order_no,
+    row.orderId,
+    row.order_id,
+    row.bundleOrderNo,
+    row.bundle_order_no,
+    row.shipmentBoxId,
+    row.shipment_box_id,
+    row.shppNo,
+    row.shpp_no,
+    row.odNo,
+    row.od_no,
+  ].forEach((value) => addIdentity(ids, value));
+  return ids;
+}
+
+function persistedOrderIdentities(row: AnyRecord) {
+  const ids = new Set<string>();
+  const raw = record(row.raw_payload);
+  const nested = record(raw.shppDirection || raw.order || raw.item);
+  [
+    row.order_no,
+    row.bundle_order_no,
+    raw.ordNo,
+    raw.orordNo,
+    raw.orderNo,
+    raw.shppNo,
+    raw.shppDirectionNo,
+    raw.dircNo,
+    nested.ordNo,
+    nested.orordNo,
+    nested.orderNo,
+    nested.shppNo,
+    nested.shppDirectionNo,
+    nested.dircNo,
+  ].forEach((value) => addIdentity(ids, value));
+  return ids;
+}
+
 async function recentlyDispatchedOrderNos(channel: AnyRecord) {
   const rows = await selectRows<AnyRecord>("automation_jobs", {
     job_type: "eq.online_order_status_update",
@@ -134,8 +182,7 @@ async function recentlyDispatchedOrderNos(channel: AnyRecord) {
     jobRows.forEach((row) => {
       const rowChannel = firstText(row.channelName, row.channel_name, row.mallName, row.mall_name);
       if (rowChannel && channelName && rowChannel !== channelName) return;
-      const orderNo = firstText(row.orderNo, row.order_no, row.orderId, row.order_id);
-      if (orderNo) dispatched.add(orderNo);
+      statusJobRowIdentities(row).forEach((id) => dispatched.add(id));
     });
   });
   return dispatched;
@@ -149,7 +196,12 @@ async function ssgFallbackConfirmedOrders(channel: AnyRecord) {
     order: "updated_at.desc",
     limit: 20,
   }).catch(() => []);
-  const activeRows = rows.filter((row) => orderStatusAdvanceRank(row.order_status) < orderStatusRank["출고완료"]);
+  const dispatchedIds = await recentlyDispatchedOrderNos(channel);
+  const activeRows = rows.filter((row) => {
+    if (orderStatusAdvanceRank(row.order_status) >= orderStatusRank["출고완료"]) return false;
+    const ids = persistedOrderIdentities(row);
+    return !Array.from(ids).some((id) => dispatchedIds.has(id));
+  });
   if (!activeRows.length) return [] as NormalizedOrder[];
   const itemRows = await selectRows<AnyRecord>("order_items", {
     order_id: `in.(${activeRows.map((row) => text(row.id)).filter(Boolean).join(",")})`,
