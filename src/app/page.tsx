@@ -7902,10 +7902,15 @@ const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취�
 
 function mapJbDirectRow(source: string[], sequence: number) {
   const mmdd = todayMmdd();
-  return jbDirectHeaders.map((header) => {
-    if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
+  const get = (header: string) => {
     const sourceIndex = salesSheetHeaders.송장출력용.indexOf(header);
     return sourceIndex >= 0 ? source[sourceIndex] || "" : "";
+  };
+  return jbDirectHeaders.map((header) => {
+    if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
+    if (header === "수량") return "1";
+    if (header === "주문옵션") return get("주문옵션");
+    return get(header);
   });
 }
 
@@ -7917,7 +7922,7 @@ function mapKemoreDirectRow(source: string[], sequence: number) {
   };
   return [
     `${mmdd}-에프엔-${String(sequence).padStart(3, "0")}`,
-    get("수량"),
+    "1",
     get("수취인"),
     get("수취인연락처1"),
     get("수취인연락처2"),
