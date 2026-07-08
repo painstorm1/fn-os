@@ -11933,8 +11933,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       "FN판매입력": exportSheets["FN판매입력"],
       "FN구매입력": exportSheets["FN구매입력"],
     });
-    if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
-    if (directShippingRows.케이모아.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, directShippingRows.케이모아);
+    const jbRows = currentDirectShippingRows("JB");
+    const kemoreRows = currentDirectShippingRows("케이모아");
+    if (jbRows.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, jbRows);
+    if (kemoreRows.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, kemoreRows);
     setCompletedSalesTasks((prev) => ({ ...prev, exportAll: true }));
     setMessage("현재 화면의 전체 시트를 Excel 파일로 내보냈습니다.");
   }
@@ -11975,6 +11977,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index));
   }
 
+  function currentDirectShippingRows(partner: DirectShippingPartner) {
+    const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
+    const sourceIndexes = directShippingSourceIndexes[partner] || [];
+    const currentRows = sourceIndexes
+      .map((sourceIndex, index) => {
+        const sourceRow = sheets.송장출력용[sourceIndex];
+        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
+      })
+      .filter((row): row is string[] => Array.isArray(row));
+    return currentRows.length ? currentRows : (directShippingRows[partner] || []);
+  }
+
   function exportBaseShippingFromModal() {
     const rows = shippingExportRowsExcludingDirect();
     if (!rows.length) {
@@ -11987,7 +12001,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function exportDirectShippingFromModal(partner: DirectShippingPartner) {
-    const rows = directShippingRows[partner] || [];
+    const rows = currentDirectShippingRows(partner);
     if (!rows.length) {
       window.alert(`${partner} 직송파일 데이터가 없습니다.`);
       return;
@@ -12000,7 +12014,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function exportShippingBundleFromModal() {
     const baseRows = shippingExportRowsExcludingDirect();
-    const totalFiles = (baseRows.length ? 1 : 0) + (directShippingRows.JB.length ? 1 : 0) + (directShippingRows.케이모아.length ? 1 : 0);
+    const jbRows = currentDirectShippingRows("JB");
+    const kemoreRows = currentDirectShippingRows("케이모아");
+    const totalFiles = (baseRows.length ? 1 : 0) + (jbRows.length ? 1 : 0) + (kemoreRows.length ? 1 : 0);
     if (!totalFiles) {
       window.alert("내보낼 송장 엑셀 데이터가 없습니다.");
       return;
@@ -12008,8 +12024,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const ok = window.confirm(`현재 생성된 송장엑셀 ${totalFiles}개 파일을 모두 내보내시겠습니까?`);
     if (!ok) return;
     if (baseRows.length) void downloadXlsxFile(`${timeLabel()}_송장출력용.xlsx`, { 송장출력용: baseRows });
-    if (directShippingRows.JB.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, directShippingRows.JB);
-    if (directShippingRows.케이모아.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, directShippingRows.케이모아);
+    if (jbRows.length) void downloadTableXlsx(`${todayMmdd()}_JB직송.xlsx`, "JB직송", jbDirectHeaders, jbRows);
+    if (kemoreRows.length) void downloadTableXlsx(`${todayMmdd()}_케이모아직송.xlsx`, "케이모아직송", kemoreDirectHeaders, kemoreRows);
     setCompletedSalesTasks((prev) => ({ ...prev, exportShipping: true }));
     setMessage(`송장 엑셀 ${totalFiles}개 파일 내보내기를 실행했습니다.`);
   }
