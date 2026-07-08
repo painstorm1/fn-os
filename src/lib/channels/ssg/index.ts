@@ -89,9 +89,10 @@ function ssgOrderStatus(row: AnyRecord) {
   const compact = code.replace(/[\s_()/.-]+/g, "").toUpperCase();
 
   // SSG listShppDirection can return only numeric shipment-progress codes.
-  // 현장 확인: shppProgStatDtlCd=11 is still the marketplace 신규주문/발주전 row.
-  if (["11", "011", "PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"].includes(compact)) return "신규주문";
-  if (["12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"].includes(compact)) return "주문확인";
+  // 현장 확인: SSG 판매자센터의 출고대기(중간단계) 건이 shppProgStatDtlCd=11/011로 내려올 수 있으므로
+  // FNOS 재수집에서는 신규주문으로 되돌리지 않고 주문확인 단계로 분류한다.
+  if (["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"].includes(compact)) return "신규주문";
+  if (["11", "011", "12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"].includes(compact)) return "주문확인";
   if (code) return code;
   return "신규주문";
 }
