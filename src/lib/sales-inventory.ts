@@ -296,10 +296,17 @@ function groupRows(rows: RawRow[], labelFor: (row: RawRow) => string, amountFor:
 
 async function existingSourceRefs(table: "sales" | "purchases", refs: string[]) {
   const uniqueRefs = Array.from(new Set(refs.filter(Boolean)));
+  if (!uniqueRefs.length) return new Set<string>();
   const existing = new Set<string>();
-  for (const ref of uniqueRefs) {
-    const rows = await optionalRows(table, { source_ref_id: `eq.${ref}`, limit: 1 });
-    if (rows.length) existing.add(ref);
+  const chunkSize = 100;
+  for (let index = 0; index < uniqueRefs.length; index += chunkSize) {
+    const chunk = uniqueRefs.slice(index, index + chunkSize);
+    const escaped = chunk.map((ref) => `"${String(ref).replace(/"/g, '\\"')}"`).join(",");
+    const rows = await optionalRows(table, { source_ref_id: `in.(${escaped})`, limit: chunk.length });
+    rows.forEach((row) => {
+      const ref = text(row.source_ref_id);
+      if (ref) existing.add(ref);
+    });
   }
   return existing;
 }
@@ -481,11 +488,8 @@ async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchase
     if (!productCodeValue && productNameMatches.length > 1) {
       errors.push(`${rowLabel}: 품목명 '${productNameValue}'와 일치하는 품목이 여러 개입니다. 품목코드를 입력해 주세요.`);
     }
-    if (productCodeValue && productNameValue && productByCodeRow && productByNameRow && !sameReference(productByCodeRow, productByNameRow)) {
-      errors.push(`${rowLabel}: 품목코드 '${productCodeValue}'와 품목명 '${productNameValue}'가 서로 다른 품목입니다.`);
-    }
-    if (productByCodeRow && productNameValue && !matchesAny(productNameValue, [text(productByCodeRow.product_name), text(productByCodeRow.prod_name)])) {
-      errors.push(`${rowLabel}: 품목코드 '${productCodeValue}'의 기초관리 품목명은 '${productName(productByCodeRow)}'입니다.`);
+    if (!productByCodeRow && productByNameRow && productCodeValue && text(productByNameRow.product_code || productByNameRow.prod_cd || productByNameRow.sku) && !matchesAny(productCodeValue, [text(productByNameRow.product_code), text(productByNameRow.prod_cd), text(productByNameRow.sku)])) {
+      errors.push(`${rowLabel}: 품목명 '${productNameValue}'의 기초관리 품목코드는 '${productCode(productByNameRow)}'입니다.`);
     }
     if (product) {
       const code = productCode(product);
@@ -576,7 +580,7 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
   const current = currentRows[0];
   const duplicateRows = currentRows.slice(1);
   const prevQty = currentRows.length
-    ? currentRows.reduce((total, item) => total + numberValue(item.on_hand_qty ?? item.bal_qty), 0)
+    ? currentRows.reduce<number>((total, item) => total + numberValue(item.on_hand_qty ?? item.bal_qty), 0)
     : 0;
   const nextQty = prevQty + deltaQty;
 
@@ -619,7 +623,7 @@ async function consolidateInventoryCurrentDuplicates() {
     groups.set(key, [...(groups.get(key) || []), row]);
   });
   let removed = 0;
-  for (const group of groups.values()) {
+  for (const group of Array.from(groups.values())) {
     if (group.length <= 1) continue;
     const [keep, ...duplicates] = group;
     const qty = group.reduce((total, row) => total + numberValue(row.on_hand_qty ?? row.bal_qty), 0);

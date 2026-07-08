@@ -7952,6 +7952,37 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
+async function saveXlsxBlobToFixedExportFolder(fileName: string, blob: Blob) {
+  try {
+    const formData = new FormData();
+    formData.append("file", blob, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`);
+    const hostname = window.location.hostname;
+    const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+    const isLocalPage = isLoopbackHost || window.location.port === "3000";
+    const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
+    const exportUrl = isLocalPage
+      ? "/api/sales/export-files"
+      : `${(savedBridgeOrigin || "http://192.168.0.27:3000").replace(/\/$/, "")}/api/sales/export-files`;
+    const res = await fetch(exportUrl, {
+      method: "POST",
+      mode: isLocalPage ? "same-origin" : "cors",
+      credentials: isLocalPage ? "include" : "omit",
+      headers: isLocalPage ? undefined : { "X-FNOS-Local-Bridge": "1" },
+      fnosSkipBusyOverlay: true,
+      body: formData,
+    } as RequestInit & { fnosSkipBusyOverlay: boolean });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.ok !== false, path: String(data.path || ""), error: String(data.error || "") };
+  } catch (error) {
+    return { ok: false, path: "", error: error instanceof Error ? error.message : "고정 폴더 저장 실패" };
+  }
+}
+
+async function dualExportXlsxBlob(fileName: string, blob: Blob) {
+  downloadBlob(fileName, blob);
+  return saveXlsxBlobToFixedExportFolder(fileName, blob);
+}
+
 function toSettlementExportValue(value: string) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -8044,12 +8075,7 @@ async function downloadXlsxFile(fileName: string, sheets: Partial<Record<SalesSh
   });
   const output = xlsx.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
   const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  return dualExportXlsxBlob(fileName, blob);
 }
 
 type TableXlsxOptions = {
@@ -8196,7 +8222,7 @@ async function tableXlsxBlob(xlsx: XlsxModule, sheetName: string, headers: strin
 
 async function downloadTableXlsx(fileName: string, sheetName: string, headers: string[], rows: string[][], options?: TableXlsxOptions) {
   const xlsx = await loadXlsxModule();
-  downloadBlob(fileName, await tableXlsxBlob(xlsx, sheetName, headers, rows, options));
+  return dualExportXlsxBlob(fileName, await tableXlsxBlob(xlsx, sheetName, headers, rows, options));
 }
 
 function timeLabel() {
@@ -8634,21 +8660,33 @@ function SalesExcelGrid({
   }
   function sortByColumn(colIndex: number) {
     const dir: "asc" | "desc" = sortState?.col === colIndex && sortState.dir === "asc" ? "desc" : "asc";
+    const originalSelectedRows = selectedRows.filter((rowIndex) => rowHasValue(rows[rowIndex] || []));
     const handled = onSortRows?.(colIndex, dir, rows);
+    let nextSelectedRows = originalSelectedRows;
     if (!handled) {
-      const filledRows = rows.filter((row) => row.some((cell) => String(cell || "").trim()));
-      const emptyRows = rows.filter((row) => !row.some((cell) => String(cell || "").trim()));
-      const sortedRows = [...filledRows].sort((a, b) => {
-        const result = compareSalesCellValue(a[colIndex] || "", b[colIndex] || "");
+      const indexedRows = rows.map((row, originalIndex) => ({ row, originalIndex }));
+      const filledRows = indexedRows.filter((item) => item.row.some((cell) => String(cell || "").trim()));
+      const emptyRows = indexedRows.filter((item) => !item.row.some((cell) => String(cell || "").trim()));
+      const sortedItems = [...filledRows].sort((a, b) => {
+        const result = compareSalesCellValue(a.row[colIndex] || "", b.row[colIndex] || "");
         return dir === "asc" ? result : -result;
       });
-      onChange([...sortedRows, ...emptyRows]);
+      nextSelectedRows = sortedItems
+        .map((item, nextIndex) => originalSelectedRows.includes(item.originalIndex) ? nextIndex : -1)
+        .filter((index) => index >= 0);
+      onChange([...sortedItems, ...emptyRows].map((item) => item.row));
     }
     setSortState({ col: colIndex, dir });
     const sortedLength = rows.filter((row) => row.some((cell) => String(cell || "").trim())).length;
-    setAnchor({ row: 0, col: colIndex });
-    setRange({ startRow: 0, endRow: Math.max(0, sortedLength - 1), startCol: colIndex, endCol: colIndex });
-    setSelectedRows([]);
+    if (nextSelectedRows.length) {
+      setSelectedRows(nextSelectedRows);
+      setAnchor({ row: nextSelectedRows[0], col: 0 });
+      setRange({ startRow: nextSelectedRows[0], endRow: nextSelectedRows[nextSelectedRows.length - 1], startCol: 0, endCol: headers.length - 1 });
+    } else {
+      setAnchor({ row: 0, col: colIndex });
+      setRange({ startRow: 0, endRow: Math.max(0, sortedLength - 1), startCol: colIndex, endCol: colIndex });
+      setSelectedRows([]);
+    }
     setEditing(null);
     gridRef.current?.focus();
   }
@@ -11204,6 +11242,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .filter((index): index is number => typeof index === "number");
       return acc;
     }, {}));
+    setSelectedSalesRange((prev) => {
+      if (prev?.sheet !== "송장출력용") return prev;
+      const previousIndexes = prev.rowIndexes?.length
+        ? prev.rowIndexes
+        : Array.from({ length: prev.range.endRow - prev.range.startRow + 1 }, (_, index) => prev.range.startRow + index);
+      const nextIndexes = previousIndexes
+        .map((index) => sourceIndexByPreviousIndex.get(index))
+        .filter((index): index is number => typeof index === "number")
+        .sort((a, b) => a - b);
+      if (!nextIndexes.length) return null;
+      return {
+        sheet: "송장출력용",
+        range: { startRow: nextIndexes[0], endRow: nextIndexes[nextIndexes.length - 1], startCol: prev.range.startCol, endCol: prev.range.endCol },
+        rowIndexes: nextIndexes,
+      };
+    });
   }
 
   const [jsonText, setJsonText] = useState(`[
@@ -12138,7 +12192,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      const purchaseRows = next["FN구매입력"].map((row) => [...row]);
+      const purchaseRows = next["FN구매입력"].filter(rowHasValue).map((row) => [...row]);
       appendSourceIndexes.forEach((rowIndex) => {
         if (progressRows[rowIndex]) {
           setProgressValue(progressRows[rowIndex], "직송거래처", partner);
@@ -12159,11 +12213,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setPurchase("품목코드", progress ? progressValue(progress, "품목코드(ERP)") : "");
         setPurchase("품목명", progress ? progressValue(progress, "품목명(ERP)") : "");
         setPurchase("수량", progress ? progressValue(progress, "수량") || "1" : "1");
-        setPurchase("단가", progress ? progressValue(progress, "정산예정금액") : "");
-        setPurchase("공급가액", progress ? progressValue(progress, "정산예정금액") : "");
-        setPurchase("합계금액", progress ? progressValue(progress, "정산예정금액") : "");
+        setPurchase("단가", "");
+        setPurchase("공급가액", "");
+        setPurchase("합계금액", "");
         setPurchase("메모", "");
-        purchaseRows[rowIndex] = purchase;
+        purchaseRows.push(purchase);
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
       next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
@@ -12221,6 +12275,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const customerByCode = new Map(customerRows.map((row) => [salesCellText(row.customer_code).toLowerCase(), row]));
     const customerByName = new Map(customerRows.map((row) => [salesCellText(row.customer_name).toLowerCase(), row]));
     const productListCache = new Map<string, FnOsProductSearchItem[]>();
+    const purchasePriceOverrides = mode === "purchases"
+      ? await fetch("/api/fnos/purchase-price-overrides", { credentials: "include", cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => data.overrides && typeof data.overrides === "object" ? data.overrides as Record<string, number> : {})
+        .catch(() => ({} as Record<string, number>))
+      : {} as Record<string, number>;
+    const purchaseOverrideKey = (customerCode: string, customerName: string, productCode: string) => [salesCellText(customerCode) || salesCellText(customerName), salesCellText(productCode)].map((value) => value.toLowerCase()).join("::");
     async function findProducts(query: string) {
       const key = salesCellText(query).toLowerCase();
       if (!key) return [] as FnOsProductSearchItem[];
@@ -12250,18 +12311,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const byCode = code ? (await findProducts(code)).find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
       const byName = name ? (await findProducts(name)).find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
       if (code && name) {
-        if (byCode && byName && salesCellText(byCode.code).toLowerCase() !== salesCellText(byName.code).toLowerCase()) {
-          return { product: null, error: `품목코드(${code})와 품목명(${name})이 서로 다른 품목입니다.` };
-        }
-        const product = byCode || byName;
-        if (!product) return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
-        if (byCode && salesCellText(byCode.name) && salesCellText(byCode.name).toLowerCase() !== nameKey) {
-          return { product: null, error: `품목코드(${code})의 실제 품목명은 "${salesCellText(byCode.name)}"입니다.` };
-        }
-        if (byName && salesCellText(byName.code) && salesCellText(byName.code).toLowerCase() !== codeKey) {
-          return { product: null, error: `품목명(${name})의 실제 품목코드는 "${salesCellText(byName.code)}"입니다.` };
-        }
-        return { product, error: "" };
+        if (byCode) return { product: byCode, error: "" };
+        if (byName && salesCellText(byName.code).toLowerCase() === codeKey) return { product: byName, error: "" };
+        if (byName && salesCellText(byName.code)) return { product: null, error: `품목코드(${code})가 FN OS 품목 DB에서 확인되지 않습니다. 품목명(${name})은 품목코드 "${salesCellText(byName.code)}"로 등록되어 있습니다.` };
+        return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
       }
       const product = byCode || byName;
       return product ? { product, error: "" } : { product: null, error: `품목(${code || name})을 FN OS 품목 DB에서 정확히 확인하지 못했습니다.` };
@@ -12284,13 +12337,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (product) {
           next.품목코드 = salesCellText(product.code) || next.품목코드;
           next.품목명 = salesCellText(product.name) || next.품목명;
-          if (mode === "purchases" && !salesMoneyValue(next.공급가액)) {
+          if (mode === "purchases") {
             const qty = salesQuantityValue(next.수량) || 1;
-            const cost = salesMoneyValue(product.inPrice);
+            const overrideKey = purchaseOverrideKey(next.거래처코드, next.거래처명, next.품목코드);
+            const overrideCost = Number(purchasePriceOverrides[overrideKey]);
+            const defaultCost = Number.isFinite(overrideCost) && overrideCost > 0 ? overrideCost : salesMoneyValue(product.inPrice);
+            const enteredCost = salesMoneyValue(next.단가);
+            const cost = enteredCost || defaultCost;
             if (cost) {
               next.단가 = String(Math.round(cost));
               next.공급가액 = String(Math.round(qty * cost));
               next.합계금액 = String(Math.round(qty * cost));
+              if (enteredCost && defaultCost && Math.round(enteredCost) !== Math.round(defaultCost)) {
+                next.__purchaseOverrideCandidate = "1";
+              }
             }
           }
         }
@@ -12301,6 +12361,39 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       throw new Error(`품목코드와 품목명이 일치하지 않는 행이 있습니다.\n${productErrors.slice(0, 10).join("\n")}${productErrors.length > 10 ? `\n외 ${productErrors.length - 10}건` : ""}\n\n품목연결/품목검색으로 같은 품목을 다시 선택해 주세요.`);
     }
     return enriched;
+  }
+
+  function openManualInvoiceSheetWindow() {
+    const manualIndexes = shippingPreviewRows
+      .map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1)
+      .filter((index) => index >= 0);
+    const rows = manualIndexes.map((index) => shippingPreviewRows[index]).filter(rowHasValue);
+    if (!rows.length) {
+      window.alert("직접 송장번호를 입력할 API 미연동 사이트 주문이 없습니다.");
+      return;
+    }
+    const popup = window.open("", "fnos_manual_invoice_sheet", "width=1500,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes");
+    if (!popup) {
+      window.alert("새창 팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 눌러주세요.");
+      return;
+    }
+    const headers = salesSheetHeaders.송장출력용;
+    const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const tableHead = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
+    const tableRows = rows.map((row) => `<tr>${headers.map((header, colIndex) => {
+      const raw = salesCellText(row[colIndex]);
+      const copyValue = header === "송장번호" ? raw.replace(/\D/g, "") : raw;
+      const copyable = ["송장번호", "수취인"].includes(header);
+      return `<td${copyable ? ` class="copyable" data-copy="${escapeHtml(copyValue)}" title="클릭하면 복사"` : ""}>${escapeHtml(raw)}</td>`;
+    }).join("")}</tr>`).join("");
+    popup.document.open();
+    popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>직접 송장번호 입력 시트</title><style>
+      body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8fafc;color:#0f172a}.bar{position:sticky;top:0;z-index:5;background:white;border-bottom:1px solid #e2e8f0;padding:14px 18px}.bar h1{margin:0;font-size:18px}.bar p{margin:4px 0 0;color:#64748b;font-weight:700}.wrap{padding:14px 18px}.toast{position:fixed;right:20px;bottom:20px;background:#111827;color:white;border-radius:10px;padding:10px 14px;font-weight:800;display:none}table{border-collapse:collapse;background:white;font-size:12px}th,td{border:1px solid #cbd5e1;padding:7px 9px;white-space:nowrap}th{position:sticky;top:73px;background:#f1f5f9;z-index:4}td.copyable{cursor:pointer;background:#fff7ed;font-weight:800}td.copyable:hover{background:#fed7aa}.tracking{color:#ea580c}
+    </style></head><body><div class="bar"><h1>직접 송장번호 입력 시트</h1><p>API 미연동 주문 ${rows.length.toLocaleString("ko-KR")}건 · 송장번호/수취인 셀 클릭 시 복사됩니다. 송장번호는 숫자만 복사됩니다.</p></div><div class="wrap"><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table></div><div id="toast" class="toast">복사되었습니다</div><script>
+      document.addEventListener('click', async (event) => { const cell = event.target.closest('td.copyable'); if (!cell) return; const text = cell.dataset.copy || ''; if (!text) return; try { await navigator.clipboard.writeText(text); } catch { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } const toast=document.getElementById('toast'); toast.style.display='block'; window.clearTimeout(window.__toastTimer); window.__toastTimer=window.setTimeout(()=>toast.style.display='none',900); });
+    </script></body></html>`);
+    popup.document.close();
+    popup.focus();
   }
 
   async function sendSalesInput() {
@@ -12321,7 +12414,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           세액: item.세액,
           공급가액: item.공급가액,
           합계금액: item.합계금액,
-          메모: item.메모,
+          메모: "",
         };
       });
     try {
@@ -12350,7 +12443,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       tax_amt: item.세액,
       supply_amt: item.공급가액,
       total_amount: item.합계금액,
-      remarks: item.메모,
+      remarks: "",
       vat_type: item["VAT 포함/별도"],
     }));
     if (!rows.length) {
@@ -12361,7 +12454,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 판매 DB에 저장합니다. 계속할까요?`);
+      const confirmMessage = sourceRows.length === rows.length
+        ? `${rows.length}개 품목 행을 FN OS 판매 DB에 저장합니다. 계속할까요?`
+        : `${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 판매 DB에 저장합니다. 계속할까요?`;
+      const ok = window.confirm(confirmMessage);
       if (!ok) return;
     }
     setMessage("");
@@ -12423,6 +12519,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
+    const purchaseOverrideRows = sourceRows
+      .filter((item) => item.__purchaseOverrideCandidate === "1")
+      .map((item) => ({
+        customer_code: item.거래처코드,
+        customer_name: item.거래처명,
+        product_code: item.품목코드,
+        product_name: item.품목명,
+        price: item.단가,
+      }));
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
     const rows = aggregatedRows.map((item, index) => ({
       purchase_date: item.일자,
@@ -12449,11 +12554,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm("구매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const ok = window.confirm(`${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 구매 DB에 저장합니다. 계속할까요?`);
+      const confirmMessage = sourceRows.length === rows.length
+        ? `${rows.length}개 품목 행을 FN OS 구매 DB에 저장합니다. 계속할까요?`
+        : `${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 구매 DB에 저장합니다. 계속할까요?`;
+      const ok = window.confirm(confirmMessage);
       if (!ok) return;
     }
     setMessage("");
     try {
+      if (purchaseOverrideRows.length) {
+        await fetch("/api/fnos/purchase-price-overrides", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ rows: purchaseOverrideRows }),
+        }).catch(() => null);
+      }
       const res = await fetch("/api/purchases/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -12895,18 +13011,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const byCode = code ? (await findProducts(code)).find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
       const byName = name ? (await findProducts(name)).find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
       if (code && name) {
-        if (byCode && byName && salesCellText(byCode.code).toLowerCase() !== salesCellText(byName.code).toLowerCase()) {
-          return { product: null, error: `품목코드(${code})와 품목명(${name})이 서로 다른 품목입니다.` };
-        }
-        const product = byCode || byName;
-        if (!product) return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
-        if (byCode && salesCellText(byCode.name) && salesCellText(byCode.name).toLowerCase() !== nameKey) {
-          return { product: null, error: `품목코드(${code})의 실제 품목명은 "${salesCellText(byCode.name)}"입니다.` };
-        }
-        if (byName && salesCellText(byName.code) && salesCellText(byName.code).toLowerCase() !== codeKey) {
-          return { product: null, error: `품목명(${name})의 실제 품목코드는 "${salesCellText(byName.code)}"입니다.` };
-        }
-        return { product, error: "" };
+        if (byCode) return { product: byCode, error: "" };
+        if (byName && salesCellText(byName.code).toLowerCase() === codeKey) return { product: byName, error: "" };
+        if (byName && salesCellText(byName.code)) return { product: null, error: `품목코드(${code})가 FN OS 품목 DB에서 확인되지 않습니다. 품목명(${name})은 품목코드 "${salesCellText(byName.code)}"로 등록되어 있습니다.` };
+        return { product: null, error: `품목코드(${code})와 품목명(${name})이 FN OS 품목 DB에서 확인되지 않습니다.` };
       }
       const product = byCode || byName;
       return product ? { product, error: "" } : { product: null, error: `품목(${code || name})을 FN OS 품목 DB에서 정확히 확인하지 못했습니다.` };
@@ -15866,6 +15974,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
                   <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
                   <span className="mx-1 h-5 w-px bg-slate-200" />
+                  <button type="button" onClick={openManualInvoiceSheetWindow} className="h-9 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-black text-amber-700 hover:bg-amber-100">직접송장 새창</button>
                   <select
                     className="h-9 rounded-md border border-blue-200 bg-white px-3 text-sm font-black text-blue-700 outline-orange-400"
                     defaultValue=""
