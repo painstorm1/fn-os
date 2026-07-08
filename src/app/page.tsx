@@ -11833,7 +11833,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             }))
           : [{ name: "쇼핑몰", status: "running" as const, message: "수집 대기 중", source: "api" as const }];
         setCollectionStatuses(waitingStatuses);
-        for (let attempt = 0; attempt < 45; attempt += 1) {
+        for (let attempt = 0; attempt < 180; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
           const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include" });
           const jobData = await jobRes.json().catch(() => ({}));
@@ -11852,7 +11852,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             message: status === "queued" ? "수집 대기 중" : "수집중",
           })));
         }
-        if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해주세요.");
+        if (data.queued) throw new Error("로컬 워커 처리 시간이 아직 완료되지 않았습니다. 잠시 후 새로고침해 결과를 확인해주세요.");
       }
       const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
       setCollectionStatuses(statuses.length
@@ -12878,7 +12878,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     if (data.queued && data.job_id) {
       const jobId = salesCellText(data.job_id);
-      for (let attempt = 0; attempt < 45; attempt += 1) {
+      for (let attempt = 0; attempt < 180; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
         const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store", credentials: "include", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean });
         const jobData = await jobRes.json().catch(() => ({}));
@@ -12898,7 +12898,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           };
         }));
       }
-      if (data.queued) throw new Error("로컬 워커 처리 시간이 초과되었습니다. 워커 실행 상태를 확인해 주세요.");
+      if (data.queued) throw new Error("로컬 워커 처리 시간이 아직 완료되지 않았습니다. 잠시 후 새로고침해 결과를 확인해 주세요.");
     }
     const results = Array.isArray(data.results) ? data.results as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
     if (results.length) {
