@@ -7756,7 +7756,17 @@ function appendCollectedOnlineOrdersToSheets(
     const orderNo = salesCellText(order.orderNo);
     (order.items || []).forEach((item) => {
       const productOrderId = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku);
-      [orderNo, productOrderId, [orderNo, productOrderId].filter(Boolean).join("|")].filter(Boolean).forEach((key) => collectedStatusByKey.set(key, status));
+      // SSG처럼 order.orderNo(ordNo)와 발주 진행 단계의 "주문번호"(actionIds.apiOrderId=shppNo)가
+      // 서로 다른 채널은 orderNo 키만으로 매칭이 안 되어 상태가 신규주문에 머무르므로 actionIds 키도 함께 등록한다.
+      const actionIds = onlineOrderActionIds(order, item);
+      [
+        orderNo,
+        productOrderId,
+        actionIds.apiOrderId,
+        actionIds.apiProductOrderId,
+        [orderNo, productOrderId].filter(Boolean).join("|"),
+        [actionIds.apiOrderId, actionIds.apiProductOrderId].filter(Boolean).join("|"),
+      ].filter(Boolean).forEach((key) => collectedStatusByKey.set(key, status));
     });
   });
   if (collectedStatusByKey.size) {
