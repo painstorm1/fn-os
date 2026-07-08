@@ -58,6 +58,13 @@ function cleanParcelRow(row: unknown[]) {
   return cleaned;
 }
 
+function lastValueColumn(row: unknown[]) {
+  for (let index = row.length - 1; index >= 0; index -= 1) {
+    if (String(row[index] ?? "").trim()) return index + 1;
+  }
+  return 0;
+}
+
 function readableGoogleSheetsError(message: string) {
   if (message.includes("not supported for this document") || message.includes("must not be an Office file")) {
     return "FN_택배시트 반영 대상이 구글 스프레드시트가 아니라 엑셀(.xlsx) 파일입니다. 해당 파일을 Google Sheets로 변환한 뒤, 변환된 구글시트 URL의 spreadsheet ID를 GOOGLE_SHEETS_SPREADSHEET_ID에 넣어주세요.";
@@ -208,6 +215,58 @@ async function sheetIdForName(spreadsheetId: string, sheetName: string) {
   return sheets.find((sheet) => sheet.title === sheetName)?.id ?? 0;
 }
 
+type RepeatCellRequest = {
+  repeatCell: {
+    range: {
+      sheetId: number;
+      startRowIndex: number;
+      endRowIndex: number;
+      startColumnIndex: number;
+      endColumnIndex: number;
+    };
+    cell: {
+      userEnteredFormat: {
+        backgroundColor: { red: number; green: number; blue: number };
+      };
+    };
+    fields: string;
+  };
+};
+
+async function highlightBlankTrackingRows(spreadsheetId: string, sheetId: number, startRow: number, rows: unknown[][]) {
+  const requests = rows.reduce<RepeatCellRequest[]>((acc, row, index) => {
+    const trackingNo = String(row[1] ?? "").trim();
+    const lastColumn = lastValueColumn(row);
+    if (trackingNo || lastColumn <= 0) return acc;
+    const rowIndex = startRow + index - 1;
+    acc.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: rowIndex,
+          endRowIndex: rowIndex + 1,
+          startColumnIndex: 0,
+          endColumnIndex: lastColumn,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 1, green: 0.6, blue: 0 },
+          },
+        },
+        fields: "userEnteredFormat.backgroundColor",
+      },
+    });
+    return acc;
+  }, []);
+
+  if (!requests.length) return 0;
+  await googleSheetsFetch(`${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests }),
+  });
+  return requests.length;
+}
+
 function spreadsheetViewUrl(spreadsheetId: string, sheetId: number, range: string) {
   const params = new URLSearchParams();
   params.set("gid", String(sheetId || 0));
@@ -259,6 +318,7 @@ export async function POST(request: NextRequest) {
       method: "PUT",
       body: JSON.stringify({ values: uniqueRows }),
     });
+    const highlightedBlankTrackingCount = await highlightBlankTrackingRows(spreadsheetId, sheetId, startRow, uniqueRows);
 
     return NextResponse.json({
       ok: true,
@@ -266,6 +326,7 @@ export async function POST(request: NextRequest) {
       requestedSheetName,
       count: uniqueRows.length,
       duplicateCount: duplicates.length,
+      highlightedBlankTrackingCount,
       duplicateRows: duplicates.map((item) => item.rowNumber),
       updatedRange: updated.updatedRange || "",
       spreadsheetUrl: spreadsheetViewUrl(spreadsheetId, sheetId, `${sheetName}!A${startRow}:K${endRow}`),

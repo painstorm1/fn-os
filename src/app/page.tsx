@@ -12720,20 +12720,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   function fnParcelTargetRows(currentSheets: Record<SalesSheetName, string[][]>) {
     const exportSheets = applyProgressTrackingToShipping(currentSheets);
-    const trackingIndex = salesSheetHeaders.송장출력용.indexOf("송장번호");
     return shippingRowsForExcelExport(exportSheets)
-      .filter((row) => row.some((cell) => String(cell || "").trim()))
-      .filter((row) => trackingIndex < 0 || salesCellText(row[trackingIndex]));
+      .filter((row) => row.some((cell) => String(cell || "").trim()));
   }
 
   async function applyFnParcelSheet() {
     const shippingRows = fnParcelTargetRows(sheetsRef.current);
     if (!shippingRows.length) {
-      window.alert("FN_택배시트에 반영할 송장엑셀 행이 없습니다. 송장번호 입력 여부를 확인해 주세요.");
+      window.alert("FN_택배시트에 반영할 송장엑셀 행이 없습니다.");
       return;
     }
     const targetSheet = fnParcelSheetName();
-    const ok = window.confirm(`선택된 주문건과 관계없이 송장엑셀 전체에서 송장번호가 입력된 ${shippingRows.length}개 행을 FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 구글시트에 반영합니다. 계속할까요?`);
+    const ok = window.confirm(`선택된 주문건과 관계없이 송장엑셀 전체 ${shippingRows.length}개 행을 FN_택배시트의 '${targetSheet}' 시트 가장 아래 빈 행부터 구글시트에 반영합니다. 송장번호가 비어있는 직송 주문건은 송장번호 셀을 빈값으로 두고, 해당 행의 값이 있는 열까지 주황색으로 표시합니다. 계속할까요?`);
     if (!ok) return;
     try {
       const rows = shippingRows.map((row) => salesSheetHeaders.송장출력용.map((_, index) => row[index] || ""));
@@ -12752,11 +12750,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setCompletedSalesTasks((prev) => ({ ...prev, fnParcelApplied: true }));
       const reflectedCount = Number(data.count || 0);
       const duplicateCount = Number(data.duplicateCount || 0);
+      const highlightedBlankTrackingCount = Number(data.highlightedBlankTrackingCount || 0);
+      const highlightSuffix = highlightedBlankTrackingCount > 0
+        ? ` 송장번호 빈 직송 주문 ${highlightedBlankTrackingCount.toLocaleString("ko-KR")}개 행은 주황색으로 표시했습니다.`
+        : "";
       const resultMessage = reflectedCount === 0 && duplicateCount > 0
         ? "새로운 행이 없습니다. 모든 행이 이미 구글시트에 있습니다."
         : duplicateCount > 0
-          ? `새로운 ${reflectedCount}개의 행만 반영되었습니다.`
-          : `FN_택배시트 '${data.sheetName || targetSheet}'에 ${reflectedCount || shippingRows.length}개 행을 반영했습니다.`;
+          ? `새로운 ${reflectedCount}개의 행만 반영되었습니다.${highlightSuffix}`
+          : `FN_택배시트 '${data.sheetName || targetSheet}'에 ${reflectedCount || shippingRows.length}개 행을 반영했습니다.${highlightSuffix}`;
       window.alert(resultMessage);
       setMessage(resultMessage);
       if (data.spreadsheetUrl) {
