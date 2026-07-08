@@ -6312,8 +6312,8 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   "발주 진행 단계": ["쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "쇼핑몰상품코드", "품목명(ERP)", "쇼핑몰품목key", "쇼핑몰명", "쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호", "주문상태", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "수량", "배송요청사항", "정산예정금액", "배송방법", "배송비금액", "배송비", "직송거래처", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"],
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
-  "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
-  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "세액", "공급가액", "합계금액", "메모"],
+  "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "공급가액", "합계금액", "메모"],
+  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "공급가액", "합계금액", "메모"],
 };
 
 const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
@@ -6349,7 +6349,9 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
     return [...row.slice(0, 7), "", ...row.slice(7)];
   }
   if ((sheet === "FN판매입력" || sheet === "FN구매입력") && row.length === salesSheetHeaders[sheet].length + 1) {
-    return [row[0] || "", ...row.slice(2)];
+    // Legacy online entry rows had a separate "세액" column between "단가" and "공급가액".
+    // The current modal no longer displays/imports that column, so preserve every value except tax.
+    return [...row.slice(0, 9), ...row.slice(10)];
   }
   if (sheet === "FN판매입력" && row.length > salesSheetHeaders[sheet].length) {
     return [
@@ -6362,7 +6364,6 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
       row[10] || "",
       row[12] || "",
       row[13] || "",
-      "",
       row[15] || "",
       row[15] || "",
       row[16] || "",
@@ -6379,7 +6380,6 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
       row[9] || "",
       row[11] || "",
       row[12] || "",
-      "",
       row[13] || "",
       row[13] || "",
       row[14] || "",
@@ -6535,37 +6535,27 @@ function salesEntryWarehouseHeader(sheet: SalesSheetName) {
   return sheet === "FN구매입력" ? "입고창고" : "출하창고";
 }
 
-function salesEntryVatIsExcluded(value: unknown) {
-  const text = entryVatLabel(value).toLowerCase();
-  return text.includes("별도") || text.includes("excluded");
-}
-
-function salesEntryCalculatedAmounts(item: Record<string, string>, mode: "sales" | "purchases") {
+function salesEntryCalculatedAmounts(item: Record<string, string>, _mode: "sales" | "purchases") {
   const qty = salesQuantityValue(item.수량);
   const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
+  const supply = salesMoneyValue(item.공급가액) || price;
   const hasQty = Boolean(salesCellText(item.수량));
-  const hasPrice = Boolean(salesCellText(item.단가 || item["단가(vat포함)"]));
-  if (!hasQty || !hasPrice) {
+  const hasSupply = Boolean(salesCellText(item.공급가액) || salesCellText(item.단가 || item["단가(vat포함)"]));
+  if (!hasQty || !hasSupply) {
     return {
       qty,
       price,
-      tax: salesMoneyValue(item.세액),
       supply: salesMoneyValue(item.공급가액),
       total: salesMoneyValue(item.합계금액),
       calculated: false,
     };
   }
-  const tax = salesEntryVatIsExcluded(item["VAT 포함/별도"]) ? qty * price * 0.1 : 0;
-  const lineTotal = qty * price + tax;
-  const supply = mode === "sales"
-    ? price + (salesEntryVatIsExcluded(item["VAT 포함/별도"]) ? price * 0.1 : 0)
-    : lineTotal;
+  const total = qty * supply;
   return {
     qty,
     price,
-    tax,
     supply,
-    total: salesMoneyValue(item.합계금액) || lineTotal,
+    total,
     calculated: true,
   };
 }
@@ -6573,7 +6563,7 @@ function salesEntryCalculatedAmounts(item: Record<string, string>, mode: "sales"
 function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHeader?: string) {
   if (!isSalesEntrySheet(sheet)) return row;
   const rec = salesRowObject(sheet, row) as Record<string, string>;
-  const changedTriggersCalculation = !changedHeader || ["수량", "단가", "단가(vat포함)", "세액", "VAT 포함/별도"].includes(changedHeader);
+  const changedTriggersCalculation = !changedHeader || ["수량", "단가", "단가(vat포함)", "공급가액", "VAT 포함/별도"].includes(changedHeader);
   if (!changedTriggersCalculation) return row;
   const amounts = salesEntryCalculatedAmounts(rec, sheet === "FN판매입력" ? "sales" : "purchases");
   if (!amounts.calculated) return row;
@@ -6582,7 +6572,6 @@ function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHea
     const index = salesSheetHeaders[sheet].indexOf(header);
     if (index >= 0) next[index] = value;
   };
-  set("세액", amounts.tax ? String(Math.round(amounts.tax)) : "");
   set("공급가액", String(Math.round(amounts.supply)));
   set("합계금액", String(Math.round(amounts.total)));
   return next;
@@ -6622,7 +6611,6 @@ function aggregateSalesEntryRows(
     qty: number;
     supply: number;
     total: number;
-    tax: number;
     memo: Set<string>;
     statementKey: string;
   }>();
@@ -6638,9 +6626,8 @@ function aggregateSalesEntryRows(
     const amounts = salesEntryCalculatedAmounts(item, mode);
     const qty = amounts.qty;
     const price = amounts.price;
-    const tax = salesMoneyValue(item.세액) || amounts.tax;
     const supply = salesMoneyValue(item.공급가액) || amounts.supply;
-    const total = salesMoneyValue(item.합계금액) || supply;
+    const total = salesMoneyValue(item.합계금액) || amounts.total || (qty * supply);
     const vat = entryVatLabel(item["VAT 포함/별도"]);
     const statementKey = [date, customerCode || customerName].join("|");
     const lineKey = [statementKey, productCode, productName].map((value) => value.replace(/\s+/g, " ").trim()).join("|");
@@ -6649,7 +6636,6 @@ function aggregateSalesEntryRows(
       existing.qty += qty;
       existing.supply += supply;
       existing.total += total;
-      existing.tax += tax;
       if (mode !== "sales" && salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
       return;
     }
@@ -6667,7 +6653,6 @@ function aggregateSalesEntryRows(
       qty,
       supply,
       total,
-      tax,
       memo: new Set(mode === "sales" ? [] : [salesCellText(item.메모 || item.적요)].filter(Boolean)),
       statementKey,
     });
@@ -6680,7 +6665,6 @@ function aggregateSalesEntryRows(
       ...entry.row,
       수량: String(entry.qty),
       단가: String(Math.round(averagePrice)),
-      세액: entry.tax ? String(Math.round(entry.tax)) : "",
       공급가액: String(Math.round(entry.supply)),
       합계금액: String(Math.round(entry.total)),
       메모: mode === "sales" ? "" : Array.from(entry.memo).join(" / "),
@@ -7673,7 +7657,6 @@ function appendCollectedOnlineOrdersToSheets(
 
       const qty = onlineOrderMoney(item.qty) || 1;
       const amount = onlineOrderSettlementAmount(item, channelName, channelCode);
-      const unitPrice = qty ? Math.round(amount / qty) : amount;
       const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
       const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
@@ -7708,9 +7691,9 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(sale, "FN판매입력", "품목코드", productCode);
       setSalesSheetCell(sale, "FN판매입력", "품목명", productName);
       setSalesSheetCell(sale, "FN판매입력", "수량", qty);
-      setSalesSheetCell(sale, "FN판매입력", "단가", unitPrice || "");
+      setSalesSheetCell(sale, "FN판매입력", "단가", amount || "");
       setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
+      setSalesSheetCell(sale, "FN판매입력", "합계금액", amount ? qty * amount : "");
       setSalesSheetCell(sale, "FN판매입력", "메모", "");
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
@@ -8418,7 +8401,7 @@ function SalesExcelGrid({
   onChange: (rows: string[][]) => void;
   onProductLinked?: (rowIndex: number, row: string[], item: FnOsProductSearchItem, targetIndexes?: number[]) => void;
   onSelectionChange?: (sheet: SalesSheetName, range: SalesGridRange, rowIndexes?: number[]) => void;
-  onSortRows?: (colIndex: number, dir: "asc" | "desc", rows: string[][]) => boolean | void;
+  onSortRows?: (colIndex: number, dir: "asc" | "desc", rows: string[][], selectedRows: number[]) => boolean | number[] | void;
   resetKey?: number;
   highlightedRows?: number[];
   copyAssistRows?: number[];
@@ -8679,8 +8662,8 @@ function SalesExcelGrid({
   function sortByColumn(colIndex: number) {
     const dir: "asc" | "desc" = sortState?.col === colIndex && sortState.dir === "asc" ? "desc" : "asc";
     const originalSelectedRows = selectedRows.filter((rowIndex) => rowHasValue(rows[rowIndex] || []));
-    const handled = onSortRows?.(colIndex, dir, rows);
-    let nextSelectedRows = originalSelectedRows;
+    const handled = onSortRows?.(colIndex, dir, rows, originalSelectedRows);
+    let nextSelectedRows = Array.isArray(handled) ? handled : originalSelectedRows;
     if (!handled) {
       const indexedRows = rows.map((row, originalIndex) => ({ row, originalIndex }));
       const filledRows = indexedRows.filter((item) => item.row.some((cell) => String(cell || "").trim()));
@@ -11222,7 +11205,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     });
   }
 
-  function sortOnlineShippingRowsByExportColumn(colIndex: number, dir: "asc" | "desc") {
+  function sortOnlineShippingRowsByExportColumn(colIndex: number, dir: "asc" | "desc", selectedVisibleRows: number[] = []) {
     const exportRows = shippingRowsForExcelExport(applyProgressTrackingToShipping(sheets));
     const filledIndexes = sheets.송장출력용
       .map((row, index) => rowHasValue(row) ? index : -1)
@@ -11240,6 +11223,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       sheetName,
       nextOrder.map((rowIndex) => [...(sourceSheets[sheetName][rowIndex] || salesSheetHeaders[sheetName].map(() => ""))]),
     );
+    const nextSelectedRows = selectedVisibleRows
+      .map((visibleIndex) => filledIndexes[visibleIndex])
+      .map((sourceIndex) => sourceIndexByPreviousIndex.get(sourceIndex))
+      .filter((index): index is number => typeof index === "number")
+      .sort((a, b) => a - b);
 
     setSheets((prev) => ({
       ...prev,
@@ -11276,6 +11264,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         rowIndexes: nextIndexes,
       };
     });
+    return nextSelectedRows;
   }
 
   const [jsonText, setJsonText] = useState(`[
@@ -12380,7 +12369,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             const cost = enteredCost || defaultCost;
             if (cost) {
               next.단가 = String(Math.round(cost));
-              next.공급가액 = String(Math.round(qty * cost));
+              next.공급가액 = String(Math.round(cost));
               next.합계금액 = String(Math.round(qty * cost));
               if (enteredCost && defaultCost && Math.round(enteredCost) !== Math.round(defaultCost)) {
                 next.__purchaseOverrideCandidate = "1";
@@ -12445,8 +12434,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           품목명: item.품목명,
           수량: item.수량,
           단가: item.단가,
-          세액: item.세액,
-          공급가액: item.합계금액 || item.공급가액,
+          공급가액: item.공급가액,
           합계금액: item.합계금액,
           메모: "",
         };
@@ -12474,7 +12462,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       prod_name: item.품목명,
       qty: item.수량,
       price: item.단가,
-      tax_amt: item.세액,
+      tax_amt: "",
       supply_amt: item.공급가액,
       total_amount: item.합계금액,
       remarks: "",
@@ -12536,7 +12524,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           품목명: item.품목명,
           수량: item.수량,
           단가: item.단가,
-          세액: item.세액,
           공급가액: item.공급가액,
           합계금액: item.합계금액,
           메모: item.메모,
@@ -12574,7 +12561,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       prod_name: item.품목명,
       qty: item.수량,
       price: item.단가,
-      tax_amt: item.세액,
+      tax_amt: "",
       supply_amt: item.공급가액,
       total_amount: item.합계금액,
       remarks: item.메모,
@@ -16030,7 +16017,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     <option value="케이모아">케이모아 직송저장</option>
                   </select>
                 </div>
-                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir) => { sortOnlineShippingRowsByExportColumn(colIndex, dir); return true; }} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} />}
+                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir, _rows, selectedRows) => sortOnlineShippingRowsByExportColumn(colIndex, dir, selectedRows)} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} />}
                 {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
                 {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
               </div>
@@ -17437,15 +17424,11 @@ function SalesPurchaseEntryModal({
     return Number(String(line.qty || 0).replace(/[^\d.-]/g, ""));
   }
 
-  function lineTax(line: SalesPurchaseEntryLine) {
-    return vatMode === "excluded" ? lineUnit(line) * 0.1 : 0;
-  }
-
   function lineSupply(line: SalesPurchaseEntryLine) {
     const qty = lineQty(line);
     const unit = lineUnit(line);
     if (!Number.isFinite(qty) || !Number.isFinite(unit)) return 0;
-    return vatMode === "excluded" ? qty * (unit + unit * 0.1) : qty * unit;
+    return qty * unit;
   }
 
   function setLineSelected(lineId: string, selected: boolean) {
@@ -17608,12 +17591,11 @@ function SalesPurchaseEntryModal({
   function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine {
     const price = mode === "purchases" ? Number(product.cost_price || fnProductPrice(product)) : Number(product.standard_price || fnProductPrice(product));
     const recentPrice = recentUnitPriceForProduct(fnProductSku(product));
-    const normalizedPrice = vatMode === "excluded" ? Math.round(price / 1.1) : price;
     return {
       ...line,
       prod_cd: fnProductSku(product),
       prod_name: fnProductName(product),
-      price: recentPrice ? String(recentPrice) : normalizedPrice ? String(normalizedPrice) : line.price,
+      price: recentPrice ? String(recentPrice) : price ? String(price) : line.price,
     };
   }
 
@@ -17692,8 +17674,7 @@ function SalesPurchaseEntryModal({
           "품목명": line.prod_name,
           "수량": line.qty,
           "단가": line.price,
-          "세액": String(Math.round(lineTax(line) * lineQty(line))),
-          "공급가액": String(Math.round(lineSupply(line))),
+          "공급가액": String(Math.round(lineUnit(line))),
           "합계금액": String(Math.round(lineSupply(line))),
           "메모": line.memo,
         };
@@ -17714,7 +17695,6 @@ function SalesPurchaseEntryModal({
       "품목명": "예시품목",
       "수량": "1",
       "단가": "1000",
-      "세액": "",
       "공급가액": "1000",
       "합계금액": "1000",
       "메모": "예시",
@@ -17893,8 +17873,9 @@ function SalesPurchaseEntryModal({
       prod_name: line.prod_name,
       qty: line.qty || "1",
       price: String(Math.round(lineUnit(line))),
-      tax_amt: String(Math.round(lineTax(line) * lineQty(line))),
-      supply_amt: String(Math.round(lineSupply(line))),
+      tax_amt: "",
+      supply_amt: String(Math.round(lineUnit(line))),
+      total_amount: String(Math.round(lineSupply(line))),
       remarks: line.memo,
       vat_type: vatMode === "included" ? "VAT포함" : "VAT별도",
     }));
@@ -18083,9 +18064,8 @@ function SalesPurchaseEntryModal({
                 <th className="w-36 px-2 py-2 text-left">품목코드</th>
                 <th className="px-2 py-2 text-left">품목명</th>
                 <th className="w-24 px-2 py-2 text-right">수량</th>
-                <th className="w-28 px-2 py-2 text-right">단가</th>
-                {vatMode === "excluded" && <th className="w-28 px-2 py-2 text-right">세액</th>}
-                <th className="w-32 px-2 py-2 text-right">공급가액</th>
+                <th className="w-28 px-2 py-2 text-right">공급가액</th>
+                <th className="w-32 px-2 py-2 text-right">합계금액</th>
                 <th className="w-48 px-2 py-2 text-left">메모</th>
               </tr>
             </thead>
@@ -18125,7 +18105,6 @@ function SalesPurchaseEntryModal({
                   }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="decimal" value={formatCommaNumber(line.qty, { decimal: true })} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", normalizeCommaNumberInput(event.target.value, { decimal: true }))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="numeric" value={formatCommaNumber(line.price)} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", normalizeCommaNumberInput(event.target.value))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
-                  {vatMode === "excluded" && <td className="px-2 py-2 text-right font-bold text-gray-600">{Math.round(lineTax(line) * lineQty(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="memo" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "memo")) return; if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
                 </tr>
