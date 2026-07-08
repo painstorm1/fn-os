@@ -234,9 +234,10 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
     const releasePath = text(params.release_path) || `/api/pd/${version.replace(/^v/i, "")}/saveWhOutCompleteProcess.ssg`;
     const rows = ssgDispatchRows(params);
     if (!rows.length) return { ok: false, data: null, error: "SSG 송장등록에 필요한 shppNo/shppSeq/송장번호가 없습니다." };
-    try {
-      const results = [];
-      for (const row of rows) {
+    const results: Array<{ shppNo: string; shppSeq: string; ok: boolean; waybill?: unknown; release?: unknown; error?: string }> = [];
+    const failureMessages: string[] = [];
+    for (const row of rows) {
+      try {
         const waybillBody = `<requestWhOutCompleteProcess><shppNo>${xmlEscape(row.shppNo)}</shppNo><shppSeq>${xmlEscape(row.shppSeq)}</shppSeq><wblNo>${xmlEscape(row.trackingNumber)}</wblNo><delicoVenId>${xmlEscape(row.deliveryCompanyCode)}</delicoVenId><shppTypeCd>20</shppTypeCd><shppTypeDtlCd>22</shppTypeDtlCd></requestWhOutCompleteProcess>`;
         const waybillResponse = await fetch(`${baseUrl}${waybillPath}`, {
           method: "POST",
@@ -251,11 +252,22 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
           body: releaseBody,
         });
         const releaseResult = await readBody(releaseResponse);
-        results.push({ waybill: waybillResult, release: releaseResult });
+        results.push({ shppNo: row.shppNo, shppSeq: row.shppSeq, ok: true, waybill: waybillResult, release: releaseResult });
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : "SSG 송장등록/출고처리 실패";
+        // 릴리스(출고완료) 단계는 SSG측 주문이 '피킹완료' 상태일 때만 허용된다. 송장 등록만으로는
+        // SSG가 자동으로 피킹완료 처리를 하지 않으므로, 해당 실패는 재시도가 아니라 SSG 판매자센터에서
+        // 피킹완료(또는 이미 출고완료된 상태인지) 확인이 필요하다는 것을 알려준다.
+        const message = /피킹완료/.test(rawMessage)
+          ? `${rawMessage} (SSG 판매자센터에서 해당 주문이 피킹완료 상태인지, 혹은 이미 출고완료 처리되었는지 확인 후 재시도해주세요. 송장번호는 저장되었을 수 있습니다.)`
+          : rawMessage;
+        results.push({ shppNo: row.shppNo, shppSeq: row.shppSeq, ok: false, error: message });
+        failureMessages.push(`${row.shppNo}/${row.shppSeq}: ${message}`);
       }
-      return { ok: true, data: results, message: `SSG 송장등록/출고처리 ${rows.length}건 요청 완료` };
-    } catch (error) {
-      return { ok: false, data: null, error: error instanceof Error ? error.message : "SSG 송장등록/출고처리 실패" };
     }
+    const succeeded = results.filter((row) => row.ok).length;
+    if (!succeeded) return { ok: false, data: results, error: failureMessages.join(" / ") || "SSG 송장등록/출고처리 실패" };
+    if (failureMessages.length) return { ok: false, data: results, error: `SSG 송장등록/출고처리 ${succeeded}/${rows.length}건 성공, 나머지 실패: ${failureMessages.join(" / ")}` };
+    return { ok: true, data: results, message: `SSG 송장등록/출고처리 ${rows.length}건 요청 완료` };
   }
 }
