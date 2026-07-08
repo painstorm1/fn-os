@@ -6540,7 +6540,7 @@ function salesEntryVatIsExcluded(value: unknown) {
   return text.includes("별도") || text.includes("excluded");
 }
 
-function salesEntryCalculatedAmounts(item: Record<string, string>) {
+function salesEntryCalculatedAmounts(item: Record<string, string>, mode: "sales" | "purchases") {
   const qty = salesQuantityValue(item.수량);
   const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
   const hasQty = Boolean(salesCellText(item.수량));
@@ -6556,13 +6556,16 @@ function salesEntryCalculatedAmounts(item: Record<string, string>) {
     };
   }
   const tax = salesEntryVatIsExcluded(item["VAT 포함/별도"]) ? qty * price * 0.1 : 0;
-  const supply = qty * price + tax;
+  const lineTotal = qty * price + tax;
+  const supply = mode === "sales"
+    ? price + (salesEntryVatIsExcluded(item["VAT 포함/별도"]) ? price * 0.1 : 0)
+    : lineTotal;
   return {
     qty,
     price,
     tax,
     supply,
-    total: salesMoneyValue(item.합계금액) || supply,
+    total: salesMoneyValue(item.합계금액) || lineTotal,
     calculated: true,
   };
 }
@@ -6572,7 +6575,7 @@ function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHea
   const rec = salesRowObject(sheet, row) as Record<string, string>;
   const changedTriggersCalculation = !changedHeader || ["수량", "단가", "단가(vat포함)", "세액", "VAT 포함/별도"].includes(changedHeader);
   if (!changedTriggersCalculation) return row;
-  const amounts = salesEntryCalculatedAmounts(rec);
+  const amounts = salesEntryCalculatedAmounts(rec, sheet === "FN판매입력" ? "sales" : "purchases");
   if (!amounts.calculated) return row;
   const next = salesSheetHeaders[sheet].map((_, index) => row[index] || "");
   const set = (header: string, value: string) => {
@@ -6581,7 +6584,7 @@ function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHea
   };
   set("세액", amounts.tax ? String(Math.round(amounts.tax)) : "");
   set("공급가액", String(Math.round(amounts.supply)));
-  set("합계금액", String(Math.round(amounts.supply)));
+  set("합계금액", String(Math.round(amounts.total)));
   return next;
 }
 
@@ -6632,7 +6635,7 @@ function aggregateSalesEntryRows(
     const warehouse = salesCellText(mode === "sales" ? item.출하창고 : item.입고창고) || "100";
     const productCode = salesCellText(item.품목코드);
     const productName = salesCellText(item.품목명);
-    const amounts = salesEntryCalculatedAmounts(item);
+    const amounts = salesEntryCalculatedAmounts(item, mode);
     const qty = amounts.qty;
     const price = amounts.price;
     const tax = salesMoneyValue(item.세액) || amounts.tax;
@@ -12433,7 +12436,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           수량: item.수량,
           단가: item.단가,
           세액: item.세액,
-          공급가액: item.공급가액,
+          공급가액: item.합계금액 || item.공급가액,
           합계금액: item.합계금액,
           메모: "",
         };
