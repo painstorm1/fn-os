@@ -8,6 +8,7 @@ type SheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
 type OrderSource = "legacy" | "esm" | "todayhouse" | "toss" | "ezwell" | "unknown";
 type ParsedInvoiceRow = {
   trackingNo: string;
+  itemCount: number;
   recipient: string;
   phone: string;
   address: string;
@@ -585,18 +586,38 @@ function parseInvoiceRowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) 
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { defval: "", raw: false, header: 1 });
   const rows: ParsedInvoiceRow[] = [];
   const seen = new Set<string>();
+  const headerIndex = matrix.findIndex((row) => row.map((cell) => clean(cell)).filter((cell) => ["운송장번호", "송장번호", "내품수량", "받는분", "받는분전화번호", "받는분주소", "상품코드"].includes(cell)).length >= 3);
+  const headerMap = new Map<string, number>();
+  if (headerIndex >= 0) {
+    matrix[headerIndex].forEach((cell, index) => {
+      const header = clean(cell);
+      if (header) headerMap.set(header, index);
+    });
+  }
+  const cellAt = (row: unknown[], names: string[], fallbackIndexes: number[]) => {
+    for (const name of names) {
+      const index = headerMap.get(name);
+      if (index !== undefined && clean(row[index])) return row[index];
+    }
+    for (const index of fallbackIndexes) {
+      if (clean(row[index])) return row[index];
+    }
+    return "";
+  };
   matrix.forEach((row, rowIndex) => {
-    const trackingNo = clean(row[7]);
-    const recipient = clean(row[20]);
-    const phone = clean(row[21]);
-    const address = clean(row[23]);
-    const productCode = clean(row[24]);
+    if (headerIndex >= 0 && rowIndex <= headerIndex) return;
+    const trackingNo = clean(cellAt(row, ["운송장번호", "송장번호"], [7]));
+    const itemCount = Math.max(1, parseNumber(cellAt(row, ["내품수량", "수량"], [26, 25])) || 1);
+    const recipient = clean(cellAt(row, ["받는분", "수취인", "수취인명"], [20]));
+    const phone = clean(cellAt(row, ["받는분전화번호", "받는분 전화번호", "수취인 연락처", "수취인연락처1"], [21]));
+    const address = clean(cellAt(row, ["받는분주소", "받는분 주소", "수취인 주소", "주소"], [23]));
+    const productCode = clean(cellAt(row, ["상품코드", "품목코드", "쇼핑몰코드"], [24]));
     if (!trackingNo || !recipient || !phone || !address) return;
     if (/송장|운송장|받는분|수취인/i.test(`${trackingNo} ${recipient}`)) return;
-    const key = [trackingNo, recipient, phone, address, productCode].map((value) => value.replace(/\s+/g, "").toLowerCase()).join("|");
+    const key = [trackingNo, itemCount, recipient, phone, address, productCode].map((value) => String(value).replace(/\s+/g, "").toLowerCase()).join("|");
     if (seen.has(key)) return;
     seen.add(key);
-    rows.push({ trackingNo, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
+    rows.push({ trackingNo, itemCount, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
   });
   return rows;
 }
