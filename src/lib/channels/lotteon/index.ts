@@ -13,6 +13,8 @@ function ymdToUtcDate(ymd: string) { return new Date(Date.UTC(Number(ymd.slice(0
 function utcDateToYmd(date: Date) { return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}`; }
 function dailySearchBodies(start: string, end: string, extra: AnyRecord) { const bodies: AnyRecord[] = []; const from = ymdToUtcDate(start.slice(0, 8)); const to = ymdToUtcDate(end.slice(0, 8)); if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return [{ srchStrtDt: start, srchEndDt: end, ...extra }]; for (let cur = new Date(from); cur <= to; cur.setUTCDate(cur.getUTCDate() + 1)) { const ymd = utcDateToYmd(cur); bodies.push({ srchStrtDt: `${ymd}000000`, srchEndDt: `${ymd}235959`, ...extra }); } return bodies; }
 function normalizeDate(value: unknown) { const raw = text(value); const compact = raw.replace(/\D/g, ""); if (compact.length >= 14) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}T${compact.slice(8,10)}:${compact.slice(10,12)}:${compact.slice(12,14)}+09:00`; if (compact.length >= 8) return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`; return raw; }
+function compactYmd(value: unknown) { const compact = text(value).replace(/\D/g, ""); return compact.length >= 8 ? compact.slice(0, 8) : ""; }
+function lotteonOrderYmd(row: AnyRecord) { return compactYmd(firstText(row.odCmptDttm, row.odDttm, row.ordDttm, row.payDttm, row.orderDate)); }
 function arrayAt(root: unknown, paths: string[][]) { for (const path of paths) { let current = root; for (const key of path) current = record(current)[key]; if (Array.isArray(current)) return current as AnyRecord[]; } return Array.isArray(root) ? root as AnyRecord[] : []; }
 function findRows(data: unknown) { const direct = arrayAt(data, [["deliveryOrderList"], ["data", "deliveryOrderList"], ["data", "orderItems"], ["data", "orders"], ["data"], ["orderItems"], ["orders"], ["result", "orderItems"]]); if (direct.length) return direct; const rows: AnyRecord[] = []; const seen = new Set<unknown>(); function visit(value: unknown) { if (!value || seen.has(value) || typeof value !== "object") return; seen.add(value); if (Array.isArray(value)) { value.forEach(visit); return; } const cur = record(value); if (firstText(cur.odNo, cur.orderNo) && firstText(cur.spdNm, cur.pdNm, cur.goodsNm, cur.prdNm, cur.itemNm)) { rows.push(cur); return; } Object.values(cur).forEach(visit); } visit(data); return rows; }
 async function readJson(response: Response) { return readJsonApiResponse(response, "롯데ON", { successCodes: ["0000", "0", "SUCCESS", "OK"], resultPaths: [["returnCode"], ["code"], ["resultCode"], ["status"]] }); }
@@ -115,7 +117,10 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const explicitStatusCode = text(params.odPrgsStepCd || params.order_status_code);
       // 공식 스펙: 조회 odPrgsStepCd는 11(출고지시)/23(회수지시)만 존재.
       // 신규/주문확인 구분은 ifCplYN(연동완료여부)로 한다: 빈 값=신규생성 주문, Y=연동완료(주문확인) 주문.
-      // 주문확인(Y)을 먼저 조회해야 두 조회에 겹치는 주문이 신규주문으로 잘못 라벨링되지 않는다(중복제거는 선착순).
+      // 기본 수집은 최근 N일을 훑어 신규주문 누락을 복구하지만, ifCplYN=Y는 이미 판매자센터에서
+      // 출고완료된 과거 주문도 계속 반환될 수 있다. 주문확인 조회는 수집 종료일 주문만 유지해
+      // 어제/이전 처리완료 건이 오늘 발주 목록에 재등장하지 않게 한다.
+      const confirmedOrderYmd = compactYmd(end);
       const stageQueries = explicitStatusCode
         ? [{ ifCplYN: text(params.ifCplYN || params.if_cpl_yn), stage: "", statusCode: explicitStatusCode }]
         : [
@@ -134,6 +139,7 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
           const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
           const data = await readJson(response);
           for (const row of findRows(data)) {
+            if (!explicitStatusCode && stageQuery.ifCplYN === "Y" && confirmedOrderYmd && lotteonOrderYmd(row) !== confirmedOrderYmd) continue;
             const key = [row.odNo, row.orderNo, row.odSeq, row.odDtlSeq, row.procSeq, row.spdNo, row.pdNo, row.sitmNo].map(text).join("|");
             if (key && seenRowKeys.has(key)) continue;
             if (key) seenRowKeys.add(key);
