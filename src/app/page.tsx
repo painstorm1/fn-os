@@ -7927,7 +7927,7 @@ function onlineWorkspaceBridgeTarget() {
   const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
   const url = isLocalPage
     ? "/api/fnos/online-workspace"
-    : `${(savedBridgeOrigin || "http://192.168.0.27:3000").replace(/\/$/, "")}/api/fnos/online-workspace`;
+    : `${(savedBridgeOrigin || "http://192.168.0.27:3010").replace(/\/$/, "")}/api/fnos/online-workspace`;
   return { url, isLocalPage };
 }
 
