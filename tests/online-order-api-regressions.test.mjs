@@ -140,8 +140,8 @@ function ssgShippingIds(row) {
 
 function ssgOrderStatus(row) {
   const firstText = (...values) => values.map((value) => String(value ?? "").trim()).find(Boolean) || "";
-  const newCodes = ["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"];
-  const confirmedCodes = ["11", "011", "12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"];
+  const newCodes = ["11", "011", "PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"];
+  const confirmedCodes = ["12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"];
   const detailCode = firstText(row.shppProgStatDtlCd).replace(/[\s_()/.-]+/g, "").toUpperCase();
   if (detailCode) {
     if (newCodes.includes(detailCode)) return "신규주문";
@@ -267,7 +267,7 @@ test("11번가 배송처리 -3313 이미 배송중 응답은 멱등 성공으로
   assert.match(elevenstSource, /mode === "dispatch" && isIdempotentElevenstDispatchStatus\(status\)/);
 });
 
-test("SSG 주문확인/출고완료는 shppNo/shppSeq native ID를 우선 사용하고 상태를 신규주문으로 역행시키지 않는다", () => {
+test("SSG 주문확인/출고완료는 shppNo/shppSeq native ID를 우선 사용하고 실제 신규주문 코드를 과상향하지 않는다", () => {
   assert.match(ssgSource, /shppNo: firstText\(row\.shppNo, row\.shpp_no, fromProductShppNo,/);
   assert.match(ssgSource, /shppSeq: firstText\(row\.shppSeq, row\.shpp_seq, fromProductShppSeq,/);
   assert.match(ssgSource, /const detailCode = firstText\(row\.shppProgStatDtlCd\)/);
@@ -275,7 +275,8 @@ test("SSG 주문확인/출고완료는 shppNo/shppSeq native ID를 우선 사용
 
   assert.deepEqual(ssgShippingIds({ shppNo: "SHP-REAL", shppSeq: "3", orderId: "ORD-FALLBACK", productOrderId: "PROD" }), { shppNo: "SHP-REAL", shppSeq: "3" });
   assert.deepEqual(ssgShippingIds({ productOrderId: "SHP-FROM-PRODUCT-7", orderId: "ORD-FALLBACK" }), { shppNo: "SHP-FROM-PRODUCT", shppSeq: "7" });
-  assert.equal(ssgOrderStatus({ shppProgStatDtlCd: "011", ordItemStatNm: "신규주문" }), "주문확인");
+  assert.equal(ssgOrderStatus({ shppProgStatDtlCd: "011", ordStatCd: 120, shppStatCd: 10, shppStatNm: "정상" }), "신규주문");
+  assert.equal(ssgOrderStatus({ shppProgStatDtlCd: "012", ordItemStatNm: "신규주문" }), "주문확인");
 });
 
 test("온라인 주문 sync 저장/최근 출고 필터는 낮은 수집상태와 partial 실패로 기존 상태를 역행시키지 않는다", () => {

@@ -144,14 +144,14 @@ function findRows(data: unknown) {
   roots.forEach(visit);
   return rows;
 }
-const SSG_NEW_ORDER_CODES = ["PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"];
-const SSG_CONFIRMED_ORDER_CODES = ["11", "011", "12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"];
+const SSG_NEW_ORDER_CODES = ["11", "011", "PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"];
+const SSG_CONFIRMED_ORDER_CODES = ["12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"];
 
 function ssgOrderStatus(row: AnyRecord) {
   // shppProgStatDtlCd/Nm은 배송진행 상세 단계(구체적)를 가리키므로, ordItemStatNm/ordStatNm 같은
   // 광범위한 주문항목 상태명(오래된 값일 수 있음)보다 먼저 확인한다.
-  // 현장 확인: SSG 판매자센터의 출고대기(중간단계) 건은 shppProgStatDtlCd=11/011로 내려오지만,
-  // 같은 행의 ordItemStatNm/ordStatNm이 여전히 "신규주문" 텍스트를 담고 있을 수 있다.
+  // 현장 확인: SSG 판매자센터 신규주문 1건이 shppProgStatDtlCd=11, ordStatCd=120,
+  // shppStatCd=10, shppStatNm="정상"으로 내려왔다. 11/011은 신규주문으로 둔다.
   const detailCode = firstText(row.shppProgStatDtlCd);
   const compactDetail = detailCode.replace(/[\s_()/.-]+/g, "").toUpperCase();
   if (compactDetail) {
