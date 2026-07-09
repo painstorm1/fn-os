@@ -100,6 +100,18 @@ function statusAfterRebuild(existingStatus, rebuiltStatus) {
   return rebuiltRank >= existingRank ? rebuiltStatus : existingStatus;
 }
 
+function persistedStatusAfterCollection(existingStatus, order) {
+  const compact = (value) => String(value ?? "").trim().replace(/[\s_()/.-]+/g, "").toUpperCase();
+  const raw = order.raw || {};
+  const isExplicitSsgNew = String(order.channelName || "").includes("SSG")
+    && order.orderStatus === "신규주문"
+    && ["11", "011"].includes(compact(raw.shppProgStatDtlCd))
+    && compact(raw.ordStatCd) === "120"
+    && compact(raw.shppStatCd) === "10";
+  if (existingStatus === "주문확인" && order.orderStatus === "신규주문" && isExplicitSsgNew) return "신규주문";
+  return statusAfterRebuild(existingStatus, order.orderStatus);
+}
+
 function propagateByShipment(rows, progressRows, sourceIndex, trackingNo) {
   const sourceShipment = progressRows[sourceIndex]?.apiShipmentId || "";
   if (!sourceShipment) return rows;
@@ -160,6 +172,26 @@ test("F2/F5 송장업로드는 기존 진행상태/API 식별자를 보존하고
   assert.equal(statusAfterRebuild("주문확인", "신규주문"), "주문확인");
   assert.equal(statusAfterRebuild("출고대기", "신규주문"), "출고대기");
   assert.equal(statusAfterRebuild("주문확인", "출고대기"), "출고대기");
+});
+
+test("F2/F5 송장업로드는 쇼핑몰코드+수취인+연락처+주소가 모두 같고 기존 주문확인인 행만 매칭/출고대기 처리한다", () => {
+  assert.match(pageSource, /const isInvoiceConfirmedProgressRow = \(index: number\) => salesCellText\(progressValue\(progressRows\[index\] \|\| \[\], "주문상태"\)\) === "주문확인";/);
+  assert.match(pageSource, /const rowMatchesInvoiceIdentity = \(row: string\[\], invoiceKey: string, productKey: string\) => \([\s\S]*invoiceProductCodeKey\(row\[0\]\) === productKey[\s\S]*rowMatchesAddress\(row, invoiceKey\)/);
+  assert.match(pageSource, /!isInvoiceConfirmedProgressRow\(index\)/);
+  assert.match(pageSource, /function applyInvoiceMatchProgressGate\(/);
+  assert.match(pageSource, /matchedSet\.has\(index\) && existingStatus === "주문확인"/);
+  assertNotMatch(pageSource, /trackingByShippingCode\.set\(item\.쇼핑몰코드, item\.송장번호\)/, "legacy 송장업로드가 쇼핑몰코드 단독 매칭을 사용하고 있습니다.");
+
+  const exactMatch = (order, invoice) => order.status === "주문확인"
+    && order.mallCode === invoice.mallCode
+    && order.recipient.replace(/\s+/g, "") === invoice.recipient.replace(/\s+/g, "")
+    && order.phone.replace(/[-\s()]/g, "") === invoice.phone.replace(/[-\s()]/g, "")
+    && order.address.replace(/\s+/g, "") === invoice.address.replace(/\s+/g, "");
+  const invoice = { mallCode: "0709-C-A001", recipient: "홍길동", phone: "01012345678", address: "서울 강남구" };
+  assert.equal(exactMatch({ ...invoice, status: "주문확인" }, invoice), true);
+  assert.equal(exactMatch({ ...invoice, status: "신규주문" }, invoice), false);
+  assert.equal(exactMatch({ ...invoice, status: "주문확인", phone: "01099999999" }, invoice), false);
+  assert.equal(statusAfterRebuild("신규주문", "출고대기"), "출고대기", "generic rebuild는 여전히 상향 가능하므로 F2 전용 gate가 필요합니다.");
 });
 
 test("11번가 등 합포장 행은 같은 API배송묶음ID 기준으로 빈 송장번호를 전파한다", () => {
@@ -281,10 +313,13 @@ test("SSG 주문확인/출고완료는 shppNo/shppSeq native ID를 우선 사용
 
 test("온라인 주문 sync 저장/최근 출고 필터는 낮은 수집상태와 partial 실패로 기존 상태를 역행시키지 않는다", () => {
   assert.match(syncRouteSource, /const existingByNo = await existingOrdersByNo\(channel, orders\.map\(\(order\) => order\.orderNo\)\)/);
-  assert.match(syncRouteSource, /orderStatusAdvanceRank\(existingStatus\) > orderStatusAdvanceRank\(collectedStatus\)/);
+  assert.match(syncRouteSource, /function collectedOrderStatusForPersist\(/);
+  assert.match(syncRouteSource, /function isSsgExplicitNewOrderStatus\(/);
   assert.match(syncRouteSource, /function statusJobChannelSucceeded\(/);
   assert.match(syncRouteSource, /if \(!statusJobChannelSucceeded\(job, channelName\)\) return;/);
 
   assert.equal(statusAfterRebuild("출고완료", "주문확인"), "출고완료");
   assert.equal(statusAfterRebuild("출고대기", "신규주문"), "출고대기");
+  assert.equal(persistedStatusAfterCollection("주문확인", { channelName: "SSG신세계", orderStatus: "신규주문", raw: { shppProgStatDtlCd: 11, ordStatCd: 120, shppStatCd: 10 } }), "신규주문");
+  assert.equal(persistedStatusAfterCollection("출고완료", { channelName: "SSG신세계", orderStatus: "신규주문", raw: { shppProgStatDtlCd: 11, ordStatCd: 120, shppStatCd: 10 } }), "출고완료");
 });

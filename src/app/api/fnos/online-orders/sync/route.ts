@@ -98,6 +98,36 @@ function orderStatusAdvanceRank(value: unknown) {
   return orderStatusRank[text(value)] ?? -1;
 }
 
+function compactStatusCode(value: unknown) {
+  return text(value).replace(/[\s_()/.-]+/g, "").toUpperCase();
+}
+
+function isSsgChannel(channel: AnyRecord, order?: NormalizedOrder) {
+  const channelCode = text(channel.channel_code || order?.channelCode).toUpperCase();
+  const channelName = text(channel.channel_name || order?.channelName);
+  return channelCode === "SSG" || channelName.includes("SSG") || channelName.includes("신세계");
+}
+
+function isSsgExplicitNewOrderStatus(channel: AnyRecord, order: NormalizedOrder) {
+  if (!isSsgChannel(channel, order) || text(order.orderStatus) !== "신규주문") return false;
+  const raw = record(order.raw);
+  const detailCode = compactStatusCode(raw.shppProgStatDtlCd);
+  const orderCode = compactStatusCode(raw.ordStatCd);
+  const shippingCode = compactStatusCode(raw.shppStatCd);
+  return (detailCode === "11" || detailCode === "011") && orderCode === "120" && shippingCode === "10";
+}
+
+function collectedOrderStatusForPersist(channel: AnyRecord, existingStatusValue: unknown, order: NormalizedOrder) {
+  const collectedStatus = text(order.orderStatus) || null;
+  const existingStatus = text(existingStatusValue);
+  if (existingStatus === "주문확인" && collectedStatus === "신규주문" && isSsgExplicitNewOrderStatus(channel, order)) {
+    return collectedStatus;
+  }
+  return existingStatus && orderStatusAdvanceRank(existingStatus) > orderStatusAdvanceRank(collectedStatus)
+    ? existingStatus
+    : collectedStatus;
+}
+
 function kstYmd(date = new Date()) {
   const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
@@ -617,11 +647,8 @@ async function persistOrders(channel: AnyRecord, orders: NormalizedOrder[]) {
   const existingByNo = await existingOrdersByNo(channel, orders.map((order) => order.orderNo));
   const orderRows = orders.map((order) => {
     const existing = existingByNo.get(order.orderNo);
-    const collectedStatus = order.orderStatus || null;
     const existingStatus = text(existing?.order_status);
-    const orderStatus = existingStatus && orderStatusAdvanceRank(existingStatus) > orderStatusAdvanceRank(collectedStatus)
-      ? existingStatus
-      : collectedStatus;
+    const orderStatus = collectedOrderStatusForPersist(channel, existingStatus, order);
     return {
       channel_id: text(channel.id) || null,
       channel_name: order.channelName || text(channel.channel_name),
