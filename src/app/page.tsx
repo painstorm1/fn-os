@@ -6665,7 +6665,7 @@ function aggregateSalesEntryRows(
       ...entry.row,
       수량: String(entry.qty),
       단가: String(Math.round(averagePrice)),
-      공급가액: String(Math.round(entry.supply)),
+      공급가액: String(Math.round(averagePrice)),
       합계금액: String(Math.round(entry.total)),
       메모: mode === "sales" ? "" : Array.from(entry.memo).join(" / "),
     } as Record<string, string>;
@@ -7667,6 +7667,7 @@ function appendCollectedOnlineOrdersToSheets(
 
       const qty = onlineOrderMoney(item.qty) || 1;
       const amount = onlineOrderSettlementAmount(item, channelName, channelCode);
+      const unitAmount = amount && qty ? amount / qty : 0;
       const mallProductCode = salesCellText(item.channelProductCode || item.channelOptionCode || item.sku);
       const mallProductName = [salesCellText(item.channelProductName), salesCellText(item.channelOptionName)].filter(Boolean).join(" / ") || "온라인 주문";
       const mallProductKey = makeShoppingProductKey(mallProductCode, mallProductName);
@@ -7701,9 +7702,9 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(sale, "FN판매입력", "품목코드", productCode);
       setSalesSheetCell(sale, "FN판매입력", "품목명", productName);
       setSalesSheetCell(sale, "FN판매입력", "수량", qty);
-      setSalesSheetCell(sale, "FN판매입력", "단가", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "공급가액", amount || "");
-      setSalesSheetCell(sale, "FN판매입력", "합계금액", amount ? qty * amount : "");
+      setSalesSheetCell(sale, "FN판매입력", "단가", unitAmount || "");
+      setSalesSheetCell(sale, "FN판매입력", "공급가액", unitAmount || "");
+      setSalesSheetCell(sale, "FN판매입력", "합계금액", amount || "");
       setSalesSheetCell(sale, "FN판매입력", "메모", "");
       saleRows.push(normalizeSalesEntryRow("FN판매입력", sale));
 
