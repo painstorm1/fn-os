@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export const runtime = "nodejs";
@@ -14,6 +14,7 @@ const localBridgeCorsHeaders = {
   "Access-Control-Allow-Origin": "https://fn-os.vercel.app",
   "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
+  "Access-Control-Allow-Private-Network": "true",
 };
 
 function jsonResponse(body: AnyRecord, init?: ResponseInit) {
@@ -81,7 +82,9 @@ async function handleSave(request: NextRequest) {
     };
 
     await mkdir(/* turbopackIgnore: true */ path.dirname(WORKSPACE_FILE_PATH), { recursive: true });
-    await writeFile(/* turbopackIgnore: true */ WORKSPACE_FILE_PATH, JSON.stringify(finalSnapshot), "utf8");
+    const tempPath = `${WORKSPACE_FILE_PATH}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(/* turbopackIgnore: true */ tempPath, JSON.stringify(finalSnapshot), "utf8");
+    await rename(/* turbopackIgnore: true */ tempPath, WORKSPACE_FILE_PATH);
 
     return jsonResponse({ ok: true, snapshot: finalSnapshot });
   } catch (error) {

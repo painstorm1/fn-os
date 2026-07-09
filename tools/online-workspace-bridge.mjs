@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const PORT = Number(process.env.FNOS_ONLINE_WORKSPACE_BRIDGE_PORT || 3010);
@@ -10,6 +10,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
   "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
+  "Access-Control-Allow-Private-Network": "true",
 };
 
 function sendJson(res, status, body) {
@@ -60,7 +61,9 @@ async function saveWorkspaceSnapshot(body) {
   const updatedBy = typeof snapshot.updatedBy === "string" && snapshot.updatedBy.trim() ? snapshot.updatedBy.trim().slice(0, 40) : "unknown-client";
   const finalSnapshot = { ...snapshot, updatedAt: new Date().toISOString(), updatedBy };
   await mkdir(path.dirname(WORKSPACE_FILE_PATH), { recursive: true });
-  await writeFile(WORKSPACE_FILE_PATH, JSON.stringify(finalSnapshot), "utf8");
+  const tempPath = `${WORKSPACE_FILE_PATH}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, JSON.stringify(finalSnapshot), "utf8");
+  await rename(tempPath, WORKSPACE_FILE_PATH);
   return { status: 200, body: { ok: true, snapshot: finalSnapshot } };
 }
 
