@@ -6965,16 +6965,6 @@ type SalesWorkspaceSnapshot = {
   message: string;
   directShippingRows: Record<DirectShippingPartner, string[][]>;
   directShippingSourceIndexes?: DirectShippingSourceIndexes;
-  updatedAt: string;
-  updatedBy: string;
-};
-
-type OnlineWorkspaceSyncState = "idle" | "loading" | "saving" | "saved" | "conflict" | "offline" | "error";
-type OnlineWorkspaceSyncStatus = {
-  state: OnlineWorkspaceSyncState;
-  message: string;
-  savedAt?: string;
-  savedBy?: string;
 };
 
 type CollectedOnlineOrderItem = {
@@ -7934,98 +7924,6 @@ async function clearSalesWorkspaceFiles() {
 function clearSalesWorkspaceStorage() {
   localStorage.removeItem(SALES_WORKSPACE_STORAGE_KEY);
   void clearSalesWorkspaceFiles().catch(() => undefined);
-}
-
-function onlineWorkspaceClientName() {
-  try {
-    const saved = window.localStorage.getItem("fnosOnlineWorkspaceClientName");
-    if (saved && saved.trim()) return saved.trim().slice(0, 40);
-  } catch {
-    // localStorage may be unavailable in restricted browser modes.
-  }
-  try {
-    const ua = window.navigator.userAgent || "";
-    const platform = /Windows/.test(ua) ? "Win" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : /iPhone|Android/.test(ua) ? "Mobile" : "PC";
-    const host = window.location.hostname || "host";
-    return `${host}-${platform}`.slice(0, 40);
-  } catch {
-    return "unknown-client";
-  }
-}
-
-function onlineWorkspaceContentCount(snapshot: Partial<SalesWorkspaceSnapshot> | null | undefined) {
-  const sheets = snapshot?.sheets || {};
-  return Object.values(sheets).reduce<number>((total, rows) =>
-    total + (Array.isArray(rows) ? rows.filter((row) => Array.isArray(row) && row.some((value) => String(value ?? "").trim())).length : 0),
-  0);
-}
-
-function onlineWorkspaceHasContent(snapshot: SalesWorkspaceSnapshot) {
-  return onlineWorkspaceContentCount(snapshot) > 0 || snapshot.uploadedFileNames.length > 0 || snapshot.pendingOrderFileNames.length > 0 || snapshot.pendingInvoiceFileNames.length > 0 || Boolean(snapshot.message.trim());
-}
-
-function onlineWorkspaceBridgeTarget() {
-  const hostname = window.location.hostname;
-  const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-  const isLocalPage = isLoopbackHost || window.location.port === "3000";
-  const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
-  const url = isLocalPage
-    ? "/api/fnos/online-workspace"
-    : `${(savedBridgeOrigin || "http://192.168.0.27:3010").replace(/\/$/, "")}/api/fnos/online-workspace`;
-  return { url, isLocalPage };
-}
-
-async function fetchOnlineWorkspaceServerSnapshot(): Promise<{ ok: boolean; snapshot: SalesWorkspaceSnapshot | null; error: string }> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 6_000);
-  try {
-    const { url, isLocalPage } = onlineWorkspaceBridgeTarget();
-    const res = await fetch(url, {
-      method: "GET",
-      mode: isLocalPage ? "same-origin" : "cors",
-      credentials: isLocalPage ? "include" : "omit",
-      headers: isLocalPage ? undefined : { "X-FNOS-Local-Bridge": "1" },
-      cache: "no-store",
-      signal: controller.signal,
-      fnosSkipBusyOverlay: true,
-    } as RequestInit & { fnosSkipBusyOverlay: boolean });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) return { ok: false, snapshot: null, error: String(data.error || "미니PC 서버 작업공간 조회 실패") };
-    return { ok: true, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
-  } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError" ? "미니PC 브릿지 응답 지연" : "미니PC 브릿지 연결 실패";
-    return { ok: false, snapshot: null, error: message };
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapshot, expectedUpdatedAt: string): Promise<{ ok: boolean; conflict: boolean; snapshot: SalesWorkspaceSnapshot | null; error: string }> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 6_000);
-  try {
-    const { url, isLocalPage } = onlineWorkspaceBridgeTarget();
-    const res = await fetch(url, {
-      method: "PUT",
-      mode: isLocalPage ? "same-origin" : "cors",
-      credentials: isLocalPage ? "include" : "omit",
-      headers: { "Content-Type": "application/json", ...(isLocalPage ? {} : { "X-FNOS-Local-Bridge": "1" }) },
-      body: JSON.stringify({ snapshot, expectedUpdatedAt }),
-      signal: controller.signal,
-      fnosSkipBusyOverlay: true,
-    } as RequestInit & { fnosSkipBusyOverlay: boolean });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 409 && data.conflict) {
-      return { ok: true, conflict: true, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: String(data.error || "") };
-    }
-    if (!res.ok || data.ok === false) return { ok: false, conflict: false, snapshot: null, error: String(data.error || "미니PC 서버 작업공간 저장 실패") };
-    return { ok: true, conflict: false, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
-  } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError" ? "미니PC 브릿지 응답 지연: 이 PC 로컬 캐시만 유지합니다." : "미니PC 브릿지 연결 실패: 이 PC 로컬 캐시만 유지합니다.";
-    return { ok: false, conflict: false, snapshot: null, error: message };
-  } finally {
-    window.clearTimeout(timeout);
-  }
 }
 
 const jbDirectHeaders = [
@@ -11473,12 +11371,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
   const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
-  const [onlineWorkspaceSyncStatus, setOnlineWorkspaceSyncStatus] = useState<OnlineWorkspaceSyncStatus>({ state: "idle", message: "" });
-  const [onlineWorkspaceAlert, setOnlineWorkspaceAlert] = useState<OnlineWorkspaceSyncStatus | null>(null);
-  const onlineWorkspaceServerUpdatedAtRef = useRef("");
-  const onlineWorkspaceSkipNextSaveRef = useRef(true);
-  const onlineWorkspaceSaveSeqRef = useRef(0);
-  const onlineWorkspaceAlertKeyRef = useRef("");
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
@@ -11903,108 +11795,32 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isHistorySection, historyMode]);
 
-  function applyOnlineWorkspaceServerSnapshot(serverSnapshot: SalesWorkspaceSnapshot) {
-    if (serverSnapshot.activeSheet && salesSheetHeaders[serverSnapshot.activeSheet]) setActiveSheet(serverSnapshot.activeSheet);
-    if (serverSnapshot.sheets) {
-      setSheets({
-        "발주 진행 단계": padSalesRows("발주 진행 단계", serverSnapshot.sheets["발주 진행 단계"] || []),
-        송장출력용: padSalesRows("송장출력용", serverSnapshot.sheets.송장출력용 || []),
-        FN송장입력: padSalesRows("FN송장입력", serverSnapshot.sheets.FN송장입력 || []),
-        "FN판매입력": padSalesRows("FN판매입력", serverSnapshot.sheets["FN판매입력"] || []),
-        "FN구매입력": padSalesRows("FN구매입력", serverSnapshot.sheets["FN구매입력"] || []),
-      });
-    }
-    setCompletedSalesTasks(serverSnapshot.completedSalesTasks || {});
-    setOrderFilePassword(serverSnapshot.orderFilePassword || "");
-    setMessage(serverSnapshot.message || "");
-    setDirectShippingRows(serverSnapshot.directShippingRows || { JB: [], 케이모아: [] });
-    setDirectShippingSourceIndexes(serverSnapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
-  }
-
   useEffect(() => {
     let cancelled = false;
     async function restoreWorkspace() {
-      let appliedFromServer = false;
-      let localSnapshot: Partial<SalesWorkspaceSnapshot> | null = null;
       try {
         const raw = localStorage.getItem(SALES_WORKSPACE_STORAGE_KEY);
-        if (raw) localSnapshot = JSON.parse(raw) as Partial<SalesWorkspaceSnapshot>;
-      } catch {
-        localSnapshot = null;
-      }
-      try {
-        setOnlineWorkspaceSyncStatus({ state: "loading", message: "미니PC 공유 작업공간을 불러오는 중..." });
-        const serverResult = await fetchOnlineWorkspaceServerSnapshot();
-        if (cancelled) return;
-        if (serverResult.ok && serverResult.snapshot) {
-          const serverSnapshot = serverResult.snapshot;
-          if (serverSnapshot.dayKey === salesWorkspaceDayKey()) {
-            const localTodaySnapshot = localSnapshot?.dayKey === salesWorkspaceDayKey() ? localSnapshot : null;
-            if (localTodaySnapshot && onlineWorkspaceContentCount(localTodaySnapshot) > onlineWorkspaceContentCount(serverSnapshot)) {
-              if (localTodaySnapshot.activeSheet && salesSheetHeaders[localTodaySnapshot.activeSheet]) setActiveSheet(localTodaySnapshot.activeSheet);
-              if (localTodaySnapshot.sheets) {
-                setSheets({
-                  "발주 진행 단계": padSalesRows("발주 진행 단계", localTodaySnapshot.sheets["발주 진행 단계"] || []),
-                  송장출력용: padSalesRows("송장출력용", localTodaySnapshot.sheets.송장출력용 || []),
-                  FN송장입력: padSalesRows("FN송장입력", localTodaySnapshot.sheets.FN송장입력 || []),
-                  "FN판매입력": padSalesRows("FN판매입력", localTodaySnapshot.sheets["FN판매입력"] || []),
-                  "FN구매입력": padSalesRows("FN구매입력", localTodaySnapshot.sheets["FN구매입력"] || []),
-                });
-              }
-              setCompletedSalesTasks(localTodaySnapshot.completedSalesTasks || {});
-              setOrderFilePassword(localTodaySnapshot.orderFilePassword || "");
-              setMessage(localTodaySnapshot.message || "");
-              setDirectShippingRows(localTodaySnapshot.directShippingRows || { JB: [], 케이모아: [] });
-              setDirectShippingSourceIndexes(localTodaySnapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
-              onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
-              onlineWorkspaceSkipNextSaveRef.current = false;
-              setOnlineWorkspaceSyncStatus({ state: "idle", message: "" });
-            } else {
-              applyOnlineWorkspaceServerSnapshot(serverSnapshot);
-              onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
-              appliedFromServer = true;
-              setOnlineWorkspaceSyncStatus({
-                state: "saved",
-                message: "미니PC 공유 작업공간에서 복원했습니다.",
-                savedAt: serverSnapshot.updatedAt,
-                savedBy: serverSnapshot.updatedBy,
-              });
-            }
-          } else {
-            setOnlineWorkspaceSyncStatus({ state: "idle", message: "미니PC 서버에 이전 날짜 작업공간이 남아있어 오늘 날짜로 새로 시작합니다." });
-          }
-        } else if (!serverResult.ok) {
-          setOnlineWorkspaceSyncStatus({ state: "offline", message: serverResult.error || "미니PC 서버에 연결하지 못해 로컬 캐시를 사용합니다." });
-        } else {
-          setOnlineWorkspaceSyncStatus({ state: "idle", message: "" });
+        if (!raw) return;
+        const snapshot = JSON.parse(raw) as Partial<SalesWorkspaceSnapshot>;
+        if (snapshot.dayKey !== salesWorkspaceDayKey()) {
+          clearSalesWorkspaceStorage();
+          return;
         }
-      } catch {
-        if (!cancelled) setOnlineWorkspaceSyncStatus({ state: "offline", message: "미니PC 서버 연결 실패, 로컬 캐시를 사용합니다." });
-      }
-      try {
-        const raw = localStorage.getItem(SALES_WORKSPACE_STORAGE_KEY);
-        if (raw) {
-          const snapshot = JSON.parse(raw) as Partial<SalesWorkspaceSnapshot>;
-          if (snapshot.dayKey !== salesWorkspaceDayKey()) {
-            clearSalesWorkspaceStorage();
-          } else if (!appliedFromServer) {
-            if (snapshot.activeSheet && salesSheetHeaders[snapshot.activeSheet]) setActiveSheet(snapshot.activeSheet);
-            if (snapshot.sheets) {
-              setSheets({
-                "발주 진행 단계": padSalesRows("발주 진행 단계", snapshot.sheets["발주 진행 단계"] || []),
-                송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
-                FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
-                "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
-                "FN구매입력": padSalesRows("FN구매입력", snapshot.sheets["FN구매입력"] || []),
-              });
-            }
-            setCompletedSalesTasks(snapshot.completedSalesTasks || {});
-            setOrderFilePassword(snapshot.orderFilePassword || "");
-            setMessage(snapshot.message || "");
-            setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
-            setDirectShippingSourceIndexes(snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
-          }
+        if (snapshot.activeSheet && salesSheetHeaders[snapshot.activeSheet]) setActiveSheet(snapshot.activeSheet);
+        if (snapshot.sheets) {
+          setSheets({
+            "발주 진행 단계": padSalesRows("발주 진행 단계", snapshot.sheets["발주 진행 단계"] || []),
+            송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
+            FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
+            "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
+            "FN구매입력": padSalesRows("FN구매입력", snapshot.sheets["FN구매입력"] || []),
+          });
         }
+        setCompletedSalesTasks(snapshot.completedSalesTasks || {});
+        setOrderFilePassword(snapshot.orderFilePassword || "");
+        setMessage(snapshot.message || "");
+        setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
+        setDirectShippingSourceIndexes(snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
         const [storedUploaded, storedOrders, storedInvoices] = await Promise.all([
           loadSalesWorkspaceFiles("uploaded"),
           loadSalesWorkspaceFiles("pendingOrders"),
@@ -12016,7 +11832,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setPendingInvoiceFiles(storedInvoices);
         setSalesGridResetKey((value) => value + 1);
       } catch {
-        if (!appliedFromServer) clearSalesWorkspaceStorage();
+        clearSalesWorkspaceStorage();
       } finally {
         if (!cancelled) setWorkspaceRestored(true);
       }
@@ -12043,12 +11859,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           message,
           directShippingRows,
           directShippingSourceIndexes,
-          updatedAt: new Date().toISOString(),
-          updatedBy: onlineWorkspaceClientName(),
         };
-        if (!onlineWorkspaceHasContent(snapshot) && onlineWorkspaceServerUpdatedAtRef.current) {
-          return;
-        }
         localStorage.setItem(SALES_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
       } catch {
         // 작업실 저장 공간이 부족하면 화면 작업은 그대로 유지하고, 다음 초기화 때 정리한다.
@@ -12056,102 +11867,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [workspaceRestored, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows, directShippingSourceIndexes]);
-
-  useEffect(() => {
-    if (!workspaceRestored || section !== "online") return undefined;
-    if (onlineWorkspaceSkipNextSaveRef.current) {
-      onlineWorkspaceSkipNextSaveRef.current = false;
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const snapshot: SalesWorkspaceSnapshot = {
-          dayKey: salesWorkspaceDayKey(),
-          activeSheet,
-          sheets,
-          uploadedFileNames: uploadedFiles.map((file) => file.name),
-          pendingOrderFileNames: pendingOrderFiles.map((file) => file.name),
-          pendingInvoiceFileNames: pendingInvoiceFiles.map((file) => file.name),
-          completedSalesTasks,
-          orderFilePassword,
-          message,
-          directShippingRows,
-          directShippingSourceIndexes,
-          updatedAt: new Date().toISOString(),
-          updatedBy: onlineWorkspaceClientName(),
-        };
-        setOnlineWorkspaceSyncStatus((prev) => ({ ...prev, state: "saving", message: "미니PC 서버에 저장 중..." }));
-        const saveSeq = ++onlineWorkspaceSaveSeqRef.current;
-        const expectedUpdatedAt = onlineWorkspaceServerUpdatedAtRef.current;
-        const result = await saveOnlineWorkspaceServerSnapshot(snapshot, expectedUpdatedAt);
-        if (saveSeq !== onlineWorkspaceSaveSeqRef.current) return;
-        if (!result.ok) {
-          setOnlineWorkspaceSyncStatus({ state: "error", message: result.error || "미니PC 연결 실패: 서버 복원은 멈추고 이 PC 로컬 캐시만 유지합니다." });
-          return;
-        }
-        if (result.conflict && result.snapshot) {
-          if (result.error.includes("빈 작업공간")) {
-            onlineWorkspaceServerUpdatedAtRef.current = result.snapshot.updatedAt || "";
-            setOnlineWorkspaceSyncStatus({
-              state: "conflict",
-              message: result.error,
-              savedAt: result.snapshot.updatedAt,
-              savedBy: result.snapshot.updatedBy,
-            });
-            return;
-          }
-          const serverSnapshot = result.snapshot;
-          onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
-          const retry = await saveOnlineWorkspaceServerSnapshot(snapshot, onlineWorkspaceServerUpdatedAtRef.current);
-          if (saveSeq !== onlineWorkspaceSaveSeqRef.current) return;
-          if (retry.ok && retry.snapshot && !retry.conflict) {
-            onlineWorkspaceServerUpdatedAtRef.current = retry.snapshot.updatedAt || snapshot.updatedAt;
-            setOnlineWorkspaceSyncStatus({
-              state: "saved",
-              message: "다른 PC 저장과 충돌했지만, 현재 이 PC 작업내용을 다시 저장했습니다.",
-              savedAt: retry.snapshot.updatedAt || snapshot.updatedAt,
-              savedBy: retry.snapshot.updatedBy || snapshot.updatedBy,
-            });
-          } else {
-            if (retry.snapshot?.updatedAt) onlineWorkspaceServerUpdatedAtRef.current = retry.snapshot.updatedAt;
-            setOnlineWorkspaceSyncStatus({
-              state: "conflict",
-              message: "다른 PC 저장과 충돌했습니다. 화면은 현재 이 PC 작업내용을 유지합니다. 새로고침 전 확인해 주세요.",
-              savedAt: serverSnapshot.updatedAt,
-              savedBy: serverSnapshot.updatedBy,
-            });
-          }
-          return;
-        }
-        if (result.snapshot) {
-          onlineWorkspaceServerUpdatedAtRef.current = result.snapshot.updatedAt || snapshot.updatedAt;
-          setOnlineWorkspaceSyncStatus({
-            state: "saved",
-            message: "미니PC 공유 작업공간에 저장했습니다.",
-            savedAt: result.snapshot.updatedAt || snapshot.updatedAt,
-            savedBy: result.snapshot.updatedBy || snapshot.updatedBy,
-          });
-        }
-      })();
-    }, 1200);
-    return () => window.clearTimeout(timer);
-  }, [workspaceRestored, section, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows, directShippingSourceIndexes]);
-
-  useEffect(() => {
-    const message = onlineWorkspaceSyncStatus.message;
-    const isProblemState = onlineWorkspaceSyncStatus.state === "offline" || onlineWorkspaceSyncStatus.state === "error" || onlineWorkspaceSyncStatus.state === "conflict";
-    const isTransientDelay = message.includes("응답 지연");
-    const shouldShowAlert = isProblemState && Boolean(message) && !isTransientDelay;
-    if (onlineWorkspaceSyncStatus.state === "saved" || (onlineWorkspaceSyncStatus.state === "idle" && !message)) {
-      onlineWorkspaceAlertKeyRef.current = "";
-      return;
-    }
-    if (!shouldShowAlert) return;
-    const key = [onlineWorkspaceSyncStatus.state, message].join("|");
-    if (onlineWorkspaceAlertKeyRef.current === key) return;
-    onlineWorkspaceAlertKeyRef.current = key;
-    setOnlineWorkspaceAlert(onlineWorkspaceSyncStatus);
-  }, [onlineWorkspaceSyncStatus]);
 
   useEffect(() => {
     if (!workspaceRestored) return;
@@ -12831,17 +12546,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           if (index >= 0) purchase[index] = value;
         };
         setPurchase("일자", today);
-        setPurchase("거래처코드", directCustomer.code);
-        setPurchase("거래처명", directCustomer.name);
-        setPurchase("입고창고", "100");
-        setPurchase("VAT 포함/별도", "포함");
+        setPurchase("거래처코드", enrichedSource.거래처코드 || directCustomer.code);
+        setPurchase("거래처명", enrichedSource.거래처명 || directCustomer.name);
+        setPurchase("입고창고", enrichedSource.입고창고 || "100");
+        setPurchase("VAT 포함/별도", enrichedSource["VAT 포함/별도"] || "포함");
         setPurchase("품목코드", enrichedSource.품목코드 || "");
         setPurchase("품목명", enrichedSource.품목명 || "");
         setPurchase("수량", enrichedSource.수량 || "1");
         setPurchase("단가", enrichedSource.단가 || "");
         setPurchase("공급가액", enrichedSource.공급가액 || "");
         setPurchase("합계금액", enrichedSource.합계금액 || "");
-        setPurchase("메모", "");
+        setPurchase("메모", enrichedSource.메모 || "");
         purchaseRows.push(purchase);
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
@@ -16481,34 +16196,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </div>
         }
       />
-      {onlineWorkspaceAlert && (
-        <FormModal
-          title="미니PC 공유 작업공간 확인 필요"
-          description="온라인발주 공유 작업공간 연결/저장 상태에 문제가 있을 때만 표시됩니다."
-          onClose={() => setOnlineWorkspaceAlert(null)}
-          size="md"
-          footer={
-            <ActionButton type="button" variant="primary" onClick={() => setOnlineWorkspaceAlert(null)}>
-              확인
-            </ActionButton>
-          }
-        >
-          <div className="space-y-3 text-sm font-bold text-slate-700">
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-              {onlineWorkspaceAlert.message}
-            </p>
-            {onlineWorkspaceAlert.savedAt && (
-              <p className="text-xs text-slate-500">
-                기준 시간: {new Date(onlineWorkspaceAlert.savedAt).toLocaleString("ko-KR")}
-                {onlineWorkspaceAlert.savedBy ? ` · ${onlineWorkspaceAlert.savedBy}` : ""}
-              </p>
-            )}
-            <p className="text-xs leading-5 text-slate-500">
-              현재 화면 작업내용은 유지됩니다. 연결 문제가 계속되면 새로고침 전 현재 온라인발주 내역을 확인하고, 미니PC 3010 브릿지 상태를 점검해 주세요.
-            </p>
-          </div>
-        </FormModal>
-      )}
       {quickLookupOpen && (
         <FormModal
           title="상품 간편 조회"

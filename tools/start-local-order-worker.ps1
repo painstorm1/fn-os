@@ -4,7 +4,6 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $NodeCommand = Get-Command node -ErrorAction Stop
 $NodeExe = $NodeCommand.Source
 $Port = 3000
-$WorkspaceBridgePort = 3010
 $LocalOrigin = $env:FN_WORKER_EXECUTION_ORIGIN
 $ProdOrigin = $env:FN_OS_ORIGIN
 
@@ -84,27 +83,6 @@ if (-not (Test-WorkerRunning)) {
   }
 }
 
-function Test-WorkspaceBridgeRunning {
-  $escapedRepo = [Regex]::Escape($RepoRoot.Path)
-  $processes = Get-CimInstance Win32_Process -Filter "name = 'node.exe'" -ErrorAction SilentlyContinue
-  return [bool]($processes | Where-Object {
-    $_.CommandLine -match "online-workspace-bridge\.mjs" -and $_.CommandLine -match $escapedRepo
-  } | Select-Object -First 1)
-}
-
-if (-not (Test-LocalPort -TargetPort $WorkspaceBridgePort) -or -not (Test-WorkspaceBridgeRunning)) {
-  Start-Process `
-    -FilePath $NodeExe `
-    -ArgumentList @("tools\online-workspace-bridge.mjs") `
-    -WorkingDirectory $RepoRoot.Path `
-    -WindowStyle Hidden
-}
-
-if (-not (Wait-LocalPort -TargetPort $WorkspaceBridgePort)) {
-  throw "Online workspace bridge did not open on port $WorkspaceBridgePort."
-}
-
 Write-Host "FN OS local order worker is ready."
 Write-Host "Web origin: $ProdOrigin"
 Write-Host "Local execution origin: $LocalOrigin"
-Write-Host "Online workspace bridge: http://0.0.0.0:$WorkspaceBridgePort/api/fnos/online-workspace"
