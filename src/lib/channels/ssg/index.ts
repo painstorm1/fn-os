@@ -50,23 +50,29 @@ function ssgTextValue(value: unknown) {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 }
 function normalizeSsgAddressText(value: unknown) {
-  return ssgTextValue(value)
-    .replace(/\s+/g, " ")
-    .replace(/\s*(?:GMARKET|G마켓|AUCTION|옥션|ESM)\s*\(?\s*\d{2,4}[-\s]?\d{3,4}[-\s]?\d{4}\s*\)?\s*$/i, "")
+  return ssgTextValue(value).replace(/\s+/g, " ").trim();
+}
+function ssgAddressShapeText(value: unknown) {
+  return normalizeSsgAddressText(value)
+    .replace(/\s*(?:GMARKET|G마켓|AUCTION|옥션|ESM)\s*[\s\S]*?(?:\d{7,}|tel:)[\s\S]*$/i, "")
     .trim();
 }
 function isSsgMarketplaceAlias(value: unknown) {
-  const compact = ssgTextValue(value).replace(/\s+/g, "");
-  return /^(?:GMARKET|G마켓|AUCTION|옥션|ESM)\(?\d{7,}\)?$/i.test(compact);
+  const raw = normalizeSsgAddressText(value);
+  const compact = raw.replace(/\s+/g, "");
+  if (!/^(?:GMARKET|G마켓|AUCTION|옥션|ESM)/i.test(compact)) return false;
+  if (/(?:특별시|광역시|특별자치시|특별자치도|도\s|시\s|군\s|구\s|읍\s|면\s|로\s|길\s|번길|대로)/.test(`${raw} `)) return false;
+  return /(?:\d{7,}|tel:)/i.test(compact) || /^(?:GMARKET|G마켓|AUCTION|옥션|ESM)$/i.test(compact);
 }
 function isSsgBaseAddress(value: unknown) {
-  const normalized = normalizeSsgAddressText(value);
+  const normalized = ssgAddressShapeText(value);
   if (!normalized || isSsgMarketplaceAlias(value)) return false;
-  return /(?:특별시|광역시|특별자치시|특별자치도|도\s|시\s|군\s|구\s|읍\s|면\s|동\s|로\s|길\s|번길|대로)/.test(`${normalized} `);
+  return /(?:특별시|광역시|특별자치시|특별자치도|도\s|시\s|군\s|구\s|읍\s|면\s|로\s|길\s|번길|대로)/.test(`${normalized} `);
 }
 function isSsgDetailAddress(value: unknown) {
   const normalized = normalizeSsgAddressText(value);
-  return Boolean(normalized && !isSsgMarketplaceAlias(value));
+  const compact = normalized.replace(/\s+/g, "");
+  return Boolean(normalized && !/^(?:\d{7,}|<?tel:\d{7,})/i.test(compact));
 }
 function ssgAddressRecords(row: AnyRecord) {
   return [
@@ -164,6 +170,7 @@ function ssgShippingAddress(row: AnyRecord) {
     "rcptpeDtlAddr",
     "receiverDetailAddress",
   ], isSsgDetailAddress);
+  if (!base) return isSsgBaseAddress(detail) ? detail : "";
   return joinedSsgAddress(base, detail);
 }
 function arrayify(value: unknown): unknown[] { if (Array.isArray(value)) return value; if (value === undefined || value === null || value === "") return []; return [value]; }
