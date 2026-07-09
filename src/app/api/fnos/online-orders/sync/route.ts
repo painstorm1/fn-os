@@ -143,6 +143,21 @@ function statusJobRowIdentities(row: AnyRecord) {
   return ids;
 }
 
+function sameChannelName(left: unknown, right: unknown) {
+  const a = text(left);
+  const b = text(right);
+  return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
+}
+
+function statusJobChannelSucceeded(job: AnyRecord, channelName: string) {
+  const result = record(job.result_json);
+  const results = Array.isArray(result.results) ? result.results.map(record) : [];
+  if (!results.length) return true;
+  const matchingResults = results.filter((row) => sameChannelName(firstText(row.channel_name, row.channelName, row.mallName, row.mall_name), channelName));
+  if (!matchingResults.length) return false;
+  return matchingResults.some((row) => row.ok !== false);
+}
+
 function persistedOrderIdentities(row: AnyRecord) {
   const ids = new Set<string>();
   const raw = record(row.raw_payload);
@@ -178,6 +193,7 @@ async function recentlyDispatchedOrderNos(channel: AnyRecord) {
   rows.forEach((job) => {
     const input = record(job.input_json);
     if (text(input.action) !== "dispatch") return;
+    if (!statusJobChannelSucceeded(job, channelName)) return;
     const jobRows = Array.isArray(input.rows) ? input.rows.map(record) : [];
     jobRows.forEach((row) => {
       const rowChannel = firstText(row.channelName, row.channel_name, row.mallName, row.mall_name);
@@ -598,23 +614,32 @@ async function logSync(row: AnyRecord) {
 async function persistOrders(channel: AnyRecord, orders: NormalizedOrder[]) {
   if (!orders.length) return [];
   const now = new Date().toISOString();
-  const orderRows = orders.map((order) => ({
-    channel_id: text(channel.id) || null,
-    channel_name: order.channelName || text(channel.channel_name),
-    order_no: order.orderNo,
-    bundle_order_no: order.bundleOrderNo || null,
-    order_date: order.orderDate || null,
-    order_status: order.orderStatus || null,
-    receiver_name: order.receiverName || null,
-    phone1: order.phone1 || null,
-    phone2: order.phone2 || null,
-    zipcode: order.zipcode || null,
-    address: order.address || null,
-    delivery_message: order.deliveryMessage || null,
-    raw_payload: order.raw || order,
-    collected_at: now,
-    updated_at: now,
-  }));
+  const existingByNo = await existingOrdersByNo(channel, orders.map((order) => order.orderNo));
+  const orderRows = orders.map((order) => {
+    const existing = existingByNo.get(order.orderNo);
+    const collectedStatus = order.orderStatus || null;
+    const existingStatus = text(existing?.order_status);
+    const orderStatus = existingStatus && orderStatusAdvanceRank(existingStatus) > orderStatusAdvanceRank(collectedStatus)
+      ? existingStatus
+      : collectedStatus;
+    return {
+      channel_id: text(channel.id) || null,
+      channel_name: order.channelName || text(channel.channel_name),
+      order_no: order.orderNo,
+      bundle_order_no: order.bundleOrderNo || null,
+      order_date: order.orderDate || null,
+      order_status: orderStatus,
+      receiver_name: order.receiverName || null,
+      phone1: order.phone1 || null,
+      phone2: order.phone2 || null,
+      zipcode: order.zipcode || null,
+      address: order.address || null,
+      delivery_message: order.deliveryMessage || null,
+      raw_payload: order.raw || order,
+      collected_at: now,
+      updated_at: now,
+    };
+  });
   const savedOrders = await upsertRows<AnyRecord>("orders", orderRows, "channel_name,order_no");
   const orderIdByNo = new Map(savedOrders.map((row) => [text(row.order_no), text(row.id)]));
 

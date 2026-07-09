@@ -204,7 +204,10 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
 
 function ssgShippingIds(row: AnyRecord) {
   const productOrderId = firstText(row.productOrderId, row.product_order_id);
-  const [fromProductShppNo, fromProductShppSeq] = productOrderId.includes("-") ? productOrderId.split("-", 2) : ["", ""];
+  const productOrderIdSeparator = productOrderId.lastIndexOf("-");
+  const [fromProductShppNo, fromProductShppSeq] = productOrderIdSeparator > 0 && productOrderIdSeparator < productOrderId.length - 1
+    ? [productOrderId.slice(0, productOrderIdSeparator), productOrderId.slice(productOrderIdSeparator + 1)]
+    : ["", ""];
   return {
     shppNo: firstText(row.shppNo, row.shpp_no, fromProductShppNo, row.shipmentBoxId, row.shipment_box_id, row.bundleOrderNo, row.bundle_order_no, row.orderId, row.order_id, row.orderNo, row.order_no),
     shppSeq: firstText(row.shppSeq, row.shpp_seq, fromProductShppSeq, row.productOrderId, row.product_order_id) || "1",

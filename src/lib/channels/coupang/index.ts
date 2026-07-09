@@ -118,11 +118,6 @@ function paramsArray(params: Record<string, unknown>, key: string) {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
-function productOrderIdsFromParams(params: Record<string, unknown>) {
-  const explicit = Array.isArray(params.productOrderIds) ? params.productOrderIds.map(text).filter(Boolean) : [];
-  if (explicit.length) return explicit;
-  return paramsArray(params, "dispatchProductOrders").map((row) => text(row.productOrderId || row.product_order_id)).filter(Boolean);
-}
 
 function coupangDispatchRows(params: Record<string, unknown>) {
   return paramsArray(params, "dispatchProductOrders")
@@ -255,9 +250,10 @@ export class CoupangChannelAdapter implements SalesChannelAdapter {
     const vendorId = text(params.vendor_id || params.seller_id || params.api_client_id);
     if (!accessKey || !secretKey || !vendorId) return { ok: false, data: null, error: "쿠팡 Access Key, Secret Key, Vendor ID를 먼저 저장해주세요." };
     const confirmRows = paramsArray(params, "confirmProductOrders");
+    const explicitShipmentBoxIds = Array.isArray(params.shipmentBoxIds) ? params.shipmentBoxIds.map(text).filter(Boolean) : [];
     const shipmentBoxIds = Array.from(new Set((confirmRows.length
-      ? confirmRows.map((row) => text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.orderId || row.order_id || row.orderNo || row.order_no))
-      : productOrderIdsFromParams(params)).filter(Boolean)));
+      ? confirmRows.map((row) => text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.bundleNo || row.bundle_no))
+      : explicitShipmentBoxIds).filter(Boolean)));
     if (!shipmentBoxIds.length) return { ok: false, data: null, error: "쿠팡 상품준비중 처리할 shipmentBoxId가 없습니다." };
     try {
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${encodeURIComponent(vendorId)}/ordersheets/acknowledgement`;
