@@ -240,6 +240,12 @@ function resultStatus(data: unknown) {
   return { code, message };
 }
 
+function isIdempotentElevenstConfirmStatus(status: { code?: string; message?: string }) {
+  const code = text(status.code);
+  const message = text(status.message).replace(/\s+/g, "");
+  return code === "-3206" && (message.includes("이미발주처리") || message.includes("발주처리할건이없"));
+}
+
 function elevenstRealStatusLabel(row: AnyRecord) {
   return firstDeepText(row, [
     "ordPrdStatNm",
@@ -527,6 +533,14 @@ async function callElevenstOrderMutation(
   const parsed = contentType.includes("json") ? JSON.parse(bodyText || "null") : parseXml(bodyText);
   const status = resultStatus(parsed);
   if (status.code && !["0", "1", "100", "200"].includes(status.code)) {
+    if (mode === "confirm" && isIdempotentElevenstConfirmStatus(status)) {
+      return {
+        request: { method, path, payload },
+        response: parsed,
+        idempotent: true,
+        message: status.message || "이미 발주 처리된 주문입니다.",
+      };
+    }
     throw new Error(`11번가 ${mode === "confirm" ? "발주확인" : "배송처리"} API result_code=${status.code}${status.message ? ` - ${status.message}` : ""}`);
   }
   return { request: { method, path, payload }, response: parsed };
