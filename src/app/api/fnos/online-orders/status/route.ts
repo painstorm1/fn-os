@@ -239,6 +239,14 @@ export async function POST(request: NextRequest) {
           orderNo: text(row.orderNo || row.order_no),
           shipmentBoxId: rowShipmentId(row),
           bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
+          vendorItemId: text(row.vendorItemId || row.vendor_item_id),
+          shppNo: text(row.shppNo || row.shpp_no || rowOrderId(row)),
+          shppSeq: text(row.shppSeq || row.shpp_seq || rowProductOrderId(row)),
+          ordNo: text(row.ordNo || row.ord_no || rowOrderId(row)),
+          ordPrdSeq: text(row.ordPrdSeq || row.ord_prd_seq || rowProductOrderId(row)),
+          dlvNo: text(row.dlvNo || row.dlv_no || rowShipmentId(row)),
+          odNo: text(row.odNo || row.od_no || rowOrderId(row)),
+          odSeq: text(row.odSeq || row.od_seq || rowProductOrderId(row)),
           quantity: text(row.quantity || row.qty),
           procSeq: rowApiExtraId(row),
         })).filter((row) => row.productOrderId || row.orderId || row.shipmentBoxId);
@@ -256,11 +264,19 @@ export async function POST(request: NextRequest) {
           orderNo: text(row.orderNo || row.order_no),
           shipmentBoxId: rowShipmentId(row),
           bundleOrderNo: text(row.bundleOrderNo || row.bundle_order_no),
+          vendorItemId: text(row.vendorItemId || row.vendor_item_id),
+          shppNo: text(row.shppNo || row.shpp_no || rowOrderId(row)),
+          shppSeq: text(row.shppSeq || row.shpp_seq || rowProductOrderId(row)),
+          ordNo: text(row.ordNo || row.ord_no || rowOrderId(row)),
+          ordPrdSeq: text(row.ordPrdSeq || row.ord_prd_seq || rowProductOrderId(row)),
+          dlvNo: text(row.dlvNo || row.dlv_no || rowShipmentId(row)),
+          odNo: text(row.odNo || row.od_no || rowOrderId(row)),
+          odSeq: text(row.odSeq || row.od_seq || rowProductOrderId(row)),
           quantity: text(row.quantity || row.qty),
           procSeq: rowApiExtraId(row),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
           deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
-          trackingNumber: text(row.trackingNumber || row.tracking_number).replace(/\D/g, ""),
+          trackingNumber: text(row.trackingNumber || row.tracking_number),
         })).filter((row) => (row.productOrderId || row.orderId || row.shipmentBoxId) && row.trackingNumber);
         const result = adapter.dispatchOrders
           ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
@@ -272,11 +288,13 @@ export async function POST(request: NextRequest) {
 
     if (!results.length) return jsonResponse({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
     const failedResults = results.filter((result) => !result.ok);
+    const succeededResults = results.filter((result) => result.ok);
+    const partial = failedResults.length > 0 && succeededResults.length > 0;
     const error = failedResults
       .map((result) => [text(result.channel_name), text(result.message)].filter(Boolean).join(": "))
       .filter(Boolean)
       .join(" / ") || "온라인 주문 처리 실패";
-    return jsonResponse({ ok: failedResults.length === 0, error: failedResults.length ? error : "", results }, { status: failedResults.length ? 502 : 200 });
+    return jsonResponse({ ok: failedResults.length === 0 || partial, partial, error: failedResults.length ? error : "", results }, { status: failedResults.length && !partial ? 502 : 200 });
   } catch (error) {
     const status = error instanceof FnosDbError ? error.status : 500;
     return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "온라인 주문 처리 실패" }, { status });

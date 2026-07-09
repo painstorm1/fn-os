@@ -129,7 +129,7 @@ function coupangDispatchRows(params: Record<string, unknown>) {
     .map((row) => {
       const productOrderId = text(row.productOrderId || row.product_order_id);
       const orderId = text(row.orderId || row.order_id || row.orderNo || row.order_no) || productOrderId;
-      const shipmentBoxId = text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.bundleNo || row.bundle_no) || orderId;
+      const shipmentBoxId = text(row.shipmentBoxId || row.shipment_box_id || row.bundleOrderNo || row.bundle_order_no || row.bundleNo || row.bundle_no);
       const vendorItemId = text(row.vendorItemId || row.vendor_item_id || productOrderId);
       return {
         shipmentBoxId,

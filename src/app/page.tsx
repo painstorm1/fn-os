@@ -6769,7 +6769,7 @@ function invoiceFailureReport(shippingRows: string[]) {
 
 function applyInvoiceTrackingToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
-  parsedSheets: Partial<Record<SalesSheetName, string[][]>>,
+  parsedSheets: Partial<Record<SalesSheetName, string[][]>> = {},
   invoiceRows: ParsedInvoiceTrackingRow[] = [],
 ) {
   if (invoiceRows.length) {
@@ -6788,6 +6788,7 @@ function applyInvoiceTrackingToSheets(
       return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
     };
     const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRows[index] || [], "직송거래처"));
+    const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRows[index] || [], "API배송묶음ID"));
     const applyTracking = (index: number, trackingNo: string) => {
       if (index < 0 || !nextShipping[index] || isDirectShippingIndex(index)) return false;
       const currentTracking = salesCellText(nextShipping[index][1]);
@@ -6801,6 +6802,15 @@ function applyInvoiceTrackingToSheets(
       matchedShipping += 1;
       usedShipping.add(index);
       return true;
+    };
+    const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string) => {
+      const shipmentKey = progressShipmentKey(sourceIndex);
+      if (!shipmentKey) return;
+      nextShipping.forEach((row, index) => {
+        if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1])) return;
+        if (progressShipmentKey(index) !== shipmentKey) return;
+        applyTracking(index, trackingNo);
+      });
     };
 
     invoiceRows.forEach((invoiceRow) => {
@@ -6837,6 +6847,7 @@ function applyInvoiceTrackingToSheets(
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
+          applyTrackingToSameShipment(alreadyIndex, trackingNo);
           if (itemCount >= 2) {
             nextShipping.forEach((row, index) => {
               if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1]) || !rowMatchesAddress(row, invoiceKey)) return;
@@ -6853,6 +6864,7 @@ function applyInvoiceTrackingToSheets(
       }
 
       applyTracking(shippingIndex, trackingNo);
+      applyTrackingToSameShipment(shippingIndex, trackingNo);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
           if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1]) || !rowMatchesAddress(row, invoiceKey)) return;
@@ -7365,16 +7377,6 @@ function onlineOrderFlowPrefixFor(
   return baseRun.repeat(length);
 }
 
-function orderProgressStatusByMallCode(currentSheets: Record<SalesSheetName, string[][]>) {
-  const byMallCode = new Map<string, string>();
-  currentSheets["발주 진행 단계"].filter(rowHasValue).forEach((row) => {
-    const mallCode = progressValue(row, "쇼핑몰코드");
-    const status = progressValue(row, "주문상태");
-    if (mallCode && status) byMallCode.set(mallCode, status);
-  });
-  return byMallCode;
-}
-
 // 수집된 상태는 앞 단계로만 되돌리지 않는다. 롯데ON처럼 발송 후에도 조회에 계속 나오는 채널이
 // 출고대기/출고완료 행을 주문확인으로 되돌리는 것을 막는다.
 const orderProgressStatusRank: Record<string, number> = { 신규주문: 0, 주문확인: 1, 출고대기: 2, 출고완료: 3 };
@@ -7386,13 +7388,35 @@ function isOrderProgressStatusAdvance(currentStatus: string, collectedStatus: st
   return collectedRank > currentRank;
 }
 
-function preserveExistingOrderProgressStatuses(rows: string[][], statusByMallCode: Map<string, string>) {
+const orderProgressPreservedHeaders = ["직송거래처", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"];
+
+function mergedOrderProgressStatus(existingStatus: string, rebuiltStatus: string) {
+  if (!existingStatus) return rebuiltStatus;
+  if (!rebuiltStatus) return existingStatus;
+  const existingRank = orderProgressStatusRank[existingStatus];
+  const rebuiltRank = orderProgressStatusRank[rebuiltStatus];
+  if (existingRank === undefined || rebuiltRank === undefined) return rebuiltStatus || existingStatus;
+  return rebuiltRank >= existingRank ? rebuiltStatus : existingStatus;
+}
+
+function preserveExistingOrderProgressFields(rows: string[][], existingRows: string[][]) {
+  const byMallCode = new Map<string, string[]>();
+  existingRows.filter(rowHasValue).forEach((row) => {
+    const mallCode = progressValue(row, "쇼핑몰코드");
+    if (mallCode && !byMallCode.has(mallCode)) byMallCode.set(mallCode, row);
+  });
+  if (!byMallCode.size) return rows;
   return rows.map((row) => {
     if (!rowHasValue(row)) return row;
-    const status = statusByMallCode.get(progressValue(row, "쇼핑몰코드"));
-    if (!status) return row;
+    const existing = byMallCode.get(progressValue(row, "쇼핑몰코드"));
+    if (!existing) return row;
     const next = [...row];
-    setProgressValue(next, "주문상태", status);
+    const status = mergedOrderProgressStatus(progressValue(existing, "주문상태"), progressValue(row, "주문상태"));
+    if (status) setProgressValue(next, "주문상태", status);
+    orderProgressPreservedHeaders.forEach((header) => {
+      const value = progressValue(existing, header);
+      if (value) setProgressValue(next, header, value);
+    });
     return next;
   });
 }
@@ -7559,7 +7583,9 @@ function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnline
     return { apiOrderId: orderId, apiProductOrderId: orderProductId, apiShipmentId: bundleId || orderId, apiExtraId: "" };
   }
   if (alias === "C") {
-    const shipmentBoxId = onlineOrderFallbackText(order, item, ["shipmentBoxId", "shipment_box_id"]) || bundleId || orderId;
+    const rawShipmentBoxId = onlineOrderFallbackText(order, item, ["shipmentBoxId", "shipment_box_id"]);
+    const normalizedShipmentBoxId = bundleId && bundleId !== orderId ? bundleId : "";
+    const shipmentBoxId = rawShipmentBoxId || normalizedShipmentBoxId;
     const vendorItemId = onlineOrderFallbackText(order, item, ["vendorItemId", "vendor_item_id"]) || salesCellText(item.channelOptionCode || item.channelProductCode);
     return { apiOrderId: orderId, apiProductOrderId: vendorItemId, apiShipmentId: shipmentBoxId, apiExtraId: "" };
   }
@@ -7676,7 +7702,6 @@ function appendCollectedOnlineOrdersToSheets(
   const invoiceRows: string[][] = [];
   const mallCodeCounters = new Map<string, number>();
   const appendedActionIds: Array<{ apiOrderId: string; apiProductOrderId: string; apiShipmentId: string; apiExtraId: string }> = [];
-  const previousStatusByMallCode = orderProgressStatusByMallCode(currentSheets);
   const mallCodeDatePart = salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8);
   const mallCodeBaseRun = onlineOrderRunCode();
 
@@ -7717,15 +7742,8 @@ function appendCollectedOnlineOrdersToSheets(
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
       const orderAddress = salesCellText(order.address);
       const isSsgOrder = mallAlias === "S";
-      const baseAddressFallbackKeys = isSsgOrder
-        ? ["shpplocBascAddr", "shpplocBaseAddr", "shpplocRoadnmAddr", "shpplocRoadAddr", "shpplocAddr", "shppLocBascAddr", "shppLocBaseAddr", "shppLocRoadnmAddr", "shppLocRoadAddr", "shppLocAddr", "rcptpeBascAddr", "rcptpeAddr", "receiverBaseAddress", "receiver_address", "shipToAddress", "shippingBaseAddress"]
-        : ["receiverBaseAddress", "receiver_address", "receiverAddress", "shipToAddress", "shippingBaseAddress"];
-      const detailAddressFallbackKeys = isSsgOrder
-        ? ["shpplocDtlAddr", "shpplocDetailAddr", "shppLocDtlAddr", "shppLocDetailAddr", "rcptpeDtlAddr", "receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"]
-        : ["receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"];
-      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, baseAddressFallbackKeys);
-      const rawDetailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, detailAddressFallbackKeys);
-      const detailAddress = isSsgOrder && !baseAddress ? "" : rawDetailAddress;
+      const baseAddress = orderAddress || (isSsgOrder ? "" : onlineOrderFallbackText(order, item, ["receiverBaseAddress", "receiver_address", "receiverAddress", "shipToAddress", "shippingBaseAddress"]));
+      const detailAddress = orderAddress || isSsgOrder ? "" : onlineOrderFallbackText(order, item, ["receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"]);
       const deliveryMessage = salesCellText(order.deliveryMessage) || onlineOrderFallbackText(order, item, ["deliveryMessage", "shippingMemo", "parcelPrintMessage"]);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
@@ -7769,7 +7787,10 @@ function appendCollectedOnlineOrdersToSheets(
   nextSheets["FN판매입력"] = padSalesRows("FN판매입력", [...currentSalesRows, ...saleRows]);
   nextSheets.송장출력용 = padSalesRows("송장출력용", [...currentShippingRows, ...shippingRows]);
   nextSheets.FN송장입력 = padSalesRows("FN송장입력", [...currentInvoiceRows, ...invoiceRows]);
-  nextSheets["발주 진행 단계"] = preserveExistingOrderProgressStatuses(buildOrderProgressRows(nextSheets), previousStatusByMallCode);
+  nextSheets["발주 진행 단계"] = preserveExistingOrderProgressFields(
+    buildOrderProgressRows(nextSheets),
+    currentSheets["발주 진행 단계"],
+  );
   appendedActionIds.forEach((actionIds, offset) => {
     const progress = nextSheets["발주 진행 단계"][currentShippingRows.length + offset];
     if (!progress) return;
@@ -12083,7 +12104,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setMessage(data.error || "엑셀 파일을 읽지 못했습니다.");
       return;
     }
-    const parsedSheets = data.sheets as Partial<Record<SalesSheetName, string[][]>>;
+    const parsedSheets = (data.sheets || {}) as Partial<Record<SalesSheetName, string[][]>>;
     setSheets((prev) => {
       const nextSheets = { ...prev };
       (Object.keys(salesSheetHeaders) as SalesSheetName[]).forEach((sheet) => {
@@ -12093,7 +12114,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           : parsedSheets?.[sheet] || [];
         if (rows.length) nextSheets[sheet] = padSalesRows(sheet, rows);
       });
-      nextSheets["발주 진행 단계"] = buildOrderProgressRows(nextSheets);
+      nextSheets["발주 진행 단계"] = preserveExistingOrderProgressFields(
+        buildOrderProgressRows(nextSheets),
+        prev["발주 진행 단계"],
+      );
       return nextSheets;
     });
     setSalesGridResetKey((value) => value + 1);
@@ -12975,7 +12999,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       setMessage(data.error || "송장파일을 읽지 못했습니다.");
       return;
     }
-    const parsedSheets = data.sheets as Partial<Record<SalesSheetName, string[][]>>;
+    const parsedSheets = (data.sheets || {}) as Partial<Record<SalesSheetName, string[][]>>;
     const invoiceRows = (data.invoiceRows || []) as ParsedInvoiceTrackingRow[];
     const result = applyInvoiceTrackingToSheets(sheets, parsedSheets, invoiceRows);
 
@@ -12998,7 +13022,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
 
-    const nextProgressRows = buildOrderProgressRows(result.sheets);
+    const nextProgressRows = preserveExistingOrderProgressFields(
+      buildOrderProgressRows(result.sheets),
+      sheets["발주 진행 단계"],
+    );
     (["JB", "케이모아"] as DirectShippingPartner[]).forEach((partner) => {
       (directShippingSourceIndexes[partner] || []).forEach((rowIndex) => {
         if (nextProgressRows[rowIndex]) setProgressValue(nextProgressRows[rowIndex], "직송거래처", partner);
@@ -13247,6 +13274,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         vendor_item_id: productOrderId,
         shppNo: progressValue(row, "API주문ID"),
         shppSeq: progressValue(row, "API상품주문ID"),
+        ordNo: progressValue(row, "API주문ID"),
+        ordPrdSeq: progressValue(row, "API상품주문ID"),
+        dlvNo: progressValue(row, "API배송묶음ID"),
+        odNo: progressValue(row, "API주문ID"),
         odSeq: progressValue(row, "API상품주문ID"),
         procSeq: progressValue(row, "API보조ID"),
         quantity: progressValue(row, "수량"),
@@ -13255,6 +13286,35 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         trackingNumber: progressValue(row, "송장번호"),
       };
     });
+  }
+
+  function statusResultMatchesChannel(resultName: string, channelName: string) {
+    const result = salesCellText(resultName).toLowerCase();
+    const channel = salesCellText(channelName).toLowerCase();
+    return Boolean(result && channel && (result === channel || result.includes(channel) || channel.includes(result)));
+  }
+
+  function onlineOrderStatusApiOutcome(indexes: number[], results: Array<{ channel_name?: string; ok?: boolean; message?: string }>) {
+    const failedResults = results.filter((result) => !result.ok);
+    if (!results.length || !failedResults.length) {
+      return { successIndexes: indexes, failedIndexes: [] as number[], failureMessage: "" };
+    }
+    const successResults = results.filter((result) => result.ok);
+    const successIndexes = indexes.filter((index) => {
+      const row = sheets["발주 진행 단계"][index] || [];
+      const channelName = progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)");
+      return successResults.some((result) => statusResultMatchesChannel(salesCellText(result.channel_name), channelName));
+    });
+    const failedIndexes = indexes.filter((index) => {
+      const row = sheets["발주 진행 단계"][index] || [];
+      const channelName = progressValue(row, "쇼핑몰명") || progressValue(row, "쇼핑몰(거래처)");
+      return failedResults.some((result) => statusResultMatchesChannel(salesCellText(result.channel_name), channelName));
+    });
+    const failureMessage = failedResults
+      .map((result) => [salesCellText(result.channel_name), salesCellText(result.message)].filter(Boolean).join(": "))
+      .filter(Boolean)
+      .join(" / ");
+    return { successIndexes, failedIndexes, failureMessage };
   }
 
   async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[], extraStatuses: OnlineApiStatusItem[] = []) {
@@ -13333,7 +13393,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         ...extraStatuses,
       ]);
     }
-    if (!res.ok || data.ok === false) throw new Error(data.error || data.results?.find((item: { message?: string }) => item.message)?.message || "온라인 주문 처리 실패");
+    if (!res.ok || data.ok === false) {
+      const hasSucceededResult = results.some((item) => item.ok);
+      if (!hasSucceededResult) throw new Error(data.error || data.results?.find((item: { message?: string }) => item.message)?.message || "온라인 주문 처리 실패");
+    }
     return data;
   }
 
@@ -13531,22 +13594,45 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     if (!shouldCallApi) setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove));
+    let statusApplyIndexes = eligibleIndexes;
+    let failedApiIndexes: number[] = [];
+    let partialFailureMessage = "";
     try {
-      if (shouldConfirmApi && apiIndexes.length) await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses);
-      if (shouldDispatchApi && apiIndexes.length) await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses);
+      if (shouldCallApi) {
+        let successfulApiIndexes = apiIndexes;
+        const data = shouldConfirmApi && apiIndexes.length
+          ? await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses)
+          : shouldDispatchApi && apiIndexes.length
+            ? await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses)
+            : null;
+        const results = Array.isArray(data?.results) ? data.results as Array<{ channel_name?: string; ok?: boolean; message?: string }> : [];
+        const outcome = onlineOrderStatusApiOutcome(apiIndexes, results);
+        successfulApiIndexes = outcome.successIndexes;
+        failedApiIndexes = outcome.failedIndexes;
+        partialFailureMessage = outcome.failureMessage;
+        const applySet = new Set<number>([...Array.from(unsupportedIndexes), ...successfulApiIndexes]);
+        statusApplyIndexes = eligibleIndexes.filter((index) => applySet.has(index));
+        if (!statusApplyIndexes.length) throw new Error(partialFailureMessage || "온라인 주문 처리 실패");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
       setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
       window.alert(message);
       return;
     }
-    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-applying", fnosOnlyStatusMove));
+    const failedApiStatusItems = failedApiIndexes.length
+      ? orderProgressStatusChangeItems(failedApiIndexes, status, "failed").map((item) => ({ ...item, message: partialFailureMessage || "API 처리 실패" }))
+      : [];
+    setCollectionStatuses([
+      ...orderProgressStatusChangeItems(statusApplyIndexes, status, "fnos-applying", fnosOnlyStatusMove),
+      ...failedApiStatusItems,
+    ]);
     await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
     let shouldCleanupManualFiles = false;
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      eligibleIndexes.forEach((index) => {
+      statusApplyIndexes.forEach((index) => {
         if (!progressRows[index]) return;
         setProgressValue(progressRows[index], "주문상태", status);
       });
@@ -13554,8 +13640,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       shouldCleanupManualFiles = status === "출고완료" && allOrderProgressRowsCompleted(next["발주 진행 단계"]);
       return next;
     });
-    setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "done", fnosOnlyStatusMove));
-    setMessage(`${status} 처리 완료: ${eligibleIndexes.length}건`);
+    setCollectionStatuses([
+      ...orderProgressStatusChangeItems(statusApplyIndexes, status, "done", fnosOnlyStatusMove),
+      ...failedApiStatusItems,
+    ]);
+    setMessage(`${status} 처리 ${failedApiIndexes.length ? "부분 완료" : "완료"}: ${statusApplyIndexes.length}건${failedApiIndexes.length ? ` / API 실패 ${failedApiIndexes.length}건` : ""}`);
+    if (partialFailureMessage) window.alert(`일부 쇼핑몰 처리는 실패했고, 성공한 쇼핑몰만 FNOS 상태를 변경했습니다.\n${partialFailureMessage}`);
     if (status === "출고완료") {
       window.setTimeout(() => {
         if (shouldCleanupManualFiles) void cleanupPendingManualOrderFilesAfterCompletion();
