@@ -11431,9 +11431,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
   const [onlineWorkspaceSyncStatus, setOnlineWorkspaceSyncStatus] = useState<OnlineWorkspaceSyncStatus>({ state: "idle", message: "" });
+  const [onlineWorkspaceAlert, setOnlineWorkspaceAlert] = useState<OnlineWorkspaceSyncStatus | null>(null);
   const onlineWorkspaceServerUpdatedAtRef = useRef("");
   const onlineWorkspaceSkipNextSaveRef = useRef(true);
   const onlineWorkspaceSaveSeqRef = useRef(0);
+  const onlineWorkspaceAlertKeyRef = useRef("");
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
@@ -12049,6 +12051,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }, 1200);
     return () => window.clearTimeout(timer);
   }, [workspaceRestored, section, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows, directShippingSourceIndexes]);
+
+  useEffect(() => {
+    const isProblemState = onlineWorkspaceSyncStatus.state === "offline" || onlineWorkspaceSyncStatus.state === "error" || onlineWorkspaceSyncStatus.state === "conflict";
+    if (onlineWorkspaceSyncStatus.state === "saved" || (onlineWorkspaceSyncStatus.state === "idle" && !onlineWorkspaceSyncStatus.message)) {
+      onlineWorkspaceAlertKeyRef.current = "";
+      return;
+    }
+    if (!isProblemState || !onlineWorkspaceSyncStatus.message) return;
+    const key = [onlineWorkspaceSyncStatus.state, onlineWorkspaceSyncStatus.message].join("|");
+    if (onlineWorkspaceAlertKeyRef.current === key) return;
+    onlineWorkspaceAlertKeyRef.current = key;
+    setOnlineWorkspaceAlert(onlineWorkspaceSyncStatus);
+  }, [onlineWorkspaceSyncStatus]);
 
   useEffect(() => {
     if (!workspaceRestored) return;
@@ -16359,6 +16374,34 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </div>
         }
       />
+      {onlineWorkspaceAlert && (
+        <FormModal
+          title="미니PC 공유 작업공간 확인 필요"
+          description="온라인발주 공유 작업공간 연결/저장 상태에 문제가 있을 때만 표시됩니다."
+          onClose={() => setOnlineWorkspaceAlert(null)}
+          size="md"
+          footer={
+            <ActionButton type="button" variant="primary" onClick={() => setOnlineWorkspaceAlert(null)}>
+              확인
+            </ActionButton>
+          }
+        >
+          <div className="space-y-3 text-sm font-bold text-slate-700">
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+              {onlineWorkspaceAlert.message}
+            </p>
+            {onlineWorkspaceAlert.savedAt && (
+              <p className="text-xs text-slate-500">
+                기준 시간: {new Date(onlineWorkspaceAlert.savedAt).toLocaleString("ko-KR")}
+                {onlineWorkspaceAlert.savedBy ? ` · ${onlineWorkspaceAlert.savedBy}` : ""}
+              </p>
+            )}
+            <p className="text-xs leading-5 text-slate-500">
+              현재 화면 작업내용은 유지됩니다. 연결 문제가 계속되면 새로고침 전 현재 온라인발주 내역을 확인하고, 미니PC 3010 브릿지 상태를 점검해 주세요.
+            </p>
+          </div>
+        </FormModal>
+      )}
       {quickLookupOpen && (
         <FormModal
           title="상품 간편 조회"
@@ -16379,27 +16422,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="online-shipping-sheet-toggle" type="checkbox" className="peer/shipping-sheet hidden" />
           <input id="online-sales-sheet-toggle" type="checkbox" className="peer/sales-sheet hidden" />
           <input id="online-purchase-sheet-toggle" type="checkbox" className="peer/purchase-sheet hidden" />
-          {onlineWorkspaceSyncStatus.message && (
-            <div
-              className={`mb-2 flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-bold ${
-                onlineWorkspaceSyncStatus.state === "saved"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : onlineWorkspaceSyncStatus.state === "conflict"
-                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                    : onlineWorkspaceSyncStatus.state === "offline" || onlineWorkspaceSyncStatus.state === "error"
-                      ? "border-rose-200 bg-rose-50 text-rose-700"
-                      : "border-slate-200 bg-slate-50 text-slate-600"
-              }`}
-            >
-              <span>미니PC 공유 작업공간: {onlineWorkspaceSyncStatus.message}</span>
-              {onlineWorkspaceSyncStatus.savedAt && (
-                <span className="text-slate-500">
-                  (최종 저장 {new Date(onlineWorkspaceSyncStatus.savedAt).toLocaleString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
-                  {onlineWorkspaceSyncStatus.savedBy ? ` · ${onlineWorkspaceSyncStatus.savedBy}` : ""})
-                </span>
-              )}
-            </div>
-          )}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
               {orderProgressStatusFilterLabels.map((label) => (
