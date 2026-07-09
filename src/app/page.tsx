@@ -7933,6 +7933,8 @@ function onlineWorkspaceBridgeTarget() {
 }
 
 async function fetchOnlineWorkspaceServerSnapshot(): Promise<{ ok: boolean; snapshot: SalesWorkspaceSnapshot | null; error: string }> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6_000);
   try {
     const { url, isLocalPage } = onlineWorkspaceBridgeTarget();
     const res = await fetch(url, {
@@ -7941,17 +7943,23 @@ async function fetchOnlineWorkspaceServerSnapshot(): Promise<{ ok: boolean; snap
       credentials: isLocalPage ? "include" : "omit",
       headers: isLocalPage ? undefined : { "X-FNOS-Local-Bridge": "1" },
       cache: "no-store",
+      signal: controller.signal,
       fnosSkipBusyOverlay: true,
     } as RequestInit & { fnosSkipBusyOverlay: boolean });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) return { ok: false, snapshot: null, error: String(data.error || "미니PC 서버 작업공간 조회 실패") };
     return { ok: true, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
   } catch (error) {
-    return { ok: false, snapshot: null, error: error instanceof Error ? error.message : "미니PC 서버 작업공간 조회 실패" };
+    const message = error instanceof Error && error.name === "AbortError" ? "미니PC 브릿지 응답 지연" : "미니PC 브릿지 연결 실패";
+    return { ok: false, snapshot: null, error: message };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
 async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapshot, expectedUpdatedAt: string): Promise<{ ok: boolean; conflict: boolean; snapshot: SalesWorkspaceSnapshot | null; error: string }> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6_000);
   try {
     const { url, isLocalPage } = onlineWorkspaceBridgeTarget();
     const res = await fetch(url, {
@@ -7960,6 +7968,7 @@ async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapsho
       credentials: isLocalPage ? "include" : "omit",
       headers: { "Content-Type": "application/json", ...(isLocalPage ? {} : { "X-FNOS-Local-Bridge": "1" }) },
       body: JSON.stringify({ snapshot, expectedUpdatedAt }),
+      signal: controller.signal,
       fnosSkipBusyOverlay: true,
     } as RequestInit & { fnosSkipBusyOverlay: boolean });
     const data = await res.json().catch(() => ({}));
@@ -7969,7 +7978,10 @@ async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapsho
     if (!res.ok || data.ok === false) return { ok: false, conflict: false, snapshot: null, error: String(data.error || "미니PC 서버 작업공간 저장 실패") };
     return { ok: true, conflict: false, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
   } catch (error) {
-    return { ok: false, conflict: false, snapshot: null, error: error instanceof Error ? error.message : "미니PC 서버 작업공간 저장 실패" };
+    const message = error instanceof Error && error.name === "AbortError" ? "미니PC 브릿지 응답 지연: 이 PC 로컬 캐시만 유지합니다." : "미니PC 브릿지 연결 실패: 이 PC 로컬 캐시만 유지합니다.";
+    return { ok: false, conflict: false, snapshot: null, error: message };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -11421,6 +11433,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [onlineWorkspaceSyncStatus, setOnlineWorkspaceSyncStatus] = useState<OnlineWorkspaceSyncStatus>({ state: "idle", message: "" });
   const onlineWorkspaceServerUpdatedAtRef = useRef("");
   const onlineWorkspaceSkipNextSaveRef = useRef(true);
+  const onlineWorkspaceSaveSeqRef = useRef(0);
   const invoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [collectionPopupOpen, setCollectionPopupOpen] = useState(false);
@@ -11991,21 +12004,36 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           updatedBy: onlineWorkspaceClientName(),
         };
         setOnlineWorkspaceSyncStatus((prev) => ({ ...prev, state: "saving", message: "미니PC 서버에 저장 중..." }));
-        const result = await saveOnlineWorkspaceServerSnapshot(snapshot, onlineWorkspaceServerUpdatedAtRef.current);
+        const saveSeq = ++onlineWorkspaceSaveSeqRef.current;
+        const expectedUpdatedAt = onlineWorkspaceServerUpdatedAtRef.current;
+        const result = await saveOnlineWorkspaceServerSnapshot(snapshot, expectedUpdatedAt);
+        if (saveSeq !== onlineWorkspaceSaveSeqRef.current) return;
         if (!result.ok) {
-          setOnlineWorkspaceSyncStatus({ state: "error", message: result.error || "미니PC 서버 저장 실패, 로컬 캐시만 저장됐습니다." });
+          setOnlineWorkspaceSyncStatus({ state: "error", message: result.error || "미니PC 연결 실패: 서버 복원은 멈추고 이 PC 로컬 캐시만 유지합니다." });
           return;
         }
         if (result.conflict && result.snapshot) {
           const serverSnapshot = result.snapshot;
           onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
-          applyOnlineWorkspaceServerSnapshot(serverSnapshot);
-          setOnlineWorkspaceSyncStatus({
-            state: "conflict",
-            message: "다른 PC에서 저장한 최신 작업공간을 불러와 반영했습니다. 방금 편집 내용은 최신 값으로 대체됐습니다.",
-            savedAt: serverSnapshot.updatedAt,
-            savedBy: serverSnapshot.updatedBy,
-          });
+          const retry = await saveOnlineWorkspaceServerSnapshot(snapshot, onlineWorkspaceServerUpdatedAtRef.current);
+          if (saveSeq !== onlineWorkspaceSaveSeqRef.current) return;
+          if (retry.ok && retry.snapshot && !retry.conflict) {
+            onlineWorkspaceServerUpdatedAtRef.current = retry.snapshot.updatedAt || snapshot.updatedAt;
+            setOnlineWorkspaceSyncStatus({
+              state: "saved",
+              message: "다른 PC 저장과 충돌했지만, 현재 이 PC 작업내용을 다시 저장했습니다.",
+              savedAt: retry.snapshot.updatedAt || snapshot.updatedAt,
+              savedBy: retry.snapshot.updatedBy || snapshot.updatedBy,
+            });
+          } else {
+            if (retry.snapshot?.updatedAt) onlineWorkspaceServerUpdatedAtRef.current = retry.snapshot.updatedAt;
+            setOnlineWorkspaceSyncStatus({
+              state: "conflict",
+              message: "다른 PC 저장과 충돌했습니다. 화면은 현재 이 PC 작업내용을 유지합니다. 새로고침 전 확인해 주세요.",
+              savedAt: serverSnapshot.updatedAt,
+              savedBy: serverSnapshot.updatedBy,
+            });
+          }
           return;
         }
         if (result.snapshot) {
