@@ -112,11 +112,21 @@ function persistedStatusAfterCollection(existingStatus, order) {
   return statusAfterRebuild(existingStatus, order.orderStatus);
 }
 
-function propagateByShipment(rows, progressRows, sourceIndex, trackingNo) {
+function invoiceIdentity(row, invoice) {
+  const normalizeText = (value) => String(value ?? "").replace(/\s+/g, "");
+  const normalizePhone = (value) => String(value ?? "").replace(/[-\s()]/g, "");
+  return row.status === "주문확인"
+    && row.mallCode === invoice.mallCode
+    && normalizeText(row.recipient) === normalizeText(invoice.recipient)
+    && normalizePhone(row.phone) === normalizePhone(invoice.phone)
+    && normalizeText(row.address) === normalizeText(invoice.address);
+}
+
+function propagateByShipment(rows, progressRows, sourceIndex, trackingNo, invoice) {
   const sourceShipment = progressRows[sourceIndex]?.apiShipmentId || "";
   if (!sourceShipment) return rows;
   return rows.map((row, index) => {
-    if (row.direct || row.trackingNo || progressRows[index]?.apiShipmentId !== sourceShipment) return row;
+    if (row.direct || row.trackingNo || progressRows[index]?.apiShipmentId !== sourceShipment || !invoiceIdentity(row, invoice)) return row;
     return { ...row, trackingNo };
   });
 }
@@ -197,25 +207,28 @@ test("F2/F5 송장업로드는 쇼핑몰코드+수취인+연락처+주소가 모
 test("11번가 등 합포장 행은 같은 API배송묶음ID 기준으로 빈 송장번호를 전파한다", () => {
   assert.match(pageSource, /const progressShipmentKey = \(index: number\) => salesCellText\(progressValue\(progressRows\[index\] \|\| \[\], "API배송묶음ID"\)\)/);
   assert.match(pageSource, /function applyInvoiceTrackingToSheets\([\s\S]*applyTrackingToSameShipment/);
-  assert.match(pageSource, /applyTrackingToSameShipment\(alreadyIndex, trackingNo\)/);
-  assert.match(pageSource, /applyTrackingToSameShipment\(shippingIndex, trackingNo\)/);
+  assert.match(pageSource, /const applyTrackingToSameShipment = \(sourceIndex: number, trackingNo: string, invoiceKey: string, productKey: string\)/);
+  assert.match(pageSource, /!rowMatchesInvoiceIdentity\(row, invoiceKey, productKey\)\) return/);
+  assert.match(pageSource, /applyTrackingToSameShipment\(alreadyIndex, trackingNo, invoiceKey, productKey\)/);
+  assert.match(pageSource, /applyTrackingToSameShipment\(shippingIndex, trackingNo, invoiceKey, productKey\)/);
 
+  const invoice = { mallCode: "0709-C-A001", recipient: "홍길동", phone: "01012345678", address: "서울 강남구" };
   const rows = [
-    { trackingNo: "", direct: false },
-    { trackingNo: "", direct: false },
-    { trackingNo: "", direct: false },
-    { trackingNo: "", direct: true },
+    { ...invoice, status: "주문확인", trackingNo: "1234567890", direct: false },
+    { ...invoice, status: "주문확인", trackingNo: "", direct: false },
+    { ...invoice, status: "주문확인", phone: "01099999999", trackingNo: "", direct: false },
+    { ...invoice, status: "주문확인", trackingNo: "", direct: true },
   ];
   const progressRows = [
     { apiShipmentId: "DLV-1" },
     { apiShipmentId: "DLV-1" },
-    { apiShipmentId: "DLV-2" },
+    { apiShipmentId: "DLV-1" },
     { apiShipmentId: "DLV-1" },
   ];
-  const next = propagateByShipment(rows, progressRows, 0, "1234567890");
+  const next = propagateByShipment(rows, progressRows, 0, "1234567890", invoice);
   assert.equal(next[0].trackingNo, "1234567890");
   assert.equal(next[1].trackingNo, "1234567890");
-  assert.equal(next[2].trackingNo, "");
+  assert.equal(next[2].trackingNo, "", "같은 API배송묶음ID라도 수취인/연락처/주소가 다르면 전파 금지");
   assert.equal(next[3].trackingNo, "");
 });
 

@@ -6814,12 +6814,13 @@ function applyInvoiceTrackingToSheets(
       matchedShippingIndexes.add(index);
       return true;
     };
-    const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string) => {
+    const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string, invoiceKey: string, productKey: string) => {
       const shipmentKey = progressShipmentKey(sourceIndex);
       if (!shipmentKey) return;
       nextShipping.forEach((row, index) => {
         if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1])) return;
         if (progressShipmentKey(index) !== shipmentKey) return;
+        if (!rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
         applyTracking(index, trackingNo);
       });
     };
@@ -6846,7 +6847,7 @@ function applyInvoiceTrackingToSheets(
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
-          applyTrackingToSameShipment(alreadyIndex, trackingNo);
+          applyTrackingToSameShipment(alreadyIndex, trackingNo, invoiceKey, productKey);
           if (itemCount >= 2) {
             nextShipping.forEach((row, index) => {
               if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
@@ -6863,7 +6864,7 @@ function applyInvoiceTrackingToSheets(
       }
 
       applyTracking(shippingIndex, trackingNo);
-      applyTrackingToSameShipment(shippingIndex, trackingNo);
+      applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, productKey);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
           if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
