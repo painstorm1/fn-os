@@ -6721,6 +6721,7 @@ type ParsedInvoiceTrackingRow = {
   phone?: string;
   address?: string;
   productCode?: string;
+  productName?: string;
   fileName?: string;
   sourceRow?: number;
 };
@@ -6741,7 +6742,7 @@ function invoiceMatchKey(name: unknown, phone: unknown, address: unknown) {
   return `${normalizeInvoiceName(name)}|${normalizeInvoicePhone(phone)}|${normalizeInvoiceAddress(address)}`;
 }
 
-function invoiceProductCodeKey(value: unknown) {
+function invoiceOptionKey(value: unknown) {
   return salesCellText(value).toUpperCase().replace(/\s+/g, "");
 }
 
@@ -6794,10 +6795,10 @@ function applyInvoiceTrackingToSheets(
   const isInvoiceConfirmedProgressRow = (index: number) => salesCellText(progressValue(progressRows[index] || [], "주문상태")) === "주문확인";
   const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRows[index] || [], "API배송묶음ID"));
   const isCompleteInvoiceKey = (invoiceKey: string) => invoiceKey.split("|").every((part) => Boolean(part));
-  const rowMatchesInvoiceIdentity = (row: string[], invoiceKey: string, productKey: string) => (
-    Boolean(productKey)
+  const rowMatchesInvoiceIdentity = (row: string[], invoiceKey: string, optionKey: string) => (
+    Boolean(optionKey)
     && isCompleteInvoiceKey(invoiceKey)
-    && invoiceProductCodeKey(row[0]) === productKey
+    && invoiceOptionKey(row[7]) === optionKey
     && rowMatchesAddress(row, invoiceKey)
   );
 
@@ -6825,13 +6826,13 @@ function applyInvoiceTrackingToSheets(
       matchedShippingIndexes.add(index);
       return true;
     };
-    const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string, invoiceKey: string, productKey: string) => {
+    const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string, invoiceKey: string, optionKey: string) => {
       const shipmentKey = progressShipmentKey(sourceIndex);
       if (!shipmentKey) return;
       nextShipping.forEach((row, index) => {
         if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1])) return;
         if (progressShipmentKey(index) !== shipmentKey) return;
-        if (!rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
+        if (!rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)) return;
         applyTracking(index, trackingNo);
       });
     };
@@ -6840,7 +6841,7 @@ function applyInvoiceTrackingToSheets(
       const trackingNo = salesCellText(invoiceRow.trackingNo);
       if (!trackingNo) return;
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
-      const productKey = invoiceProductCodeKey(invoiceRow.productCode);
+      const optionKey = invoiceOptionKey(invoiceRow.productName);
       const itemCount = Math.max(1, Number(invoiceRow.itemCount || 1) || 1);
       const shippingIndex = nextShipping.findIndex((row, index) => (
         !usedShipping.has(index)
@@ -6848,38 +6849,38 @@ function applyInvoiceTrackingToSheets(
         && !salesCellText(row[1])
         && isInvoiceConfirmedProgressRow(index)
         && !isDirectShippingIndex(index)
-        && rowMatchesInvoiceIdentity(row, invoiceKey, productKey)
+        && rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)
       ));
 
       if (shippingIndex < 0) {
         const alreadyIndex = nextShipping.findIndex((row, index) => {
           if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo || !isInvoiceConfirmedProgressRow(index) || isDirectShippingIndex(index)) return false;
-          return rowMatchesInvoiceIdentity(row, invoiceKey, productKey);
+          return rowMatchesInvoiceIdentity(row, invoiceKey, optionKey);
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
           matchedInvoiceRows += 1;
-          applyTrackingToSameShipment(alreadyIndex, trackingNo, invoiceKey, productKey);
+          applyTrackingToSameShipment(alreadyIndex, trackingNo, invoiceKey, optionKey);
           if (itemCount >= 2) {
             nextShipping.forEach((row, index) => {
-              if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
+              if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)) return;
               applyTracking(index, trackingNo);
             });
           }
           return;
         }
-        const highlightIndex = productKey
-          ? nextShipping.findIndex((row, index) => rowHasValue(row) && isInvoiceConfirmedProgressRow(index) && !isDirectShippingIndex(index) && invoiceProductCodeKey(row[0]) === productKey)
+        const highlightIndex = optionKey
+          ? nextShipping.findIndex((row, index) => rowHasValue(row) && isInvoiceConfirmedProgressRow(index) && !isDirectShippingIndex(index) && rowMatchesInvoiceIdentity(row, invoiceKey, optionKey))
           : -1;
         if (highlightIndex >= 0) failedShippingIndexes.add(highlightIndex);
         return;
       }
 
       if (applyTracking(shippingIndex, trackingNo)) matchedInvoiceRows += 1;
-      applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, productKey);
+      applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, optionKey);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
-          if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
+          if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)) return;
           applyTracking(index, trackingNo);
         });
       }
@@ -6924,15 +6925,15 @@ function applyInvoiceTrackingToSheets(
   const parsedTrackingRows = parsedShippingRows
     .map((row) => {
       const item = salesRowObject("송장출력용", row);
-      const productKey = invoiceProductCodeKey(item.쇼핑몰코드);
+      const optionKey = invoiceOptionKey(item.주문옵션);
       const tracking = salesCellText(item.송장번호);
       const addressKeys = [
         invoiceMatchKey(item.수취인, item.수취인연락처1, item.주소),
         invoiceMatchKey(item.수취인, item.수취인연락처2, item.주소),
       ].filter(isCompleteInvoiceKey);
-      return { productKey, tracking, addressKeys };
+      return { optionKey, tracking, addressKeys };
     })
-    .filter((item) => item.productKey && item.tracking && item.addressKeys.length);
+    .filter((item) => item.optionKey && item.tracking && item.addressKeys.length);
 
   let matchedShipping = 0;
   const matchedShippingIndexes = new Set<number>();
@@ -6941,9 +6942,9 @@ function applyInvoiceTrackingToSheets(
     const currentItem = salesRowObject("송장출력용", row);
     const currentTracking = salesCellText(currentItem.송장번호);
     if (currentTracking) return row;
-    const currentProductKey = invoiceProductCodeKey(currentItem.쇼핑몰코드);
+    const currentOptionKey = invoiceOptionKey(currentItem.주문옵션);
     const match = parsedTrackingRows.find((parsedRow) => (
-      parsedRow.productKey === currentProductKey
+      parsedRow.optionKey === currentOptionKey
       && parsedRow.addressKeys.some((addressKey) => rowMatchesAddress(row, addressKey))
     ));
     if (!match) return row;

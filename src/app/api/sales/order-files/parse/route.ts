@@ -6,6 +6,8 @@ export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
 type OrderSource = "legacy" | "esm" | "todayhouse" | "toss" | "ezwell" | "unknown";
+const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
+const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
 type ParsedInvoiceRow = {
   trackingNo: string;
   itemCount: number;
@@ -13,6 +15,7 @@ type ParsedInvoiceRow = {
   phone: string;
   address: string;
   productCode: string;
+  productName: string;
   fileName: string;
   sourceRow: number;
 };
@@ -343,6 +346,26 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     }
 
     const productCode = clean(pick(source, ["품목코드(ERP)", "품목코드"]));
+    const customerCode = clean(pick(source, ["거래처코드", "customer_code"]));
+    const customerName = clean(pick(source, ["거래처명", "customer_name"])) || mallName;
+    if (alias === "O") {
+      sale.push([
+        dateDigits(date),
+        customerCode || TODAYHOUSE_CUSTOMER_CODE,
+        customerName || TODAYHOUSE_CUSTOMER_NAME,
+        "100",
+        "포함",
+        productCode,
+        productCode ? clean(pick(source, ["품목명(ERP)", "품목명"])) : option,
+        clean(pick(source, ["수량"])) || "1",
+        unit ? comma(unit) : "",
+        "",
+        amount ? comma(amount) : "",
+        amount ? comma(amount) : "",
+        "",
+      ]);
+      continue;
+    }
     sale.push([
       dateDigits(date),
       "",
@@ -430,7 +453,9 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
       return {
         __alias: "O",
         수집일자: pick(row, ["주문결제완료일", "출고예정일"]),
-        쇼핑몰명: "오늘의 집",
+        쇼핑몰명: TODAYHOUSE_CUSTOMER_NAME,
+        거래처코드: TODAYHOUSE_CUSTOMER_CODE,
+        거래처명: TODAYHOUSE_CUSTOMER_NAME,
         주문번호: pick(row, ["주문번호"]),
         묶음주문번호: pick(row, ["묶음배송그룹", "주문번호"]),
         배송방법코드: pick(row, ["배송방법"]),
@@ -612,12 +637,13 @@ function parseInvoiceRowsFromWorksheet(sheet: XLSX.WorkSheet, fileName: string) 
     const phone = clean(cellAt(row, ["받는분전화번호", "받는분 전화번호", "수취인 연락처", "수취인연락처1"], [21]));
     const address = clean(cellAt(row, ["받는분주소", "받는분 주소", "수취인 주소", "주소"], [23]));
     const productCode = clean(cellAt(row, ["상품코드", "품목코드", "쇼핑몰코드"], [24]));
+    const productName = clean(cellAt(row, ["상품명", "품목명", "주문옵션", "단품명"], [25, 27]));
     if (!trackingNo || !recipient || !phone || !address) return;
     if (/송장|운송장|받는분|수취인/i.test(`${trackingNo} ${recipient}`)) return;
-    const key = [trackingNo, itemCount, recipient, phone, address, productCode].map((value) => String(value).replace(/\s+/g, "").toLowerCase()).join("|");
+    const key = [trackingNo, itemCount, recipient, phone, address, productCode, productName].map((value) => String(value).replace(/\s+/g, "").toLowerCase()).join("|");
     if (seen.has(key)) return;
     seen.add(key);
-    rows.push({ trackingNo, itemCount, recipient, phone, address, productCode, fileName, sourceRow: rowIndex + 1 });
+    rows.push({ trackingNo, itemCount, recipient, phone, address, productCode, productName, fileName, sourceRow: rowIndex + 1 });
   });
   return rows;
 }
