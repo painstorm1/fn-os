@@ -10,6 +10,131 @@ function text(value: unknown) { return String(value ?? "").trim(); }
 function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
 function numberValue(value: unknown) { const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, "")); return Number.isFinite(parsed) ? parsed : 0; }
 function firstText(...values: unknown[]) { for (const value of values) { const next = text(value); if (next) return next; } return ""; }
+function firstDeepText(root: unknown, keys: string[], maxDepth = 4) {
+  const seen = new Set<unknown>();
+  function visit(value: unknown, depth: number): string {
+    if (!value || depth > maxDepth || seen.has(value)) return "";
+    if (typeof value !== "object") return "";
+    seen.add(value);
+    const current = record(value);
+    for (const key of keys) {
+      const direct = text(current[key]);
+      if (direct) return direct;
+    }
+    for (const child of Object.values(current)) {
+      if (Array.isArray(child)) {
+        for (const item of child) {
+          const found = visit(item, depth + 1);
+          if (found) return found;
+        }
+        continue;
+      }
+      const found = visit(child, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  return visit(root, 0);
+}
+function joinedSsgAddress(...values: unknown[]) {
+  const parts: string[] = [];
+  values.forEach((value) => {
+    const next = text(value).replace(/\s+/g, " ").trim();
+    if (!next) return;
+    if (parts.some((part) => part === next || part.includes(next))) return;
+    parts.push(next);
+  });
+  return parts.join(" ");
+}
+function ssgAddressRecords(row: AnyRecord) {
+  return [
+    record(row.shppLoc),
+    record(row.shpploc),
+    record(row.shpplocInfo),
+    record(row.shppLocInfo),
+    record(row.shippingAddress),
+    record(row.receiverAddress),
+    record(row.receiver),
+    record(row.recipient),
+    record(row.delivery),
+    record(row.address),
+  ];
+}
+function firstSsgAddressText(row: AnyRecord, keys: string[], deepKeys: string[] = keys) {
+  const nestedValues = ssgAddressRecords(row).flatMap((candidate) => keys.map((key) => candidate[key]));
+  return firstText(...keys.map((key) => row[key]), ...nestedValues, firstDeepText(row, deepKeys));
+}
+function ssgZipcode(row: AnyRecord) {
+  return firstSsgAddressText(row, [
+    "shpplocZipcd",
+    "shpplocZipCd",
+    "shppLocZipcd",
+    "shppLocZipCd",
+    "rcptpeZipcd",
+    "receiverZipCode",
+    "zipcd",
+    "zipcode",
+    "zipCode",
+    "postNo",
+    "postNo1",
+  ], [
+    "shpplocZipcd",
+    "shpplocZipCd",
+    "shppLocZipcd",
+    "shppLocZipCd",
+    "rcptpeZipcd",
+    "receiverZipCode",
+  ]);
+}
+function ssgShippingAddress(row: AnyRecord) {
+  const base = firstSsgAddressText(row, [
+    "shpplocAddr",
+    "shpplocRoadAddr",
+    "shpplocRoadnmAddr",
+    "shpplocBaseAddr",
+    "shppLocAddr",
+    "shppLocRoadAddr",
+    "shppLocRoadnmAddr",
+    "shppLocBaseAddr",
+    "rcptpeAddr",
+    "receiverAddress",
+    "receiverBaseAddress",
+    "roadnmAddr",
+    "roadAddr",
+    "baseAddr",
+    "addr1",
+  ], [
+    "shpplocAddr",
+    "shpplocRoadAddr",
+    "shpplocRoadnmAddr",
+    "shpplocBaseAddr",
+    "shppLocAddr",
+    "shppLocRoadAddr",
+    "shppLocRoadnmAddr",
+    "shppLocBaseAddr",
+    "rcptpeAddr",
+    "receiverBaseAddress",
+  ]);
+  const detail = firstSsgAddressText(row, [
+    "shpplocDtlAddr",
+    "shpplocDetailAddr",
+    "shppLocDtlAddr",
+    "shppLocDetailAddr",
+    "rcptpeDtlAddr",
+    "receiverDetailAddress",
+    "detailAddr",
+    "dtlAddr",
+    "addr2",
+  ], [
+    "shpplocDtlAddr",
+    "shpplocDetailAddr",
+    "shppLocDtlAddr",
+    "shppLocDetailAddr",
+    "rcptpeDtlAddr",
+    "receiverDetailAddress",
+  ]);
+  return joinedSsgAddress(base, detail);
+}
 function arrayify(value: unknown): unknown[] { if (Array.isArray(value)) return value; if (value === undefined || value === null || value === "") return []; return [value]; }
 function arrayAt(root: unknown, paths: string[][]) { for (const path of paths) { let current = root; for (const key of path) current = record(current)[key]; if (Array.isArray(current)) return current as AnyRecord[]; } return Array.isArray(root) ? root as AnyRecord[] : []; }
 function formatCompactDate(value: unknown, boundary: "start" | "end") {
@@ -132,8 +257,8 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
     receiverName: firstText(row.rcptpeNm, row.receiverName, row.rcverNm),
     phone1: firstText(row.rcptpeHpno, row.receiverMobile, row.hpno, row.phone1),
     phone2: firstText(row.rcptpeTelno, row.receiverPhone, row.telno, row.phone2),
-    zipcode: firstText(row.shpplocZipcd, row.zipcd, row.zipcode, row.postNo),
-    address: [firstText(row.shpplocAddr, row.addr1, row.baseAddr, row.receiverAddress), firstText(row.addr2, row.dtlAddr, row.receiverDetailAddress)].filter(Boolean).join(" "),
+    zipcode: ssgZipcode(row),
+    address: ssgShippingAddress(row),
     deliveryMessage: firstText(row.ordMemoCntt, row.dlvMsg, row.deliveryMessage),
     items: [item],
     raw: rawRow,
