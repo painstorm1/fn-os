@@ -37,67 +37,18 @@ function firstDeepText(root: unknown, keys: string[], maxDepth = 4) {
   }
   return visit(root, 0);
 }
-function joinedSsgAddress(...values: unknown[]) {
-  const parts: string[] = [];
-  values.forEach((value) => {
-    const next = text(value).replace(/\s+/g, " ").trim();
-    if (!next) return;
-    if (parts.some((part) => part === next || part.includes(next))) return;
-    parts.push(next);
-  });
-  return parts.join(" ");
+function primitiveText(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? String(value).replace(/\s+/g, " ").trim() : "";
 }
-function ssgTextValue(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
-}
-function normalizeSsgAddressText(value: unknown) {
-  return ssgTextValue(value).replace(/\s+/g, " ").trim();
-}
-function ssgAddressShapeText(value: unknown) {
-  return normalizeSsgAddressText(value)
-    .replace(/\s*(?:GMARKET|G마켓|AUCTION|옥션|ESM)\s*[\s\S]*?(?:\d{7,}|tel:)[\s\S]*$/i, "")
-    .trim();
-}
-function isSsgMarketplaceAlias(value: unknown) {
-  const raw = normalizeSsgAddressText(value);
-  const compact = raw.replace(/\s+/g, "");
-  if (!/^(?:GMARKET|G마켓|AUCTION|옥션|ESM)/i.test(compact)) return false;
-  if (/(?:특별시|광역시|특별자치시|특별자치도|도\s|시\s|군\s|구\s|읍\s|면\s|로\s|길\s|번길|대로)/.test(`${raw} `)) return false;
-  return /(?:\d{7,}|tel:)/i.test(compact) || /^(?:GMARKET|G마켓|AUCTION|옥션|ESM)$/i.test(compact);
-}
-function isSsgBaseAddress(value: unknown) {
-  const normalized = ssgAddressShapeText(value);
-  if (!normalized || isSsgMarketplaceAlias(value)) return false;
-  return /(?:특별시|광역시|특별자치시|특별자치도|도\s|시\s|군\s|구\s|읍\s|면\s|로\s|길\s|번길|대로)/.test(`${normalized} `);
-}
-function isSsgDetailAddress(value: unknown) {
-  const normalized = normalizeSsgAddressText(value);
-  const compact = normalized.replace(/\s+/g, "");
-  return Boolean(normalized && !/^(?:\d{7,}|<?tel:\d{7,})/i.test(compact));
-}
-function ssgAddressRecords(row: AnyRecord) {
-  return [
-    record(row.shppLoc),
-    record(row.shpploc),
-    record(row.shpplocInfo),
-    record(row.shppLocInfo),
-    record(row.shippingAddress),
-    record(row.receiverAddress),
-    record(row.receiver),
-    record(row.recipient),
-    record(row.delivery),
-    record(row.address),
-  ];
-}
-function firstSsgAddressText(row: AnyRecord, keys: string[], deepKeys: string[] = keys, accept: (value: unknown) => boolean = (value) => Boolean(ssgTextValue(value))) {
-  const nestedValues = ssgAddressRecords(row).flatMap((candidate) => keys.map((key) => candidate[key]));
-  for (const value of [...keys.map((key) => row[key]), ...nestedValues, firstDeepText(row, deepKeys)]) {
-    if (accept(value)) return normalizeSsgAddressText(value);
+function firstSsgColumnText(row: AnyRecord, keys: string[], deepKeys: string[] = []) {
+  for (const value of [...keys.map((key) => row[key]), deepKeys.length ? firstDeepText(row, deepKeys) : ""]) {
+    const next = primitiveText(value);
+    if (next) return next;
   }
   return "";
 }
 function ssgZipcode(row: AnyRecord) {
-  return firstSsgAddressText(row, [
+  return firstSsgColumnText(row, [
     "shpplocZipcd",
     "shpplocZipCd",
     "shppLocZipcd",
@@ -118,61 +69,8 @@ function ssgZipcode(row: AnyRecord) {
     "receiverZipCode",
   ]);
 }
-function ssgShippingAddress(row: AnyRecord) {
-  const base = firstSsgAddressText(row, [
-    "shpplocAddr",
-    "shpplocRoadAddr",
-    "shpplocRoadnmAddr",
-    "shpplocBaseAddr",
-    "shpplocBascAddr",
-    "shppLocAddr",
-    "shppLocRoadAddr",
-    "shppLocRoadnmAddr",
-    "shppLocBaseAddr",
-    "shppLocBascAddr",
-    "rcptpeAddr",
-    "rcptpeBascAddr",
-    "receiverAddress",
-    "receiverBaseAddress",
-    "roadnmAddr",
-    "roadAddr",
-    "baseAddr",
-    "addr1",
-  ], [
-    "shpplocAddr",
-    "shpplocRoadAddr",
-    "shpplocRoadnmAddr",
-    "shpplocBaseAddr",
-    "shpplocBascAddr",
-    "shppLocAddr",
-    "shppLocRoadAddr",
-    "shppLocRoadnmAddr",
-    "shppLocBaseAddr",
-    "shppLocBascAddr",
-    "rcptpeAddr",
-    "rcptpeBascAddr",
-    "receiverBaseAddress",
-  ], isSsgBaseAddress);
-  const detail = firstSsgAddressText(row, [
-    "shpplocDtlAddr",
-    "shpplocDetailAddr",
-    "shppLocDtlAddr",
-    "shppLocDetailAddr",
-    "rcptpeDtlAddr",
-    "receiverDetailAddress",
-    "detailAddr",
-    "dtlAddr",
-    "addr2",
-  ], [
-    "shpplocDtlAddr",
-    "shpplocDetailAddr",
-    "shppLocDtlAddr",
-    "shppLocDetailAddr",
-    "rcptpeDtlAddr",
-    "receiverDetailAddress",
-  ], isSsgDetailAddress);
-  if (!base) return isSsgBaseAddress(detail) ? detail : "";
-  return joinedSsgAddress(base, detail);
+function ssgReceiverAddress(row: AnyRecord) {
+  return firstSsgColumnText(row, ["수취인주소", "수취인 주소", "ordpeRoadAddr"], ["수취인주소", "수취인 주소", "ordpeRoadAddr"]);
 }
 function arrayify(value: unknown): unknown[] { if (Array.isArray(value)) return value; if (value === undefined || value === null || value === "") return []; return [value]; }
 function arrayAt(root: unknown, paths: string[][]) { for (const path of paths) { let current = root; for (const key of path) current = record(current)[key]; if (Array.isArray(current)) return current as AnyRecord[]; } return Array.isArray(root) ? root as AnyRecord[] : []; }
@@ -297,7 +195,7 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
     phone1: firstText(row.rcptpeHpno, row.receiverMobile, row.hpno, row.phone1),
     phone2: firstText(row.rcptpeTelno, row.receiverPhone, row.telno, row.phone2),
     zipcode: ssgZipcode(row),
-    address: ssgShippingAddress(row),
+    address: ssgReceiverAddress(row),
     deliveryMessage: firstText(row.ordMemoCntt, row.dlvMsg, row.deliveryMessage),
     items: [item],
     raw: rawRow,
