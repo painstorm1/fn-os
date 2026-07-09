@@ -21,6 +21,14 @@ function assertNotMatch(haystack, pattern, message) {
   assert.equal(pattern.test(haystack), false, message);
 }
 
+function invoiceMatchSummaryMessage(matched, total) {
+  const safeMatched = Math.max(0, Number(matched || 0));
+  const safeTotal = Math.max(0, Number(total || 0));
+  if (!safeTotal) return `송장매칭 ${safeMatched}건 성공`;
+  if (safeMatched >= safeTotal) return `${safeMatched}/${safeTotal}건 전체 매칭 성공`;
+  return `${safeMatched}건/${safeTotal}건 매칭성공`;
+}
+
 function loadStatusRouteWithMocks(captured) {
   const filename = resolve(projectRoot, "src/app/api/fnos/online-orders/status/route.ts");
   const compiled = ts.transpileModule(statusRouteSource, {
@@ -202,6 +210,19 @@ test("F2/F5 송장업로드는 쇼핑몰코드+수취인+연락처+주소가 모
   assert.equal(exactMatch({ ...invoice, status: "신규주문" }, invoice), false);
   assert.equal(exactMatch({ ...invoice, status: "주문확인", phone: "01099999999" }, invoice), false);
   assert.equal(statusAfterRebuild("신규주문", "출고대기"), "출고대기", "generic rebuild는 여전히 상향 가능하므로 F2 전용 gate가 필요합니다.");
+});
+
+test("F2/F5 송장업로드 완료 팝업은 송장엑셀 전체 대비 매칭 건수를 표시하고 미연동 사이트 메모 팝업을 띄우지 않는다", () => {
+  assert.match(pageSource, /function invoiceMatchSummaryMessage\(matched: number, total: number\)/);
+  assert.match(pageSource, /matchedInvoiceRows/);
+  assert.match(pageSource, /invoiceTotalRows/);
+  const alertSnippet = pageSource.slice(pageSource.indexOf("window.alert(failureMessage ? `${summaryMessage}"), pageSource.indexOf("window.alert(failureMessage ? `${summaryMessage}") + 120);
+  assert.equal(alertSnippet.includes("`${summaryMessage}" + "\\" + "n" + "${failureMessage}` : summaryMessage);"), true);
+  assertNotMatch(pageSource, /window\.alert\(failureMessage \|\| "송장매칭 성공"\)/, "송장매칭 성공 단독 팝업이 남아있습니다.");
+  assertNotMatch(pageSource, /setInvoiceMemoText\(memo\)|직접 입력 대상 메모장을 화면에 표시했습니다/, "API미연동 사이트 직접입력 메모 팝업 경로가 남아있습니다.");
+
+  assert.equal(invoiceMatchSummaryMessage(3, 20), "3건/20건 매칭성공");
+  assert.equal(invoiceMatchSummaryMessage(20, 20), "20/20건 전체 매칭 성공");
 });
 
 test("11번가 등 합포장 행은 같은 API배송묶음ID 기준으로 빈 송장번호를 전파한다", () => {

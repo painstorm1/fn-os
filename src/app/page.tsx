@@ -6767,6 +6767,16 @@ function invoiceFailureReport(shippingRows: string[]) {
   ].join("\n");
 }
 
+function invoiceMatchSummaryMessage(matched: number, total: number) {
+  const safeMatched = Math.max(0, Number(matched || 0));
+  const safeTotal = Math.max(0, Number(total || 0));
+  const matchedText = safeMatched.toLocaleString("ko-KR");
+  const totalText = safeTotal.toLocaleString("ko-KR");
+  if (!safeTotal) return `송장매칭 ${matchedText}건 성공`;
+  if (safeMatched >= safeTotal) return `${matchedText}/${totalText}건 전체 매칭 성공`;
+  return `${matchedText}건/${totalText}건 매칭성공`;
+}
+
 function applyInvoiceTrackingToSheets(
   currentSheets: Record<SalesSheetName, string[][]>,
   parsedSheets: Partial<Record<SalesSheetName, string[][]>> = {},
@@ -6797,6 +6807,7 @@ function applyInvoiceTrackingToSheets(
     const failedShippingIndexes = new Set<number>();
     const matchedShippingIndexes = new Set<number>();
     let matchedShipping = 0;
+    let matchedInvoiceRows = 0;
     let alreadyMatchedShipping = 0;
 
     const applyTracking = (index: number, trackingNo: string) => {
@@ -6847,6 +6858,7 @@ function applyInvoiceTrackingToSheets(
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
+          matchedInvoiceRows += 1;
           applyTrackingToSameShipment(alreadyIndex, trackingNo, invoiceKey, productKey);
           if (itemCount >= 2) {
             nextShipping.forEach((row, index) => {
@@ -6863,7 +6875,7 @@ function applyInvoiceTrackingToSheets(
         return;
       }
 
-      applyTracking(shippingIndex, trackingNo);
+      if (applyTracking(shippingIndex, trackingNo)) matchedInvoiceRows += 1;
       applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, productKey);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
@@ -6894,6 +6906,8 @@ function applyInvoiceTrackingToSheets(
         송장출력용: nextShipping,
       },
       matchedShipping,
+      matchedInvoiceRows,
+      invoiceTotalRows: invoiceRows.length,
       matchedInvoice: 0,
       failedShipping,
       failedInvoice: [] as string[],
@@ -6956,6 +6970,8 @@ function applyInvoiceTrackingToSheets(
       송장출력용: nextShipping,
     },
     matchedShipping,
+    matchedInvoiceRows: matchedShipping,
+    invoiceTotalRows: parsedTrackingRows.length,
     matchedInvoice: 0,
     failedShipping: [] as string[],
     failedInvoice: [] as string[],
@@ -13162,22 +13178,19 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     } else {
       setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: false }));
     }
-    const manualRows = result.manualRows;
     const failureMessage = result.failedShipping.length
       ? invoiceFailureReport(result.failedShipping)
       : "";
+    const summaryMessage = invoiceMatchSummaryMessage(
+      Number(result.matchedInvoiceRows ?? result.matchedShipping),
+      Number(result.invoiceTotalRows || invoiceRows.length || 0),
+    );
     setSalesSheetHighlightedRows({
       송장출력용: result.failedShippingIndexes,
     });
-    window.alert(failureMessage || "송장매칭 성공");
-    if (manualRows.length) {
-      const memo = [`<${new Date().getMonth() + 1}월${new Date().getDate()}일 직접 송장 입력>`, "", ...manualRows].join("\n");
-      setInvoiceMemoText(memo);
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건 반영. 직접 입력 대상 메모장을 화면에 표시했습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
-    } else {
-      setInvoiceMemoText("");
-      setMessage(`송장번호 매칭 완료: 송장출력용 ${result.matchedShipping}건 반영. 직접 입력 대상은 없습니다.${failureMessage ? `\n${failureMessage}` : ""}`);
-    }
+    window.alert(failureMessage ? `${summaryMessage}\n${failureMessage}` : summaryMessage);
+    setInvoiceMemoText("");
+    setMessage(`송장번호 매칭 완료: ${summaryMessage}${failureMessage ? `\n${failureMessage}` : ""}`);
   }
 
   function fnParcelTargetRows(currentSheets: Record<SalesSheetName, string[][]>) {
