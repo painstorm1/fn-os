@@ -7980,13 +7980,14 @@ const jbDirectHeaders = [
 ];
 const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
 
-function mapJbDirectRow(source: string[], _sequence: number) {
+function mapJbDirectRow(source: string[], sequence: number) {
+  const mmdd = todayMmdd();
   const get = (header: string) => {
     const sourceIndex = salesSheetHeaders.송장출력용.indexOf(header);
     return sourceIndex >= 0 ? source[sourceIndex] || "" : "";
   };
   return jbDirectHeaders.map((header) => {
-    if (header === "쇼핑몰코드") return get("쇼핑몰코드");
+    if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
     if (header === "거래처") return "JB";
     if (header === "수량") return "1";
     if (header === "주문옵션") return get("주문옵션");
@@ -12425,13 +12426,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       : exportSheets["발주 진행 단계"]
           .map((row, index) => progressValue(row, "직송거래처") === partner ? index : -1)
           .filter((index) => index >= 0);
-    const currentRows = sourceIndexes
+    return sourceIndexes
       .map((sourceIndex, index) => {
         const sourceRow = shippingRows[sourceIndex];
         return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
       })
       .filter((row): row is string[] => Array.isArray(row));
-    return (directShippingRows[partner] || []).length ? (directShippingRows[partner] || []) : currentRows;
   }
 
   function exportBaseShippingFromModal() {
@@ -12630,12 +12630,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const previousSourceIndexes = directShippingSourceIndexes[partner] || [];
     const otherPartner: DirectShippingPartner = partner === "JB" ? "케이모아" : "JB";
     const alreadyDirectIndexes = new Set([...previousSourceIndexes, ...(directShippingSourceIndexes[otherPartner] || [])]);
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
     const appendRows: string[][] = [];
     const appendSourceIndexes: number[] = [];
 
-    selectedRows.forEach((sourceRow, selectedOffset) => {
+    selectedRows.forEach((_sourceRow, selectedOffset) => {
       const sourceIndex = selectedIndexes[selectedOffset];
       if (sourceIndex == null || alreadyDirectIndexes.has(sourceIndex)) return;
+      const sourceRow = shippingRows[sourceIndex];
+      if (!sourceRow || !rowHasValue(sourceRow)) return;
       const preview = mapper(sourceRow, previousRows.length + appendRows.length + 1);
       const isDuplicate = previousRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"))
         || appendRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"));
@@ -12651,8 +12655,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
 
-    const savedRows = [...previousRows, ...appendRows];
     const savedSourceIndexes = [...previousSourceIndexes, ...appendSourceIndexes];
+    const savedRows = savedSourceIndexes
+      .map((sourceIndex, index) => {
+        const sourceRow = shippingRows[sourceIndex];
+        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
+      })
+      .filter((row): row is string[] => Array.isArray(row));
     setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
     setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: savedSourceIndexes }));
     setSheets((prev) => {
