@@ -46,6 +46,18 @@ async function readWorkspaceSnapshot(): Promise<AnyRecord | null> {
   }
 }
 
+function workspaceNonEmptyCount(snapshot: AnyRecord | null | undefined) {
+  const sheets = snapshot && typeof snapshot.sheets === "object" && snapshot.sheets ? snapshot.sheets as Record<string, unknown> : {};
+  return Object.values(sheets).reduce<number>((total, rows) => {
+    if (!Array.isArray(rows)) return total;
+    return total + rows.filter((row) => {
+      if (Array.isArray(row)) return row.some((value) => String(value ?? "").trim());
+      if (row && typeof row === "object") return Object.values(row).some((value) => String(value ?? "").trim());
+      return String(row ?? "").trim();
+    }).length;
+  }, 0);
+}
+
 export async function GET() {
   try {
     const snapshot = await readWorkspaceSnapshot();
@@ -69,6 +81,10 @@ async function handleSave(request: NextRequest) {
     const currentDayKey = current && typeof current.dayKey === "string" ? current.dayKey : "";
     const incomingDayKey = typeof snapshot.dayKey === "string" ? snapshot.dayKey : "";
     const sameDay = Boolean(currentDayKey) && currentDayKey === incomingDayKey;
+
+    if (sameDay && workspaceNonEmptyCount(current) > 0 && workspaceNonEmptyCount(snapshot) === 0) {
+      return jsonResponse({ ok: false, conflict: true, snapshot: current, error: "빈 작업공간으로 기존 온라인발주 공유 내역을 덮어쓸 수 없습니다." }, { status: 409 });
+    }
 
     if (sameDay && currentUpdatedAt && expectedUpdatedAt !== currentUpdatedAt) {
       return jsonResponse({ ok: false, conflict: true, snapshot: current, error: "서버에 더 최신 작업공간이 저장되어 있습니다." }, { status: 409 });

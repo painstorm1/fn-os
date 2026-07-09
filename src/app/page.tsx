@@ -7474,6 +7474,37 @@ function onlineOrderPairContacts(first: unknown, second: unknown) {
   return { phone1: phone1 || phone2, phone2: phone2 || phone1 };
 }
 
+function isFnCompanyShippingAddress(value: unknown) {
+  const raw = salesCellText(value).replace(/\s+/g, " ");
+  if (!raw) return false;
+  const compact = raw.replace(/\s+/g, "");
+  return /백옥대로\s*2101번길\s*42-19/i.test(raw)
+    || compact.includes("백옥대로2101번길42-19")
+    || compact.includes("초부리29-22")
+    || /FNcompany/i.test(raw);
+}
+
+function stripFnCompanyShippingAddress(value: unknown) {
+  const raw = salesCellText(value).replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/\s*(?:경기도\s*용인시\s*처인구\s*모현읍\s*)?(?:초부리\s*29-22\s*)?\(?백옥대로\s*2101번길\s*42-19\)?\s*에프엔?.*$/i, "")
+    .replace(/\s*FNcompany\s+42-19,?\s*Baegok-daero\s*2101beon-gil.*$/i, "")
+    .trim();
+}
+
+function onlineOrderJoinCustomerAddress(...values: unknown[]) {
+  const parts: string[] = [];
+  values.forEach((value) => {
+    const raw = salesCellText(value).replace(/\s+/g, " ").trim();
+    const next = isFnCompanyShippingAddress(raw) ? stripFnCompanyShippingAddress(raw) : raw;
+    if (!next || isFnCompanyShippingAddress(next)) return;
+    if (parts.some((part) => part === next || part.includes(next))) return;
+    parts.push(next);
+  });
+  return parts.join(" ");
+}
+
 function onlineOrderRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -7689,8 +7720,9 @@ function appendCollectedOnlineOrdersToSheets(
       const rawPhone2 = salesCellText(order.phone2) || onlineOrderFallbackText(order, item, ["phone2", "tel2", "receiverPhoneNumber2", "receiverTelNo2", "receiverPhone"]);
       const { phone1, phone2 } = onlineOrderPairContacts(rawPhone1, rawPhone2);
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
-      const baseAddress = salesCellText(order.address) || onlineOrderFallbackText(order, item, ["address", "baseAddress", "address1", "receiverAddress", "shippingAddress"]);
-      const detailAddress = onlineOrderFallbackText(order, item, ["detailedAddress", "address2", "receiverDetailAddress", "detailAddress"]);
+      const orderAddress = salesCellText(order.address);
+      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, ["address", "baseAddress", "address1", "receiverAddress", "shippingAddress"]);
+      const detailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, ["detailedAddress", "address2", "receiverDetailAddress", "detailAddress"]);
       const deliveryMessage = salesCellText(order.deliveryMessage) || onlineOrderFallbackText(order, item, ["deliveryMessage", "shippingMemo", "parcelPrintMessage"]);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
@@ -7714,7 +7746,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처1", phone1);
       setSalesSheetCell(shipping, "송장출력용", "수취인연락처2", phone2);
       setSalesSheetCell(shipping, "송장출력용", "우편번호", zipcode);
-      setSalesSheetCell(shipping, "송장출력용", "주소", [baseAddress, detailAddress].filter(Boolean).join(" "));
+      setSalesSheetCell(shipping, "송장출력용", "주소", onlineOrderJoinCustomerAddress(baseAddress, detailAddress));
       setSalesSheetCell(shipping, "송장출력용", "주문옵션", mallProductName);
       setSalesSheetCell(shipping, "송장출력용", "수량", qty);
       setSalesSheetCell(shipping, "송장출력용", "배송요청사항", deliveryMessage);
@@ -7921,6 +7953,17 @@ function onlineWorkspaceClientName() {
   }
 }
 
+function onlineWorkspaceContentCount(snapshot: Partial<SalesWorkspaceSnapshot> | null | undefined) {
+  const sheets = snapshot?.sheets || {};
+  return Object.values(sheets).reduce<number>((total, rows) =>
+    total + (Array.isArray(rows) ? rows.filter((row) => Array.isArray(row) && row.some((value) => String(value ?? "").trim())).length : 0),
+  0);
+}
+
+function onlineWorkspaceHasContent(snapshot: SalesWorkspaceSnapshot) {
+  return onlineWorkspaceContentCount(snapshot) > 0 || snapshot.uploadedFileNames.length > 0 || snapshot.pendingOrderFileNames.length > 0 || snapshot.pendingInvoiceFileNames.length > 0 || Boolean(snapshot.message.trim());
+}
+
 function onlineWorkspaceBridgeTarget() {
   const hostname = window.location.hostname;
   const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
@@ -7973,7 +8016,7 @@ async function saveOnlineWorkspaceServerSnapshot(snapshot: SalesWorkspaceSnapsho
     } as RequestInit & { fnosSkipBusyOverlay: boolean });
     const data = await res.json().catch(() => ({}));
     if (res.status === 409 && data.conflict) {
-      return { ok: true, conflict: true, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
+      return { ok: true, conflict: true, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: String(data.error || "") };
     }
     if (!res.ok || data.ok === false) return { ok: false, conflict: false, snapshot: null, error: String(data.error || "미니PC 서버 작업공간 저장 실패") };
     return { ok: true, conflict: false, snapshot: (data.snapshot as SalesWorkspaceSnapshot) || null, error: "" };
@@ -11882,6 +11925,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     let cancelled = false;
     async function restoreWorkspace() {
       let appliedFromServer = false;
+      let localSnapshot: Partial<SalesWorkspaceSnapshot> | null = null;
+      try {
+        const raw = localStorage.getItem(SALES_WORKSPACE_STORAGE_KEY);
+        if (raw) localSnapshot = JSON.parse(raw) as Partial<SalesWorkspaceSnapshot>;
+      } catch {
+        localSnapshot = null;
+      }
       try {
         setOnlineWorkspaceSyncStatus({ state: "loading", message: "미니PC 공유 작업공간을 불러오는 중..." });
         const serverResult = await fetchOnlineWorkspaceServerSnapshot();
@@ -11889,15 +11939,37 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (serverResult.ok && serverResult.snapshot) {
           const serverSnapshot = serverResult.snapshot;
           if (serverSnapshot.dayKey === salesWorkspaceDayKey()) {
-            applyOnlineWorkspaceServerSnapshot(serverSnapshot);
-            onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
-            appliedFromServer = true;
-            setOnlineWorkspaceSyncStatus({
-              state: "saved",
-              message: "미니PC 공유 작업공간에서 복원했습니다.",
-              savedAt: serverSnapshot.updatedAt,
-              savedBy: serverSnapshot.updatedBy,
-            });
+            const localTodaySnapshot = localSnapshot?.dayKey === salesWorkspaceDayKey() ? localSnapshot : null;
+            if (localTodaySnapshot && onlineWorkspaceContentCount(localTodaySnapshot) > onlineWorkspaceContentCount(serverSnapshot)) {
+              if (localTodaySnapshot.activeSheet && salesSheetHeaders[localTodaySnapshot.activeSheet]) setActiveSheet(localTodaySnapshot.activeSheet);
+              if (localTodaySnapshot.sheets) {
+                setSheets({
+                  "발주 진행 단계": padSalesRows("발주 진행 단계", localTodaySnapshot.sheets["발주 진행 단계"] || []),
+                  송장출력용: padSalesRows("송장출력용", localTodaySnapshot.sheets.송장출력용 || []),
+                  FN송장입력: padSalesRows("FN송장입력", localTodaySnapshot.sheets.FN송장입력 || []),
+                  "FN판매입력": padSalesRows("FN판매입력", localTodaySnapshot.sheets["FN판매입력"] || []),
+                  "FN구매입력": padSalesRows("FN구매입력", localTodaySnapshot.sheets["FN구매입력"] || []),
+                });
+              }
+              setCompletedSalesTasks(localTodaySnapshot.completedSalesTasks || {});
+              setOrderFilePassword(localTodaySnapshot.orderFilePassword || "");
+              setMessage(localTodaySnapshot.message || "");
+              setDirectShippingRows(localTodaySnapshot.directShippingRows || { JB: [], 케이모아: [] });
+              setDirectShippingSourceIndexes(localTodaySnapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
+              onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
+              onlineWorkspaceSkipNextSaveRef.current = false;
+              setOnlineWorkspaceSyncStatus({ state: "idle", message: "" });
+            } else {
+              applyOnlineWorkspaceServerSnapshot(serverSnapshot);
+              onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
+              appliedFromServer = true;
+              setOnlineWorkspaceSyncStatus({
+                state: "saved",
+                message: "미니PC 공유 작업공간에서 복원했습니다.",
+                savedAt: serverSnapshot.updatedAt,
+                savedBy: serverSnapshot.updatedBy,
+              });
+            }
           } else {
             setOnlineWorkspaceSyncStatus({ state: "idle", message: "미니PC 서버에 이전 날짜 작업공간이 남아있어 오늘 날짜로 새로 시작합니다." });
           }
@@ -11974,6 +12046,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           updatedAt: new Date().toISOString(),
           updatedBy: onlineWorkspaceClientName(),
         };
+        if (!onlineWorkspaceHasContent(snapshot) && onlineWorkspaceServerUpdatedAtRef.current) {
+          return;
+        }
         localStorage.setItem(SALES_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
       } catch {
         // 작업실 저장 공간이 부족하면 화면 작업은 그대로 유지하고, 다음 초기화 때 정리한다.
@@ -12015,6 +12090,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           return;
         }
         if (result.conflict && result.snapshot) {
+          if (result.error.includes("빈 작업공간")) {
+            onlineWorkspaceServerUpdatedAtRef.current = result.snapshot.updatedAt || "";
+            setOnlineWorkspaceSyncStatus({
+              state: "conflict",
+              message: result.error,
+              savedAt: result.snapshot.updatedAt,
+              savedBy: result.snapshot.updatedBy,
+            });
+            return;
+          }
           const serverSnapshot = result.snapshot;
           onlineWorkspaceServerUpdatedAtRef.current = serverSnapshot.updatedAt || "";
           const retry = await saveOnlineWorkspaceServerSnapshot(snapshot, onlineWorkspaceServerUpdatedAtRef.current);
@@ -12053,13 +12138,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }, [workspaceRestored, section, activeSheet, sheets, uploadedFiles, pendingOrderFiles, pendingInvoiceFiles, completedSalesTasks, orderFilePassword, message, directShippingRows, directShippingSourceIndexes]);
 
   useEffect(() => {
+    const message = onlineWorkspaceSyncStatus.message;
     const isProblemState = onlineWorkspaceSyncStatus.state === "offline" || onlineWorkspaceSyncStatus.state === "error" || onlineWorkspaceSyncStatus.state === "conflict";
-    if (onlineWorkspaceSyncStatus.state === "saved" || (onlineWorkspaceSyncStatus.state === "idle" && !onlineWorkspaceSyncStatus.message)) {
+    const isTransientDelay = message.includes("응답 지연");
+    const shouldShowAlert = isProblemState && Boolean(message) && !isTransientDelay;
+    if (onlineWorkspaceSyncStatus.state === "saved" || (onlineWorkspaceSyncStatus.state === "idle" && !message)) {
       onlineWorkspaceAlertKeyRef.current = "";
       return;
     }
-    if (!isProblemState || !onlineWorkspaceSyncStatus.message) return;
-    const key = [onlineWorkspaceSyncStatus.state, onlineWorkspaceSyncStatus.message].join("|");
+    if (!shouldShowAlert) return;
+    const key = [onlineWorkspaceSyncStatus.state, message].join("|");
     if (onlineWorkspaceAlertKeyRef.current === key) return;
     onlineWorkspaceAlertKeyRef.current = key;
     setOnlineWorkspaceAlert(onlineWorkspaceSyncStatus);
@@ -12707,33 +12795,52 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .filter((row): row is string[] => Array.isArray(row));
     setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
     setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: savedSourceIndexes }));
+
+    const directCustomer = directShippingCustomerForPartner(partner);
+    const purchaseSourceRows: Array<Record<string, string>> = appendSourceIndexes.map((rowIndex) => {
+      const progress = sheets["발주 진행 단계"][rowIndex];
+      return {
+        거래처코드: directCustomer.code,
+        거래처명: directCustomer.name,
+        품목코드: progress ? progressValue(progress, "품목코드(ERP)") : "",
+        품목명: progress ? progressValue(progress, "품목명(ERP)") : "",
+        수량: progress ? progressValue(progress, "수량") || "1" : "1",
+        단가: "",
+      };
+    });
+    let enrichedPurchaseSourceRows: Array<Record<string, string>> = purchaseSourceRows;
+    try {
+      enrichedPurchaseSourceRows = await enrichOnlineEntryRows(purchaseSourceRows, "purchases");
+    } catch {
+      enrichedPurchaseSourceRows = purchaseSourceRows;
+    }
+
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
       const purchaseRows = next["FN구매입력"].filter(rowHasValue).map((row) => [...row]);
-      appendSourceIndexes.forEach((rowIndex) => {
+      const today = salesWorkspaceDayKey().replace(/\D/g, "");
+      appendSourceIndexes.forEach((rowIndex, appendIndex) => {
         if (progressRows[rowIndex]) {
           setProgressValue(progressRows[rowIndex], "직송거래처", partner);
         }
-        const progress = progressRows[rowIndex];
+        const enrichedSource = enrichedPurchaseSourceRows[appendIndex] || purchaseSourceRows[appendIndex];
         const purchase = salesSheetHeaders["FN구매입력"].map(() => "");
-        const today = salesWorkspaceDayKey().replace(/\D/g, "");
         const setPurchase = (header: string, value: string) => {
           const index = salesSheetHeaders["FN구매입력"].indexOf(header);
           if (index >= 0) purchase[index] = value;
         };
         setPurchase("일자", today);
-        const directCustomer = directShippingCustomerForPartner(partner);
         setPurchase("거래처코드", directCustomer.code);
         setPurchase("거래처명", directCustomer.name);
         setPurchase("입고창고", "100");
         setPurchase("VAT 포함/별도", "포함");
-        setPurchase("품목코드", progress ? progressValue(progress, "품목코드(ERP)") : "");
-        setPurchase("품목명", progress ? progressValue(progress, "품목명(ERP)") : "");
-        setPurchase("수량", progress ? progressValue(progress, "수량") || "1" : "1");
-        setPurchase("단가", "");
-        setPurchase("공급가액", "");
-        setPurchase("합계금액", "");
+        setPurchase("품목코드", enrichedSource.품목코드 || "");
+        setPurchase("품목명", enrichedSource.품목명 || "");
+        setPurchase("수량", enrichedSource.수량 || "1");
+        setPurchase("단가", enrichedSource.단가 || "");
+        setPurchase("공급가액", enrichedSource.공급가액 || "");
+        setPurchase("합계금액", enrichedSource.합계금액 || "");
         setPurchase("메모", "");
         purchaseRows.push(purchase);
       });
