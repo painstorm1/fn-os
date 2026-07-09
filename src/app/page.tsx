@@ -81,8 +81,12 @@ type CheckboxSelectionMode = "select" | "deselect";
 function setKeysSelected(prev: string[], keys: string[], selected: boolean) {
   const cleanKeys = keys.filter(Boolean);
   if (!cleanKeys.length) return prev;
-  if (selected) return Array.from(new Set([...prev, ...cleanKeys]));
+  if (selected) {
+    if (cleanKeys.every((key) => prev.includes(key))) return prev;
+    return Array.from(new Set([...prev, ...cleanKeys]));
+  }
   const removeSet = new Set(cleanKeys);
+  if (!prev.some((key) => removeSet.has(key))) return prev;
   return prev.filter((key) => !removeSet.has(key));
 }
 
@@ -9320,14 +9324,37 @@ function OnlineOrderProgressList({
     error: "",
   });
   const productInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const onSelectionChangeRef = useRef(onSelectionChange);
   const productInputFocusValues = useRef<Record<string, string>>({});
   const pendingProductInputFocus = useRef<{ rowIndex: number; select: boolean } | null>(null);
   const quickProductSearchCache = useRef<Map<string, FnOsProductSearchItem[]>>(new Map());
   const quickProductSearchInFlight = useRef<Map<string, Promise<FnOsProductSearchItem[]>>>(new Map());
   const productEnterResolving = useRef<Set<string>>(new Set());
+  function progressRowSelectionKey(row: string[], index: number) {
+    const stableParts = [
+      progressValue(row, "API상품주문ID"),
+      progressValue(row, "API주문ID"),
+      progressValue(row, "API배송묶음ID"),
+      progressValue(row, "API보조ID"),
+      progressValue(row, "쇼핑몰상품코드"),
+      progressValue(row, "쇼핑몰품목key"),
+      progressValue(row, "주문번호"),
+      progressValue(row, "묶음주문번호"),
+      progressValue(row, "쇼핑몰코드"),
+      progressValue(row, "쇼핑몰명"),
+    ].map(salesCellText).filter(Boolean).join("::");
+    if (stableParts) return `progress-${stableParts}-${index}`;
+    const fallback = ["쇼핑몰(거래처)", "수집일자", "수취인", "수취인연락처1", "우편번호", "주소"]
+      .map((header) => progressValue(row, header))
+      .map(salesCellText)
+      .filter(Boolean)
+      .join("::");
+    return `progress-${fallback || "row"}-${index}`;
+  }
+
   const highlightedRowSet = useMemo(() => new Set(highlightedRows), [highlightedRows]);
   const visibleRows = useMemo(() => rows
-    .map((row, index) => ({ row, index, key: `progress-${index}` }))
+    .map((row, index) => ({ row, index, key: progressRowSelectionKey(row, index) }))
     .filter((item) => rowHasValue(item.row))
     .filter((item) => {
       if (!siteFilter || siteFilter === "전체") return true;
@@ -9362,6 +9389,7 @@ function OnlineOrderProgressList({
   const selectedIndexes = selectedKeys
     .map((key) => visibleRows.find((item) => item.key === key)?.index)
     .filter((index): index is number => typeof index === "number");
+  const selectedIndexKey = [...selectedIndexes].sort((a, b) => a - b).join("|");
   const controlledSelectionKey = selectedRowIndexes?.join("|") ?? "";
   const frozenProgressHeaders = ["__select", "쇼핑몰(거래처)", "수집일자", "품목코드(ERP)", "품목명(ERP)"];
 
@@ -9373,11 +9401,15 @@ function OnlineOrderProgressList({
   }, [resetKey]);
 
   useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
+
+  useEffect(() => {
     if (!selectedRowIndexes) return;
-    const visibleKeySet = new Set(visibleRows.map((item) => item.key));
+    const keyByIndex = new Map(visibleRows.map((item) => [item.index, item.key]));
     const nextKeys = selectedRowIndexes
-      .map((index) => `progress-${index}`)
-      .filter((key) => visibleKeySet.has(key));
+      .map((index) => keyByIndex.get(index))
+      .filter((key): key is string => Boolean(key));
     setSelectedKeys((prev) => (
       prev.length === nextKeys.length && prev.every((key, index) => key === nextKeys[index])
         ? prev
@@ -9391,18 +9423,23 @@ function OnlineOrderProgressList({
       if (onPageChange) onPageChange(clampedPage);
       else setUncontrolledPage(clampedPage);
     }
-    setSelectedKeys((prev) => prev.filter((key) => visibleRows.some((item) => item.key === key)));
+    const visibleKeySet = new Set(visibleRows.map((item) => item.key));
+    setSelectedKeys((prev) => {
+      const next = prev.filter((key) => visibleKeySet.has(key));
+      return next.length === prev.length && next.every((key, index) => key === prev[index]) ? prev : next;
+    });
   }, [totalPages, visibleRows, requestedPage, onPageChange]);
 
   useEffect(() => {
-    if (!onSelectionChange) return;
-    if (!selectedIndexes.length) {
-      onSelectionChange("발주 진행 단계", { startRow: 0, endRow: 0, startCol: 0, endCol: headers.length - 1 }, []);
+    const notifySelectionChange = onSelectionChangeRef.current;
+    if (!notifySelectionChange) return;
+    if (!selectedIndexKey) {
+      notifySelectionChange("발주 진행 단계", { startRow: 0, endRow: 0, startCol: 0, endCol: headers.length - 1 }, []);
       return;
     }
-    const sorted = [...selectedIndexes].sort((a, b) => a - b);
-    onSelectionChange("발주 진행 단계", { startRow: sorted[0], endRow: sorted[sorted.length - 1], startCol: 0, endCol: headers.length - 1 }, sorted);
-  }, [selectedKeys, rows]);
+    const sorted = selectedIndexKey.split("|").map((value) => Number(value)).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+    notifySelectionChange("발주 진행 단계", { startRow: sorted[0], endRow: sorted[sorted.length - 1], startCol: 0, endCol: headers.length - 1 }, sorted);
+  }, [selectedIndexKey, headers.length]);
 
   useEffect(() => {
     const pending = pendingProductInputFocus.current;
