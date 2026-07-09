@@ -7711,8 +7711,8 @@ function appendCollectedOnlineOrdersToSheets(
       const { phone1, phone2 } = onlineOrderPairContacts(rawPhone1, rawPhone2);
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
       const orderAddress = salesCellText(order.address);
-      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, ["address", "baseAddress", "address1", "receiverAddress", "shippingAddress"]);
-      const detailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, ["detailedAddress", "address2", "receiverDetailAddress", "detailAddress"]);
+      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, ["receiverBaseAddress", "receiver_address", "receiverAddress", "shipToAddress", "shippingBaseAddress"]);
+      const detailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, ["receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"]);
       const deliveryMessage = salesCellText(order.deliveryMessage) || onlineOrderFallbackText(order, item, ["deliveryMessage", "shippingMemo", "parcelPrintMessage"]);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
