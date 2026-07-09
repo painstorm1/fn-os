@@ -6969,6 +6969,9 @@ type WindowWithSaveFilePicker = Window & {
   }) => Promise<FileSystemFileHandleLike>;
 };
 
+type OnlineOrderManualFileRowRef = { fileName: string; mallCode: string };
+type OnlineOrderManualFileRows = Record<string, string[]>;
+
 type SalesWorkspaceSnapshot = {
   dayKey: string;
   activeSheet: SalesSheetName;
@@ -6981,6 +6984,7 @@ type SalesWorkspaceSnapshot = {
   message: string;
   directShippingRows: Record<DirectShippingPartner, string[][]>;
   directShippingSourceIndexes?: DirectShippingSourceIndexes;
+  pendingManualOrderFileRows?: OnlineOrderManualFileRows;
 };
 
 type CollectedOnlineOrderItem = {
@@ -7029,6 +7033,7 @@ type SalesChannelProductMapping = {
 const SALES_WORKSPACE_STORAGE_KEY = "fnos.salesInventory.onlineWorkspace.v1";
 const ONLINE_ORDER_COMPLETED_FLOW_KEY = "fnos.salesInventory.onlineOrderCompletedFlows.v1";
 const ONLINE_ORDER_MANUAL_FILES_KEY = "fnos.salesInventory.onlineOrderManualFiles.v1";
+const ONLINE_ORDER_MANUAL_FILE_ROWS_KEY = "fnos.salesInventory.onlineOrderManualFileRows.v1";
 const SALES_WORKSPACE_DB_NAME = "fnos-sales-inventory-workspace";
 const SALES_WORKSPACE_DB_STORE = "files";
 const SALES_WORKSPACE_FILE_BUCKETS = ["uploaded", "pendingOrders", "pendingInvoices"] as const;
@@ -7644,36 +7649,108 @@ function collectedOnlineOrderManualFileNames(orders: CollectedOnlineOrder[]) {
   return Array.from(names);
 }
 
+function normalizePendingOnlineOrderManualFileName(value: unknown) {
+  return salesCellText(value).split(/[\/]/).pop() || "";
+}
+
 function readPendingOnlineOrderManualFiles() {
   if (typeof window === "undefined") return [] as string[];
   try {
     const parsed = JSON.parse(window.localStorage.getItem(ONLINE_ORDER_MANUAL_FILES_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.map((value) => salesCellText(value)).filter(Boolean) : [];
+    return Array.isArray(parsed)
+      ? Array.from(new Set(parsed.map(normalizePendingOnlineOrderManualFileName).filter(Boolean)))
+      : [];
   } catch {
     return [] as string[];
   }
 }
 
+function normalizePendingOnlineOrderManualFileRows(value: unknown): OnlineOrderManualFileRows {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const rows: OnlineOrderManualFileRows = {};
+  Object.entries(value as Record<string, unknown>).forEach(([fileName, mallCodes]) => {
+    const normalizedFileName = normalizePendingOnlineOrderManualFileName(fileName);
+    const normalizedMallCodes = Array.isArray(mallCodes)
+      ? Array.from(new Set(mallCodes.map(salesCellText).filter(Boolean)))
+      : [];
+    if (normalizedFileName && normalizedMallCodes.length) rows[normalizedFileName] = normalizedMallCodes;
+  });
+  return rows;
+}
+
+function readPendingOnlineOrderManualFileRows(): OnlineOrderManualFileRows {
+  if (typeof window === "undefined") return {};
+  try {
+    return normalizePendingOnlineOrderManualFileRows(JSON.parse(window.localStorage.getItem(ONLINE_ORDER_MANUAL_FILE_ROWS_KEY) || "{}"));
+  } catch {
+    return {};
+  }
+}
+
+function writePendingOnlineOrderManualFileRows(rows: OnlineOrderManualFileRows) {
+  if (typeof window === "undefined") return;
+  const normalized = normalizePendingOnlineOrderManualFileRows(rows);
+  const fileNames = Object.keys(normalized);
+  if (!fileNames.length) {
+    window.localStorage.removeItem(ONLINE_ORDER_MANUAL_FILE_ROWS_KEY);
+    return;
+  }
+  window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILE_ROWS_KEY, JSON.stringify(normalized));
+}
+
 function rememberPendingOnlineOrderManualFiles(orders: CollectedOnlineOrder[]) {
   if (typeof window === "undefined") return;
-  const files = collectedOnlineOrderManualFileNames(orders);
+  const files = collectedOnlineOrderManualFileNames(orders).map(normalizePendingOnlineOrderManualFileName).filter(Boolean);
   if (!files.length) return;
   const merged = Array.from(new Set([...readPendingOnlineOrderManualFiles(), ...files]));
   window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILES_KEY, JSON.stringify(merged.slice(-50)));
 }
 
+function rememberPendingOnlineOrderManualFileRows(refs: OnlineOrderManualFileRowRef[]) {
+  if (typeof window === "undefined") return;
+  const grouped: OnlineOrderManualFileRows = {};
+  refs.forEach(({ fileName, mallCode }) => {
+    const normalizedFileName = normalizePendingOnlineOrderManualFileName(fileName);
+    const normalizedMallCode = salesCellText(mallCode);
+    if (!normalizedFileName || !normalizedMallCode) return;
+    grouped[normalizedFileName] = Array.from(new Set([...(grouped[normalizedFileName] || []), normalizedMallCode]));
+  });
+  const fileNames = Object.keys(grouped);
+  if (!fileNames.length) return;
+  const currentRows = readPendingOnlineOrderManualFileRows();
+  fileNames.forEach((fileName) => {
+    currentRows[fileName] = grouped[fileName];
+  });
+  writePendingOnlineOrderManualFileRows(currentRows);
+  const mergedFiles = Array.from(new Set([...readPendingOnlineOrderManualFiles(), ...fileNames]));
+  window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILES_KEY, JSON.stringify(mergedFiles.slice(-50)));
+}
+
 function clearPendingOnlineOrderManualFiles(files: string[]) {
   if (typeof window === "undefined") return;
   if (!files.length) return;
-  const removed = new Set(files.map(salesCellText).filter(Boolean));
+  const removed = new Set(files.map(normalizePendingOnlineOrderManualFileName).filter(Boolean));
   const remaining = readPendingOnlineOrderManualFiles().filter((fileName) => !removed.has(fileName));
   if (remaining.length) window.localStorage.setItem(ONLINE_ORDER_MANUAL_FILES_KEY, JSON.stringify(remaining));
   else window.localStorage.removeItem(ONLINE_ORDER_MANUAL_FILES_KEY);
+  const fileRows = readPendingOnlineOrderManualFileRows();
+  removed.forEach((fileName) => delete fileRows[fileName]);
+  writePendingOnlineOrderManualFileRows(fileRows);
 }
 
-function allOrderProgressRowsCompleted(progressRows: string[][]) {
-  const rows = progressRows.filter(rowHasValue);
-  return rows.length > 0 && rows.every((row) => progressValue(row, "주문상태") === "출고완료");
+function completedPendingOnlineOrderManualFiles(progressRows: string[][]) {
+  const pendingFiles = readPendingOnlineOrderManualFiles();
+  if (!pendingFiles.length) return [] as string[];
+  const fileRows = readPendingOnlineOrderManualFileRows();
+  const statusByMallCode = new Map<string, string>();
+  progressRows.filter(rowHasValue).forEach((row) => {
+    const mallCode = salesCellText(progressValue(row, "쇼핑몰코드"));
+    if (mallCode) statusByMallCode.set(mallCode, salesCellText(progressValue(row, "주문상태")));
+  });
+  return pendingFiles.filter((fileName) => {
+    const mallCodes = Array.from(new Set((fileRows[fileName] || []).map(salesCellText).filter(Boolean)));
+    return mallCodes.length > 0 && mallCodes.every((mallCode) => statusByMallCode.get(mallCode) === "출고완료");
+  });
 }
 
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
@@ -7702,6 +7779,7 @@ function appendCollectedOnlineOrdersToSheets(
   const invoiceRows: string[][] = [];
   const mallCodeCounters = new Map<string, number>();
   const appendedActionIds: Array<{ apiOrderId: string; apiProductOrderId: string; apiShipmentId: string; apiExtraId: string }> = [];
+  const appendedManualFileRows: OnlineOrderManualFileRowRef[] = [];
   const mallCodeDatePart = salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8);
   const mallCodeBaseRun = onlineOrderRunCode();
 
@@ -7732,6 +7810,8 @@ function appendCollectedOnlineOrdersToSheets(
       const mallCodeSeq = (mallCodeCounters.get(mallCodeKey) || 0) + 1;
       mallCodeCounters.set(mallCodeKey, mallCodeSeq);
       const generatedMallCode = makeOnlineOrderMallCode(mallCodeDatePart, mallAlias, mallCodeFlowPrefix, mallCodeSeq);
+      const manualFileName = onlineOrderManualFileNameFromRaw(order.raw) || onlineOrderManualFileNameFromRaw(item.raw);
+      if (manualFileName) appendedManualFileRows.push({ fileName: manualFileName, mallCode: generatedMallCode });
       const mapping = findSalesChannelMapping(mappings, channelName, channelCode, mallProductCode, mallProductKey);
       const productCode = salesCellText(mapping?.product_code);
       const productName = salesCellText(mapping?.product_name);
@@ -7834,6 +7914,7 @@ function appendCollectedOnlineOrdersToSheets(
       return next;
     });
   }
+  rememberPendingOnlineOrderManualFileRows(appendedManualFileRows);
   return nextSheets;
 }
 
@@ -7957,6 +8038,8 @@ async function clearSalesWorkspaceFiles() {
 
 function clearSalesWorkspaceStorage() {
   localStorage.removeItem(SALES_WORKSPACE_STORAGE_KEY);
+  localStorage.removeItem(ONLINE_ORDER_MANUAL_FILES_KEY);
+  localStorage.removeItem(ONLINE_ORDER_MANUAL_FILE_ROWS_KEY);
   void clearSalesWorkspaceFiles().catch(() => undefined);
 }
 
@@ -11886,6 +11969,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setMessage(snapshot.message || "");
         setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
         setDirectShippingSourceIndexes(snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
+        if (snapshot.pendingManualOrderFileRows) writePendingOnlineOrderManualFileRows(snapshot.pendingManualOrderFileRows);
         const [storedUploaded, storedOrders, storedInvoices] = await Promise.all([
           loadSalesWorkspaceFiles("uploaded"),
           loadSalesWorkspaceFiles("pendingOrders"),
@@ -11924,6 +12008,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           message,
           directShippingRows,
           directShippingSourceIndexes,
+          pendingManualOrderFileRows: readPendingOnlineOrderManualFileRows(),
         };
         localStorage.setItem(SALES_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
       } catch {
@@ -13489,8 +13574,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return true;
   }
 
-  async function cleanupPendingManualOrderFilesAfterCompletion() {
-    const files = readPendingOnlineOrderManualFiles();
+  async function cleanupPendingManualOrderFilesAfterCompletion(filesToCleanup?: string[]) {
+    const files = Array.from(new Set(
+      (filesToCleanup?.length ? filesToCleanup : completedPendingOnlineOrderManualFiles(sheets["발주 진행 단계"]))
+        .map(normalizePendingOnlineOrderManualFileName)
+        .filter(Boolean),
+    ));
     if (!files.length) return;
     const hostname = window.location.hostname;
     const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
@@ -13628,7 +13717,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ...failedApiStatusItems,
     ]);
     await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
-    let shouldCleanupManualFiles = false;
+    let manualFilesToCleanup: string[] = [];
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
@@ -13637,7 +13726,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         setProgressValue(progressRows[index], "주문상태", status);
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-      shouldCleanupManualFiles = status === "출고완료" && allOrderProgressRowsCompleted(next["발주 진행 단계"]);
+      manualFilesToCleanup = status === "출고완료" ? completedPendingOnlineOrderManualFiles(next["발주 진행 단계"]) : [];
       return next;
     });
     setCollectionStatuses([
@@ -13648,7 +13737,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (partialFailureMessage) window.alert(`일부 쇼핑몰 처리는 실패했고, 성공한 쇼핑몰만 FNOS 상태를 변경했습니다.\n${partialFailureMessage}`);
     if (status === "출고완료") {
       window.setTimeout(() => {
-        if (shouldCleanupManualFiles) void cleanupPendingManualOrderFilesAfterCompletion();
+        if (manualFilesToCleanup.length) void cleanupPendingManualOrderFilesAfterCompletion(manualFilesToCleanup);
       }, 0);
     }
   }
