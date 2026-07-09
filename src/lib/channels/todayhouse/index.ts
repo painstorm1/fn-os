@@ -5,6 +5,8 @@ type AnyRecord = Record<string, unknown>;
 
 const TODAYHOUSE_BASE_URL = "https://api.ohou.se";
 const TODAYHOUSE_ORDER_PATH = "/orora/claim/v1/orora/orders/list";
+const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
+const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
@@ -32,7 +34,7 @@ export class TodayhouseChannelAdapter implements SalesChannelAdapter {
       const response = await fetch(`${baseUrl}${path}?${search.toString()}`, { headers: { Accept: "application/json", Authorization: `Bearer ${authCode}`, "X-Auth-Code": authCode, "X-OTP-Code": authCode } });
       const data = await readJson(response);
       const rows = rowsFrom(data);
-      const base = { channelCode: text(params.channel_code) || "TODAYHOUSE", channelName: text(params.channel_name) || "오늘의집", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
+      const base = { channelCode: text(params.channel_code) || TODAYHOUSE_CUSTOMER_CODE, channelName: text(params.channel_name) || TODAYHOUSE_CUSTOMER_NAME, customerCode: text(params.customer_code) || TODAYHOUSE_CUSTOMER_CODE, customerName: text(params.customer_name) || TODAYHOUSE_CUSTOMER_NAME };
       return { ok: true, data: rows.map((row) => normalize(row, base)).filter((order) => order.orderNo), message: `오늘의집 주문 ${rows.length}건을 수집했습니다.` };
     } catch (error) { return { ok: false, data: [], error: error instanceof Error ? error.message : "오늘의집 주문 수집 실패" }; }
   }

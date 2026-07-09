@@ -297,6 +297,8 @@ const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall"
 const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
 const ESM_CHANNEL_CODE = "2208183676";
 const ESM_CHANNEL_NAME = "ESM이에스엠";
+const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
+const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
 type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "unknown";
 
 type ManualOrderFileResult = {
@@ -408,7 +410,7 @@ function manualSourceFromFileName(fileName: string): ManualOrderSource {
 }
 
 function manualSourceSiteName(source: ManualOrderSource) {
-  if (source === "todayhouse") return "오늘의집";
+  if (source === "todayhouse") return TODAYHOUSE_CUSTOMER_NAME;
   if (source === "toss") return "토스";
   if (source === "ezwel") return "현대이지웰";
   if (source === "esm") return ESM_CHANNEL_NAME;
@@ -562,7 +564,7 @@ function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSo
 function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrderSource): NormalizedOrder | null {
   if (source === "esm") return normalizeEsmManualRow(row, fileName);
   if (source === "todayhouse") return makeManualOrder(row, fileName, source, {
-    code: "O", name: "오늘의집", orderKeys: ["주문번호"], bundleKeys: ["묶음배송그룹", "주문번호"], dateKeys: ["주문결제완료일", "출고예정일"],
+    code: TODAYHOUSE_CUSTOMER_CODE, name: TODAYHOUSE_CUSTOMER_NAME, orderKeys: ["주문번호"], bundleKeys: ["묶음배송그룹", "주문번호"], dateKeys: ["주문결제완료일", "출고예정일"],
     receiverKeys: ["수취인명"], phoneKeys: ["수취인 연락처"], zipcodeKeys: ["수취인 우편번호"], addressKeys: ["수취인 주소"], detailAddressKeys: ["수취인 주소상세"],
     memoKeys: ["배송메모", "주문메모"], productCodeKeys: ["상품자체관리코드", "상품아이디", "상품번호", "상품코드"], optionCodeKeys: ["주문옵션번호", "옵션아이디", "주문상품번호", "옵션번호", "옵션ID"], productKeys: ["상품명"], optionKeys: ["옵션명"],
     qtyKeys: ["수량"], amountKeys: ["정산예정금액", "판매가*수량 + 조립비 + 배송비", "판매가 * 수량"],
