@@ -9401,7 +9401,7 @@ function OnlineOrderProgressList({
       if (statusFilter === "신규주문") return !status || status === "신규주문";
       return status === statusFilter;
     }), [rows, statusFilter, siteFilter]);
-  const pageSize = 30;
+  const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
   const requestedPage = page ?? uncontrolledPage;
   const currentPage = Math.min(Math.max(1, requestedPage), totalPages);
@@ -9836,7 +9836,7 @@ function OnlineOrderProgressList({
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="h-[760px] max-h-[760px] overflow-auto">
+      <div className="h-[560px] min-h-[420px] max-h-[calc(100vh-300px)] overflow-auto">
         <table className="w-full table-fixed text-xs" style={{ minWidth: progressTableMinWidth }}>
           <colgroup>
             <col style={{ width: progressColumnWidth("__select") }} />
@@ -16345,7 +16345,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     );
   }
 
-  const orderProgressPageSize = 30;
+  const orderProgressPageSize = 10;
   const orderProgressTotalCount = filteredOrderProgressRows().length;
   const orderProgressTotalPages = Math.max(1, Math.ceil(orderProgressTotalCount / orderProgressPageSize));
   const orderProgressCurrentPage = Math.min(Math.max(1, orderProgressPage), orderProgressTotalPages);

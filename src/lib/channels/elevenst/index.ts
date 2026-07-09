@@ -1,4 +1,4 @@
-import { normalizeCollectableOnlineOrders } from "../common/order-status";
+import { collectableOnlineOrderStage, normalizeCollectableOnlineOrders } from "../common/order-status";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelAdapter } from "../common/types";
 
 type AnyRecord = Record<string, unknown>;
@@ -240,7 +240,7 @@ function resultStatus(data: unknown) {
   return { code, message };
 }
 
-function statusLabel(row: AnyRecord, fallback: string) {
+function elevenstRealStatusLabel(row: AnyRecord) {
   return firstDeepText(row, [
     "ordPrdStatNm",
     "ordPrdStatName",
@@ -248,7 +248,7 @@ function statusLabel(row: AnyRecord, fallback: string) {
     "orderStatusName",
     "orderStatus",
     "prdStatNm",
-  ]) || fallback;
+  ]);
 }
 
 function normalizeElevenstRow(
@@ -259,8 +259,12 @@ function normalizeElevenstRow(
   const orderNo = firstDeepText(row, ["ordNo", "orderNo"]);
   const ordPrdSeq = firstDeepText(row, ["ordPrdSeq", "orderProductSequence", "ordSeq"]);
   const dlvNo = firstDeepText(row, ["dlvNo", "deliveryNo"]);
-  const placeOrderStatus = fallbackStatus === "결제완료" ? "NOTYET" : "OK";
-  const rawWithCollectableStatus = { ...row, __fnosPlaceOrderStatusType: placeOrderStatus };
+  const realStatus = elevenstRealStatusLabel(row);
+  const realStage = collectableOnlineOrderStage(realStatus);
+  const placeOrderStatus = realStage ? "" : fallbackStatus === "결제완료" ? "NOTYET" : "OK";
+  const rawWithCollectableStatus = placeOrderStatus
+    ? { ...row, __fnosPlaceOrderStatusType: placeOrderStatus }
+    : { ...row };
   const item: NormalizedOrderItem = {
     channelProductCode: firstDeepText(row, ["prdNo", "productNo", "sellerPrdCd", "sellerProductCode"]),
     channelOptionCode: [ordPrdSeq, dlvNo].filter(Boolean).join("-") || undefined,
@@ -278,7 +282,7 @@ function normalizeElevenstRow(
     orderNo: orderNo || [ordPrdSeq, dlvNo].filter(Boolean).join("-") || firstDeepText(row, ["orderId"]),
     bundleOrderNo: firstDeepText(row, ["ordNo", "orderNo", "bundleNo"]),
     orderDate: dateFromElevenst(firstDeepText(row, ["ordDtm", "orderDate", "ordDt", "payDt", "paymentDate"])),
-    orderStatus: statusLabel(row, fallbackStatus),
+    orderStatus: realStage ? realStatus : fallbackStatus,
     receiverName: firstDeepText(row, ["rcvrNm", "receiverName", "recipientName", "recvNm"]),
     phone1: receiverPhone,
     phone2: firstDeepText(row, ["rcvrTlphn", "receiverTel", "receiverPhone2"]),
@@ -295,6 +299,12 @@ function normalizeElevenstRow(
 
 function mergeOrders(orders: NormalizedOrder[]) {
   const byOrder = new Map<string, NormalizedOrder>();
+  const statusRank = (value: unknown) => {
+    const stage = collectableOnlineOrderStage(value);
+    if (stage === "주문확인") return 1;
+    if (stage === "신규주문") return 0;
+    return -1;
+  };
   orders.forEach((order) => {
     const key = `${order.channelCode}:${order.orderNo}`;
     const existing = byOrder.get(key);
@@ -303,6 +313,7 @@ function mergeOrders(orders: NormalizedOrder[]) {
       return;
     }
     existing.items.push(...order.items);
+    if (statusRank(order.orderStatus) > statusRank(existing.orderStatus)) existing.orderStatus = order.orderStatus;
     if (!existing.receiverName) existing.receiverName = order.receiverName;
     if (!existing.phone1) existing.phone1 = order.phone1;
     if (!existing.address) existing.address = order.address;
