@@ -7928,7 +7928,6 @@ function clearSalesWorkspaceStorage() {
 
 const jbDirectHeaders = [
   "쇼핑몰코드",
-  "거래처",
   ...salesSheetHeaders.송장출력용.filter((header) => !["쇼핑몰코드", "정산예정금액", "송장번호"].includes(header)),
 ];
 const kemoreDirectHeaders = ["쇼핑몰코드", "수량", "수취인", "수취인연락처1", "수취인연락처2", "주문옵션", "우편번호", "주소", "배송구분", "배송금액", "선불/착불", "배송요청사항", "발송처", "발송처TEL"];
@@ -7941,7 +7940,6 @@ function mapJbDirectRow(source: string[], sequence: number) {
   };
   return jbDirectHeaders.map((header) => {
     if (header === "쇼핑몰코드") return `${mmdd}-JB-${String(sequence).padStart(3, "0")}`;
-    if (header === "거래처") return "JB";
     if (header === "수량") return "1";
     if (header === "주문옵션") return get("주문옵션");
     return get(header);
@@ -12703,39 +12701,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return enriched;
   }
 
-  function openManualInvoiceSheetWindow() {
-    const manualIndexes = shippingPreviewRows
-      .map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1)
-      .filter((index) => index >= 0);
-    const rows = manualIndexes.map((index) => shippingPreviewRows[index]).filter(rowHasValue);
-    if (!rows.length) {
-      window.alert("직접 송장번호를 입력할 API 미연동 사이트 주문이 없습니다.");
-      return;
-    }
-    const popup = window.open("", "fnos_manual_invoice_sheet", "width=1500,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes");
-    if (!popup) {
-      window.alert("새창 팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 눌러주세요.");
-      return;
-    }
-    const headers = salesSheetHeaders.송장출력용;
-    const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const tableHead = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
-    const tableRows = rows.map((row) => `<tr>${headers.map((header, colIndex) => {
-      const raw = salesCellText(row[colIndex]);
-      const copyValue = header === "송장번호" ? raw.replace(/\D/g, "") : raw;
-      const copyable = ["송장번호", "수취인"].includes(header);
-      return `<td${copyable ? ` class="copyable" data-copy="${escapeHtml(copyValue)}" title="클릭하면 복사"` : ""}>${escapeHtml(raw)}</td>`;
-    }).join("")}</tr>`).join("");
-    popup.document.open();
-    popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>직접 송장번호 입력 시트</title><style>
-      body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8fafc;color:#0f172a}.bar{position:sticky;top:0;z-index:5;background:white;border-bottom:1px solid #e2e8f0;padding:14px 18px}.bar h1{margin:0;font-size:18px}.bar p{margin:4px 0 0;color:#64748b;font-weight:700}.wrap{padding:14px 18px}.toast{position:fixed;right:20px;bottom:20px;background:#111827;color:white;border-radius:10px;padding:10px 14px;font-weight:800;display:none}table{border-collapse:collapse;background:white;font-size:12px}th,td{border:1px solid #cbd5e1;padding:7px 9px;white-space:nowrap}th{position:sticky;top:73px;background:#f1f5f9;z-index:4}td.copyable{cursor:pointer;background:#fff7ed;font-weight:800}td.copyable:hover{background:#fed7aa}.tracking{color:#ea580c}
-    </style></head><body><div class="bar"><h1>직접 송장번호 입력 시트</h1><p>API 미연동 주문 ${rows.length.toLocaleString("ko-KR")}건 · 송장번호/수취인 셀 클릭 시 복사됩니다. 송장번호는 숫자만 복사됩니다.</p></div><div class="wrap"><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table></div><div id="toast" class="toast">복사되었습니다</div><script>
-      document.addEventListener('click', async (event) => { const cell = event.target.closest('td.copyable'); if (!cell) return; const text = cell.dataset.copy || ''; if (!text) return; try { await navigator.clipboard.writeText(text); } catch { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } const toast=document.getElementById('toast'); toast.style.display='block'; window.clearTimeout(window.__toastTimer); window.__toastTimer=window.setTimeout(()=>toast.style.display='none',900); });
-    </script></body></html>`);
-    popup.document.close();
-    popup.focus();
-  }
-
   async function sendSalesInput() {
     let sourceRows: Array<Record<string, string>> = sheets["FN판매입력"]
       .filter(rowHasValue)
@@ -16318,7 +16283,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                   <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
                   <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
                   <span className="mx-1 h-5 w-px bg-slate-200" />
-                  <button type="button" onClick={openManualInvoiceSheetWindow} className="h-9 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-black text-amber-700 hover:bg-amber-100">직접송장 새창</button>
                   <select
                     className="h-9 rounded-md border border-blue-200 bg-white px-3 text-sm font-black text-blue-700 outline-orange-400"
                     defaultValue=""
