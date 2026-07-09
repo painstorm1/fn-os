@@ -46,14 +46,17 @@ function joinedSsgAddress(...values: unknown[]) {
   });
   return parts.join(" ");
 }
+function ssgTextValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
 function normalizeSsgAddressText(value: unknown) {
-  return text(value)
+  return ssgTextValue(value)
     .replace(/\s+/g, " ")
     .replace(/\s*(?:GMARKET|G마켓|AUCTION|옥션|ESM)\s*\(?\s*\d{2,4}[-\s]?\d{3,4}[-\s]?\d{4}\s*\)?\s*$/i, "")
     .trim();
 }
 function isSsgMarketplaceAlias(value: unknown) {
-  const compact = text(value).replace(/\s+/g, "");
+  const compact = ssgTextValue(value).replace(/\s+/g, "");
   return /^(?:GMARKET|G마켓|AUCTION|옥션|ESM)\(?\d{7,}\)?$/i.test(compact);
 }
 function isSsgBaseAddress(value: unknown) {
@@ -79,7 +82,7 @@ function ssgAddressRecords(row: AnyRecord) {
     record(row.address),
   ];
 }
-function firstSsgAddressText(row: AnyRecord, keys: string[], deepKeys: string[] = keys, accept: (value: unknown) => boolean = (value) => Boolean(text(value))) {
+function firstSsgAddressText(row: AnyRecord, keys: string[], deepKeys: string[] = keys, accept: (value: unknown) => boolean = (value) => Boolean(ssgTextValue(value))) {
   const nestedValues = ssgAddressRecords(row).flatMap((candidate) => keys.map((key) => candidate[key]));
   for (const value of [...keys.map((key) => row[key]), ...nestedValues, firstDeepText(row, deepKeys)]) {
     if (accept(value)) return normalizeSsgAddressText(value);
