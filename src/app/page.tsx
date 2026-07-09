@@ -8491,7 +8491,7 @@ function SalesExcelGrid({
 }) {
   const headers = salesSheetHeaders[sheet];
   const displayHeaders = salesSheetDisplayHeaders(sheet);
-  const hiddenHeaders = new Set(isSalesEntrySheet(sheet) ? ["단가"] : []);
+  const hiddenHeaders = new Set(sheet === "FN판매입력" ? ["단가"] : []);
   const visibleColIndexes = headers.map((_, index) => index).filter((index) => !hiddenHeaders.has(headers[index]));
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<SalesGridCell>({ row: 0, col: 0 });
@@ -18064,7 +18064,9 @@ function SalesPurchaseEntryModal({
       ...line,
       prod_cd: fnProductSku(product),
       prod_name: fnProductName(product),
-      price: recentPrice ? String(recentPrice) : price ? String(price) : line.price,
+      price: mode === "purchases"
+        ? (price ? String(price) : recentPrice ? String(recentPrice) : line.price)
+        : (recentPrice ? String(recentPrice) : price ? String(price) : line.price),
     };
   }
 
@@ -18533,7 +18535,8 @@ function SalesPurchaseEntryModal({
                 <th className="w-36 px-2 py-2 text-left">품목코드</th>
                 <th className="px-2 py-2 text-left">품목명</th>
                 <th className="w-24 px-2 py-2 text-right">수량</th>
-                <th className="w-28 px-2 py-2 text-right">공급가액</th>
+                <th className="w-28 px-2 py-2 text-right">{mode === "purchases" ? "단가" : "공급가액"}</th>
+                {mode === "purchases" && <th className="w-28 px-2 py-2 text-right">공급가액</th>}
                 <th className="w-32 px-2 py-2 text-right">합계금액</th>
                 <th className="w-48 px-2 py-2 text-left">메모</th>
               </tr>
@@ -18574,6 +18577,7 @@ function SalesPurchaseEntryModal({
                   }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="decimal" value={formatCommaNumber(line.qty, { decimal: true })} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", normalizeCommaNumberInput(event.target.value, { decimal: true }))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="numeric" value={formatCommaNumber(line.price)} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", normalizeCommaNumberInput(event.target.value))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
+                  {mode === "purchases" && <td className="px-2 py-2 text-right font-black">{Math.round(lineUnit(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="memo" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "memo")) return; if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
                 </tr>
