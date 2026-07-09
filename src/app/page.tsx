@@ -6772,25 +6772,35 @@ function applyInvoiceTrackingToSheets(
   parsedSheets: Partial<Record<SalesSheetName, string[][]>> = {},
   invoiceRows: ParsedInvoiceTrackingRow[] = [],
 ) {
+  const progressRows = currentSheets["발주 진행 단계"];
+  const rowMatchesAddress = (row: string[], invoiceKey: string) => {
+    const name = row[2];
+    const phone1 = row[3];
+    const phone2 = row[4];
+    const address = row[6];
+    return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
+  };
+  const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRows[index] || [], "직송거래처"));
+  const isInvoiceConfirmedProgressRow = (index: number) => salesCellText(progressValue(progressRows[index] || [], "주문상태")) === "주문확인";
+  const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRows[index] || [], "API배송묶음ID"));
+  const isCompleteInvoiceKey = (invoiceKey: string) => invoiceKey.split("|").every((part) => Boolean(part));
+  const rowMatchesInvoiceIdentity = (row: string[], invoiceKey: string, productKey: string) => (
+    Boolean(productKey)
+    && isCompleteInvoiceKey(invoiceKey)
+    && invoiceProductCodeKey(row[0]) === productKey
+    && rowMatchesAddress(row, invoiceKey)
+  );
+
   if (invoiceRows.length) {
     const nextShipping = currentSheets.송장출력용.map((row) => normalizeShippingRowForTracking(row));
     const usedShipping = new Set<number>();
     const failedShippingIndexes = new Set<number>();
+    const matchedShippingIndexes = new Set<number>();
     let matchedShipping = 0;
     let alreadyMatchedShipping = 0;
-    const progressRows = currentSheets["발주 진행 단계"].filter(rowHasValue);
 
-    const rowMatchesAddress = (row: string[], invoiceKey: string) => {
-      const name = row[2];
-      const phone1 = row[3];
-      const phone2 = row[4];
-      const address = row[6];
-      return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
-    };
-    const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRows[index] || [], "직송거래처"));
-    const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRows[index] || [], "API배송묶음ID"));
     const applyTracking = (index: number, trackingNo: string) => {
-      if (index < 0 || !nextShipping[index] || isDirectShippingIndex(index)) return false;
+      if (index < 0 || !nextShipping[index] || isDirectShippingIndex(index) || !isInvoiceConfirmedProgressRow(index)) return false;
       const currentTracking = salesCellText(nextShipping[index][1]);
       if (currentTracking === trackingNo) {
         alreadyMatchedShipping += 1;
@@ -6801,6 +6811,7 @@ function applyInvoiceTrackingToSheets(
       nextShipping[index][1] = trackingNo;
       matchedShipping += 1;
       usedShipping.add(index);
+      matchedShippingIndexes.add(index);
       return true;
     };
     const applyTrackingToSameShipment = (sourceIndex: number, trackingNo: string) => {
@@ -6819,45 +6830,33 @@ function applyInvoiceTrackingToSheets(
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
       const productKey = invoiceProductCodeKey(invoiceRow.productCode);
       const itemCount = Math.max(1, Number(invoiceRow.itemCount || 1) || 1);
-      const shippingIndexByCode = productKey
-        ? nextShipping.findIndex((row, index) => (
-          !usedShipping.has(index)
-          && rowHasValue(row)
-          && !isDirectShippingIndex(index)
-          && !salesCellText(row[1])
-          && invoiceProductCodeKey(row[0]) === productKey
-        ))
-        : -1;
-      const shippingIndexByAddress = itemCount >= 2
-        ? nextShipping.findIndex((row, index) => (
-          !usedShipping.has(index)
-          && rowHasValue(row)
-          && !isDirectShippingIndex(index)
-          && !salesCellText(row[1])
-          && rowMatchesAddress(row, invoiceKey)
-        ))
-        : -1;
-      const shippingIndex = shippingIndexByCode >= 0 ? shippingIndexByCode : shippingIndexByAddress;
+      const shippingIndex = nextShipping.findIndex((row, index) => (
+        !usedShipping.has(index)
+        && rowHasValue(row)
+        && !salesCellText(row[1])
+        && isInvoiceConfirmedProgressRow(index)
+        && !isDirectShippingIndex(index)
+        && rowMatchesInvoiceIdentity(row, invoiceKey, productKey)
+      ));
 
       if (shippingIndex < 0) {
-        const alreadyIndex = nextShipping.findIndex((row) => {
-          if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo) return false;
-          return rowMatchesAddress(row, invoiceKey)
-            || (productKey && invoiceProductCodeKey(row[0]) === productKey);
+        const alreadyIndex = nextShipping.findIndex((row, index) => {
+          if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo || !isInvoiceConfirmedProgressRow(index) || isDirectShippingIndex(index)) return false;
+          return rowMatchesInvoiceIdentity(row, invoiceKey, productKey);
         });
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
           applyTrackingToSameShipment(alreadyIndex, trackingNo);
           if (itemCount >= 2) {
             nextShipping.forEach((row, index) => {
-              if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1]) || !rowMatchesAddress(row, invoiceKey)) return;
+              if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
               applyTracking(index, trackingNo);
             });
           }
           return;
         }
         const highlightIndex = productKey
-          ? nextShipping.findIndex((row, index) => rowHasValue(row) && !isDirectShippingIndex(index) && invoiceProductCodeKey(row[0]) === productKey)
+          ? nextShipping.findIndex((row, index) => rowHasValue(row) && isInvoiceConfirmedProgressRow(index) && !isDirectShippingIndex(index) && invoiceProductCodeKey(row[0]) === productKey)
           : -1;
         if (highlightIndex >= 0) failedShippingIndexes.add(highlightIndex);
         return;
@@ -6867,7 +6866,7 @@ function applyInvoiceTrackingToSheets(
       applyTrackingToSameShipment(shippingIndex, trackingNo);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
-          if (!rowHasValue(row) || isDirectShippingIndex(index) || salesCellText(row[1]) || !rowMatchesAddress(row, invoiceKey)) return;
+          if (!rowHasValue(row) || salesCellText(row[1]) || !rowMatchesInvoiceIdentity(row, invoiceKey, productKey)) return;
           applyTracking(index, trackingNo);
         });
       }
@@ -6901,26 +6900,41 @@ function applyInvoiceTrackingToSheets(
       failedInvoiceIndexes: [] as number[],
       alreadyMatchedShipping,
       alreadyMatchedInvoice: 0,
+      matchedShippingIndexes: [...matchedShippingIndexes],
       manualRows,
     };
   }
 
   const parsedShippingRows = (parsedSheets.송장출력용 || []).filter(rowHasValue);
-  const trackingByShippingCode = new Map<string, string>();
-
-  parsedShippingRows.forEach((row) => {
-    const item = salesRowObject("송장출력용", row);
-    if (item.쇼핑몰코드 && item.송장번호) trackingByShippingCode.set(item.쇼핑몰코드, item.송장번호);
-  });
+  const parsedTrackingRows = parsedShippingRows
+    .map((row) => {
+      const item = salesRowObject("송장출력용", row);
+      const productKey = invoiceProductCodeKey(item.쇼핑몰코드);
+      const tracking = salesCellText(item.송장번호);
+      const addressKeys = [
+        invoiceMatchKey(item.수취인, item.수취인연락처1, item.주소),
+        invoiceMatchKey(item.수취인, item.수취인연락처2, item.주소),
+      ].filter(isCompleteInvoiceKey);
+      return { productKey, tracking, addressKeys };
+    })
+    .filter((item) => item.productKey && item.tracking && item.addressKeys.length);
 
   let matchedShipping = 0;
-  const nextShipping = currentSheets.송장출력용.map((row) => {
-    if (!rowHasValue(row)) return row;
-    const item = salesRowObject("송장출력용", row);
-    const tracking = trackingByShippingCode.get(item.쇼핑몰코드);
-    if (!tracking || item.송장번호 === tracking) return row;
+  const matchedShippingIndexes = new Set<number>();
+  const nextShipping = currentSheets.송장출력용.map((row, index) => {
+    if (!rowHasValue(row) || isDirectShippingIndex(index) || !isInvoiceConfirmedProgressRow(index)) return row;
+    const currentItem = salesRowObject("송장출력용", row);
+    const currentTracking = salesCellText(currentItem.송장번호);
+    if (currentTracking) return row;
+    const currentProductKey = invoiceProductCodeKey(currentItem.쇼핑몰코드);
+    const match = parsedTrackingRows.find((parsedRow) => (
+      parsedRow.productKey === currentProductKey
+      && parsedRow.addressKeys.some((addressKey) => rowMatchesAddress(row, addressKey))
+    ));
+    if (!match) return row;
     matchedShipping += 1;
-    return row.map((cell, index) => index === 1 ? tracking : cell);
+    matchedShippingIndexes.add(index);
+    return row.map((cell, cellIndex) => cellIndex === 1 ? match.tracking : cell);
   });
 
   const manualRows = nextShipping
@@ -6948,6 +6962,7 @@ function applyInvoiceTrackingToSheets(
     failedInvoiceIndexes: [] as number[],
     alreadyMatchedShipping: 0,
     alreadyMatchedInvoice: 0,
+    matchedShippingIndexes: [...matchedShippingIndexes],
     manualRows,
   };
 }
@@ -7422,6 +7437,21 @@ function preserveExistingOrderProgressFields(rows: string[][], existingRows: str
       const value = progressValue(existing, header);
       if (value) setProgressValue(next, header, value);
     });
+    return next;
+  });
+}
+
+function applyInvoiceMatchProgressGate(rows: string[][], existingRows: string[][], matchedIndexes: number[]) {
+  const matchedSet = new Set(matchedIndexes);
+  return rows.map((row, index) => {
+    if (!rowHasValue(row)) return row;
+    const existing = existingRows[index] || [];
+    const existingStatus = progressValue(existing, "주문상태");
+    const existingTracking = progressValue(existing, "송장번호");
+    if (matchedSet.has(index) && existingStatus === "주문확인") return row;
+    const next = [...row];
+    if (existingStatus) setProgressValue(next, "주문상태", existingStatus);
+    setProgressValue(next, "송장번호", existingTracking);
     return next;
   });
 }
@@ -13107,9 +13137,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
 
-    const nextProgressRows = preserveExistingOrderProgressFields(
-      buildOrderProgressRows(result.sheets),
+    const nextProgressRows = applyInvoiceMatchProgressGate(
+      preserveExistingOrderProgressFields(
+        buildOrderProgressRows(result.sheets),
+        sheets["발주 진행 단계"],
+      ),
       sheets["발주 진행 단계"],
+      result.matchedShippingIndexes || [],
     );
     (["JB", "케이모아"] as DirectShippingPartner[]).forEach((partner) => {
       (directShippingSourceIndexes[partner] || []).forEach((rowIndex) => {
