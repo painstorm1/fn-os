@@ -18,7 +18,8 @@ function firstDeepText(root: unknown, keys: string[], maxDepth = 4) {
     seen.add(value);
     const current = record(value);
     for (const key of keys) {
-      const direct = text(current[key]);
+      const directValue = current[key];
+      const direct = typeof directValue === "string" || typeof directValue === "number" ? String(directValue).trim() : "";
       if (direct) return direct;
     }
     for (const child of Object.values(current)) {

@@ -7511,7 +7511,8 @@ function onlineOrderFirstDeepText(root: unknown, keys: string[], maxDepth = 5): 
     seen.add(value);
     const record = onlineOrderRecord(value);
     for (const key of keys) {
-      const direct = salesCellText(record[key]);
+      const directValue = record[key];
+      const direct = typeof directValue === "string" || typeof directValue === "number" ? salesCellText(directValue) : "";
       if (direct) return direct;
     }
     for (const child of Object.values(record)) {
@@ -7715,8 +7716,16 @@ function appendCollectedOnlineOrdersToSheets(
       const { phone1, phone2 } = onlineOrderPairContacts(rawPhone1, rawPhone2);
       const zipcode = salesCellText(order.zipcode) || onlineOrderFallbackText(order, item, ["zipcode", "zipCode", "postCode", "receiverZipCode"]);
       const orderAddress = salesCellText(order.address);
-      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, ["receiverBaseAddress", "receiver_address", "receiverAddress", "shipToAddress", "shippingBaseAddress"]);
-      const detailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, ["receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"]);
+      const isSsgOrder = mallAlias === "S";
+      const baseAddressFallbackKeys = isSsgOrder
+        ? ["shpplocBascAddr", "shpplocBaseAddr", "shpplocRoadnmAddr", "shpplocRoadAddr", "shpplocAddr", "shppLocBascAddr", "shppLocBaseAddr", "shppLocRoadnmAddr", "shppLocRoadAddr", "shppLocAddr", "rcptpeBascAddr", "rcptpeAddr", "receiverBaseAddress", "receiver_address", "shipToAddress", "shippingBaseAddress"]
+        : ["receiverBaseAddress", "receiver_address", "receiverAddress", "shipToAddress", "shippingBaseAddress"];
+      const detailAddressFallbackKeys = isSsgOrder
+        ? ["shpplocDtlAddr", "shpplocDetailAddr", "shppLocDtlAddr", "shppLocDetailAddr", "rcptpeDtlAddr", "receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"]
+        : ["receiverDetailAddress", "receiver_detail_address", "shippingDetailAddress", "shipToDetailAddress"];
+      const baseAddress = orderAddress || onlineOrderFallbackText(order, item, baseAddressFallbackKeys);
+      const rawDetailAddress = orderAddress ? "" : onlineOrderFallbackText(order, item, detailAddressFallbackKeys);
+      const detailAddress = isSsgOrder && !baseAddress ? "" : rawDetailAddress;
       const deliveryMessage = salesCellText(order.deliveryMessage) || onlineOrderFallbackText(order, item, ["deliveryMessage", "shippingMemo", "parcelPrintMessage"]);
 
       const sale = salesSheetHeaders["FN판매입력"].map(() => "");
