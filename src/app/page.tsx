@@ -12369,6 +12369,56 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일`, source: "api" as const }];
     }
   }
+
+  function orderCollectionStatusItems(
+    statuses: Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }>,
+    fallbackOk: boolean,
+    fallbackMessage: string,
+  ): OnlineApiStatusItem[] {
+    return statuses.length
+      ? statuses.map((item) => {
+          const displayCount = Number(item.item_count ?? item.count ?? 0);
+          const orderCount = Number(item.count ?? 0);
+          const itemCount = Number(item.item_count ?? displayCount);
+          const countMessage = itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
+          const isManual = item.source === "manual";
+          return {
+            name: salesCellText(item.channel_name) || (isManual ? "수동 주문수집" : "쇼핑몰"),
+            status: item.ok ? "done" as const : (item.skipped ? "skipped" as const : "failed" as const),
+            message: item.ok ? countMessage : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
+            source: isManual ? "manual" as const : "api" as const,
+          };
+        })
+      : [
+          {
+            name: "쇼핑몰 API",
+            status: fallbackOk ? "done" as const : "failed" as const,
+            message: fallbackOk ? "" : fallbackMessage,
+            source: "api" as const,
+          },
+        ];
+  }
+
+  async function revealOrderCollectionStatuses(finalStatuses: OnlineApiStatusItem[]) {
+    const apiIndexes = finalStatuses
+      .map((item, index) => ((item.source || "api") === "api" && item.status !== "skipped" ? index : -1))
+      .filter((index) => index >= 0);
+    if (apiIndexes.length <= 1) {
+      setCollectionStatuses(finalStatuses);
+      return;
+    }
+    setCollectionStatuses(finalStatuses.map((item, index) => (
+      apiIndexes.includes(index)
+        ? { ...item, status: "running" as const, message: item.message || "수집 결과 반영 중" }
+        : item
+    )));
+    for (const index of apiIndexes) {
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      setCollectionStatuses((prev) => prev.map((item, itemIndex) => (itemIndex === index ? finalStatuses[index] : item)));
+    }
+    setCollectionStatuses(finalStatuses);
+  }
+
   async function runOrderCollectionFlow(dayWindow = 4) {
     const collectDays = Math.max(1, Math.floor(dayWindow));
     setCollectionPopupOpen(false);
@@ -12437,28 +12487,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (data.queued) throw new Error("로컬 워커 처리 시간이 아직 완료되지 않았습니다. 잠시 후 새로고침해 결과를 확인해주세요.");
       }
       const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
-      setCollectionStatuses(statuses.length
-        ? statuses.map((item) => {
-            const displayCount = Number(item.item_count ?? item.count ?? 0);
-            const orderCount = Number(item.count ?? 0);
-            const itemCount = Number(item.item_count ?? displayCount);
-            const countMessage = itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
-            const isManual = item.source === "manual";
-            return {
-              name: salesCellText(item.channel_name) || (isManual ? "수동 주문수집" : "쇼핑몰"),
-              status: item.ok ? "done" : (item.skipped ? "skipped" : "failed"),
-              message: item.ok ? countMessage : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
-              source: isManual ? "manual" as const : "api" as const,
-            };
-          })
-        : [
-            {
-              name: "쇼핑몰 API",
-              status: res.ok && data.ok !== false ? "done" : "failed",
-              message: res.ok && data.ok !== false ? "" : salesCellText(data.error || data.message || "수집 실패"),
-              source: "api" as const,
-            },
-          ]);
+      const finalStatuses = orderCollectionStatusItems(
+        statuses,
+        res.ok && data.ok !== false,
+        salesCellText(data.error || data.message || "수집 실패"),
+      );
+      await revealOrderCollectionStatuses(finalStatuses);
       if (!res.ok || data.ok === false) {
         setMessage(data.error || "쇼핑몰 API 주문 수집에 실패했습니다.");
         return;
@@ -12477,7 +12511,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       setCompletedSalesTasks((prev) => ({ ...prev, orderFlow: true }));
       setMessage(`최근 ${collectDays}일 쇼핑몰 API 주문 ${collectedOrderCount}건(상품 ${collectedItemCount}줄)을 수집해 온라인 발주 시트에 반영했습니다.`);
-      window.alert("작업 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : "쇼핑몰 API 주문 수집 실패";
       setCollectionStatuses((prev) => prev.map((item) => ({ ...item, status: "failed", message })));

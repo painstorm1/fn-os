@@ -67,6 +67,30 @@ function orderJobType(channelCode: string) {
   return channelCode === "COUPANG" ? "collect_coupang_orders" : "collect_smartstore_orders";
 }
 
+const DEFAULT_ONLINE_ORDER_CHANNEL_CONCURRENCY = 3;
+const MAX_ONLINE_ORDER_CHANNEL_CONCURRENCY = 3;
+
+function onlineOrderChannelConcurrency() {
+  const parsed = Number(process.env.FNOS_ONLINE_ORDER_CHANNEL_CONCURRENCY || DEFAULT_ONLINE_ORDER_CHANNEL_CONCURRENCY);
+  if (!Number.isFinite(parsed)) return DEFAULT_ONLINE_ORDER_CHANNEL_CONCURRENCY;
+  return Math.max(1, Math.min(MAX_ONLINE_ORDER_CHANNEL_CONCURRENCY, Math.floor(parsed)));
+}
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), Math.max(1, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 function orderItemCount(orders: NormalizedOrder[]) {
   return orders.reduce((sum, order) => sum + Math.max(1, Array.isArray(order.items) ? order.items.length : 0), 0);
 }
@@ -838,10 +862,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const results = [];
-    for (const channel of supportedChannels) {
-      results.push(await collectChannel(channel, body));
-    }
+    const results = await mapWithConcurrency(
+      supportedChannels as AnyRecord[],
+      onlineOrderChannelConcurrency(),
+      (channel: AnyRecord) => collectChannel(channel, body),
+    );
     for (const channel of unsupportedChannels) {
       results.push({ channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: ONLINE_ORDER_UNSUPPORTED_MESSAGE });
     }
