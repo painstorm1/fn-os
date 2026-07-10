@@ -740,27 +740,26 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
     return { channel, ok: false, orders: [] as NormalizedOrder[], message };
   }
 
-  const credentialRows = await readChannelCredentials(text(channel.id), true);
-  const credentialError = credentialReadError(credentialRows);
-  if (credentialError) {
-    return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: credentialError };
-  }
-  if (!credentialValueCount(credentialRows)) {
-    return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: "API 인증값을 먼저 저장해 주세요." };
-  }
-  const credentials = credentialMap(credentialRows);
-  const params = {
-    ...credentials,
-    ...body,
-    channel_code: adapterCode,
-    channel_name: text(channel.channel_name),
-    customer_code: text(channel.customer_code),
-    customer_name: text(channel.customer_name),
-    seller_id: text(channel.seller_id),
-  };
-  let result: ChannelResult<NormalizedOrder[]>;
   try {
-    result = await adapter.collectOrders(params);
+    const credentialRows = await readChannelCredentials(text(channel.id), true);
+    const credentialError = credentialReadError(credentialRows);
+    if (credentialError) {
+      return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: credentialError };
+    }
+    if (!credentialValueCount(credentialRows)) {
+      return { channel, ok: false, skipped: true, orders: [] as NormalizedOrder[], message: "API 인증값을 먼저 저장해 주세요." };
+    }
+    const credentials = credentialMap(credentialRows);
+    const params = {
+      ...credentials,
+      ...body,
+      channel_code: adapterCode,
+      channel_name: text(channel.channel_name),
+      customer_code: text(channel.customer_code),
+      customer_name: text(channel.customer_name),
+      seller_id: text(channel.seller_id),
+    };
+    const result: ChannelResult<NormalizedOrder[]> = await adapter.collectOrders(params);
     let orders: NormalizedOrder[] = normalizeCollectableOnlineOrders(result.data || []);
     if (result.ok && adapterCode === "LOTTEON" && orders.length) {
       const [existingByNo, dispatchedOrderNos] = await Promise.all([
