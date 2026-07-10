@@ -57,3 +57,14 @@ test("direct-shipping purchase input appends grouped delivery fee rows by recipi
   assert.match(pageSource, /purchaseOverrideRows = sourceRows[\s\S]*__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch\(item\)/);
   assert.match(pageSource, /directRows\.push\(directShippingPurchaseRecordToRow\(directShippingDeliveryFeeRecord\(feePartner, deliveryCount\)\)\)/);
 });
+
+test("online sales/purchase save avoids per-row inventory-current updates and post-save busy overlay", () => {
+  assert.match(salesInventorySource, /function inventoryMovementUpdateKey\(row: RawRow\)/);
+  assert.match(salesInventorySource, /async function updateCurrentInventoryForMovements\(movementPairs: Array<\{ sourceRow: RawRow; movement: RawRow \}>\)/);
+  assert.match(salesInventorySource, /current\.deltaQty \+= deltaQty/);
+  assert.match(salesInventorySource, /const batchSize = 12;[\s\S]*await Promise\.all\(batch\.map\(\(item\) => updateCurrentInventory\(item\.sourceRow, item\.deltaQty\)\)\)/);
+  assert.match(salesInventorySource, /await updateCurrentInventoryForMovements\(movementPairs\);/);
+  assert.doesNotMatch(salesInventorySource, /Promise\.all\(movementPairs\.map\(\(pair\) => updateCurrentInventory/);
+  assert.match(pageSource, /function loadSummary\(force = false, options\?: \{ skipBusyOverlay\?: boolean \}\)/);
+  assert.match(pageSource, /loadSummary\(true, \{ skipBusyOverlay: true \}\);/);
+});

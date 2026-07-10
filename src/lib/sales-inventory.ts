@@ -705,6 +705,40 @@ async function consolidateInventoryCurrentDuplicates() {
   return removed;
 }
 
+function inventoryMovementUpdateKey(row: RawRow) {
+  const whCd = text(row.wh_cd) || "100";
+  const productKey = text(row.product_id) || text(row.prod_cd || row.product_code || row.sku) || text(row.prod_name || row.product_name);
+  return whCd && productKey ? `${whCd}::${lookupKey(productKey)}` : "";
+}
+
+async function updateCurrentInventoryForMovements(movementPairs: Array<{ sourceRow: RawRow; movement: RawRow }>) {
+  const grouped = new Map<string, { sourceRow: RawRow; deltaQty: number }>();
+  const ungrouped: Array<{ sourceRow: RawRow; deltaQty: number }> = [];
+
+  for (const pair of movementPairs) {
+    const deltaQty = numberValue(pair.movement.qty);
+    const key = inventoryMovementUpdateKey(pair.sourceRow);
+    if (!key) {
+      ungrouped.push({ sourceRow: pair.sourceRow, deltaQty });
+      continue;
+    }
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, { sourceRow: pair.sourceRow, deltaQty });
+      continue;
+    }
+    current.deltaQty += deltaQty;
+    if (!text(current.sourceRow.product_id) && text(pair.sourceRow.product_id)) current.sourceRow = pair.sourceRow;
+  }
+
+  const updates = [...Array.from(grouped.values()), ...ungrouped].filter((item) => item.deltaQty !== 0);
+  const batchSize = 12;
+  for (let index = 0; index < updates.length; index += batchSize) {
+    const batch = updates.slice(index, index + batchSize);
+    await Promise.all(batch.map((item) => updateCurrentInventory(item.sourceRow, item.deltaQty)));
+  }
+}
+
 async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in" | "return_in" | "exchange_out") {
   const expandedRows = movementType === "sale_out" || movementType === "exchange_out"
     ? (await Promise.all(rows.map(expandSaleInventoryRows))).flat()
@@ -733,7 +767,7 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
   const movementRows = movementPairs.map((pair) => pair.movement);
   if (!movementRows.length) return 0;
   const { saved } = await insertRowsWithSchemaFallback("inventory_movements", movementRows);
-  await Promise.all(movementPairs.map((pair) => updateCurrentInventory(pair.sourceRow, numberValue(pair.movement.qty))));
+  await updateCurrentInventoryForMovements(movementPairs);
   return saved.length;
 }
 

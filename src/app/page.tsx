@@ -11959,7 +11959,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     );
   }
 
-  function loadSummary(force = false) {
+  function loadSummary(force = false, options?: { skipBusyOverlay?: boolean }) {
     const summaryUrl = section === "history" ? "/api/dashboard/summary?scope=sales-history" : "/api/dashboard/summary";
     const cached = readCachedJson<SalesInventorySummary>(summaryUrl, { storageTtl: 60_000 });
     const emptyHistoryCache = section === "history" && Boolean(cached) && !hasHistorySummaryRows(cached);
@@ -11967,7 +11967,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!shouldForce) {
       if (cached) setSummary(cached);
     }
-    cachedClientJson<SalesInventorySummary>(summaryUrl, { ttl: section === "history" ? 10_000 : 45_000, storageTtl: 60_000, force: shouldForce })
+    cachedClientJson<SalesInventorySummary>(summaryUrl, {
+      ttl: section === "history" ? 10_000 : 45_000,
+      storageTtl: 60_000,
+      force: shouldForce,
+      init: options?.skipBusyOverlay ? ({ fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean }) : undefined,
+    })
       .then((summaryData) => {
         setSummary(summaryData);
       })
@@ -13239,7 +13244,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("sales");
       }
       invalidateSalesInventoryCaches();
-      loadSummary(true);
+      loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
       window.alert(`FN OS 판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
@@ -13354,7 +13359,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("purchase");
       }
       invalidateSalesInventoryCaches();
-      loadSummary(true);
+      loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
       window.alert(`FN OS 구매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
