@@ -7,12 +7,13 @@ const dashboardSource = readFileSync(new URL("../src/lib/main-dashboard.ts", imp
 const partnerBalancesSource = readFileSync(new URL("../src/lib/partner-balances.ts", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 
-test("sales/purchase imports force today and no longer require spreadsheet date", () => {
-  assert.match(salesInventorySource, /function importEntryDate[\s\S]*options\?\.forceToday \? todayCompact\(\)/);
+test("sales/purchase imports preserve provided dates and still accept missing dates", () => {
+  assert.match(salesInventorySource, /function importEntryDate\(row: RawRow, keys: string\[\]\)[\s\S]*text\(first\(row, keys\)\) \|\| todayCompact\(\)/);
   assert.match(salesInventorySource, /importSalesRows[\s\S]*salesInventoryEntryRequiredError\(row, "sales", index, \{ requireDate: false \}\)/);
-  assert.match(salesInventorySource, /importSalesRows[\s\S]*normalizeSale\(row, index, batch\.id, sourceFileName, \{ forceToday: true \}\)/);
+  assert.match(salesInventorySource, /importSalesRows[\s\S]*normalizeSale\(row, index, batch\.id, sourceFileName\)/);
   assert.match(salesInventorySource, /importPurchaseRows[\s\S]*salesInventoryEntryRequiredError\(row, "purchases", index, \{ requireDate: false \}\)/);
-  assert.match(salesInventorySource, /importPurchaseRows[\s\S]*normalizePurchase\(row, index, batch\.id, sourceFileName, \{ forceToday: true \}\)/);
+  assert.match(salesInventorySource, /importPurchaseRows[\s\S]*normalizePurchase\(row, index, batch\.id, sourceFileName\)/);
+  assert.doesNotMatch(salesInventorySource, /forceToday/);
 });
 
 test("uploaded sales/purchase batches are grouped by date and customer, not by whole batch", () => {
@@ -41,6 +42,16 @@ test("direct entry Excel upload preserves row-level customer and warehouse metad
   assert.match(pageSource, /importedLines\.push\(\{[\s\S]*entryDate: rowDate,[\s\S]*customerCode: rowCustomerCode,[\s\S]*customerText: rowCustomerText,[\s\S]*warehouseCode: rowWarehouse,[\s\S]*vatMode: rowVatMode/);
   assert.match(pageSource, /const lineCustomerCode = \(line: SalesPurchaseEntryLine\) => line\.customerCode \?\? customerCode;/);
   assert.match(pageSource, /cust_code: lineCustomerCode\(line\),[\s\S]*cust_name: lineCustomerText\(line\),[\s\S]*wh_cd: lineWarehouseCode\(line\)/);
+});
+
+test("direct sales/purchase statement save uses the user-selected statement date", () => {
+  const saveRowsStart = pageSource.indexOf("  async function saveRows()");
+  assert.notEqual(saveRowsStart, -1);
+  const saveRowsSource = pageSource.slice(saveRowsStart, pageSource.indexOf("  const allLinesSelected", saveRowsStart));
+  assert.match(saveRowsSource, /const fallbackEntryDate = entryDate;/);
+  assert.match(saveRowsSource, /const lineEntryDate = \(line: SalesPurchaseEntryLine\) => line\.entryDate \|\| fallbackEntryDate;/);
+  assert.match(saveRowsSource, /io_date: effectiveDate,[\s\S]*sale_date: mode !== "purchases" \? effectiveDate : "",[\s\S]*purchase_date: mode === "purchases" \? effectiveDate : ""/);
+  assert.doesNotMatch(saveRowsSource, /fallbackEntryDate = mode === "returns" \? entryDate : entryDateToday\(\)/);
 });
 
 test("direct sales/purchase entry narrows reference lookups before F4 save", () => {

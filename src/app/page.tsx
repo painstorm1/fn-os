@@ -18738,7 +18738,7 @@ function SalesPurchaseEntryModal({
   async function saveRows() {
     setLocalError("");
     const validLines = lines.filter((line) => (line.prod_cd.trim() || line.prod_name.trim()) && lineQty(line) > 0);
-    const fallbackEntryDate = mode === "returns" ? entryDate : entryDateToday();
+    const fallbackEntryDate = entryDate;
     const lineEntryDate = (line: SalesPurchaseEntryLine) => line.entryDate || fallbackEntryDate;
     const lineCustomerCode = (line: SalesPurchaseEntryLine) => line.customerCode ?? customerCode;
     const lineCustomerText = (line: SalesPurchaseEntryLine) => line.customerText ?? customerText;

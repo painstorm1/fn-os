@@ -58,12 +58,8 @@ function buildSourceRef(sourceFileName: string | undefined, date: string, sequen
   return [sourceFileName || "FN_OS_WEB", date, sequence, productCode, qty].map(cleanForRef).join("|");
 }
 
-type NormalizeEntryOptions = {
-  forceToday?: boolean;
-};
-
-function importEntryDate(row: RawRow, keys: string[], options?: NormalizeEntryOptions) {
-  return options?.forceToday ? todayCompact() : text(first(row, keys)) || todayCompact();
+function importEntryDate(row: RawRow, keys: string[]) {
+  return text(first(row, keys)) || todayCompact();
 }
 
 function groupKeyPart(value: unknown) {
@@ -140,9 +136,9 @@ function legacyEntryRequiredError(row: RawRow, kind: "sales" | "purchases", inde
   return missing.length ? `${index + 1}행 필수값 누락: ${missing.join(", ")}` : "";
 }
 
-function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string, options?: NormalizeEntryOptions) {
+function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
   const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
-  const saleDate = importEntryDate(row, ["일자", "판매일", "sale_date", "io_date", "IO_DATE"], options);
+  const saleDate = importEntryDate(row, ["일자", "판매일", "sale_date", "io_date", "IO_DATE"]);
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
   const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
@@ -186,9 +182,9 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
   };
 }
 
-function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFileName?: string, options?: NormalizeEntryOptions) {
+function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
   const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
-  const purchaseDate = importEntryDate(row, ["일자", "구매일", "purchase_date", "io_date", "IO_DATE"], options);
+  const purchaseDate = importEntryDate(row, ["일자", "구매일", "purchase_date", "io_date", "IO_DATE"]);
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
   const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
@@ -851,7 +847,7 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
   if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
 
   const batch = await createUploadBatch("sales", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName, { forceToday: true }));
+  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
   const referenceResult = await validateEntryReferences(normalized, "sales");
   if (referenceResult.errors.length) {
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
@@ -934,7 +930,7 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
 
   const batch = await createUploadBatch("purchases", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName, { forceToday: true }));
+  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
   const referenceResult = await validateEntryReferences(normalized, "purchases");
   if (referenceResult.errors.length) {
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
