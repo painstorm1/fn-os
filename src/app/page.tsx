@@ -6843,11 +6843,14 @@ function applyInvoiceTrackingToSheets(
   const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRowForShippingIndex(index), "직송거래처"));
   const isInvoiceConfirmedProgressRow = (index: number) => salesCellText(progressValue(progressRowForShippingIndex(index), "주문상태")) === "주문확인";
   const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRowForShippingIndex(index), "API배송묶음ID"));
+  const rowMatchesInvoiceAddressIdentity = (row: string[], invoiceKey: string) => (
+    isCompleteInvoiceKey(invoiceKey)
+    && rowMatchesAddress(row, invoiceKey)
+  );
   const rowMatchesInvoiceIdentity = (row: string[], invoiceKey: string, optionKey: string) => (
     Boolean(optionKey)
-    && isCompleteInvoiceKey(invoiceKey)
     && invoiceOptionKey(row[7]) === optionKey
-    && rowMatchesAddress(row, invoiceKey)
+    && rowMatchesInvoiceAddressIdentity(row, invoiceKey)
   );
 
   if (invoiceRows.length) {
@@ -6884,6 +6887,16 @@ function applyInvoiceTrackingToSheets(
         applyTracking(index, trackingNo);
       });
     };
+    const findUniqueAddressOnlyShippingIndex = (invoiceKey: string, predicate: (row: string[], index: number) => boolean) => {
+      const candidates: number[] = [];
+      nextShipping.forEach((row, index) => {
+        if (!predicate(row, index)) return;
+        if (!rowMatchesInvoiceAddressIdentity(row, invoiceKey)) return;
+        candidates.push(index);
+      });
+      return candidates.length === 1 ? candidates[0] : -1;
+    };
+    let addressOnlyMatchedShipping = 0;
 
     invoiceRows.forEach((invoiceRow) => {
       const trackingNo = salesCellText(invoiceRow.trackingNo);
@@ -6891,7 +6904,7 @@ function applyInvoiceTrackingToSheets(
       const invoiceKey = invoiceMatchKey(invoiceRow.recipient, invoiceRow.phone, invoiceRow.address);
       const optionKey = invoiceOptionKey(invoiceRow.productName);
       const itemCount = Math.max(1, Number(invoiceRow.itemCount || 1) || 1);
-      const shippingIndex = nextShipping.findIndex((row, index) => (
+      const exactShippingIndex = nextShipping.findIndex((row, index) => (
         !usedShipping.has(index)
         && rowHasValue(row)
         && !salesCellText(row[1])
@@ -6899,12 +6912,28 @@ function applyInvoiceTrackingToSheets(
         && !isDirectShippingIndex(index)
         && rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)
       ));
+      const addressOnlyShippingIndex = exactShippingIndex >= 0 ? -1 : findUniqueAddressOnlyShippingIndex(invoiceKey, (row, index) => (
+        !usedShipping.has(index)
+        && rowHasValue(row)
+        && !salesCellText(row[1])
+        && isInvoiceConfirmedProgressRow(index)
+        && !isDirectShippingIndex(index)
+      ));
+      const shippingIndex = exactShippingIndex >= 0 ? exactShippingIndex : addressOnlyShippingIndex;
 
       if (shippingIndex < 0) {
-        const alreadyIndex = nextShipping.findIndex((row, index) => {
+        let alreadyIndex = nextShipping.findIndex((row, index) => {
           if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo || !isInvoiceConfirmedProgressRow(index) || isDirectShippingIndex(index)) return false;
           return rowMatchesInvoiceIdentity(row, invoiceKey, optionKey);
         });
+        if (alreadyIndex < 0) {
+          alreadyIndex = findUniqueAddressOnlyShippingIndex(invoiceKey, (row, index) => (
+            rowHasValue(row)
+            && salesCellText(row[1]) === trackingNo
+            && isInvoiceConfirmedProgressRow(index)
+            && !isDirectShippingIndex(index)
+          ));
+        }
         if (alreadyIndex >= 0) {
           alreadyMatchedShipping += 1;
           matchedInvoiceRows += 1;
@@ -6924,7 +6953,10 @@ function applyInvoiceTrackingToSheets(
         return;
       }
 
-      if (applyTracking(shippingIndex, trackingNo)) matchedInvoiceRows += 1;
+      if (applyTracking(shippingIndex, trackingNo)) {
+        matchedInvoiceRows += 1;
+        if (addressOnlyShippingIndex >= 0) addressOnlyMatchedShipping += 1;
+      }
       applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, optionKey);
       if (itemCount >= 2) {
         nextShipping.forEach((row, index) => {
@@ -6964,6 +6996,7 @@ function applyInvoiceTrackingToSheets(
       failedInvoiceIndexes: [] as number[],
       alreadyMatchedShipping,
       alreadyMatchedInvoice: 0,
+      addressOnlyMatchedShipping,
       matchedShippingIndexes: [...matchedShippingIndexes],
       manualRows,
     };
@@ -13397,7 +13430,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           return;
         }
         const noMatchMessage = parsedRowCount
-          ? `송장번호 매칭 결과가 없습니다. 송장 ${parsedRowCount.toLocaleString("ko-KR")}행은 읽었지만, 주문상태가 '주문확인'이고 수취인/연락처/주소/주문옵션이 일치하는 행을 찾지 못했습니다.`
+          ? `송장번호 매칭 결과가 없습니다. 송장 ${parsedRowCount.toLocaleString("ko-KR")}행은 읽었지만, 주문상태가 '주문확인'이고 수취인/연락처/주소가 유일하게 일치하는 행을 찾지 못했습니다. 같은 수취인/주소 후보가 여러 건이면 주문옵션까지 일치해야 자동 매칭됩니다.`
           : "송장파일에서 읽을 수 있는 송장 행이 없습니다. 파일 형식/헤더를 확인해 주세요.";
         setCollectionStatuses([{ name: "송장매칭", status: "failed", message: noMatchMessage, source: "api" }]);
         setMessage(noMatchMessage);
@@ -13436,13 +13469,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         Number(result.matchedInvoiceRows ?? result.matchedShipping),
         Number(result.invoiceTotalRows || invoiceRows.length || 0),
       );
+      const addressOnlyMatched = Number(result.addressOnlyMatchedShipping || 0);
+      const summaryWithMatchNote = addressOnlyMatched > 0
+        ? `${summaryMessage} · 주소단일매칭 ${addressOnlyMatched.toLocaleString("ko-KR")}건`
+        : summaryMessage;
       setSalesSheetHighlightedRows({
         송장출력용: result.failedShippingIndexes,
       });
-      setCollectionStatuses([{ name: "송장매칭", status: failureMessage ? "failed" : "done", message: failureMessage ? `${summaryMessage} · 일부 확인필요` : summaryMessage, source: "api" }]);
-      window.alert(failureMessage ? `${summaryMessage}\n${failureMessage}` : summaryMessage);
+      setCollectionStatuses([{ name: "송장매칭", status: failureMessage ? "failed" : "done", message: failureMessage ? `${summaryWithMatchNote} · 일부 확인필요` : summaryWithMatchNote, source: "api" }]);
+      window.alert(failureMessage ? `${summaryWithMatchNote}\n${failureMessage}` : summaryWithMatchNote);
       setInvoiceMemoText("");
-      setMessage(`송장번호 매칭 완료: ${summaryMessage}${failureMessage ? `\n${failureMessage}` : ""}`);
+      setMessage(`송장번호 매칭 완료: ${summaryWithMatchNote}${failureMessage ? `\n${failureMessage}` : ""}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? `송장파일 처리 실패: ${error.message}` : "송장파일 처리 실패";
       setCollectionStatuses([{ name: "송장파일", status: "failed", message: errorMessage, source: "api" }]);
