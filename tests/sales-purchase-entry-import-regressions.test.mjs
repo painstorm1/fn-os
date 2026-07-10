@@ -40,3 +40,19 @@ test("direct entry Excel upload preserves row-level customer and warehouse metad
   assert.match(pageSource, /const lineCustomerCode = \(line: SalesPurchaseEntryLine\) => line\.customerCode \?\? customerCode;/);
   assert.match(pageSource, /cust_code: lineCustomerCode\(line\),[\s\S]*cust_name: lineCustomerText\(line\),[\s\S]*wh_cd: lineWarehouseCode\(line\)/);
 });
+
+test("FN purchase entry uses supply amount instead of a separate visible unit-price column", () => {
+  assert.match(pageSource, /"FN구매입력": \["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함\/별도", "품목코드", "품목명", "수량", "공급가액", "합계금액", "메모"\]/);
+  assert.doesNotMatch(pageSource, /"FN구매입력": \[[^\]]*"단가"/);
+  assert.match(pageSource, /const price = rawPrice \|\| supply;/);
+  assert.match(salesInventorySource, /const price = rawPrice \|\| explicitSupply;/);
+});
+
+test("direct-shipping purchase input appends grouped delivery fee rows by recipient phone and address", () => {
+  assert.match(pageSource, /directShippingDeliveryFeeUnit[\s\S]*케이모아: 4500,[\s\S]*JB: 2500/);
+  assert.match(pageSource, /directShippingDeliveryFeeProduct[\s\S]*code: "ETC_01",[\s\S]*name: "직송 배송비"/);
+  assert.match(pageSource, /function directShippingDeliveryIdentity[\s\S]*progressValue\(row, "수취인"\)[\s\S]*progressValue\(row, "수취인연락처1"\) \|\| progressValue\(row, "수취인연락처2"\)[\s\S]*progressValue\(row, "주소"\)/);
+  assert.match(pageSource, /function directShippingDeliveryCount[\s\S]*identities\.add\(directShippingDeliveryIdentity\(row, sourceIndex\)\)/);
+  assert.match(pageSource, /async function sendPurchaseInput\(\)[\s\S]*await buildDirectShippingPurchaseRows\(sheets\["FN구매입력"\], sheets\["발주 진행 단계"\], directShippingSourceIndexes\)/);
+  assert.match(pageSource, /directRows\.push\(directShippingPurchaseRecordToRow\(directShippingDeliveryFeeRecord\(feePartner, deliveryCount\)\)\)/);
+});

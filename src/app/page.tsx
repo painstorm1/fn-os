@@ -6317,7 +6317,7 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
   송장출력용: ["쇼핑몰코드", "송장번호", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
   FN송장입력: ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드", "송장번호"],
   "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "공급가액", "합계금액", "메모"],
-  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "공급가액", "합계금액", "메모"],
+  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "공급가액", "합계금액", "메모"],
 };
 
 const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
@@ -6352,7 +6352,16 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
   if (sheet === "발주 진행 단계" && row.length === salesSheetHeaders[sheet].length - 1) {
     return [...row.slice(0, 7), "", ...row.slice(7)];
   }
-  if ((sheet === "FN판매입력" || sheet === "FN구매입력") && row.length === salesSheetHeaders[sheet].length + 1) {
+  if (sheet === "FN구매입력" && row.length === salesSheetHeaders[sheet].length + 1) {
+    // Previous FN구매입력 rows had a visible "단가" column before "공급가액".
+    // The purchase entry sheet now uses "공급가액" as the unit purchase amount.
+    return [...row.slice(0, 8), ...row.slice(9)];
+  }
+  if (sheet === "FN구매입력" && row.length === salesSheetHeaders[sheet].length + 2) {
+    // Older legacy rows could contain both "단가" and "세액" before "공급가액".
+    return [...row.slice(0, 8), ...row.slice(10)];
+  }
+  if (sheet === "FN판매입력" && row.length === salesSheetHeaders[sheet].length + 1) {
     // Legacy online entry rows had a separate "세액" column between "단가" and "공급가액".
     // The current modal no longer displays/imports that column, so preserve every value except tax.
     return [...row.slice(0, 9), ...row.slice(10)];
@@ -6383,7 +6392,6 @@ function migrateLegacyEntryRow(sheet: SalesSheetName, row: string[]) {
       row[8] || "",
       row[9] || "",
       row[11] || "",
-      row[12] || "",
       row[13] || "",
       row[13] || "",
       row[14] || "",
@@ -6541,15 +6549,17 @@ function salesEntryWarehouseHeader(sheet: SalesSheetName) {
 
 function salesEntryCalculatedAmounts(item: Record<string, string>, _mode: "sales" | "purchases") {
   const qty = salesQuantityValue(item.수량);
-  const price = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
-  const supply = salesMoneyValue(item.공급가액) || price;
+  const rawPrice = salesMoneyValue(item.단가 || item["단가(vat포함)"]);
+  const rawSupply = salesMoneyValue(item.공급가액);
+  const supply = rawSupply || rawPrice;
+  const price = rawPrice || supply;
   const hasQty = Boolean(salesCellText(item.수량));
   const hasSupply = Boolean(salesCellText(item.공급가액) || salesCellText(item.단가 || item["단가(vat포함)"]));
   if (!hasQty || !hasSupply) {
     return {
       qty,
       price,
-      supply: salesMoneyValue(item.공급가액),
+      supply: rawSupply,
       total: salesMoneyValue(item.합계금액),
       calculated: false,
     };
@@ -8507,6 +8517,16 @@ const directShippingCustomerOptions = {
   ],
 } as const;
 
+const directShippingPartnerOrder: DirectShippingPartner[] = ["케이모아", "JB"];
+const directShippingDeliveryFeeUnit: Record<DirectShippingPartner, number> = {
+  케이모아: 4500,
+  JB: 2500,
+};
+const directShippingDeliveryFeeProduct = {
+  code: "ETC_01",
+  name: "직송 배송비",
+} as const;
+
 function directShippingCustomerForPartner(partner: DirectShippingPartner) {
   return directShippingCustomerOptions[partner][0];
 }
@@ -8527,6 +8547,51 @@ function normalizeDirectShippingPurchaseCustomer(row: Record<string, string>) {
   const isJbCompany = partner === "JB" && (currentCode === "1262636402" || currentName === "제이비컴퍼니");
   const customer = isJbCompany ? directShippingCustomerOptions.JB[1] : directShippingCustomerForPartner(partner);
   return { ...row, 거래처코드: customer.code, 거래처명: customer.name };
+}
+
+function directShippingDeliveryFeeRowMatch(row: Record<string, string> | string[]) {
+  const code = Array.isArray(row) ? salesCellText(row[salesSheetHeaders["FN구매입력"].indexOf("품목코드")]) : salesCellText(row.품목코드);
+  const name = Array.isArray(row) ? salesCellText(row[salesSheetHeaders["FN구매입력"].indexOf("품목명")]) : salesCellText(row.품목명);
+  return code === directShippingDeliveryFeeProduct.code || name === directShippingDeliveryFeeProduct.name || `${code}${name}` === `${directShippingDeliveryFeeProduct.code}${directShippingDeliveryFeeProduct.name}`;
+}
+
+function directShippingDeliveryIdentity(row: string[], rowIndex: number) {
+  const recipient = salesCellText(progressValue(row, "수취인")).replace(/\s+/g, "").toLowerCase();
+  const phone = salesCellText(progressValue(row, "수취인연락처1") || progressValue(row, "수취인연락처2")).replace(/\D/g, "");
+  const address = salesCellText(progressValue(row, "주소")).replace(/\s+/g, "").toLowerCase();
+  return [recipient || `recipient:${rowIndex}`, phone || `phone:${rowIndex}`, address || `address:${rowIndex}`].join("|");
+}
+
+function directShippingDeliveryCount(progressRows: string[][], sourceIndexes: number[]) {
+  const identities = new Set<string>();
+  sourceIndexes.forEach((sourceIndex) => {
+    const row = progressRows[sourceIndex];
+    if (!row || !rowHasValue(row)) return;
+    identities.add(directShippingDeliveryIdentity(row, sourceIndex));
+  });
+  return identities.size;
+}
+
+function directShippingDeliveryFeeRecord(partner: DirectShippingPartner, deliveryCount: number) {
+  const customer = directShippingCustomerForPartner(partner);
+  const fee = directShippingDeliveryFeeUnit[partner];
+  return {
+    거래처코드: customer.code,
+    거래처명: customer.name,
+    입고창고: "100",
+    "VAT 포함/별도": "포함",
+    품목코드: directShippingDeliveryFeeProduct.code,
+    품목명: directShippingDeliveryFeeProduct.name,
+    수량: String(deliveryCount),
+    단가: String(fee),
+    공급가액: String(fee),
+    합계금액: String(deliveryCount * fee),
+    메모: "",
+  } as Record<string, string>;
+}
+
+function directShippingPurchaseRecordToRow(record: Record<string, string>) {
+  return salesSheetHeaders["FN구매입력"].map((header) => record[header] || "");
 }
 
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
@@ -12688,6 +12753,60 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return rows;
   }
 
+  async function buildDirectShippingPurchaseRows(
+    currentPurchaseRows: string[][],
+    progressRows: string[][],
+    sourceIndexesByPartner: DirectShippingSourceIndexes,
+  ) {
+    const baseRows = currentPurchaseRows
+      .filter(rowHasValue)
+      .filter((row) => !directShippingCustomerMatch(row) && !directShippingDeliveryFeeRowMatch(row))
+      .map((row) => [...row]);
+    const directRows: string[][] = [];
+    for (const feePartner of directShippingPartnerOrder) {
+      const sourceIndexes = sourceIndexesByPartner[feePartner] || [];
+      if (!sourceIndexes.length) continue;
+      const directCustomer = directShippingCustomerForPartner(feePartner);
+      const purchaseSourceRows: Array<Record<string, string>> = sourceIndexes.map((rowIndex) => {
+        const progress = progressRows[rowIndex];
+        return {
+          거래처코드: directCustomer.code,
+          거래처명: directCustomer.name,
+          품목코드: progress ? progressValue(progress, "품목코드(ERP)") : "",
+          품목명: progress ? progressValue(progress, "품목명(ERP)") : "",
+          수량: progress ? progressValue(progress, "수량") || "1" : "1",
+        };
+      });
+      let enrichedPurchaseSourceRows = purchaseSourceRows;
+      try {
+        enrichedPurchaseSourceRows = await enrichOnlineEntryRows(purchaseSourceRows, "purchases");
+      } catch {
+        enrichedPurchaseSourceRows = purchaseSourceRows;
+      }
+      enrichedPurchaseSourceRows.forEach((enrichedSource, index) => {
+        const fallbackSource = purchaseSourceRows[index] || {};
+        directRows.push(directShippingPurchaseRecordToRow({
+          일자: salesWorkspaceDayKey().replace(/\D/g, ""),
+          거래처코드: enrichedSource.거래처코드 || fallbackSource.거래처코드 || directCustomer.code,
+          거래처명: enrichedSource.거래처명 || fallbackSource.거래처명 || directCustomer.name,
+          입고창고: enrichedSource.입고창고 || "100",
+          "VAT 포함/별도": enrichedSource["VAT 포함/별도"] || "포함",
+          품목코드: enrichedSource.품목코드 || fallbackSource.품목코드 || "",
+          품목명: enrichedSource.품목명 || fallbackSource.품목명 || "",
+          수량: enrichedSource.수량 || fallbackSource.수량 || "1",
+          공급가액: enrichedSource.공급가액 || enrichedSource.단가 || "",
+          합계금액: enrichedSource.합계금액 || "",
+          메모: enrichedSource.메모 || "",
+        }));
+      });
+      const deliveryCount = directShippingDeliveryCount(progressRows, sourceIndexes);
+      if (deliveryCount > 0) {
+        directRows.push(directShippingPurchaseRecordToRow(directShippingDeliveryFeeRecord(feePartner, deliveryCount)));
+      }
+    }
+    return [...baseRows, ...directRows];
+  }
+
   async function makeDirectShippingFile(partner: DirectShippingPartner) {
     const selectedRows = selectedShippingRows();
     const selectedIndexes = selectedOrderRowIndexes();
@@ -12738,56 +12857,26 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
     setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: savedSourceIndexes }));
 
-    const directCustomer = directShippingCustomerForPartner(partner);
-    const purchaseSourceRows: Array<Record<string, string>> = appendSourceIndexes.map((rowIndex) => {
-      const progress = sheets["발주 진행 단계"][rowIndex];
-      return {
-        거래처코드: directCustomer.code,
-        거래처명: directCustomer.name,
-        품목코드: progress ? progressValue(progress, "품목코드(ERP)") : "",
-        품목명: progress ? progressValue(progress, "품목명(ERP)") : "",
-        수량: progress ? progressValue(progress, "수량") || "1" : "1",
-        단가: "",
-      };
-    });
-    let enrichedPurchaseSourceRows: Array<Record<string, string>> = purchaseSourceRows;
-    try {
-      enrichedPurchaseSourceRows = await enrichOnlineEntryRows(purchaseSourceRows, "purchases");
-    } catch {
-      enrichedPurchaseSourceRows = purchaseSourceRows;
-    }
+    const nextSourceIndexesByPartner: DirectShippingSourceIndexes = {
+      ...directShippingSourceIndexes,
+      [partner]: savedSourceIndexes,
+    };
+    const nextPurchaseRows = await buildDirectShippingPurchaseRows(
+      sheets["FN구매입력"],
+      sheets["발주 진행 단계"],
+      nextSourceIndexesByPartner,
+    );
 
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      const purchaseRows = next["FN구매입력"].filter(rowHasValue).map((row) => [...row]);
-      const today = salesWorkspaceDayKey().replace(/\D/g, "");
-      appendSourceIndexes.forEach((rowIndex, appendIndex) => {
-        if (progressRows[rowIndex]) {
-          setProgressValue(progressRows[rowIndex], "직송거래처", partner);
-        }
-        const enrichedSource = enrichedPurchaseSourceRows[appendIndex] || purchaseSourceRows[appendIndex];
-        const purchase = salesSheetHeaders["FN구매입력"].map(() => "");
-        const setPurchase = (header: string, value: string) => {
-          const index = salesSheetHeaders["FN구매입력"].indexOf(header);
-          if (index >= 0) purchase[index] = value;
-        };
-        setPurchase("일자", today);
-        setPurchase("거래처코드", enrichedSource.거래처코드 || directCustomer.code);
-        setPurchase("거래처명", enrichedSource.거래처명 || directCustomer.name);
-        setPurchase("입고창고", enrichedSource.입고창고 || "100");
-        setPurchase("VAT 포함/별도", enrichedSource["VAT 포함/별도"] || "포함");
-        setPurchase("품목코드", enrichedSource.품목코드 || "");
-        setPurchase("품목명", enrichedSource.품목명 || "");
-        setPurchase("수량", enrichedSource.수량 || "1");
-        setPurchase("단가", enrichedSource.단가 || "");
-        setPurchase("공급가액", enrichedSource.공급가액 || "");
-        setPurchase("합계금액", enrichedSource.합계금액 || "");
-        setPurchase("메모", enrichedSource.메모 || "");
-        purchaseRows.push(purchase);
+      directShippingPartnerOrder.forEach((feePartner) => {
+        (nextSourceIndexesByPartner[feePartner] || []).forEach((rowIndex) => {
+          if (progressRows[rowIndex]) setProgressValue(progressRows[rowIndex], "직송거래처", feePartner);
+        });
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-      next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+      next["FN구매입력"] = padSalesRows("FN구매입력", nextPurchaseRows);
       return next;
     });
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
@@ -12795,7 +12884,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setDirectPartnerPickerOpen(false);
   }
 
-  function removeDirectShippingRows(partner: DirectShippingPartner, rowIndexes: number[]) {
+  async function removeDirectShippingRows(partner: DirectShippingPartner, rowIndexes: number[]) {
     const targets = new Set(rowIndexes);
     if (!targets.size) {
       window.alert("삭제할 직송 주문을 선택해 주세요.");
@@ -12812,18 +12901,30 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return next;
       });
     const nextSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => !targets.has(index));
+    const nextSourceIndexesByPartner: DirectShippingSourceIndexes = {
+      ...directShippingSourceIndexes,
+      [partner]: nextSourceIndexes,
+    };
+    const nextPurchaseRows = await buildDirectShippingPurchaseRows(
+      sheets["FN구매입력"],
+      sheets["발주 진행 단계"],
+      nextSourceIndexesByPartner,
+    );
     setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
     setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: nextSourceIndexes }));
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      const purchaseRows = next["FN구매입력"].map((row) => [...row]);
       removedSourceIndexes.forEach((sourceIndex) => {
         if (progressRows[sourceIndex]) setProgressValue(progressRows[sourceIndex], "직송거래처", "");
-        if (purchaseRows[sourceIndex]) purchaseRows[sourceIndex] = salesSheetHeaders["FN구매입력"].map(() => "");
+      });
+      directShippingPartnerOrder.forEach((feePartner) => {
+        (nextSourceIndexesByPartner[feePartner] || []).forEach((rowIndex) => {
+          if (progressRows[rowIndex]) setProgressValue(progressRows[rowIndex], "직송거래처", feePartner);
+        });
       });
       next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-      next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+      next["FN구매입력"] = padSalesRows("FN구매입력", nextPurchaseRows);
       return next;
     });
     if (!nextRows.length && shippingPreviewTab === partner) setShippingPreviewTab("shipping");
@@ -12924,7 +13025,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             const overrideKey = purchaseOverrideKey(next.거래처코드, next.거래처명, next.품목코드);
             const overrideCost = Number(purchasePriceOverrides[overrideKey]);
             const defaultCost = Number.isFinite(overrideCost) && overrideCost > 0 ? overrideCost : salesMoneyValue(product.inPrice);
-            const enteredCost = salesMoneyValue(next.단가);
+            const enteredCost = salesMoneyValue(next.단가 || next.공급가액);
             const cost = enteredCost || defaultCost;
             if (cost) {
               next.단가 = String(Math.round(cost));
@@ -13036,7 +13137,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendPurchaseInput() {
-    let sourceRows: Array<Record<string, string>> = sheets["FN구매입력"]
+    let purchaseInputRows = sheets["FN구매입력"];
+    if (directShippingPartnerOrder.some((feePartner) => (directShippingSourceIndexes[feePartner] || []).length > 0)) {
+      purchaseInputRows = padSalesRows(
+        "FN구매입력",
+        await buildDirectShippingPurchaseRows(sheets["FN구매입력"], sheets["발주 진행 단계"], directShippingSourceIndexes),
+      );
+      setSheets((prev) => ({ ...prev, "FN구매입력": purchaseInputRows }));
+    }
+    let sourceRows: Array<Record<string, string>> = purchaseInputRows
       .filter(rowHasValue)
       .map((row) => {
         const item = salesRowObject("FN구매입력", normalizeSalesEntryRow("FN구매입력", row));
@@ -13049,7 +13158,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           품목코드: item.품목코드,
           품목명: item.품목명,
           수량: item.수량,
-          단가: item.단가,
+          단가: item.단가 || item.공급가액,
           공급가액: item.공급가액,
           합계금액: item.합계금액,
           메모: item.메모,
@@ -13073,7 +13182,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         customer_name: item.거래처명,
         product_code: item.품목코드,
         product_name: item.품목명,
-        price: item.단가,
+        price: item.단가 || item.공급가액,
       }));
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
     const rows = aggregatedRows.map((item, index) => ({
@@ -13086,7 +13195,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       prod_cd: item.품목코드,
       prod_name: item.품목명,
       qty: item.수량,
-      price: item.단가,
+      price: item.단가 || item.공급가액,
       tax_amt: "",
       supply_amt: item.공급가액,
       total_amount: item.합계금액,
@@ -18388,7 +18497,7 @@ function SalesPurchaseEntryModal({
         const prod_cd = pick(row, "품목코드");
         const prod_name = pick(row, "품목명");
         const qty = pick(row, "수량");
-        const price = pick(row, "단가");
+        const price = pick(row, "단가") || (mode === "purchases" ? pick(row, "공급가액") : "");
         const memo = pick(row, "메모");
         if (!(prod_cd || prod_name || qty || price || memo)) continue;
         const rowDate = entryDateToday();
@@ -18721,8 +18830,7 @@ function SalesPurchaseEntryModal({
                 <th className="w-36 px-2 py-2 text-left">품목코드</th>
                 <th className="px-2 py-2 text-left">품목명</th>
                 <th className="w-24 px-2 py-2 text-right">수량</th>
-                <th className="w-28 px-2 py-2 text-right">{mode === "purchases" ? "단가" : "공급가액"}</th>
-                {mode === "purchases" && <th className="w-28 px-2 py-2 text-right">공급가액</th>}
+                <th className="w-28 px-2 py-2 text-right">공급가액</th>
                 <th className="w-32 px-2 py-2 text-right">합계금액</th>
                 <th className="w-48 px-2 py-2 text-left">메모</th>
               </tr>
@@ -18763,7 +18871,6 @@ function SalesPurchaseEntryModal({
                   }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="qty" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="decimal" value={formatCommaNumber(line.qty, { decimal: true })} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "qty", normalizeCommaNumberInput(event.target.value, { decimal: true }))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "qty")) return; handleRequiredEnter(event); }} /></td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="price" className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-orange-400" inputMode="numeric" value={formatCommaNumber(line.price)} onFocus={(event) => event.currentTarget.select()} onChange={(event) => updateLine(index, "price", normalizeCommaNumberInput(event.target.value))} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "price")) return; handleRequiredEnter(event); }} /></td>
-                  {mode === "purchases" && <td className="px-2 py-2 text-right font-black">{Math.round(lineUnit(line)).toLocaleString("ko-KR")}</td>}
                   <td className="px-2 py-2 text-right font-black">{Math.round(lineSupply(line)).toLocaleString("ko-KR")}</td>
                   <td className="px-2 py-2"><input data-line-index={index} data-line-field="memo" className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-orange-400" value={line.memo} onChange={(event) => updateLine(index, "memo", event.target.value)} onKeyDown={(event) => { if (handleLineArrowKey(event, index, "memo")) return; if (event.key === "Enter") { event.preventDefault(); moveFromMemo(index); } }} /></td>
                 </tr>

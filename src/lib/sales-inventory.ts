@@ -114,11 +114,13 @@ function vatIsExcluded(row: RawRow) {
 
 function calculatedAmounts(row: RawRow) {
   const qty = numberValue(first(row, ["수량", "qty", "QTY"]));
-  const price = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
   const explicitTax = numberValue(first(row, ["세액", "부가세", "tax_amt", "vat_amount", "VAT_AMT"]));
+  const explicitSupply = numberValue(first(row, ["공급가액", "정산예정금액", "supply_amt", "SUPPLY_AMT"]));
+  const rawPrice = numberValue(first(row, ["단가(vat포함)", "단가", "price", "PRICE"]));
+  const price = rawPrice || explicitSupply;
   const tax = explicitTax || (vatIsExcluded(row) ? qty * price * 0.1 : 0);
   const calculatedSupply = qty * price + tax;
-  const supplyAmt = numberValue(first(row, ["공급가액", "정산예정금액", "supply_amt", "SUPPLY_AMT"])) || calculatedSupply;
+  const supplyAmt = explicitSupply || calculatedSupply;
   const totalAmt = numberValue(first(row, ["합계금액", "총금액", "판매금액", "구매금액", "total_amount", "TOTAL_AMOUNT"])) || supplyAmt;
   return { qty, price, tax, supplyAmt, totalAmt };
 }
