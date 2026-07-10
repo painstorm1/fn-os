@@ -17,6 +17,7 @@ const statusRouteSource = source("src/app/api/fnos/online-orders/status/route.ts
 const syncRouteSource = source("src/app/api/fnos/online-orders/sync/route.ts");
 const coupangSource = source("src/lib/channels/coupang/index.ts");
 const elevenstSource = source("src/lib/channels/elevenst/index.ts");
+const lotteonSource = source("src/lib/channels/lotteon/index.ts");
 const ssgSource = source("src/lib/channels/ssg/index.ts");
 const todayhouseSource = source("src/lib/channels/todayhouse/index.ts");
 
@@ -101,6 +102,28 @@ function loadStatusRouteWithMocks(captured) {
   return cjsModule.exports;
 }
 
+function loadLotteonAdapterWithMocks() {
+  const filename = resolve(projectRoot, "src/lib/channels/lotteon/index.ts");
+  const compiled = ts.transpileModule(lotteonSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      strict: true,
+    },
+    fileName: filename,
+  }).outputText;
+  const cjsModule = { exports: {} };
+  const localRequire = (specifier) => {
+    if (specifier === "../common/api-response") {
+      return { readJsonApiResponse: async (response) => response.json() };
+    }
+    return createRequire(filename)(specifier);
+  };
+  new Function("require", "exports", "module", compiled)(localRequire, cjsModule.exports, cjsModule);
+  return cjsModule.exports.LotteonChannelAdapter;
+}
+
 function statusAfterRebuild(existingStatus, rebuiltStatus) {
   const rank = { 신규주문: 0, 주문확인: 1, 출고대기: 2, 출고완료: 3 };
   if (!existingStatus) return rebuiltStatus;
@@ -182,6 +205,30 @@ function ssgOrderStatus(row) {
   }
   return firstText(row.shppProgStatDtlNm, row.ordItemStatNm, row.ordStatNm, row.statusName) || "신규주문";
 }
+
+test("롯데ON 수집은 같은 주문번호의 여러 상품행을 주문 1건으로 병합한다", async () => {
+  const LotteonChannelAdapter = loadLotteonAdapterWithMocks();
+  const adapter = new LotteonChannelAdapter();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init = {}) => {
+    const body = JSON.parse(String(init.body || "{}"));
+    const deliveryOrderList = body.ifCplYN === "Y" ? [] : [
+      { odNo: "LO-ORDER-1", odSeq: "1", procSeq: "1", spdNo: "P001", sitmNo: "S001", spdNm: "롯데 상품 A", sitmNm: "블랙", ordQty: 1, slAmt: 10000, odCmptDttm: "20260710101010" },
+      { odNo: "LO-ORDER-1", odSeq: "2", procSeq: "1", spdNo: "P002", sitmNo: "S002", spdNm: "롯데 상품 B", sitmNm: "화이트", ordQty: 2, slAmt: 20000, odCmptDttm: "20260710101010" },
+    ];
+    return { json: async () => ({ returnCode: "0000", deliveryOrderList }) };
+  };
+  try {
+    const result = await adapter.collectOrders({ api_key: "test-key", fromDate: "20260710", toDate: "20260710", channel_code: "LOTTEON", channel_name: "롯데온" });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.length, 1, "같은 롯데ON 주문번호는 DB upsert 전에 주문 1건으로 병합되어야 합니다.");
+    assert.equal(result.data[0].orderNo, "LO-ORDER-1");
+    assert.equal(result.data[0].items.length, 2, "주문 안의 상품행은 order_items로 보존되어야 합니다.");
+    assert.match(result.message, /1건\(2개 상품\)/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test("F2/F5 송장업로드는 기존 진행상태/API 식별자를 보존하고 직접 재빌드로 덮지 않는다", () => {
   assert.match(pageSource, /function preserveExistingOrderProgressFields\(/);

@@ -47,6 +47,30 @@ function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: 
   return { ...base, orderNo: firstText(row.odNo, row.orderNo), bundleOrderNo: firstText(row.odNo, row.pkgNo), orderDate: normalizeDate(firstText(row.odCmptDttm, row.odDttm, row.ordDttm, row.payDttm, row.orderDate)), orderStatus: stageLabel || lotteonOrderStatus(row), receiverName: firstText(row.dvpCustNm, row.rcvrNm, row.receiverName, row.buyrNm), phone1: firstText(row.dvpMphnNo, row.rcvrCellNo, row.receiverMobile, row.hpNo), phone2: firstText(row.dvpTelNo, row.rcvrTelNo, row.receiverPhone, row.telNo), zipcode: firstText(row.dvpZipNo, row.rcvrZipNo, row.zipcode, row.postNo), address: [firstText(row.dvpStnmZipAddr, row.dvpJbZipAddr, row.rcvrBaseAddr, row.receiverAddress, row.addr), firstText(row.dvpStnmDtlAddr, row.dvpJbDtlAddr, row.rcvrDtlAddr, row.receiverDetailAddress, row.addrDtl)].filter(Boolean).join(" "), deliveryMessage: firstText(row.dvMsg, row.dlvMsg, row.deliveryMessage), items: [item], raw: row };
 }
 
+function mergeOrders(orders: NormalizedOrder[]) {
+  const byOrder = new Map<string, NormalizedOrder>();
+  const statusRank = (value: unknown) => text(value) === "주문확인" ? 1 : text(value) === "신규주문" ? 0 : -1;
+  orders.forEach((order) => {
+    const key = `${order.channelCode}:${order.orderNo}`;
+    const existing = byOrder.get(key);
+    if (!existing) {
+      byOrder.set(key, { ...order, items: [...order.items] });
+      return;
+    }
+    existing.items.push(...order.items);
+    if (statusRank(order.orderStatus) > statusRank(existing.orderStatus)) existing.orderStatus = order.orderStatus;
+    if (!existing.bundleOrderNo) existing.bundleOrderNo = order.bundleOrderNo;
+    if (!existing.orderDate) existing.orderDate = order.orderDate;
+    if (!existing.receiverName) existing.receiverName = order.receiverName;
+    if (!existing.phone1) existing.phone1 = order.phone1;
+    if (!existing.phone2) existing.phone2 = order.phone2;
+    if (!existing.zipcode) existing.zipcode = order.zipcode;
+    if (!existing.address) existing.address = order.address;
+    if (!existing.deliveryMessage) existing.deliveryMessage = order.deliveryMessage;
+  });
+  return Array.from(byOrder.values());
+}
+
 
 function lotteonRequestRows(params: Record<string, unknown>, key: "confirmProductOrders" | "dispatchProductOrders") { const value = params[key]; return Array.isArray(value) ? value.map(record) : []; }
 function lotteonIds(row: AnyRecord) {
@@ -151,12 +175,18 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const base = { channelCode: text(params.channel_code) || "LOTTEON", channelName: text(params.channel_name) || "롯데ON", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
       const collectableRows = rows.filter(({ row }) => !lotteonShipmentStarted(row));
       const excludedShipmentCount = rows.length - collectableRows.length;
+      const normalizedOrders = collectableRows.map(({ row, stage }) => normalizeRow(row, base, stage)).filter((order) => order.orderNo);
+      const mergedOrders = mergeOrders(normalizedOrders);
+      const itemCount = normalizedOrders.reduce((sum, order) => sum + Math.max(1, order.items.length), 0);
+      const countMessage = itemCount === mergedOrders.length
+        ? `롯데ON 주문 ${mergedOrders.length}건을 수집했습니다.`
+        : `롯데ON 주문 ${mergedOrders.length}건(${itemCount}개 상품)을 수집했습니다.`;
       return {
         ok: true,
-        data: collectableRows.map(({ row, stage }) => normalizeRow(row, base, stage)).filter((order) => order.orderNo),
+        data: mergedOrders,
         message: excludedShipmentCount
-          ? `롯데ON 주문 ${collectableRows.length}건을 수집했습니다. 송장입력/배송중 ${excludedShipmentCount}건은 제외했습니다.`
-          : `롯데ON 주문 ${collectableRows.length}건을 수집했습니다.`,
+          ? `${countMessage} 송장입력/배송중 ${excludedShipmentCount}건은 제외했습니다.`
+          : countMessage,
       };
     } catch (error) { return { ok: false, data: [], error: error instanceof Error ? error.message : "롯데ON 주문 수집 실패" }; }
   }
