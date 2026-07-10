@@ -340,6 +340,7 @@ export async function mainDashboardSummary() {
     purchases,
     orders,
     inventory,
+    inventoryMovements,
     channels,
     adReports,
     adDailyMetrics,
@@ -360,6 +361,7 @@ export async function mainDashboardSummary() {
     optionalRows("purchases", { order: "created_at.desc", limit: 1500 }),
     optionalRows("orders", { order: "created_at.desc", limit: 700 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 500 }),
+    optionalRows("inventory_movements", { order: "movement_date.desc", limit: 10000 }),
     optionalRows("sales_channels", { order: "channel_code.asc", limit: 100 }),
     optionalRows("ad_reports", { order: "report_date.desc", limit: 2000 }),
     optionalRows("ad_daily_metrics", { order: "metric_date.desc", limit: 500 }),
@@ -388,6 +390,7 @@ export async function mainDashboardSummary() {
 
   const salesDate = (row: Row) => row.io_date ?? row.sale_date ?? row.created_at;
   const salesAmount = (row: Row) => row.total_amount ?? row.supply_amount ?? row.supply_amt;
+  const inventorySalesMovements = inventoryMovements.filter((row) => /^(sale_out|bom_consume|exchange_out)$/i.test(text(row.movement_type)) && numberValue(row.qty) < 0);
   const returnExchangeRows = allSales.filter(isReturnExchangeRow);
   const sales = allSales.filter((row) => !isReturnExchangeRow(row));
   const orderDate = (row: Row) => row.order_date ?? row.created_at;
@@ -540,6 +543,8 @@ export async function mainDashboardSummary() {
     inventory_risk_count: riskItems.length,
     inventory_risk_items: riskItems.slice(0, 10),
     inventory: inventory.slice(0, 500),
+    recent_inventory_movements: inventoryMovements.slice(0, 80),
+    inventory_sales_basis: inventorySalesMovements.slice(0, 10000),
     sales_inventory_basis: sales.slice(0, 1500),
     purchase_inventory_basis: purchases.slice(0, 1500),
     recent_sales: summarizeEntryRows(sales, "sales", 80),

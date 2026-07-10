@@ -99,3 +99,33 @@ test("online sales/purchase save avoids per-row inventory-current updates and po
   assert.match(pageSource, /function loadSummary\(force = false, options\?: \{ skipBusyOverlay\?: boolean \}\)/);
   assert.match(pageSource, /loadSummary\(true, \{ skipBusyOverlay: true \}\);/);
 });
+
+test("RG/SET products keep parent sales rows but inventory consumes BOM components", () => {
+  assert.match(salesInventorySource, /function isVirtualInventoryProduct\(row: RawRow \| null \| undefined\)/);
+  assert.match(salesInventorySource, /activeBomItems\(productId\)/);
+  assert.match(salesInventorySource, /validateVirtualInventoryBomRows\(referenceResult\.rows\)/);
+  assert.match(salesInventorySource, /return virtualInventoryProduct \? \[\] : \[\{ row, movementType: fallbackMovementType \}\]/);
+  assert.match(salesInventorySource, /movementType: "bom_consume"/);
+  assert.match(salesInventorySource, /expandBomInventoryRows\(row, "return_in", "return_in"\)/);
+  assert.match(salesInventorySource, /parent_prod_cd: productCode\(product\)/);
+  assert.match(salesInventorySource, /sku: text\(item\.row\.prod_cd \|\| item\.row\.product_code \|\| item\.row\.sku\)/);
+  assert.match(salesInventorySource, /writeInventoryMovements\(saved, "sale_out"\)/);
+  assert.doesNotMatch(salesInventorySource, /importPurchaseRows[\s\S]{0,900}expandBomInventoryRows/);
+});
+
+test("RG/SET inventory displays are hidden and 30/90 day stats use stock-out movements", () => {
+  assert.match(dashboardSource, /optionalRows\("inventory_movements", \{ order: "movement_date\.desc", limit: 10000 \}\)/);
+  assert.match(dashboardSource, /inventorySalesMovements = inventoryMovements\.filter\(\(row\) => \/\^\(sale_out\|bom_consume\|exchange_out\)\$\/i\.test\(text\(row\.movement_type\)\) && numberValue\(row\.qty\) < 0\)/);
+  assert.match(dashboardSource, /inventory_sales_basis: inventorySalesMovements\.slice\(0, 10000\)/);
+  assert.match(pageSource, /inventory_sales_basis\?: Array<Record<string, unknown>>/);
+  assert.match(pageSource, /row\.movement_date \|\| row\.created_at/);
+  assert.match(pageSource, /movementType && !\/\^\(sale_out\|bom_consume\|exchange_out\)\$\/i\.test\(movementType\)/);
+  assert.match(pageSource, /const qty = Math\.abs\(salesRowQty\(row\)\)/);
+  assert.match(pageSource, /summary\?\.inventory_sales_basis \|\| summary\?\.recent_inventory_movements \|\| summary\?\.sales_inventory_basis/);
+  assert.match(pageSource, /inventoryProducts\.filter\(\(product\) => !isVirtualInventoryProduct\(product\)\)\.flatMap/);
+  assert.match(pageSource, /function productChannelStockText\(product: FnProduct\)[\s\S]*if \(isVirtualInventoryProduct\(product\)\) return "-";/);
+  assert.match(pageSource, /const inventory = virtualInventoryProduct \? \[\] : usableWarehouses/);
+  assert.match(pageSource, /const virtualInventoryProduct = isVirtualInventoryProduct\(\{ product_attribute: productAttribute, product_kind: productAttribute, product_name: draft\.product_name, product_code: draft\.product_code \}\);/);
+  assert.match(pageSource, /!virtualInventoryProduct \? \(/);
+  assert.match(pageSource, /RG\/SET 품목은 부모 재고를 직접 등록하지 않습니다/);
+});

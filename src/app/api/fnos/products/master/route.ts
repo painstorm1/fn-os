@@ -70,6 +70,20 @@ function productAttributeLabel(value: unknown) {
   return "일반";
 }
 
+function resolvedProductAttribute(row: AnyRecord) {
+  const explicitAttribute = normalizeProductAttribute(row.product_attribute, "plain");
+  const explicitKind = normalizeProductAttribute(row.product_kind, "plain");
+  const inferred = inferredProductAttribute({ product_code: productCode(row), product_name: productName(row) });
+  if (explicitAttribute === "set" || explicitAttribute === "rg") return explicitAttribute;
+  if (explicitKind === "set" || explicitKind === "rg") return explicitKind;
+  return inferred;
+}
+
+function isVirtualInventoryProduct(row: AnyRecord) {
+  const attribute = resolvedProductAttribute(row);
+  return attribute === "set" || attribute === "rg";
+}
+
 function normalizeSetPrefix(value: unknown) {
   return text(value).replace(/^\s*\[NG[\]\}]\s*/i, "[SET]");
 }
@@ -378,6 +392,9 @@ export async function GET(request: NextRequest) {
     const activeProducts = products.filter((row) => text(row.status).toLowerCase() !== "deleted" && row.is_active !== false);
     const activeProductIds = new Set(activeProducts.map((row) => text(row.id)).filter(Boolean));
     const activeProductCodes = new Set(activeProducts.map((row) => productCode(row)).filter(Boolean));
+    const productById = new Map<string, AnyRecord>(products.map((row): [string, AnyRecord] => [text(row.id), row]));
+    const activeProductById = new Map<string, AnyRecord>(activeProducts.map((row): [string, AnyRecord] => [text(row.id), row]).filter(([id]) => Boolean(id)));
+    const activeProductByCode = new Map<string, AnyRecord>(activeProducts.map((row): [string, AnyRecord] => [productCode(row), row]).filter(([code]) => Boolean(code)));
     const inventoryByProduct = new Map<string, AnyRecord[]>();
     const inventoryByCode = new Map<string, AnyRecord[]>();
     inventory.forEach((row) => {
@@ -386,14 +403,15 @@ export async function GET(request: NextRequest) {
       const productId = text(row.product_id);
       const code = text(row.prod_cd || row.sku);
       if (productId) {
-        if (!activeProductIds.has(productId)) return;
+        const matchedProduct = activeProductById.get(productId);
+        if (!activeProductIds.has(productId) || !matchedProduct || isVirtualInventoryProduct(matchedProduct)) return;
         inventoryByProduct.set(productId, [...(inventoryByProduct.get(productId) || []), row]);
         return;
       }
-      if (!code || !activeProductCodes.has(code)) return;
+      const matchedProduct = activeProductByCode.get(code);
+      if (!code || !activeProductCodes.has(code) || !matchedProduct || isVirtualInventoryProduct(matchedProduct)) return;
       inventoryByCode.set(code, [...(inventoryByCode.get(code) || []), row]);
     });
-    const productById = new Map(products.map((row) => [text(row.id), row]));
     const bomByProduct = new Map<string, AnyRecord>();
     boms.forEach((row) => {
       const key = text(row.parent_product_id);
@@ -415,7 +433,9 @@ export async function GET(request: NextRequest) {
 
     const normalizedProducts = activeProducts.map((row) => {
       const code = productCode(row);
-      const stockRows = inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
+      const productAttribute = resolvedProductAttribute(row);
+      const virtualInventoryProduct = isVirtualInventoryProduct(row);
+      const stockRows = virtualInventoryProduct ? [] : inventoryByProduct.get(text(row.id)) || inventoryByCode.get(code) || [];
       const inventoryList = stockRows.map(normalizeInventory);
       const currentStock = inventoryList.reduce((sum, item) => sum + item.qty, 0);
       const bom = bomByProduct.get(text(row.id));
@@ -448,13 +468,13 @@ export async function GET(request: NextRequest) {
         id: text(row.id),
         product_code: code,
         product_name: productName(row),
-        product_attribute: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
-        product_kind: normalizeProductAttribute(row.product_attribute, inferredProductAttribute({ product_code: code, product_name: productName(row) })),
-        product_attribute_label: productAttributeLabel(row.product_attribute),
+        product_attribute: productAttribute,
+        product_kind: productAttribute,
+        product_attribute_label: productAttributeLabel(productAttribute),
         cost_price: numberValue(row.cost_price ?? row.in_price),
         standard_price: numberValue(row.standard_price ?? row.out_price),
-        current_stock: currentStock,
-        inventory: inventoryList,
+        current_stock: virtualInventoryProduct ? 0 : currentStock,
+        inventory: virtualInventoryProduct ? [] : inventoryList,
         bom: mappedBom,
         import_links: mappedImportLinks,
         raw: row,
@@ -506,7 +526,14 @@ export async function POST(request: NextRequest) {
 
     const now = nowIso();
     const inferredAttribute = inferredProductAttribute({ product_code: code, product_name: name });
-    const productAttribute = normalizeProductAttribute(product.product_attribute ?? product.product_kind, inferredAttribute);
+    const explicitAttribute = normalizeProductAttribute(product.product_attribute, "plain");
+    const explicitKind = normalizeProductAttribute(product.product_kind, "plain");
+    const productAttribute = explicitAttribute === "set" || explicitAttribute === "rg"
+      ? explicitAttribute
+      : explicitKind === "set" || explicitKind === "rg"
+        ? explicitKind
+        : inferredAttribute;
+    const virtualInventoryProduct = productAttribute === "set" || productAttribute === "rg";
     const values = {
       product_code: code,
       prod_cd: code,
@@ -518,7 +545,7 @@ export async function POST(request: NextRequest) {
       in_price: numberValue(product.cost_price ?? product.in_price),
       standard_price: numberValue(product.standard_price ?? product.out_price),
       out_price: numberValue(product.standard_price ?? product.out_price),
-      is_stock_managed: true,
+      is_stock_managed: !virtualInventoryProduct,
       status: "active",
       is_active: true,
       updated_at: now,
@@ -541,8 +568,8 @@ export async function POST(request: NextRequest) {
     const warehouses = await warehouseRows();
     const warehouseById = new Map(warehouses.map((row) => [text(row.id), row]));
     const warehouseByCode = new Map(warehouses.map((row) => [warehouseCode(row), row]));
-    const inventory = Array.isArray(body.inventory) ? body.inventory as AnyRecord[] : [];
-    const inventoryHistory = Array.isArray(body.inventory_history) ? body.inventory_history as AnyRecord[] : [];
+    const inventory = virtualInventoryProduct ? [] : Array.isArray(body.inventory) ? body.inventory as AnyRecord[] : [];
+    const inventoryHistory = virtualInventoryProduct ? [] : Array.isArray(body.inventory_history) ? body.inventory_history as AnyRecord[] : [];
     const bom = Array.isArray(body.bom) ? body.bom as AnyRecord[] : [];
 
     for (const item of inventory) {

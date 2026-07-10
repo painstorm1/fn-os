@@ -1734,6 +1734,14 @@ function productAttributeOf(product: Partial<FnProduct>): ProductAttribute {
   return normalizeProductAttribute(product.product_attribute ?? product.product_kind, productAttributeFromName(product.product_name));
 }
 
+function isVirtualInventoryProduct(product: Partial<FnProduct> | Record<string, unknown>) {
+  const row = product as Partial<FnProduct> & Record<string, unknown>;
+  const name = String(row.product_name || row.prod_name || "");
+  const code = String(row.product_code || row.prod_cd || row.sku || "");
+  const attribute = productAttributeOf(row);
+  return attribute === "set" || attribute === "rg" || /(^|\s)\[(RG|SET|NG)[\]\}]/i.test(`${code} ${name}`);
+}
+
 function productAttributeLabel(attribute: unknown) {
   const normalized = normalizeProductAttribute(attribute);
   if (normalized === "set") return "SET";
@@ -2072,6 +2080,7 @@ type SalesInventorySummary = {
   purchases_by_customer?: Array<Record<string, unknown>>;
   purchases_by_product?: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
+  inventory_sales_basis?: Array<Record<string, unknown>>;
   sales_inventory_basis?: Array<Record<string, unknown>>;
   purchase_inventory_basis?: Array<Record<string, unknown>>;
   logs?: Array<Record<string, unknown>>;
@@ -11154,7 +11163,7 @@ function entryDateFilterKey(value: unknown) {
 }
 
 function entryRowDate(row: Record<string, unknown>) {
-  return normalizeEntryDate(row.io_date || row.sale_date || row.purchase_date || row.created_at);
+  return normalizeEntryDate(row.io_date || row.sale_date || row.purchase_date || row.movement_date || row.created_at);
 }
 
 function entryRowCustomer(row: Record<string, unknown>, mode: SalesPurchaseMode) {
@@ -11658,12 +11667,15 @@ function inventoryStatusTone(status: string) {
 function buildInventorySalesStats(rows: Array<Record<string, unknown>>, targetDate: string) {
   const stats = new Map<string, { sales30: number; sales90: number; sales365: number }>();
   rows.forEach((row) => {
+    const movementType = String(row.movement_type || "").trim();
+    if (movementType && !/^(sale_out|bom_consume|exchange_out)$/i.test(movementType)) return;
     const code = salesRowProductCode(row);
     if (!code) return;
     const date = entryRowDate(row);
     const diff = daysBetweenInventoryDates(date, targetDate);
     if (diff < 0 || diff > 365) return;
-    const qty = salesRowQty(row);
+    const qty = Math.abs(salesRowQty(row));
+    if (!qty) return;
     const current = stats.get(code) || { sales30: 0, sales90: 0, sales365: 0 };
     if (diff < 30) current.sales30 += qty;
     if (diff < 90) current.sales90 += qty;
@@ -15979,9 +15991,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setEntryModalMode(historyMode);
   }
 
-  const inventorySalesStats = buildInventorySalesStats(summary?.sales_inventory_basis || summary?.recent_sales || [], inventoryFilters.date);
+  const inventorySalesStats = buildInventorySalesStats(summary?.inventory_sales_basis || summary?.recent_inventory_movements || summary?.sales_inventory_basis || summary?.recent_sales || [], inventoryFilters.date);
   const inventoryWarehouseByCode = new Map(inventoryWarehouses.map((warehouse) => [warehouse.warehouse_code, warehouse]));
-  const inventoryListRows = inventoryProducts.flatMap((product) => {
+  const inventoryListRows = inventoryProducts.filter((product) => !isVirtualInventoryProduct(product)).flatMap((product) => {
     const productCode = inventoryProductCode(product);
     const productName = inventoryProductName(product);
     const cost = Number(product.cost_price || 0);
@@ -21678,6 +21690,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
   }
 
   function productChannelStockText(product: FnProduct) {
+    if (isVirtualInventoryProduct(product)) return "-";
     return (["fn", "coupang", "naver"] as const)
       .map((target) => {
         const qty = productChannelStock(product, target);
@@ -21711,11 +21724,12 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
     const rawProductName = String(draft.product_name || "").trim();
     const productAttribute = normalizeProductAttribute(draft.product_attribute ?? draft.product_kind);
     const productName = productNameWithAttribute(rawProductName, productAttribute);
+    const virtualInventoryProduct = isVirtualInventoryProduct({ product_attribute: productAttribute, product_kind: productAttribute, product_name: productName });
     if (!productCode || !rawProductName) {
       window.alert("품목코드와 품목명은 필수입니다.");
       return;
     }
-    const inventory = usableWarehouses
+    const inventory = virtualInventoryProduct ? [] : usableWarehouses
       .map((warehouse) => ({
         warehouse_id: warehouse.id,
         warehouse_code: warehouse.warehouse_code,
@@ -22994,11 +23008,12 @@ function ProductEditModal({
   const [componentCandidates, setComponentCandidates] = useState<FnProduct[]>([]);
   const [bomOpen, setBomOpen] = useState(false);
   const productAttribute = normalizeProductAttribute(draft.product_attribute || draft.product_kind);
-  const showBomPanel = productAttribute === "set" || bomRows.length > 0 || bomOpen;
+  const virtualInventoryProduct = isVirtualInventoryProduct({ product_attribute: productAttribute, product_kind: productAttribute, product_name: draft.product_name, product_code: draft.product_code });
+  const showBomPanel = virtualInventoryProduct || bomRows.length > 0 || bomOpen;
   useEscapeToClose(true, onClose);
 
   useEffect(() => {
-    const keyword = componentQuery.trim() || (productAttribute === "set" ? relatedProductSearchQuery(draft.product_name) : "");
+    const keyword = componentQuery.trim() || (virtualInventoryProduct ? relatedProductSearchQuery(draft.product_name) : "");
     if (!keyword) {
       setComponentCandidates([]);
       return;
@@ -23017,7 +23032,7 @@ function ProductEditModal({
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [componentQuery, draft.id, draft.product_name, productAttribute, bomRows]);
+  }, [componentQuery, draft.id, draft.product_name, virtualInventoryProduct, bomRows]);
 
   function addBomComponent(product: FnProduct) {
     if (!product.id) return;
@@ -23049,7 +23064,7 @@ function ProductEditModal({
     onChange("product_attribute", attribute);
     onChange("product_kind", attribute);
     onChange("product_name", productNameWithAttribute(draft.product_name || "", attribute));
-    if (attribute === "set") setBomOpen(true);
+    if (attribute === "set" || attribute === "rg") setBomOpen(true);
   }
 
   return (
@@ -23093,27 +23108,33 @@ function ProductEditModal({
           <FormField label="입고가"><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.cost_price || "")} onChange={(event) => onChange("cost_price", normalizeCommaNumberInput(event.target.value))} /></FormField>
           <FormField label="출고가"><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(draft.standard_price || "")} onChange={(event) => onChange("standard_price", normalizeCommaNumberInput(event.target.value))} /></FormField>
         </div>
-        <div className="rounded-xl border border-gray-200 p-4">
-          <div className="mb-3 text-sm font-semibold text-gray-900">재고등록(수정)</div>
-          <div className="grid gap-2 md:grid-cols-2">
-            {warehouses.map((warehouse) => (
-              <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate">{warehouse.warehouse_code} - {warehouse.warehouse_name}</span>
-                  <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">현재 {Number(draft[`stock_${warehouse.warehouse_code}`] || 0).toLocaleString("ko-KR")}</span>
-                </span>
-                <input
-                  className={modalInputClass}
-                  inputMode="numeric"
-                  value={formatCommaNumber(draft[`stock_${warehouse.warehouse_code}`] || "")}
-                  placeholder="수정 수량"
-                  onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, normalizeCommaNumberInput(event.target.value))}
-                />
-              </label>
-            ))}
-            {!warehouses.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">등록된 창고가 없습니다. 먼저 창고관리에서 창고를 등록해 주세요.</div>}
+        {!virtualInventoryProduct ? (
+          <div className="rounded-xl border border-gray-200 p-4">
+            <div className="mb-3 text-sm font-semibold text-gray-900">재고등록(수정)</div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {warehouses.map((warehouse) => (
+                <label key={warehouse.id || warehouse.warehouse_code} className="text-xs font-black text-slate-500">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate">{warehouse.warehouse_code} - {warehouse.warehouse_name}</span>
+                    <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">현재 {Number(draft[`stock_${warehouse.warehouse_code}`] || 0).toLocaleString("ko-KR")}</span>
+                  </span>
+                  <input
+                    className={modalInputClass}
+                    inputMode="numeric"
+                    value={formatCommaNumber(draft[`stock_${warehouse.warehouse_code}`] || "")}
+                    placeholder="수정 수량"
+                    onChange={(event) => onChange(`stock_${warehouse.warehouse_code}`, normalizeCommaNumberInput(event.target.value))}
+                  />
+                </label>
+              ))}
+              {!warehouses.length && <div className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-400">등록된 창고가 없습니다. 먼저 창고관리에서 창고를 등록해 주세요.</div>}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold leading-relaxed text-emerald-800">
+            RG/SET 품목은 부모 재고를 직접 등록하지 않습니다. 판매/반품/교환 시 아래 BOM 구성품 재고로 차감·복원됩니다.
+          </div>
+        )}
         {!showBomPanel && (
           <div className="rounded-xl border border-dashed border-gray-200 p-4">
             <ActionButton type="button" variant="secondary" onClick={() => setBomOpen(true)}>BOM 설정</ActionButton>

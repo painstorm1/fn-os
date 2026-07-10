@@ -392,6 +392,36 @@ function productName(row: RawRow | null | undefined) {
   return text(row?.product_name || row?.prod_name || row?.name);
 }
 
+function normalizeInventoryProductAttribute(value: unknown) {
+  const normalized = text(value).toLowerCase();
+  if (normalized === "set" || normalized === "세트" || normalized === "ng" || normalized.includes("[ng")) return "set";
+  if (normalized === "rg" || normalized === "로켓그로스") return "rg";
+  return "plain";
+}
+
+function isVirtualInventoryProduct(row: RawRow | null | undefined) {
+  const attribute = normalizeInventoryProductAttribute(row?.product_attribute);
+  const kind = normalizeInventoryProductAttribute(row?.product_kind || row?.item_kind || row?.product_type);
+  const marker = `${productCode(row)} ${productName(row)}`;
+  return attribute === "set" || attribute === "rg" || kind === "set" || kind === "rg" || /(^|\s)\[(RG|SET|NG)[\]\}]/i.test(marker);
+}
+
+async function findBomComponent(item: RawRow) {
+  const componentId = text(item.component_product_id || item.product_id);
+  if (componentId) {
+    const [component] = await optionalRows("products", { id: `eq.${componentId}`, limit: 1 });
+    if (component) return component;
+  }
+  const componentSku = text(item.component_sku || item.sku || item.product_code || item.prod_cd);
+  if (!componentSku) return null;
+  const [byCode] = await optionalRows("products", { product_code: `eq.${componentSku}`, limit: 1 });
+  if (byCode) return byCode;
+  const [byLegacyCode] = await optionalRows("products", { prod_cd: `eq.${componentSku}`, limit: 1 });
+  if (byLegacyCode) return byLegacyCode;
+  const [bySku] = await optionalRows("products", { sku: `eq.${componentSku}`, limit: 1 });
+  return bySku || null;
+}
+
 function canonicalCustomerCode(row: RawRow | null | undefined) {
   return text(row?.customer_code || row?.cust_code);
 }
@@ -542,7 +572,7 @@ async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchase
     const customerByCodeRow = customerCodeMatches[0] || null;
     const customerByNameRow = customerNameMatches[0] || null;
 
-    let customer = customerByCodeRow || customerByNameRow;
+    const customer = customerByCodeRow || customerByNameRow;
     if (customerCodeValue && !customerByCodeRow) {
       errors.push(`${rowLabel}: 거래처코드 '${customerCodeValue}'가 기초관리 거래처 DB에 없습니다.`);
     }
@@ -647,36 +677,60 @@ async function activeBomItems(productId: string) {
   return optionalRows("product_bom_items", { bom_id: `eq.${bom.id}`, order: "created_at.asc", limit: 200 });
 }
 
-async function expandSaleInventoryRows(row: RawRow) {
+async function expandBomInventoryRows(row: RawRow, fallbackMovementType: "sale_out" | "return_in" | "exchange_out", componentMovementType: "bom_consume" | "return_in") {
   const product = await findProduct(row);
   const productId = text(product?.id);
+  const virtualInventoryProduct = isVirtualInventoryProduct(product || row);
   const items = await activeBomItems(productId);
   const saleQty = Math.abs(numberValue(row.qty));
-  if (!items.length || saleQty === 0) return [{ row, movementType: "sale_out" }];
+  if (!items.length || saleQty === 0) return virtualInventoryProduct ? [] : [{ row, movementType: fallbackMovementType }];
 
-  const expanded: Array<{ row: RawRow; movementType: "bom_consume" }> = [];
+  const expanded: Array<{ row: RawRow; movementType: "bom_consume" | "return_in" }> = [];
   for (const item of items) {
-    const componentId = text(item.component_product_id);
-    const [component] = componentId ? await optionalRows("products", { id: `eq.${componentId}`, limit: 1 }) : [];
+    const component = await findBomComponent(item);
+    const componentId = text(component?.id || item.component_product_id);
     const code = productCode(component) || text(item.component_sku);
-    if (!code) continue;
-    const componentQty = saleQty * numberValue(item.qty_per_unit ?? 1);
+    const componentQtyPerUnit = numberValue(item.qty_per_unit ?? 1);
+    if (!code || componentQtyPerUnit <= 0) continue;
+    const componentName = productName(component) || text(item.component_product_name || item.component_name || code);
+    const componentQty = saleQty * componentQtyPerUnit;
     expanded.push({
-      movementType: "bom_consume",
+      movementType: componentMovementType,
       row: {
         ...row,
         product_id: componentId || null,
         prod_cd: code,
         product_code: code,
         sku: text(component?.sku) || code,
-        prod_name: productName(component) || text(row.prod_name),
+        prod_name: componentName,
+        product_name: componentName,
         qty: componentQty,
+        parent_product_id: productId || text(row.product_id) || null,
+        parent_prod_cd: productCode(product) || text(row.prod_cd || row.product_code),
+        parent_prod_name: productName(product) || text(row.prod_name || row.product_name),
         remarks: `${text(row.remarks)} BOM 구성품 차감`.trim(),
       },
     });
   }
 
-  return expanded.length ? expanded : [{ row, movementType: "sale_out" }];
+  return expanded.length ? expanded : virtualInventoryProduct ? [] : [{ row, movementType: fallbackMovementType }];
+}
+
+async function validateVirtualInventoryBomRows(rows: RawRow[]) {
+  const errors: string[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const product = await findProduct(row);
+    if (!isVirtualInventoryProduct(product || row)) continue;
+    const productId = text(product?.id);
+    const items = await activeBomItems(productId);
+    const validItems = items.filter((item) => numberValue(item.qty_per_unit ?? 1) > 0 && (text(item.component_product_id || item.product_id) || text(item.component_sku || item.sku || item.product_code || item.prod_cd)));
+    if (validItems.length) continue;
+    const code = productCode(product) || text(row.prod_cd || row.product_code || row.sku);
+    const name = productName(product) || text(row.prod_name || row.product_name) || code || "RG/SET 품목";
+    errors.push(`${index + 1}행: RG/SET 품목 '${name}'${code ? `(${code})` : ""}은 활성 BOM 구성품이 없어 재고 차감 대상이 없습니다. BOM 등록 후 저장해 주세요.`);
+  }
+  return errors;
 }
 
 async function updateCurrentInventory(row: RawRow, deltaQty: number) {
@@ -795,8 +849,10 @@ async function updateCurrentInventoryForMovements(movementPairs: Array<{ sourceR
 
 async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" | "purchase_in" | "return_in" | "exchange_out") {
   const expandedRows = movementType === "sale_out" || movementType === "exchange_out"
-    ? (await Promise.all(rows.map(expandSaleInventoryRows))).flat()
-    : rows.map((row) => ({ row, movementType }));
+    ? (await Promise.all(rows.map((row) => expandBomInventoryRows(row, movementType, "bom_consume")))).flat()
+    : movementType === "return_in"
+      ? (await Promise.all(rows.map((row) => expandBomInventoryRows(row, "return_in", "return_in")))).flat()
+      : rows.map((row) => ({ row, movementType }));
   const movementPairs = expandedRows
     .filter((item) => numberValue(item.row.qty) !== 0 && (text(item.row.prod_cd) || text(item.row.sku)))
     .map((item) => {
@@ -807,8 +863,8 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
           movement_date: nowIso(),
           movement_type: item.movementType,
           product_id: text(item.row.product_id) || null,
-          sku: text(item.row.sku || item.row.prod_cd),
-          prod_cd: text(item.row.prod_cd || item.row.sku),
+          sku: text(item.row.prod_cd || item.row.product_code || item.row.sku),
+          prod_cd: text(item.row.prod_cd || item.row.product_code || item.row.sku),
           wh_cd: text(item.row.wh_cd) || "100",
           qty,
           source_type: item.movementType === "purchase_in" ? "purchases" : "sales",
@@ -853,6 +909,11 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
     return blockedImportResult(rows, referenceResult.errors);
   }
+  const virtualBomErrors = await validateVirtualInventoryBomRows(referenceResult.rows);
+  if (virtualBomErrors.length) {
+    await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
+    return blockedImportResult(rows, virtualBomErrors);
+  }
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
@@ -896,6 +957,11 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
   if (referenceResult.errors.length) {
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
     return blockedImportResult(rows, referenceResult.errors);
+  }
+  const virtualBomErrors = await validateVirtualInventoryBomRows(referenceResult.rows);
+  if (virtualBomErrors.length) {
+    await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
+    return blockedImportResult(rows, virtualBomErrors);
   }
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
