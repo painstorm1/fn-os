@@ -8893,7 +8893,7 @@ function SalesExcelGrid({
   function isLockedOnlineEntryCell(colIndex: number) {
     if (!isSalesEntrySheet(sheet)) return false;
     const header = headers[colIndex];
-    return header !== warehouseHeader && header !== "메모";
+    return header !== warehouseHeader && header !== "수량" && header !== "메모";
   }
   function deleteSelectedGridRows() {
     const targets = selectedRows.filter((index) => rowHasValue(rows[index] || []));
@@ -13273,19 +13273,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendPurchaseInput() {
-    let purchaseInputRows = sheets["FN구매입력"];
-    if (directShippingPartnerOrder.some((feePartner) => (directShippingSourceIndexes[feePartner] || []).length > 0)) {
-      purchaseInputRows = padSalesRows(
-        "FN구매입력",
-        await buildDirectShippingPurchaseRows(
-          sheets["FN구매입력"],
-          sheets["발주 진행 단계"],
-          directShippingSourceIndexes,
-          { enrich: false },
-        ),
-      );
-      setSheets((prev) => ({ ...prev, "FN구매입력": purchaseInputRows }));
-    }
+    const purchaseInputRows = sheets["FN구매입력"];
     let sourceRows: Array<Record<string, string>> = purchaseInputRows
       .filter(rowHasValue)
       .map((row) => {

@@ -28,6 +28,8 @@ test("uploaded sales/purchase batches are grouped by date and customer, not by w
 test("online order FN sales/purchase input uses today and does not require row date", () => {
   assert.match(pageSource, /"FN판매입력": \["거래처코드", "거래처명", "출하창고", "품목코드", "품목명", "수량"\]/);
   assert.match(pageSource, /"FN구매입력": \["거래처코드", "거래처명", "입고창고", "품목코드", "품목명", "수량"\]/);
+  assert.match(pageSource, /return header !== warehouseHeader && header !== "수량" && header !== "메모";/);
+  assert.match(pageSource, /onDoubleClick=\{\(\) => \{\s*if \(!lockedCell\) setEditing\(\{ row: rowIndex, col: colIndex \}\);\s*\}\}/);
   assert.match(pageSource, /const date = entryDateToday\(\)\.replace\(\/\\D\/g, ""\);/);
   assert.match(pageSource, /일자: entryDateToday\(\),[\s\S]*거래처코드: item\.거래처코드/);
   assert.doesNotMatch(pageSource, /salesCellText\(item\.일자\)[\s\S]{0,80}salesCellText\(warehouse\)/);
@@ -68,7 +70,10 @@ test("direct-shipping purchase input appends grouped delivery fee rows by recipi
   assert.match(pageSource, /function directShippingDeliveryCount[\s\S]*identities\.add\(directShippingDeliveryIdentity\(row, sourceIndex\)\)/);
   assert.match(pageSource, /async function buildDirectShippingPurchaseRows\([\s\S]*options\?: \{ enrich\?: boolean \}/);
   assert.match(pageSource, /if \(options\?\.enrich !== false\) \{[\s\S]*enrichedPurchaseSourceRows = await enrichOnlineEntryRows\(purchaseSourceRows, "purchases"\)/);
-  assert.match(pageSource, /async function sendPurchaseInput\(\)[\s\S]*await buildDirectShippingPurchaseRows\([\s\S]*directShippingSourceIndexes,[\s\S]*\{ enrich: false \},[\s\S]*\)/);
+  const sendPurchaseStart = pageSource.indexOf("  async function sendPurchaseInput()");
+  const sendPurchasePreflight = pageSource.slice(sendPurchaseStart, pageSource.indexOf("    const missingRequired", sendPurchaseStart));
+  assert.match(sendPurchasePreflight, /const purchaseInputRows = sheets\["FN구매입력"\];/);
+  assert.doesNotMatch(sendPurchasePreflight, /buildDirectShippingPurchaseRows|setSheets\(\(prev\) => \(\{ \.\.\.prev, "FN구매입력": purchaseInputRows \}\)\)/);
   assert.match(pageSource, /purchaseOverrideRows = sourceRows[\s\S]*__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch\(item\)/);
   assert.match(pageSource, /directRows\.push\(directShippingPurchaseRecordToRow\(directShippingDeliveryFeeRecord\(feePartner, deliveryCount\)\)\)/);
 });
