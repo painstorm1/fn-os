@@ -13176,7 +13176,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return;
     }
     const purchaseOverrideRows = sourceRows
-      .filter((item) => item.__purchaseOverrideCandidate === "1")
+      .filter((item) => item.__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch(item))
       .map((item) => ({
         customer_code: item.거래처코드,
         customer_name: item.거래처명,
