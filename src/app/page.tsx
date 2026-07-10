@@ -8460,7 +8460,7 @@ type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { id?: string; code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
-type CollectionPopupMode = "collection" | "status-change";
+type CollectionPopupMode = "collection" | "status-change" | "invoice-upload";
 type OrderProgressStatusChangeStage = "api-running" | "fnos-waiting" | "fnos-applying" | "done" | "failed";
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
 
@@ -13158,81 +13158,110 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (!ok) return;
     }
 
-    setMessage("");
+    const fileCountText = filesToMatch.length.toLocaleString("ko-KR");
+    setCollectionPopupOpen(false);
+    setCollectionPopupTitle("송장업로드");
+    setCollectionPopupMode("invoice-upload");
+    setCollectionStatuses([{ name: "송장파일", status: "running", message: `${fileCountText}개 파일 읽는 중`, source: "api" }]);
+    setCollectionPopupOpen(true);
+    setMessage(`송장파일 ${fileCountText}개 읽는 중...`);
     const formData = new FormData();
     formData.append("kind", "invoices");
     if (orderFilePassword) formData.append("order_file_password", orderFilePassword);
     filesToMatch.forEach((file) => formData.append("files", file));
-    const res = await fetch("/api/sales/order-files/parse", {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      setMessage(data.error || "송장파일을 읽지 못했습니다.");
-      return;
-    }
-    const parsedSheets = (data.sheets || {}) as Partial<Record<SalesSheetName, string[][]>>;
-    const invoiceRows = (data.invoiceRows || []) as ParsedInvoiceTrackingRow[];
-    const result = applyInvoiceTrackingToSheets(sheets, parsedSheets, invoiceRows);
 
-    if (!result.matchedShipping) {
-      const already = Number(result.alreadyMatchedShipping || 0);
-      if (already > 0) {
-        const ok = window.confirm("송장매칭이 이미 되었습니다. 다시 매칭하시겠어요?");
-        if (!ok) return;
-      }
-      if (result.failedShipping.length) {
-        const failureMessage = invoiceFailureReport(result.failedShipping);
-        setSalesSheetHighlightedRows({
-          송장출력용: result.failedShippingIndexes,
-        });
-        window.alert(failureMessage);
-        setMessage(failureMessage);
+    try {
+      const res = await fetch("/api/sales/order-files/parse", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        const errorMessage = data.error || "송장파일을 읽지 못했습니다.";
+        setCollectionStatuses([{ name: "송장파일", status: "failed", message: errorMessage, source: "api" }]);
+        setMessage(errorMessage);
+        window.alert(errorMessage);
         return;
       }
-      setMessage("송장번호 매칭 결과가 없습니다. 수취인/연락처/주소를 확인해 주세요.");
-      return;
-    }
+      const parsedSheets = (data.sheets || {}) as Partial<Record<SalesSheetName, string[][]>>;
+      const invoiceRows = (data.invoiceRows || []) as ParsedInvoiceTrackingRow[];
+      const parsedRowCount = invoiceRows.length || Object.values(parsedSheets || {}).reduce((sum, rows) => sum + ((rows || []).length), 0);
+      const parsedRowCountText = parsedRowCount.toLocaleString("ko-KR");
+      setCollectionStatuses([{ name: "송장파일", status: "running", message: `${parsedRowCountText}행 읽음 · 매칭 중`, source: "api" }]);
+      setMessage(`송장 ${parsedRowCountText}행 읽음 · 매칭 중...`);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      const result = applyInvoiceTrackingToSheets(sheets, parsedSheets, invoiceRows);
 
-    const nextProgressRows = applyInvoiceMatchProgressGate(
-      preserveExistingOrderProgressFields(
-        buildOrderProgressRows(result.sheets),
+      if (!result.matchedShipping) {
+        const already = Number(result.alreadyMatchedShipping || 0);
+        if (already > 0) {
+          const ok = window.confirm("송장매칭이 이미 되었습니다. 다시 매칭하시겠어요?");
+          if (!ok) return;
+        }
+        if (result.failedShipping.length) {
+          const failureMessage = invoiceFailureReport(result.failedShipping);
+          setSalesSheetHighlightedRows({
+            송장출력용: result.failedShippingIndexes,
+          });
+          setCollectionStatuses([{ name: "송장매칭", status: "failed", message: failureMessage, source: "api" }]);
+          window.alert(failureMessage);
+          setMessage(failureMessage);
+          return;
+        }
+        const noMatchMessage = parsedRowCount
+          ? `송장번호 매칭 결과가 없습니다. 송장 ${parsedRowCount.toLocaleString("ko-KR")}행은 읽었지만, 주문상태가 '주문확인'이고 수취인/연락처/주소/주문옵션이 일치하는 행을 찾지 못했습니다.`
+          : "송장파일에서 읽을 수 있는 송장 행이 없습니다. 파일 형식/헤더를 확인해 주세요.";
+        setCollectionStatuses([{ name: "송장매칭", status: "failed", message: noMatchMessage, source: "api" }]);
+        setMessage(noMatchMessage);
+        window.alert(noMatchMessage);
+        return;
+      }
+
+      const nextProgressRows = applyInvoiceMatchProgressGate(
+        preserveExistingOrderProgressFields(
+          buildOrderProgressRows(result.sheets),
+          sheets["발주 진행 단계"],
+        ),
         sheets["발주 진행 단계"],
-      ),
-      sheets["발주 진행 단계"],
-      result.matchedShippingIndexes || [],
-    );
-    (["JB", "케이모아"] as DirectShippingPartner[]).forEach((partner) => {
-      (directShippingSourceIndexes[partner] || []).forEach((rowIndex) => {
-        if (nextProgressRows[rowIndex]) setProgressValue(nextProgressRows[rowIndex], "직송거래처", partner);
+        result.matchedShippingIndexes || [],
+      );
+      (["JB", "케이모아"] as DirectShippingPartner[]).forEach((partner) => {
+        (directShippingSourceIndexes[partner] || []).forEach((rowIndex) => {
+          if (nextProgressRows[rowIndex]) setProgressValue(nextProgressRows[rowIndex], "직송거래처", partner);
+        });
       });
-    });
-    setSheets({
-      ...result.sheets,
-      "발주 진행 단계": nextProgressRows,
-    });
-    setSalesGridResetKey((value) => value + 1);
-    if (!result.failedShipping.length) {
-      setPendingInvoiceFiles([]);
-      setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: true }));
-    } else {
-      setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: false }));
+      setSheets({
+        ...result.sheets,
+        "발주 진행 단계": nextProgressRows,
+      });
+      setSalesGridResetKey((value) => value + 1);
+      if (!result.failedShipping.length) {
+        setPendingInvoiceFiles([]);
+        setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: true }));
+      } else {
+        setCompletedSalesTasks((prev) => ({ ...prev, invoiceFlow: true, invoiceMatched: false }));
+      }
+      const failureMessage = result.failedShipping.length
+        ? invoiceFailureReport(result.failedShipping)
+        : "";
+      const summaryMessage = invoiceMatchSummaryMessage(
+        Number(result.matchedInvoiceRows ?? result.matchedShipping),
+        Number(result.invoiceTotalRows || invoiceRows.length || 0),
+      );
+      setSalesSheetHighlightedRows({
+        송장출력용: result.failedShippingIndexes,
+      });
+      setCollectionStatuses([{ name: "송장매칭", status: failureMessage ? "failed" : "done", message: failureMessage ? `${summaryMessage} · 일부 확인필요` : summaryMessage, source: "api" }]);
+      window.alert(failureMessage ? `${summaryMessage}\n${failureMessage}` : summaryMessage);
+      setInvoiceMemoText("");
+      setMessage(`송장번호 매칭 완료: ${summaryMessage}${failureMessage ? `\n${failureMessage}` : ""}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? `송장파일 처리 실패: ${error.message}` : "송장파일 처리 실패";
+      setCollectionStatuses([{ name: "송장파일", status: "failed", message: errorMessage, source: "api" }]);
+      setMessage(errorMessage);
+      window.alert(errorMessage);
     }
-    const failureMessage = result.failedShipping.length
-      ? invoiceFailureReport(result.failedShipping)
-      : "";
-    const summaryMessage = invoiceMatchSummaryMessage(
-      Number(result.matchedInvoiceRows ?? result.matchedShipping),
-      Number(result.invoiceTotalRows || invoiceRows.length || 0),
-    );
-    setSalesSheetHighlightedRows({
-      송장출력용: result.failedShippingIndexes,
-    });
-    window.alert(failureMessage ? `${summaryMessage}\n${failureMessage}` : summaryMessage);
-    setInvoiceMemoText("");
-    setMessage(`송장번호 매칭 완료: ${summaryMessage}${failureMessage ? `\n${failureMessage}` : ""}`);
   }
 
   function fnParcelTargetRows(currentSheets: Record<SalesSheetName, string[][]>) {
@@ -16823,10 +16852,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               footer={<ActionButton type="button" onClick={() => setCollectionPopupOpen(false)}>확인</ActionButton>}
             >
               <div className="space-y-4">
-                {[
-                  ["api", collectionPopupMode === "status-change" ? "API 연동 사이트" : "API 연동 사이트"],
-                  ["manual", collectionPopupMode === "status-change" ? "API 미연동/FNOS 적용 사이트" : "API 미연동/수동 업로드 사이트"],
-                ].map(([source, label]) => {
+                {(collectionPopupMode === "invoice-upload"
+                  ? [["api", "송장업로드"]]
+                  : [
+                    ["api", collectionPopupMode === "status-change" ? "API 연동 사이트" : "API 연동 사이트"],
+                    ["manual", collectionPopupMode === "status-change" ? "API 미연동/FNOS 적용 사이트" : "API 미연동/수동 업로드 사이트"],
+                  ]
+                ).map(([source, label]) => {
                   const items = collectionStatuses.filter((item) => (item.source || "api") === source);
                   if (!items.length) return null;
                   return (
@@ -16856,7 +16888,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                                 : isSkipped
                                   ? "대기"
                                   : "문제"
-                            : item.status === "done" ? "수집완료" : isRunning ? "수집중" : isSkipped ? "확인필요" : "문제";
+                            : collectionPopupMode === "invoice-upload"
+                              ? item.status === "done" ? "완료" : isRunning ? "처리중" : isSkipped ? "대기" : "문제"
+                              : item.status === "done" ? "수집완료" : isRunning ? "수집중" : isSkipped ? "확인필요" : "문제";
                           return (
                             <div key={`${source}-${item.name}-${item.message}`} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${tone}`}>
                               <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} />
