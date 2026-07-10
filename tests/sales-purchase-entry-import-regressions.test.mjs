@@ -6,6 +6,7 @@ const salesInventorySource = readFileSync(new URL("../src/lib/sales-inventory.ts
 const dashboardSource = readFileSync(new URL("../src/lib/main-dashboard.ts", import.meta.url), "utf8");
 const partnerBalancesSource = readFileSync(new URL("../src/lib/partner-balances.ts", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+const productMasterSource = readFileSync(new URL("../src/app/api/fnos/products/master/route.ts", import.meta.url), "utf8");
 
 test("sales/purchase imports preserve provided dates and still accept missing dates", () => {
   assert.match(salesInventorySource, /function importEntryDate\(row: RawRow, keys: string\[\]\)[\s\S]*text\(first\(row, keys\)\) \|\| todayCompact\(\)/);
@@ -95,9 +96,27 @@ test("online sales/purchase save avoids per-row inventory-current updates and po
   assert.match(salesInventorySource, /current\.deltaQty \+= deltaQty/);
   assert.match(salesInventorySource, /const batchSize = 12;[\s\S]*await Promise\.all\(batch\.map\(\(item\) => updateCurrentInventory\(item\.sourceRow, item\.deltaQty\)\)\)/);
   assert.match(salesInventorySource, /await updateCurrentInventoryForMovements\(movementPairs\);/);
+  assert.match(salesInventorySource, /warehouse_id: text\(item\.row\.warehouse_id\) \|\| null/);
+  assert.doesNotMatch(salesInventorySource, /writeInventoryMovements\([\s\S]{0,120}\.catch\(\(\) => 0\)/);
   assert.doesNotMatch(salesInventorySource, /Promise\.all\(movementPairs\.map\(\(pair\) => updateCurrentInventory/);
   assert.match(pageSource, /function loadSummary\(force = false, options\?: \{ skipBusyOverlay\?: boolean \}\)/);
   assert.match(pageSource, /loadSummary\(true, \{ skipBusyOverlay: true \}\);/);
+});
+
+test("inventory status/history uses durable identity and reverses deleted sales or purchases", () => {
+  assert.match(salesInventorySource, /async function findProduct\(row: RawRow\)[\s\S]*const productId = text\(row\.product_id\)/);
+  assert.match(salesInventorySource, /async function findWarehouse\(row: RawRow\)[\s\S]*const warehouseId = text\(row\.warehouse_id\)/);
+  assert.match(salesInventorySource, /next\.warehouse_id = text\(warehouse\.id\) \|\| null/);
+  assert.match(salesInventorySource, /if \(deleted\.length\) await reverseDeletedEntryInventoryMovements\(table, deleted\)/);
+  assert.match(salesInventorySource, /movementRowsForDeletedEntries\(table: "sales" \| "purchases", deletedRows: RawRow\[\]\)/);
+  assert.match(salesInventorySource, /movement_type: `\$\{text\(movement\.movement_type\) \|\| "movement"\}_delete_reversal`/);
+  assert.match(salesInventorySource, /source_type: "inventory_manual"/);
+  assert.match(productMasterSource, /function parseInventoryHistoryMemo\(value: unknown\)/);
+  assert.match(productMasterSource, /salesRowsForMovementFallback, purchaseRowsForMovementFallback/);
+  assert.match(productMasterSource, /sourceRowsByRef\.get\(text\(movement\.source_ref_id\)\)/);
+  assert.match(productMasterSource, /movementType === "warehouse_transfer" \|\| text\(meta\.kind\) === "warehouse_transfer"/);
+  assert.match(productMasterSource, /applyAsOfDelta\(productKeys, fromWh, movement, qty\)/);
+  assert.match(productMasterSource, /applyAsOfDelta\(productKeys, toWh, movement, -qty\)/);
 });
 
 test("RG/SET products keep parent sales rows but inventory consumes BOM components", () => {

@@ -42,6 +42,17 @@ function inventoryHistoryMemo(entry: AnyRecord) {
   return `FN_INV_HISTORY ${JSON.stringify(entry)}`;
 }
 
+function parseInventoryHistoryMemo(value: unknown) {
+  const memo = text(value);
+  const marker = "FN_INV_HISTORY ";
+  if (!memo.startsWith(marker)) return {} as AnyRecord;
+  try {
+    return JSON.parse(memo.slice(marker.length)) as AnyRecord;
+  } catch {
+    return {} as AnyRecord;
+  }
+}
+
 function productCode(row: AnyRecord) {
   return text(row.product_code || row.prod_cd || row.sku);
 }
@@ -345,7 +356,7 @@ export async function GET(request: NextRequest) {
     const excludeBom = text(request.nextUrl.searchParams.get("excludeBom")).toLowerCase() === "true";
     const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
     const pageSize = Math.min(5000, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize") || 20)));
-    const [products, warehouses, currentInventory, movements, boms, bomItems, importLinks, importProducts] = await Promise.all([
+    const [products, warehouses, currentInventory, movements, boms, bomItems, importLinks, importProducts, salesRowsForMovementFallback, purchaseRowsForMovementFallback] = await Promise.all([
       productRows(),
       warehouseRows(),
       inventoryRows(),
@@ -354,38 +365,99 @@ export async function GET(request: NextRequest) {
       bomItemRows(),
       importLinkRows(),
       importProductRows(),
+      asOfIso ? selectRows<AnyRecord>("sales", { order: "created_at.desc", limit: 10000 }).catch(() => []) : Promise.resolve([] as AnyRecord[]),
+      asOfIso ? selectRows<AnyRecord>("purchases", { order: "created_at.desc", limit: 10000 }).catch(() => []) : Promise.resolve([] as AnyRecord[]),
     ]);
     const warehouseByIdForInventory = new Map(warehouses.map((row) => [text(row.id), row]));
+    const warehouseByCodeForInventory = new Map<string, AnyRecord>();
+    warehouses.forEach((row) => {
+      const code = warehouseCode(row);
+      if (code) warehouseByCodeForInventory.set(code, row);
+    });
+    const productByIdForInventory = new Map(products.map((row): [string, AnyRecord] => [text(row.id), row]));
+    const sourceRowsByRef = new Map<string, AnyRecord>();
+    [...salesRowsForMovementFallback, ...purchaseRowsForMovementFallback].forEach((row) => {
+      [text(row.id), text(row.source_ref_id)].filter(Boolean).forEach((ref) => sourceRowsByRef.set(ref, row));
+    });
     const inventory = currentInventory.map((row) => ({ ...row }));
     if (asOfIso) {
       const targetTime = new Date(asOfIso).getTime();
       const inventoryByKey = new Map<string, AnyRecord>();
-      inventory.forEach((row) => {
-        const code = text(row.prod_cd || row.sku);
-        const wh = text(row.wh_cd || row.warehouse_code) || warehouseCode(warehouseByIdForInventory.get(text(row.warehouse_id)) || {});
-        if (code && wh) inventoryByKey.set(`${code}::${wh}`, row);
-      });
-      movements.forEach((movement) => {
-        const movementTime = new Date(text(movement.movement_date || movement.created_at)).getTime();
-        if (!Number.isFinite(movementTime) || movementTime <= targetTime) return;
-        const code = text(movement.prod_cd || movement.product_code || movement.sku);
-        const wh = text(movement.wh_cd || movement.warehouse_code) || warehouseCode(warehouseByIdForInventory.get(text(movement.warehouse_id)) || {});
-        if (!code || !wh) return;
-        const key = `${code}::${wh}`;
-        const row = inventoryByKey.get(key) || {
-          prod_cd: code,
-          sku: code,
+      const inventoryKeyCandidates = (row: AnyRecord) => {
+        const product = productByIdForInventory.get(text(row.product_id));
+        const productKeys = [
+          text(row.product_id),
+          text(row.prod_cd || row.product_code || row.sku),
+          productCode(product || {}),
+        ].filter(Boolean);
+        const warehouse = warehouseByIdForInventory.get(text(row.warehouse_id));
+        const wh = text(row.wh_cd || row.warehouse_code) || warehouseCode(warehouse || {});
+        return Array.from(new Set(productKeys)).map((productKey) => `${productKey}::${wh}`).filter((key) => wh && !key.startsWith("::"));
+      };
+      const indexInventoryRow = (row: AnyRecord) => {
+        inventoryKeyCandidates(row).forEach((key) => inventoryByKey.set(key, row));
+      };
+      inventory.forEach(indexInventoryRow);
+      const movementProductKeys = (movement: AnyRecord, meta: AnyRecord) => {
+        const product = productByIdForInventory.get(text(movement.product_id));
+        return Array.from(new Set([
+          text(movement.product_id),
+          text(meta.productCode || movement.prod_cd || movement.product_code || movement.sku),
+          productCode(product || {}),
+        ].filter(Boolean)));
+      };
+      const movementWarehouseCode = (movement: AnyRecord, meta: AnyRecord, sourceRow?: AnyRecord) => {
+        const warehouse = warehouseByIdForInventory.get(text(movement.warehouse_id || sourceRow?.warehouse_id));
+        return text(meta.warehouseCode || meta.fromWarehouseCode || movement.wh_cd || movement.warehouse_code || sourceRow?.wh_cd || sourceRow?.warehouse_code) || warehouseCode(warehouse || {});
+      };
+      const ensureInventoryRow = (productKeys: string[], wh: string, movement: AnyRecord) => {
+        for (const productKey of productKeys) {
+          const row = inventoryByKey.get(`${productKey}::${wh}`);
+          if (row) return row;
+        }
+        const product = productByIdForInventory.get(text(movement.product_id));
+        const warehouse = warehouseByCodeForInventory.get(wh) || warehouseByIdForInventory.get(text(movement.warehouse_id));
+        const row: AnyRecord = {
+          warehouse_id: text(warehouse?.id || movement.warehouse_id) || null,
+          product_id: text(movement.product_id) || null,
+          prod_cd: text(movement.prod_cd || movement.product_code || movement.sku || productCode(product || {})),
+          sku: text(movement.sku || movement.prod_cd || movement.product_code || productCode(product || {})),
           wh_cd: wh,
-          wh_name: warehouseName(warehouseByIdForInventory.get(text(movement.warehouse_id)) || { wh_cd: wh }),
+          wh_name: warehouseName(warehouse || { wh_cd: wh }),
           on_hand_qty: 0,
           available_qty: 0,
           bal_qty: 0,
         };
-        const nextQty = numberValue(row.on_hand_qty ?? row.bal_qty) - numberValue(movement.qty);
+        inventory.push(row);
+        indexInventoryRow(row);
+        return row;
+      };
+      const applyAsOfDelta = (productKeys: string[], wh: string, movement: AnyRecord, delta: number) => {
+        if (!productKeys.length || !wh || delta === 0) return;
+        const row = ensureInventoryRow(productKeys, wh, movement);
+        const nextQty = numberValue(row.on_hand_qty ?? row.bal_qty) + delta;
         row.on_hand_qty = nextQty;
         row.available_qty = nextQty - numberValue(row.reserved_qty);
         row.bal_qty = nextQty;
-        inventoryByKey.set(key, row);
+        indexInventoryRow(row);
+      };
+      movements.forEach((movement) => {
+        const movementTime = new Date(text(movement.movement_date || movement.created_at)).getTime();
+        if (!Number.isFinite(movementTime) || movementTime <= targetTime) return;
+        const meta = parseInventoryHistoryMemo(movement.memo);
+        const sourceRow = sourceRowsByRef.get(text(movement.source_ref_id));
+        const productKeys = movementProductKeys(movement, meta);
+        const movementType = text(movement.movement_type);
+        if (movementType === "warehouse_transfer" || text(meta.kind) === "warehouse_transfer") {
+          const qty = Math.abs(numberValue(meta.qty ?? movement.qty));
+          const fromWh = text(meta.fromWarehouseCode) || movementWarehouseCode(movement, meta, sourceRow);
+          const toWh = text(meta.toWarehouseCode);
+          applyAsOfDelta(productKeys, fromWh, movement, qty);
+          applyAsOfDelta(productKeys, toWh, movement, -qty);
+          return;
+        }
+        const wh = movementWarehouseCode(movement, meta, sourceRow);
+        applyAsOfDelta(productKeys, wh, movement, -numberValue(movement.qty));
       });
     }
 

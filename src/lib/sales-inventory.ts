@@ -289,6 +289,7 @@ export async function deleteEntryGroups(table: "sales" | "purchases", groupKeys:
     const rows = await deleteRows<RawRow>(table, groupFilters(table, groupKey));
     deleted.push(...rows);
   }
+  if (deleted.length) await reverseDeletedEntryInventoryMovements(table, deleted);
   return deleted;
 }
 
@@ -369,6 +370,11 @@ async function existingSourceRefs(table: "sales" | "purchases", refs: string[]) 
 }
 
 async function findProduct(row: RawRow) {
+  const productId = text(row.product_id);
+  if (productId) {
+    const [byId] = await optionalRows("products", { id: `eq.${productId}`, limit: 1 });
+    if (byId) return byId;
+  }
   const productCode = text(row.prod_cd || row.product_code);
   const sku = text(row.sku) || productCode;
   const name = text(row.prod_name || row.product_name);
@@ -436,6 +442,24 @@ function warehouseCode(row: RawRow | null | undefined) {
 
 function warehouseName(row: RawRow | null | undefined) {
   return text(row?.warehouse_name || row?.wh_name);
+}
+
+async function findWarehouse(row: RawRow) {
+  const warehouseId = text(row.warehouse_id);
+  if (warehouseId) {
+    const [byId] = await optionalRows("warehouses", { id: `eq.${warehouseId}`, limit: 1 });
+    if (byId) return byId;
+  }
+  const whCd = text(row.wh_cd || row.warehouse_code) || "100";
+  const byCode = whCd ? await optionalRows("warehouses", { warehouse_code: `eq.${whCd}`, limit: 1 }) : [];
+  if (byCode[0]) return byCode[0];
+  const byLegacyCode = whCd ? await optionalRows("warehouses", { wh_cd: `eq.${whCd}`, limit: 1 }) : [];
+  if (byLegacyCode[0]) return byLegacyCode[0];
+  const whName = text(row.wh_name || row.warehouse_name);
+  const byName = whName ? await optionalRows("warehouses", { warehouse_name: `eq.${whName}`, limit: 1 }) : [];
+  if (byName[0]) return byName[0];
+  const byLegacyName = whName ? await optionalRows("warehouses", { wh_name: `eq.${whName}`, limit: 1 }) : [];
+  return byLegacyName[0] || null;
 }
 
 function lookupKey(value: unknown) {
@@ -614,6 +638,7 @@ async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchase
     }
     if (warehouse) {
       next.wh_cd = warehouseCode(warehouse);
+      next.warehouse_id = text(warehouse.id) || null;
       if (warehouseName(warehouse)) next.wh_name = warehouseName(warehouse);
     }
 
@@ -734,29 +759,37 @@ async function validateVirtualInventoryBomRows(rows: RawRow[]) {
 }
 
 async function updateCurrentInventory(row: RawRow, deltaQty: number) {
-  const product = text(row.product_id) ? row : await findProduct(row);
+  const product = await findProduct(row);
+  const warehouse = await findWarehouse(row);
   const productId = text(row.product_id || product?.id);
-  const productCode = text(row.prod_cd || product?.product_code || product?.prod_cd);
-  const productName = text(row.prod_name || product?.product_name || product?.prod_name);
+  const productCode = text(row.prod_cd || row.product_code || product?.product_code || product?.prod_cd || row.sku);
+  const productName = text(row.prod_name || row.product_name || product?.product_name || product?.prod_name);
   const sku = text(row.sku || product?.sku || productCode);
-  const whCd = text(row.wh_cd) || "100";
-  const currentRows = await optionalRows("inventory_current", {
-    wh_cd: `eq.${whCd}`,
-    prod_cd: `eq.${productCode}`,
-    limit: 100,
-  });
+  const whCd = text(row.wh_cd || row.warehouse_code || warehouseCode(warehouse)) || "100";
+  const warehouseId = text(row.warehouse_id || warehouse?.id);
+  const currentRows = productId
+    ? await optionalRows("inventory_current", { product_id: `eq.${productId}`, wh_cd: `eq.${whCd}`, limit: 100 })
+    : [];
+  const currentRowsByWarehouseId = !currentRows.length && productId && warehouseId
+    ? await optionalRows("inventory_current", { product_id: `eq.${productId}`, warehouse_id: `eq.${warehouseId}`, limit: 100 })
+    : [];
+  const legacyRows = !currentRows.length && !currentRowsByWarehouseId.length && productCode
+    ? await optionalRows("inventory_current", { wh_cd: `eq.${whCd}`, prod_cd: `eq.${productCode}`, limit: 100 })
+    : [];
+  const mergedRows = currentRows.length ? currentRows : currentRowsByWarehouseId.length ? currentRowsByWarehouseId : legacyRows;
   const now = nowIso();
-  const current = currentRows[0];
-  const duplicateRows = currentRows.slice(1);
+  const current = mergedRows[0];
+  const duplicateRows = mergedRows.slice(1);
   let prevQty = 0;
-  for (const item of currentRows) prevQty += numberValue(item.on_hand_qty ?? item.bal_qty);
+  for (const item of mergedRows) prevQty += numberValue(item.on_hand_qty ?? item.bal_qty);
   const nextQty = prevQty + deltaQty;
 
   const values = {
+    warehouse_id: warehouseId || text(current?.warehouse_id) || null,
     product_id: productId || null,
     sku,
     wh_cd: whCd,
-    wh_name: text(current?.wh_name),
+    wh_name: warehouseName(warehouse) || text(current?.wh_name),
     prod_cd: productCode,
     prod_name: productName,
     size_des: text(row.size_des || product?.size_des),
@@ -814,9 +847,9 @@ async function consolidateInventoryCurrentDuplicates() {
 }
 
 function inventoryMovementUpdateKey(row: RawRow) {
-  const whCd = text(row.wh_cd) || "100";
+  const whKey = text(row.wh_cd || row.warehouse_code || row.warehouse_id) || "100";
   const productKey = text(row.product_id) || text(row.prod_cd || row.product_code || row.sku) || text(row.prod_name || row.product_name);
-  return whCd && productKey ? `${whCd}::${lookupKey(productKey)}` : "";
+  return whKey && productKey ? `${whKey}::${lookupKey(productKey)}` : "";
 }
 
 async function updateCurrentInventoryForMovements(movementPairs: Array<{ sourceRow: RawRow; movement: RawRow }>) {
@@ -862,6 +895,7 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
         movement: {
           movement_date: nowIso(),
           movement_type: item.movementType,
+          warehouse_id: text(item.row.warehouse_id) || null,
           product_id: text(item.row.product_id) || null,
           sku: text(item.row.prod_cd || item.row.product_code || item.row.sku),
           prod_cd: text(item.row.prod_cd || item.row.product_code || item.row.sku),
@@ -874,9 +908,107 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
         },
       };
     });
+
   const movementRows = movementPairs.map((pair) => pair.movement);
   if (!movementRows.length) return 0;
   const { saved } = await insertRowsWithSchemaFallback("inventory_movements", movementRows);
+  await updateCurrentInventoryForMovements(movementPairs);
+  return saved.length;
+}
+
+function deletedEntryRefValues(row: RawRow) {
+  return [text(row.id), text(row.source_ref_id)].filter(Boolean);
+}
+
+async function movementRowsForDeletedEntries(table: "sales" | "purchases", deletedRows: RawRow[]) {
+  const refs = Array.from(new Set(deletedRows.flatMap(deletedEntryRefValues)));
+  if (!refs.length) return [] as RawRow[];
+  const rowsById = new Map<string, RawRow>();
+  const chunkSize = 100;
+  for (let index = 0; index < refs.length; index += chunkSize) {
+    const chunk = refs.slice(index, index + chunkSize);
+    const movements = await optionalRows("inventory_movements", {
+      source_type: `eq.${table}`,
+      source_ref_id: sqlInFilter(chunk),
+      limit: Math.max(100, chunk.length * 20),
+    });
+    movements.forEach((row) => rowsById.set(text(row.id || `${row.source_ref_id}-${row.movement_date}-${row.qty}`), row));
+  }
+  return Array.from(rowsById.values());
+}
+
+function deletedEntryByReference(rows: RawRow[]) {
+  const map = new Map<string, RawRow>();
+  rows.forEach((row) => {
+    deletedEntryRefValues(row).forEach((ref) => map.set(ref, row));
+  });
+  return map;
+}
+
+function reversalSourceRowForMovement(movement: RawRow, deletedRow: RawRow | undefined): RawRow {
+  const productKey = text(movement.prod_cd || movement.product_code || movement.sku || deletedRow?.prod_cd || deletedRow?.product_code || deletedRow?.sku);
+  return {
+    warehouse_id: text(movement.warehouse_id || deletedRow?.warehouse_id) || null,
+    wh_cd: text(movement.wh_cd || deletedRow?.wh_cd || deletedRow?.warehouse_code),
+    wh_name: text(deletedRow?.wh_name || deletedRow?.warehouse_name),
+    product_id: text(movement.product_id || deletedRow?.product_id) || null,
+    prod_cd: productKey,
+    product_code: productKey,
+    sku: text(movement.sku || movement.prod_cd || deletedRow?.sku || deletedRow?.prod_cd || productKey),
+    prod_name: text(movement.prod_name || deletedRow?.prod_name || deletedRow?.product_name),
+    product_name: text(movement.prod_name || deletedRow?.prod_name || deletedRow?.product_name),
+  };
+}
+
+async function reverseDeletedEntryInventoryMovements(table: "sales" | "purchases", deletedRows: RawRow[]) {
+  const movements = await movementRowsForDeletedEntries(table, deletedRows);
+  if (!movements.length) return 0;
+  const deletedByRef = deletedEntryByReference(deletedRows);
+  const now = nowIso();
+  const movementPairs = movements
+    .map((movement) => {
+      const sourceRef = text(movement.source_ref_id);
+      const deletedRow = deletedByRef.get(sourceRef);
+      const sourceRow = reversalSourceRowForMovement(movement, deletedRow);
+      const qty = -numberValue(movement.qty);
+      if (!qty) return null;
+      const warehouseKey = text(sourceRow.wh_cd || sourceRow.warehouse_id);
+      const productKey = text(sourceRow.product_id || sourceRow.prod_cd || sourceRow.sku);
+      if (!warehouseKey || !productKey) return null;
+      return {
+        sourceRow,
+        movement: {
+          movement_date: now,
+          movement_type: `${text(movement.movement_type) || "movement"}_delete_reversal`,
+          warehouse_id: text(sourceRow.warehouse_id) || null,
+          product_id: text(sourceRow.product_id) || null,
+          sku: text(sourceRow.sku || sourceRow.prod_cd),
+          prod_cd: text(sourceRow.prod_cd || sourceRow.sku),
+          wh_cd: text(sourceRow.wh_cd),
+          qty,
+          source_type: "inventory_manual",
+          source_ref_id: `delete-reversal-${text(movement.id || sourceRef || Date.now())}`,
+          memo: `FN_INV_HISTORY ${JSON.stringify({
+            kind: "delete_reversal",
+            sourceTable: table,
+            sourceRefId: sourceRef,
+            originalMovementId: text(movement.id),
+            originalMovementType: text(movement.movement_type),
+            productCode: text(sourceRow.prod_cd || sourceRow.sku),
+            productName: text(sourceRow.prod_name || sourceRow.product_name),
+            warehouseCode: text(sourceRow.wh_cd),
+            warehouseName: text(sourceRow.wh_name),
+            changeQty: qty,
+            qty: Math.abs(qty),
+            userMemo: "판매/구매 삭제에 따른 재고 자동 되돌림",
+          })}`,
+          created_at: now,
+        },
+      };
+    })
+    .filter(Boolean) as Array<{ sourceRow: RawRow; movement: RawRow }>;
+  if (!movementPairs.length) return 0;
+  const { saved } = await insertRowsWithSchemaFallback("inventory_movements", movementPairs.map((pair) => pair.movement));
   await updateCurrentInventoryForMovements(movementPairs);
   return saved.length;
 }
@@ -917,7 +1049,7 @@ export async function importSalesRows(rows: RawRow[], sourceFileName?: string): 
   const existingRefs = await existingSourceRefs("sales", normalized.map((row) => row.source_ref_id));
   const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
-  const movementCount = await writeInventoryMovements(saved, "sale_out").catch(() => 0);
+  const movementCount = await writeInventoryMovements(saved, "sale_out");
   await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
 
   return {
@@ -968,9 +1100,9 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("sales", freshRows) : { saved: [], removedColumns: [] };
   const returnRows = saved.filter((row) => returnExchangeKindFromRow(row) !== "exchange_out");
   const exchangeRows = saved.filter((row) => returnExchangeKindFromRow(row) === "exchange_out");
-  const movementCount =
-    await writeInventoryMovements(returnRows, "return_in").catch(() => 0) +
-    await writeInventoryMovements(exchangeRows, "exchange_out").catch(() => 0);
+  const returnMovementCount = await writeInventoryMovements(returnRows, "return_in");
+  const exchangeMovementCount = await writeInventoryMovements(exchangeRows, "exchange_out");
+  const movementCount = returnMovementCount + exchangeMovementCount;
   await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
 
   return {
@@ -1005,7 +1137,7 @@ export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string
   const existingRefs = await existingSourceRefs("purchases", normalized.map((row) => row.source_ref_id));
   const freshRows = referenceResult.rows.filter((row) => !existingRefs.has(text(row.source_ref_id)));
   const { saved, removedColumns } = freshRows.length ? await insertRowsWithSchemaFallback("purchases", freshRows) : { saved: [], removedColumns: [] };
-  const movementCount = await writeInventoryMovements(saved, "purchase_in").catch(() => 0);
+  const movementCount = await writeInventoryMovements(saved, "purchase_in");
   await updateUploadBatch(batch.id, saved.length, rows.length - saved.length).catch(() => null);
 
   return {
