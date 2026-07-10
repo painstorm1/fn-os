@@ -12,7 +12,8 @@
     "db:seed:sales-inventory": "node tools/seed-sales-inventory-from-excel.mjs",
     "start": "next start",
     "lint": "eslint",
-    "test:online-orders": "node --test tests/online-order-api-regressions.test.mjs"
+    "test:online-orders": "node --test tests/online-order-api-regressions.test.mjs",
+    "test:sales-purchase-import": "node --test tests/sales-purchase-entry-import-regressions.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

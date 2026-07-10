@@ -43,7 +43,7 @@ function dateKey(value: unknown) {
 }
 
 function todayCompact() {
-  return new Date().toISOString().slice(0, 10).replace(/\D/g, "");
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/\D/g, "");
 }
 
 function nowIso() {
@@ -56,6 +56,48 @@ function cleanForRef(value: unknown) {
 
 function buildSourceRef(sourceFileName: string | undefined, date: string, sequence: string, productCode: string, qty: number) {
   return [sourceFileName || "FN_OS_WEB", date, sequence, productCode, qty].map(cleanForRef).join("|");
+}
+
+type NormalizeEntryOptions = {
+  forceToday?: boolean;
+};
+
+function importEntryDate(row: RawRow, keys: string[], options?: NormalizeEntryOptions) {
+  return options?.forceToday ? todayCompact() : text(first(row, keys)) || todayCompact();
+}
+
+function groupKeyPart(value: unknown) {
+  return encodeURIComponent(text(value));
+}
+
+function decodeGroupKeyPart(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function isoDateFromCompact(value: string) {
+  return /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : "";
+}
+
+function entryCustomerCode(row: RawRow) {
+  return text(row.cust_code || row.customer_code || row.supplier_code || row.CUST);
+}
+
+function entryCustomerName(row: RawRow) {
+  return text(row.cust_name || row.customer_name || row.supplier_name || row.CUST_DES);
+}
+
+function batchEntryGroupKey(row: RawRow, mode: "sales" | "purchases") {
+  const batchId = text(row.upload_batch_id);
+  if (!batchId) return "";
+  const date = dateKey(row.io_date ?? (mode === "sales" ? row.sale_date : row.purchase_date) ?? row.created_at);
+  const customerCode = entryCustomerCode(row);
+  const customerName = entryCustomerName(row);
+  if (!date || !(customerCode || customerName)) return `batch:${batchId}`;
+  return ["batch-entry", batchId, date, customerCode, customerName].map(groupKeyPart).join(":");
 }
 
 function legacyProductEntryRequiredError(row: RawRow, mode: "sales" | "purchases", index: number) {
@@ -96,9 +138,9 @@ function legacyEntryRequiredError(row: RawRow, kind: "sales" | "purchases", inde
   return missing.length ? `${index + 1}행 필수값 누락: ${missing.join(", ")}` : "";
 }
 
-function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
+function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileName?: string, options?: NormalizeEntryOptions) {
   const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
-  const saleDate = text(first(row, ["일자", "판매일", "sale_date", "io_date", "IO_DATE"])) || todayCompact();
+  const saleDate = importEntryDate(row, ["일자", "판매일", "sale_date", "io_date", "IO_DATE"], options);
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
   const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
@@ -142,9 +184,9 @@ function normalizeSale(row: RawRow, index: number, batchId: string, sourceFileNa
   };
 }
 
-function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFileName?: string) {
+function normalizePurchase(row: RawRow, index: number, batchId: string, sourceFileName?: string, options?: NormalizeEntryOptions) {
   const { qty, price, tax, supplyAmt, totalAmt } = calculatedAmounts(row);
-  const purchaseDate = text(first(row, ["일자", "구매일", "purchase_date", "io_date", "IO_DATE"])) || todayCompact();
+  const purchaseDate = importEntryDate(row, ["일자", "구매일", "purchase_date", "io_date", "IO_DATE"], options);
   const uploadSerNo = text(first(row, ["순번", "upload_ser_no", "UPLOAD_SER_NO"])) || String(index + 1);
   const productCode = text(first(row, ["품목코드", "product_code", "prod_cd", "PROD_CD"]));
   const prodName = text(first(row, ["품목명", "product_name", "prod_name", "PROD_DES"]));
@@ -197,8 +239,25 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<Record<string, unknown>>(table, query).catch(() => []);
 }
 
-function groupFilters(groupKey: string) {
+function groupFilters(table: "sales" | "purchases", groupKey: string) {
   const key = text(groupKey);
+  if (key.startsWith("batch-entry:")) {
+    const [, batchPart = "", datePart = "", codePart = "", namePart = ""] = key.split(":");
+    const batchId = decodeGroupKeyPart(batchPart);
+    const date = decodeGroupKeyPart(datePart);
+    const customerCode = decodeGroupKeyPart(codePart);
+    const customerName = decodeGroupKeyPart(namePart);
+    const filters: Record<string, QueryValue> = { upload_batch_id: `eq.${batchId}` };
+    const isoDate = isoDateFromCompact(date);
+    const dateValues = Array.from(new Set([date, isoDate].filter(Boolean)));
+    if (dateValues.length) {
+      const documentDateColumn = table === "sales" ? "sale_date" : "purchase_date";
+      filters.or = `(${dateValues.flatMap((value) => [`io_date.eq.${value}`, `${documentDateColumn}.eq.${value}`]).join(",")})`;
+    }
+    if (customerCode) filters.cust_code = `eq.${customerCode}`;
+    if (customerName) filters.cust_name = `eq.${customerName}`;
+    return filters;
+  }
   if (key.startsWith("batch:")) return { upload_batch_id: `eq.${key.slice(6)}` };
   if (key.startsWith("manual:")) return { source_ref_id: `ilike.${key.slice(7)}%` };
   if (key.startsWith("source:")) return { source_ref_id: `ilike.${key.slice(7)}%` };
@@ -222,14 +281,14 @@ export async function updateEntryGroup(table: "sales" | "purchases", groupKey: s
   if (text(values.cust_name)) updateValues.cust_name = text(values.cust_name);
   if (text(values.wh_cd)) updateValues.wh_cd = text(values.wh_cd);
   if (text(values.vat_type)) updateValues.vat_type = text(values.vat_type);
-  return patchRows(table, groupFilters(groupKey), updateValues);
+  return patchRows(table, groupFilters(table, groupKey), updateValues);
 }
 
 export async function deleteEntryGroups(table: "sales" | "purchases", groupKeys: string[]) {
   if (!hasDbConfig()) throw new Error("Supabase environment variables are not configured.");
   const deleted: RawRow[] = [];
   for (const groupKey of groupKeys) {
-    const rows = await deleteRows<RawRow>(table, groupFilters(groupKey));
+    const rows = await deleteRows<RawRow>(table, groupFilters(table, groupKey));
     deleted.push(...rows);
   }
   return deleted;
@@ -579,9 +638,8 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
   const now = nowIso();
   const current = currentRows[0];
   const duplicateRows = currentRows.slice(1);
-  const prevQty = currentRows.length
-    ? currentRows.reduce<number>((total, item) => total + numberValue(item.on_hand_qty ?? item.bal_qty), 0)
-    : 0;
+  let prevQty = 0;
+  for (const item of currentRows) prevQty += numberValue(item.on_hand_qty ?? item.bal_qty);
   const nextQty = prevQty + deltaQty;
 
   const values = {
@@ -677,14 +735,14 @@ async function writeInventoryMovements(rows: RawRow[], movementType: "sale_out" 
   return saved.length;
 }
 
-function salesInventoryEntryRequiredError(row: RawRow, kind: "sales" | "purchases", index: number) {
+function salesInventoryEntryRequiredError(row: RawRow, kind: "sales" | "purchases", index: number, options?: { requireDate?: boolean }) {
   const date = text(first(row, ["date", "sale_date", "purchase_date", "io_date", "IO_DATE", "일자"]));
   const customer = text(first(row, ["customer_code", "customer_name", "supplier_code", "supplier_name", "cust_code", "cust_name", "CUST", "CUST_DES", "거래처코드", "거래처명", "공급처코드", "공급처"]));
   const warehouse = text(first(row, ["warehouse_code", "wh_cd", "WH_CD", "입고창고", "출하창고", "창고코드"]));
   const product = text(first(row, ["product_code", "product_name", "prod_cd", "prod_name", "PROD_CD", "PROD_DES", "품목코드", "품목명"]));
   const qty = numberValue(first(row, ["qty", "QTY", "수량"]));
   const missing: string[] = [];
-  if (!date) missing.push("date");
+  if (options?.requireDate !== false && !date) missing.push("date");
   if (!customer) missing.push("customer");
   if (!warehouse) missing.push(kind === "purchases" ? "purchase warehouse" : "warehouse");
   if (!product) missing.push("product");
@@ -695,11 +753,11 @@ function salesInventoryEntryRequiredError(row: RawRow, kind: "sales" | "purchase
 export async function importSalesRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
-  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index)).filter(Boolean);
+  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "sales", index, { requireDate: false })).filter(Boolean);
   if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
 
   const batch = await createUploadBatch("sales", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName));
+  const normalized = rows.map((row, index) => normalizeSale(row, index, batch.id, sourceFileName, { forceToday: true }));
   const referenceResult = await validateEntryReferences(normalized, "sales");
   if (referenceResult.errors.length) {
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);
@@ -778,11 +836,11 @@ export async function importReturnExchangeRows(rows: RawRow[], sourceFileName?: 
 export async function importPurchaseRows(rows: RawRow[], sourceFileName?: string): Promise<ImportResult> {
   if (!hasDbConfig()) return noDbResult(rows);
 
-  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "purchases", index)).filter(Boolean);
+  const invalidErrors = rows.map((row, index) => salesInventoryEntryRequiredError(row, "purchases", index, { requireDate: false })).filter(Boolean);
   if (invalidErrors.length) return blockedImportResult(rows, invalidErrors);
 
   const batch = await createUploadBatch("purchases", sourceFileName, rows.length);
-  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName));
+  const normalized = rows.map((row, index) => normalizePurchase(row, index, batch.id, sourceFileName, { forceToday: true }));
   const referenceResult = await validateEntryReferences(normalized, "purchases");
   if (referenceResult.errors.length) {
     await updateUploadBatch(batch.id, 0, rows.length).catch(() => null);

@@ -131,9 +131,23 @@ function lineNo(row: Row) {
   return parsed > 0 ? parsed : Number.POSITIVE_INFINITY;
 }
 
-function entryGroupKey(row: Row, mode: BalanceMode) {
+function groupKeyPart(value: unknown) {
+  return encodeURIComponent(text(value));
+}
+
+function batchEntryGroupKey(row: Row, mode: BalanceMode) {
   const batchId = text(row.upload_batch_id);
-  if (batchId) return `batch:${batchId}`;
+  if (!batchId) return "";
+  const date = entryDate(row, mode).replace(/\D/g, "").slice(0, 8);
+  const customerCode = entryCustomerCode(row);
+  const customerName = text(row.cust_name || row.customer_name || row.supplier_name);
+  if (!date || !(customerCode || customerName)) return `batch:${batchId}`;
+  return ["batch-entry", batchId, date, customerCode, customerName].map(groupKeyPart).join(":");
+}
+
+function entryGroupKey(row: Row, mode: BalanceMode) {
+  const batchEntryKey = batchEntryGroupKey(row, mode);
+  if (batchEntryKey) return batchEntryKey;
   const ref = text(row.source_ref_id);
   const manualMatch = ref.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   if (manualMatch?.[1]) return `manual:${manualMatch[1]}`;

@@ -125,9 +125,31 @@ function entryProductName(row: Row) {
   return text(row.prod_name || row.product_name || row.prod_cd || row.sku);
 }
 
-function entryGroupKey(row: Row, mode: "sales" | "purchases") {
+function entryCustomerCode(row: Row) {
+  return text(row.cust_code || row.customer_code || row.supplier_code || row.CUST);
+}
+
+function entryCustomerName(row: Row) {
+  return text(row.cust_name || row.customer_name || row.supplier_name || row.CUST_DES);
+}
+
+function groupKeyPart(value: unknown) {
+  return encodeURIComponent(text(value));
+}
+
+function batchEntryGroupKey(row: Row, mode: "sales" | "purchases") {
   const batchId = text(row.upload_batch_id);
-  if (batchId) return `batch:${batchId}`;
+  if (!batchId) return "";
+  const date = dateKey(entryDate(row, mode));
+  const customerCode = entryCustomerCode(row);
+  const customerName = entryCustomerName(row);
+  if (!date || !(customerCode || customerName)) return `batch:${batchId}`;
+  return ["batch-entry", batchId, date, customerCode, customerName].map(groupKeyPart).join(":");
+}
+
+function entryGroupKey(row: Row, mode: "sales" | "purchases") {
+  const batchEntryKey = batchEntryGroupKey(row, mode);
+  if (batchEntryKey) return batchEntryKey;
   const ref = text(row.source_ref_id);
   const manualMatch = ref.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   if (manualMatch?.[1]) return `manual:${manualMatch[1]}`;

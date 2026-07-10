@@ -6321,8 +6321,8 @@ const salesSheetHeaders: Record<SalesSheetName, string[]> = {
 };
 
 const salesRequiredHeaders: Partial<Record<SalesSheetName, string[]>> = {
-  "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "품목코드", "품목명", "수량"],
-  "FN구매입력": ["일자", "거래처코드", "거래처명", "입고창고", "품목코드", "품목명", "수량"],
+  "FN판매입력": ["거래처코드", "거래처명", "출하창고", "품목코드", "품목명", "수량"],
+  "FN구매입력": ["거래처코드", "거래처명", "입고창고", "품목코드", "품목명", "수량"],
 };
 
 const visibleSalesSheetNames: SalesSheetName[] = ["발주 진행 단계", "송장출력용", "FN판매입력", "FN구매입력"];
@@ -6584,8 +6584,7 @@ function normalizeSalesEntryRow(sheet: SalesSheetName, row: string[], changedHea
 function salesEntryRecordHasRequiredValues(item: Record<string, string>, mode: "sales" | "purchases") {
   const warehouse = mode === "sales" ? item.출하창고 : item.입고창고;
   return Boolean(
-    salesCellText(item.일자)
-    && (salesCellText(item.거래처코드) || salesCellText(item.거래처명))
+    (salesCellText(item.거래처코드) || salesCellText(item.거래처명))
     && salesCellText(warehouse)
     && (salesCellText(item.품목코드) || salesCellText(item.품목명))
     && salesQuantityValue(item.수량) > 0,
@@ -6621,7 +6620,7 @@ function aggregateSalesEntryRows(
   const statementNumbers = new Map<string, number>();
 
   rows.forEach((item) => {
-    const date = normalizeEntryDateValue(item.일자);
+    const date = entryDateToday().replace(/\D/g, "");
     const customerCode = salesCellText(item.거래처코드);
     const customerName = salesCellText(item.거래처명);
     const warehouse = salesCellText(mode === "sales" ? item.출하창고 : item.입고창고) || "100";
@@ -10804,6 +10803,11 @@ function normalizeSalesHistoryMode(value: string | null): SalesHistoryMode {
 
 type SalesPurchaseEntryLine = {
   id: string;
+  entryDate?: string;
+  customerCode?: string;
+  customerText?: string;
+  warehouseCode?: string;
+  vatMode?: SalesPurchaseVatMode;
   prod_cd: string;
   prod_name: string;
   qty: string;
@@ -11029,13 +11033,35 @@ function historyEntryMode(mode: SalesHistoryMode): SalesPurchaseMode {
   return mode === "purchases" ? "purchases" : "sales";
 }
 
+function entryBatchCustomerCode(row: Record<string, unknown>) {
+  return String(row.cust_code || row.customer_code || row.supplier_code || "").trim();
+}
+
+function entryBatchCustomerName(row: Record<string, unknown>) {
+  return String(row.cust_name || row.customer_name || row.supplier_name || "").trim();
+}
+
+function entryGroupKeyPart(value: unknown) {
+  return encodeURIComponent(String(value ?? "").trim());
+}
+
+function batchEntryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode) {
+  const batchId = String(row.upload_batch_id || "").trim();
+  if (!batchId) return "";
+  const date = entryDateFilterKey(entryRowDate(row));
+  const customerCode = entryBatchCustomerCode(row);
+  const customerName = entryBatchCustomerName(row);
+  if (!date || !(customerCode || customerName)) return `batch:${batchId}`;
+  return ["batch-entry", batchId, date, customerCode, customerName].map(entryGroupKeyPart).join(":");
+}
+
 function entryRowKey(row: Record<string, unknown>, mode: SalesPurchaseMode, index = 0) {
   const sourceRef = String(row.source_ref_id || "");
   const manualMatch = sourceRef.match(/^(manual-(?:sale|purchase|return|exchange)-\d+)/);
   const sourceBase = sourceRef.replace(/-\d+-.+$/, "");
   const groupedSourceRef = sourceBase && sourceBase !== sourceRef ? sourceBase : "";
-  const batchId = String(row.upload_batch_id || "");
-  return String(row.entry_group_key || (batchId ? `batch:${batchId}` : "") || (manualMatch?.[1] ? `manual:${manualMatch[1]}` : "") || (groupedSourceRef ? `source:${groupedSourceRef}` : "") || row.id || `${mode}-${index}`);
+  const batchKey = batchEntryRowKey(row, mode);
+  return String(row.entry_group_key || batchKey || (manualMatch?.[1] ? `manual:${manualMatch[1]}` : "") || (groupedSourceRef ? `source:${groupedSourceRef}` : "") || row.id || `${mode}-${index}`);
 }
 
 function entryRowSourceRefBase(row: Record<string, unknown>, mode: SalesPurchaseMode) {
@@ -12925,7 +12951,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .map((row) => {
         const item = salesRowObject("FN판매입력", normalizeSalesEntryRow("FN판매입력", row));
         return {
-          일자: item.일자,
+          일자: entryDateToday(),
           거래처코드: item.거래처코드,
           거래처명: item.거래처명,
           출하창고: item.출하창고 || "100",
@@ -12947,7 +12973,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
     if (missingRequired.length) {
-      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
@@ -13015,7 +13041,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .map((row) => {
         const item = salesRowObject("FN구매입력", normalizeSalesEntryRow("FN구매입력", row));
         return {
-          일자: item.일자,
+          일자: entryDateToday(),
           거래처코드: item.거래처코드,
           거래처명: item.거래처명,
           입고창고: item.입고창고 || "100",
@@ -13037,7 +13063,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
     if (missingRequired.length) {
-      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 일자, 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
+      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
       return;
     }
     const purchaseOverrideRows = sourceRows
@@ -18280,7 +18306,7 @@ function SalesPurchaseEntryModal({
     const headers = [...salesSheetDisplayHeaders(sheetName), "삭제하세요", "삭제하세요"];
     const row = [...entrySheetHeaders().map((header) => sample[header] || ""), "삭제하세요", "삭제하세요"];
     void downloadTableXlsx(`FN_OS_${sheetName}_엑셀폼.xlsx`, sheetName, headers, [row], {
-      requiredHeaders: ["일자", "거래처코드", "거래처명", warehouseHeader, "품목코드", "품목명", "수량"],
+      requiredHeaders: ["거래처코드", "거래처명", warehouseHeader, "품목코드", "품목명", "수량"],
       dropdowns: { "VAT 포함/별도": ["포함", "별도"] },
     });
   }
@@ -18315,11 +18341,8 @@ function SalesPurchaseEntryModal({
       dataRows.forEach((rawRow, index) => {
         const row = rawRow as Array<string | number>;
         const missing: string[] = [];
-        if (index === 0) {
-          if (!normalizeEntryDate(pick(row, "일자"))) missing.push("일자");
-          if (!(pick(row, "거래처코드") || pick(row, "거래처명"))) missing.push("거래처코드/거래처명");
-          if (!pick(row, warehouseHeader)) missing.push(warehouseHeader);
-        }
+        if (!(pick(row, "거래처코드") || pick(row, "거래처명"))) missing.push("거래처코드/거래처명");
+        if (!pick(row, warehouseHeader)) missing.push(warehouseHeader);
         if (!(pick(row, "품목코드") || pick(row, "품목명"))) missing.push("품목코드/품목명");
         if (!pick(row, "수량")) missing.push("수량");
         if (missing.length) missingRows.push({ rowNumber: index + 2, missing });
@@ -18334,21 +18357,33 @@ function SalesPurchaseEntryModal({
         const price = pick(row, "단가");
         const memo = pick(row, "메모");
         if (!(prod_cd || prod_name || qty || price || memo)) continue;
+        const rowDate = entryDateToday();
+        const rowCustomerCode = pick(row, "거래처코드");
+        const rowCustomerText = pick(row, "거래처명") || rowCustomerCode;
+        const rowWarehouse = pick(row, warehouseHeader) || "100";
+        const vatText = pick(row, "VAT 포함/별도");
+        const rowVatMode: SalesPurchaseVatMode = vatText.includes("별도") ? "excluded" : "included";
         if (!importedLines.length) {
-          const rowDate = normalizeEntryDate(pick(row, "일자"));
-          if (rowDate) setEntryDate(rowDate);
-          setCustomerCode(pick(row, "거래처코드"));
-          setCustomerText(pick(row, "거래처명") || pick(row, "거래처코드"));
-          const warehouse = pick(row, warehouseHeader);
-          if (warehouse) {
-            setWarehouseCode(warehouse);
-            setWarehouseText(warehouse);
-          }
-          const vatText = pick(row, "VAT 포함/별도");
-          if (vatText.includes("별도")) setVatMode("excluded");
-          if (vatText.includes("포함")) setVatMode("included");
+          setEntryDate(rowDate);
+          setCustomerCode(rowCustomerCode);
+          setCustomerText(rowCustomerText);
+          setWarehouseCode(rowWarehouse);
+          setWarehouseText(rowWarehouse);
+          setVatMode(rowVatMode);
         }
-        importedLines.push({ ...defaultLine(), prod_cd, prod_name, qty: qty || "1", price, memo });
+        importedLines.push({
+          ...defaultLine(),
+          entryDate: rowDate,
+          customerCode: rowCustomerCode,
+          customerText: rowCustomerText,
+          warehouseCode: rowWarehouse,
+          vatMode: rowVatMode,
+          prod_cd,
+          prod_name,
+          qty: qty || "1",
+          price,
+          memo,
+        });
       }
       if (!importedLines.length) {
         window.alert("읽어올 품목 행이 없습니다.");
@@ -18430,33 +18465,43 @@ function SalesPurchaseEntryModal({
   async function saveRows() {
     setLocalError("");
     const validLines = lines.filter((line) => (line.prod_cd.trim() || line.prod_name.trim()) && lineQty(line) > 0);
-    if (!entryDate || !(customerText.trim() || customerCode.trim()) || !warehouseCode.trim() || !validLines.length) {
+    const fallbackEntryDate = mode === "returns" ? entryDate : entryDateToday();
+    const lineEntryDate = (line: SalesPurchaseEntryLine) => line.entryDate || fallbackEntryDate;
+    const lineCustomerCode = (line: SalesPurchaseEntryLine) => line.customerCode ?? customerCode;
+    const lineCustomerText = (line: SalesPurchaseEntryLine) => line.customerText ?? customerText;
+    const lineWarehouseCode = (line: SalesPurchaseEntryLine) => line.warehouseCode ?? warehouseCode;
+    const missingLine = validLines.find((line) => !lineEntryDate(line) || !(lineCustomerText(line).trim() || lineCustomerCode(line).trim()) || !lineWarehouseCode(line).trim());
+    if (!validLines.length || missingLine) {
       setLocalError("날짜, 거래처코드 또는 거래처명, 창고, 품목코드 또는 품목명 1개 이상, 수량은 필수입니다.");
       return;
     }
     const sourceRefPrefix = mode === "returns" ? (returnKind === "return_in" ? "manual-return" : "manual-exchange") : mode === "sales" ? "manual-sale" : "manual-purchase";
     const sourceRefBase = initialDraft?.sourceRefBase || `${sourceRefPrefix}-${Date.now()}`;
-    const rows = validLines.map((line, index) => ({
-      io_date: entryDate,
-      sale_date: mode !== "purchases" ? entryDate : "",
-      purchase_date: mode === "purchases" ? entryDate : "",
-      upload_ser_no: String(index + 1),
-      source_ref_id: `${sourceRefBase}-${index + 1}-${line.prod_cd}`,
-      io_type: mode === "returns" ? returnKind : "",
-      return_exchange_type: mode === "returns" ? returnKind : "",
-      cust_code: customerCode,
-      cust_name: customerText,
-      wh_cd: warehouseCode,
-      prod_cd: line.prod_cd,
-      prod_name: line.prod_name,
-      qty: line.qty || "1",
-      price: String(Math.round(lineUnit(line))),
-      tax_amt: "",
-      supply_amt: String(Math.round(lineUnit(line))),
-      total_amount: String(Math.round(lineSupply(line))),
-      remarks: line.memo,
-      vat_type: vatMode === "included" ? "VAT포함" : "VAT별도",
-    }));
+    const rows = validLines.map((line, index) => {
+      const effectiveDate = lineEntryDate(line);
+      const effectiveVatMode = line.vatMode || vatMode;
+      return {
+        io_date: effectiveDate,
+        sale_date: mode !== "purchases" ? effectiveDate : "",
+        purchase_date: mode === "purchases" ? effectiveDate : "",
+        upload_ser_no: String(index + 1),
+        source_ref_id: `${sourceRefBase}-${index + 1}-${line.prod_cd}`,
+        io_type: mode === "returns" ? returnKind : "",
+        return_exchange_type: mode === "returns" ? returnKind : "",
+        cust_code: lineCustomerCode(line),
+        cust_name: lineCustomerText(line),
+        wh_cd: lineWarehouseCode(line),
+        prod_cd: line.prod_cd,
+        prod_name: line.prod_name,
+        qty: line.qty || "1",
+        price: String(Math.round(lineUnit(line))),
+        tax_amt: "",
+        supply_amt: String(Math.round(lineUnit(line))),
+        total_amount: String(Math.round(lineSupply(line))),
+        remarks: line.memo,
+        vat_type: effectiveVatMode === "included" ? "VAT포함" : "VAT별도",
+      };
+    });
     setSaving(true);
     try {
       const endpoint = mode === "purchases" ? "/api/purchases/import" : "/api/sales/import";
