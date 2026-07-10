@@ -357,6 +357,11 @@ test("11번가 배송처리 -3313 이미 배송중 응답은 멱등 성공으로
   assert.match(elevenstSource, /mode === "dispatch" && isIdempotentElevenstDispatchStatus\(status\)/);
 });
 
+test("11번가 정산예정금액은 수집 원본의 stlPlnAmt를 우선 사용한다", () => {
+  assert.match(elevenstSource, /settlementAmount:\s*numberValue\(firstDeepText\(row, \["stlPlnAmt",/);
+  assertNotMatch(elevenstSource, /Math\.round\([^)]*0\.88[^)]*\)/, "11번가 어댑터에서 결제금액 * 0.88을 계산하고 있습니다.");
+});
+
 test("SSG 주문확인/출고완료는 shppNo/shppSeq native ID를 우선 사용하고 실제 신규주문 코드를 과상향하지 않는다", () => {
   assert.match(ssgSource, /shppNo: firstText\(row\.shppNo, row\.shpp_no, fromProductShppNo,/);
   assert.match(ssgSource, /shppSeq: firstText\(row\.shppSeq, row\.shpp_seq, fromProductShppSeq,/);

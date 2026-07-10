@@ -285,7 +285,7 @@ function normalizeElevenstRow(
     sku: firstDeepText(row, ["sellerPrdCd", "sellerStockCd", "sellerProductCode", "sellerManagementCode"]),
     qty: numberValue(firstDeepText(row, ["ordQty", "orderQty", "qty", "quantity"])) || 1,
     salesAmount: numberValue(firstDeepText(row, ["ordPayAmt", "payAmt", "selPrc", "salePrice", "productPrice", "prdPrc"])) || undefined,
-    settlementAmount: numberValue(firstDeepText(row, ["sttlAmt", "settlementAmount", "expectedSettlementAmount"])) || undefined,
+    settlementAmount: numberValue(firstDeepText(row, ["stlPlnAmt", "settlementPlannedAmount", "plannedSettlementAmount", "settlementExpectAmount", "sttlAmt", "settlementAmount", "expectedSettlementAmount"])) || undefined,
     raw: rawWithCollectableStatus,
   };
   const receiverPhone = firstDeepText(row, ["rcvrPrtblNo", "receiverMobile", "receiverPhone", "rcvrTlphn", "receiverTel"]);
