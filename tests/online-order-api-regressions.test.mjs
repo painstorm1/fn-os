@@ -196,7 +196,10 @@ test("F2/F5 송장업로드는 기존 진행상태/API 식별자를 보존하고
 });
 
 test("F2/F5 송장업로드는 쇼핑몰코드를 제외하고 수취인+연락처+주소+주문옵션이 모두 같고 기존 주문확인인 행만 매칭/출고대기 처리한다", () => {
-  assert.match(pageSource, /const isInvoiceConfirmedProgressRow = \(index: number\) => salesCellText\(progressValue\(progressRows\[index\] \|\| \[\], "주문상태"\)\) === "주문확인";/);
+  assert.match(pageSource, /const progressMatchesShippingRow = \(progress: string\[\], shippingRow: string\[\]\) =>/);
+  assert.match(pageSource, /const progressIndexForShippingRow = \(shippingRow: string\[\], shippingIndex: number\) =>/);
+  assert.match(pageSource, /const isInvoiceConfirmedProgressRow = \(index: number\) => salesCellText\(progressValue\(progressRowForShippingIndex\(index\), "주문상태"\)\) === "주문확인";/);
+  assertNotMatch(pageSource, /const isInvoiceConfirmedProgressRow = \(index: number\) => salesCellText\(progressValue\(progressRows\[index\]/, "송장업로드는 송장출력용 정렬 후에도 발주 진행 단계 행을 index가 아닌 식별자로 찾아야 합니다.");
   assert.match(pageSource, /function invoiceOptionKey\(value: unknown\)/);
   assert.match(pageSource, /const rowMatchesInvoiceIdentity = \(row: string\[\], invoiceKey: string, optionKey: string\) => \([\s\S]*invoiceOptionKey\(row\[7\]\) === optionKey[\s\S]*rowMatchesAddress\(row, invoiceKey\)/);
   assertNotMatch(pageSource, /invoiceProductCodeKey\(row\[0\]\) === productKey/, "송장업로드 매칭이 아직 쇼핑몰코드/상품코드를 필수키로 사용하고 있습니다.");

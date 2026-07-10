@@ -6800,10 +6800,49 @@ function applyInvoiceTrackingToSheets(
     const address = row[6];
     return invoiceKey === invoiceMatchKey(name, phone1, address) || invoiceKey === invoiceMatchKey(name, phone2, address);
   };
-  const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRows[index] || [], "직송거래처"));
-  const isInvoiceConfirmedProgressRow = (index: number) => salesCellText(progressValue(progressRows[index] || [], "주문상태")) === "주문확인";
-  const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRows[index] || [], "API배송묶음ID"));
   const isCompleteInvoiceKey = (invoiceKey: string) => invoiceKey.split("|").every((part) => Boolean(part));
+  const progressOptionKey = (progress: string[]) => invoiceOptionKey(onlineOrderShippingOptionName(
+    progressValue(progress, "품목명(ERP)"),
+    progressValue(progress, "쇼핑몰품목key") || progressValue(progress, "품목명(ERP)"),
+    progressValue(progress, "수량"),
+  ));
+  const progressMatchesShippingRow = (progress: string[], shippingRow: string[]) => {
+    if (!rowHasValue(progress) || !rowHasValue(shippingRow)) return false;
+    const shippingMallCode = salesCellText(shippingRow[0]);
+    const progressMallCode = progressValue(progress, "쇼핑몰코드");
+    if (shippingMallCode && progressMallCode && shippingMallCode !== progressMallCode) return false;
+    const shippingOptionKey = invoiceOptionKey(shippingRow[7]);
+    const currentProgressOptionKey = progressOptionKey(progress);
+    if (shippingOptionKey && currentProgressOptionKey && shippingOptionKey !== currentProgressOptionKey) return false;
+    const shippingKeys = [
+      invoiceMatchKey(shippingRow[2], shippingRow[3], shippingRow[6]),
+      invoiceMatchKey(shippingRow[2], shippingRow[4], shippingRow[6]),
+    ].filter(isCompleteInvoiceKey);
+    if (!shippingKeys.length) return false;
+    return shippingKeys.some((key) => (
+      key === invoiceMatchKey(progressValue(progress, "수취인"), progressValue(progress, "수취인연락처1"), progressValue(progress, "주소"))
+      || key === invoiceMatchKey(progressValue(progress, "수취인"), progressValue(progress, "수취인연락처2"), progressValue(progress, "주소"))
+    ));
+  };
+  const shippingProgressIndexCache = new Map<number, number>();
+  const progressIndexForShippingRow = (shippingRow: string[], shippingIndex: number) => {
+    if (shippingProgressIndexCache.has(shippingIndex)) return shippingProgressIndexCache.get(shippingIndex) ?? -1;
+    let matchedIndex = -1;
+    if (progressMatchesShippingRow(progressRows[shippingIndex] || [], shippingRow)) {
+      matchedIndex = shippingIndex;
+    } else {
+      matchedIndex = progressRows.findIndex((progress) => progressMatchesShippingRow(progress, shippingRow));
+    }
+    shippingProgressIndexCache.set(shippingIndex, matchedIndex);
+    return matchedIndex;
+  };
+  const progressRowForShippingIndex = (shippingIndex: number) => {
+    const progressIndex = progressIndexForShippingRow(normalizeShippingRowForTracking(currentSheets.송장출력용[shippingIndex] || []), shippingIndex);
+    return progressIndex >= 0 ? progressRows[progressIndex] || [] : progressRows[shippingIndex] || [];
+  };
+  const isDirectShippingIndex = (index: number) => Boolean(progressValue(progressRowForShippingIndex(index), "직송거래처"));
+  const isInvoiceConfirmedProgressRow = (index: number) => salesCellText(progressValue(progressRowForShippingIndex(index), "주문상태")) === "주문확인";
+  const progressShipmentKey = (index: number) => salesCellText(progressValue(progressRowForShippingIndex(index), "API배송묶음ID"));
   const rowMatchesInvoiceIdentity = (row: string[], invoiceKey: string, optionKey: string) => (
     Boolean(optionKey)
     && isCompleteInvoiceKey(invoiceKey)
@@ -7470,9 +7509,15 @@ function preserveExistingOrderProgressFields(rows: string[][], existingRows: str
 
 function applyInvoiceMatchProgressGate(rows: string[][], existingRows: string[][], matchedIndexes: number[]) {
   const matchedSet = new Set(matchedIndexes);
+  const existingByMallCode = new Map<string, string[]>();
+  existingRows.filter(rowHasValue).forEach((row) => {
+    const mallCode = progressValue(row, "쇼핑몰코드");
+    if (mallCode && !existingByMallCode.has(mallCode)) existingByMallCode.set(mallCode, row);
+  });
   return rows.map((row, index) => {
     if (!rowHasValue(row)) return row;
-    const existing = existingRows[index] || [];
+    const mallCode = progressValue(row, "쇼핑몰코드");
+    const existing = (mallCode ? existingByMallCode.get(mallCode) : undefined) || existingRows[index] || [];
     const existingStatus = progressValue(existing, "주문상태");
     const existingTracking = progressValue(existing, "송장번호");
     if (matchedSet.has(index) && existingStatus === "주문확인") return row;
