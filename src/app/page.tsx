@@ -12873,6 +12873,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     currentPurchaseRows: string[][],
     progressRows: string[][],
     sourceIndexesByPartner: DirectShippingSourceIndexes,
+    options?: { enrich?: boolean },
   ) {
     const baseRows = currentPurchaseRows
       .filter(rowHasValue)
@@ -12894,10 +12895,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         };
       });
       let enrichedPurchaseSourceRows = purchaseSourceRows;
-      try {
-        enrichedPurchaseSourceRows = await enrichOnlineEntryRows(purchaseSourceRows, "purchases");
-      } catch {
-        enrichedPurchaseSourceRows = purchaseSourceRows;
+      if (options?.enrich !== false) {
+        try {
+          enrichedPurchaseSourceRows = await enrichOnlineEntryRows(purchaseSourceRows, "purchases");
+        } catch {
+          enrichedPurchaseSourceRows = purchaseSourceRows;
+        }
       }
       enrichedPurchaseSourceRows.forEach((enrichedSource, index) => {
         const fallbackSource = purchaseSourceRows[index] || {};
@@ -13257,7 +13260,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (directShippingPartnerOrder.some((feePartner) => (directShippingSourceIndexes[feePartner] || []).length > 0)) {
       purchaseInputRows = padSalesRows(
         "FN구매입력",
-        await buildDirectShippingPurchaseRows(sheets["FN구매입력"], sheets["발주 진행 단계"], directShippingSourceIndexes),
+        await buildDirectShippingPurchaseRows(
+          sheets["FN구매입력"],
+          sheets["발주 진행 단계"],
+          directShippingSourceIndexes,
+          { enrich: false },
+        ),
       );
       setSheets((prev) => ({ ...prev, "FN구매입력": purchaseInputRows }));
     }

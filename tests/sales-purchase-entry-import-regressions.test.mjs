@@ -53,7 +53,9 @@ test("direct-shipping purchase input appends grouped delivery fee rows by recipi
   assert.match(pageSource, /directShippingDeliveryFeeProduct[\s\S]*code: "ETC_01",[\s\S]*name: "직송 배송비"/);
   assert.match(pageSource, /function directShippingDeliveryIdentity[\s\S]*progressValue\(row, "수취인"\)[\s\S]*progressValue\(row, "수취인연락처1"\) \|\| progressValue\(row, "수취인연락처2"\)[\s\S]*progressValue\(row, "주소"\)/);
   assert.match(pageSource, /function directShippingDeliveryCount[\s\S]*identities\.add\(directShippingDeliveryIdentity\(row, sourceIndex\)\)/);
-  assert.match(pageSource, /async function sendPurchaseInput\(\)[\s\S]*await buildDirectShippingPurchaseRows\(sheets\["FN구매입력"\], sheets\["발주 진행 단계"\], directShippingSourceIndexes\)/);
+  assert.match(pageSource, /async function buildDirectShippingPurchaseRows\([\s\S]*options\?: \{ enrich\?: boolean \}/);
+  assert.match(pageSource, /if \(options\?\.enrich !== false\) \{[\s\S]*enrichedPurchaseSourceRows = await enrichOnlineEntryRows\(purchaseSourceRows, "purchases"\)/);
+  assert.match(pageSource, /async function sendPurchaseInput\(\)[\s\S]*await buildDirectShippingPurchaseRows\([\s\S]*directShippingSourceIndexes,[\s\S]*\{ enrich: false \},[\s\S]*\)/);
   assert.match(pageSource, /purchaseOverrideRows = sourceRows[\s\S]*__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch\(item\)/);
   assert.match(pageSource, /directRows\.push\(directShippingPurchaseRecordToRow\(directShippingDeliveryFeeRecord\(feePartner, deliveryCount\)\)\)/);
 });
