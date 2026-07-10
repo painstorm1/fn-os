@@ -6887,14 +6887,19 @@ function applyInvoiceTrackingToSheets(
         applyTracking(index, trackingNo);
       });
     };
-    const findUniqueAddressOnlyShippingIndex = (invoiceKey: string, predicate: (row: string[], index: number) => boolean) => {
+    const findAddressOnlyShippingIndexes = (invoiceKey: string, predicate: (row: string[], index: number) => boolean) => {
       const candidates: number[] = [];
       nextShipping.forEach((row, index) => {
         if (!predicate(row, index)) return;
         if (!rowMatchesInvoiceAddressIdentity(row, invoiceKey)) return;
         candidates.push(index);
       });
-      return candidates.length === 1 ? candidates[0] : -1;
+      return candidates;
+    };
+    const safeAddressOnlyShippingIndexes = (candidates: number[], itemCount: number) => {
+      if (candidates.length === 1) return candidates;
+      if (itemCount >= 2 && candidates.length === itemCount) return candidates;
+      return [];
     };
     let addressOnlyMatchedShipping = 0;
 
@@ -6912,13 +6917,14 @@ function applyInvoiceTrackingToSheets(
         && !isDirectShippingIndex(index)
         && rowMatchesInvoiceIdentity(row, invoiceKey, optionKey)
       ));
-      const addressOnlyShippingIndex = exactShippingIndex >= 0 ? -1 : findUniqueAddressOnlyShippingIndex(invoiceKey, (row, index) => (
+      const addressOnlyShippingIndexes = exactShippingIndex >= 0 ? [] : safeAddressOnlyShippingIndexes(findAddressOnlyShippingIndexes(invoiceKey, (row, index) => (
         !usedShipping.has(index)
         && rowHasValue(row)
         && !salesCellText(row[1])
         && isInvoiceConfirmedProgressRow(index)
         && !isDirectShippingIndex(index)
-      ));
+      )), itemCount);
+      const addressOnlyShippingIndex = addressOnlyShippingIndexes[0] ?? -1;
       const shippingIndex = exactShippingIndex >= 0 ? exactShippingIndex : addressOnlyShippingIndex;
 
       if (shippingIndex < 0) {
@@ -6926,16 +6932,20 @@ function applyInvoiceTrackingToSheets(
           if (!rowHasValue(row) || salesCellText(row[1]) !== trackingNo || !isInvoiceConfirmedProgressRow(index) || isDirectShippingIndex(index)) return false;
           return rowMatchesInvoiceIdentity(row, invoiceKey, optionKey);
         });
+        let alreadyAddressOnlyIndexes: number[] = [];
         if (alreadyIndex < 0) {
-          alreadyIndex = findUniqueAddressOnlyShippingIndex(invoiceKey, (row, index) => (
+          alreadyAddressOnlyIndexes = safeAddressOnlyShippingIndexes(findAddressOnlyShippingIndexes(invoiceKey, (row, index) => (
             rowHasValue(row)
             && salesCellText(row[1]) === trackingNo
             && isInvoiceConfirmedProgressRow(index)
             && !isDirectShippingIndex(index)
-          ));
+          )), itemCount);
+          alreadyIndex = alreadyAddressOnlyIndexes[0] ?? -1;
         }
         if (alreadyIndex >= 0) {
-          alreadyMatchedShipping += 1;
+          const alreadyIndexes = alreadyAddressOnlyIndexes.length ? alreadyAddressOnlyIndexes : [alreadyIndex];
+          alreadyMatchedShipping += alreadyIndexes.length;
+          alreadyIndexes.forEach((index) => usedShipping.add(index));
           matchedInvoiceRows += 1;
           applyTrackingToSameShipment(alreadyIndex, trackingNo, invoiceKey, optionKey);
           if (itemCount >= 2) {
@@ -6955,7 +6965,14 @@ function applyInvoiceTrackingToSheets(
 
       if (applyTracking(shippingIndex, trackingNo)) {
         matchedInvoiceRows += 1;
-        if (addressOnlyShippingIndex >= 0) addressOnlyMatchedShipping += 1;
+        if (addressOnlyShippingIndex >= 0) {
+          addressOnlyMatchedShipping += 1;
+          addressOnlyShippingIndexes
+            .filter((index) => index !== shippingIndex)
+            .forEach((index) => {
+              if (applyTracking(index, trackingNo)) addressOnlyMatchedShipping += 1;
+            });
+        }
       }
       applyTrackingToSameShipment(shippingIndex, trackingNo, invoiceKey, optionKey);
       if (itemCount >= 2) {
@@ -13484,7 +13501,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       );
       const addressOnlyMatched = Number(result.addressOnlyMatchedShipping || 0);
       const summaryWithMatchNote = addressOnlyMatched > 0
-        ? `${summaryMessage} · 주소단일매칭 ${addressOnlyMatched.toLocaleString("ko-KR")}건`
+        ? `${summaryMessage} · 주소/묶음매칭 ${addressOnlyMatched.toLocaleString("ko-KR")}건`
         : summaryMessage;
       setSalesSheetHighlightedRows({
         송장출력용: result.failedShippingIndexes,

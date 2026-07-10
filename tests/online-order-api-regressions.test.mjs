@@ -203,9 +203,10 @@ test("F2/F5 송장업로드는 정렬 후에도 진행행을 식별자로 찾고
   assert.match(pageSource, /function invoiceOptionKey\(value: unknown\)/);
   assert.match(pageSource, /const rowMatchesInvoiceAddressIdentity = \(row: string\[\], invoiceKey: string\) => \([\s\S]*rowMatchesAddress\(row, invoiceKey\)/);
   assert.match(pageSource, /const rowMatchesInvoiceIdentity = \(row: string\[\], invoiceKey: string, optionKey: string\) => \([\s\S]*invoiceOptionKey\(row\[7\]\) === optionKey[\s\S]*rowMatchesInvoiceAddressIdentity\(row, invoiceKey\)/);
-  assert.match(pageSource, /const findUniqueAddressOnlyShippingIndex = \(invoiceKey: string, predicate: \(row: string\[\], index: number\) => boolean\) =>/);
-  assert.match(pageSource, /candidates\.length === 1 \? candidates\[0\] : -1/);
-  assert.match(pageSource, /주소단일매칭/);
+  assert.match(pageSource, /const findAddressOnlyShippingIndexes = \(invoiceKey: string, predicate: \(row: string\[\], index: number\) => boolean\) =>/);
+  assert.match(pageSource, /const safeAddressOnlyShippingIndexes = \(candidates: number\[\], itemCount: number\) =>/);
+  assert.match(pageSource, /itemCount >= 2 && candidates\.length === itemCount/);
+  assert.match(pageSource, /주소\/묶음매칭/);
   assertNotMatch(pageSource, /invoiceProductCodeKey\(row\[0\]\) === productKey/, "송장업로드 매칭이 아직 쇼핑몰코드/상품코드를 필수키로 사용하고 있습니다.");
   assert.match(pageSource, /!isInvoiceConfirmedProgressRow\(index\)/);
   assert.match(pageSource, /function applyInvoiceMatchProgressGate\(/);
@@ -231,7 +232,10 @@ test("F2/F5 송장업로드는 정렬 후에도 진행행을 식별자로 찾고
     && order.address.replace(/\s+/g, "") === invoice.address.replace(/\s+/g, ""));
   assert.equal(addressOnlyCandidates.length === 1, true, "옵션명이 달라도 수취인/전화/주소 후보가 1건이면 fallback 대상입니다.");
   addressOnlyCandidates.push({ ...invoice, option: "두 번째 주문", status: "주문확인" });
-  assert.equal(addressOnlyCandidates.length === 1, false, "같은 수취인/전화/주소 후보가 여러 건이면 자동매칭하지 않습니다.");
+  assert.equal(addressOnlyCandidates.length === 1, false, "같은 수취인/전화/주소 후보가 여러 건이면 단건 송장으로 자동매칭하지 않습니다.");
+  assert.equal(addressOnlyCandidates.length === 2, true, "송장파일 내품수량이 2이고 후보가 2건이면 묶음배송 fallback 대상입니다.");
+  addressOnlyCandidates.push({ ...invoice, option: "세 번째 주문", status: "주문확인" });
+  assert.equal(addressOnlyCandidates.length === 2, false, "후보 수가 내품수량과 다르면 묶음배송 자동매칭하지 않습니다.");
   assert.equal(statusAfterRebuild("신규주문", "출고대기"), "출고대기", "generic rebuild는 여전히 상향 가능하므로 F2 전용 gate가 필요합니다.");
 });
 
