@@ -8948,7 +8948,7 @@ function SalesExcelGrid({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ query: keyword }),
+        body: JSON.stringify({ query: keyword, includeInventory: false, limit: 50 }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -18370,15 +18370,6 @@ function SalesPurchaseEntryModal({
     }, 0);
   }
 
-  function focusProductName(index: number) {
-    window.setTimeout(() => {
-      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>("[data-product-name-input='true']");
-      const input = inputs?.[index];
-      input?.focus();
-      input?.select();
-    }, 0);
-  }
-
   function focusLineField(index: number, field: keyof SalesPurchaseEntryLine) {
     window.setTimeout(() => {
       const input = formRef.current?.querySelector<HTMLInputElement>(`[data-line-index="${index}"][data-line-field="${field}"]`);
@@ -18437,7 +18428,7 @@ function SalesPurchaseEntryModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ query: keyword, productAttribute: attributeFilter }),
+        body: JSON.stringify({ query: keyword, productAttribute: attributeFilter, includeInventory: false, limit: 50 }),
       });
       const data = await res.json().catch(() => ({}));
       const rawProducts = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
@@ -18504,7 +18495,7 @@ function SalesPurchaseEntryModal({
     });
     setProductSearch((prev) => ({ ...prev, open: false }));
     setProductSearchSelectedKeys([]);
-    focusProductName(productSearch.lineIndex);
+    focusLineField(productSearch.lineIndex, "qty");
   }
 
   function chooseProduct(product: FnProduct) {

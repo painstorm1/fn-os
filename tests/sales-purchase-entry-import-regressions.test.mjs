@@ -41,6 +41,19 @@ test("direct entry Excel upload preserves row-level customer and warehouse metad
   assert.match(pageSource, /cust_code: lineCustomerCode\(line\),[\s\S]*cust_name: lineCustomerText\(line\),[\s\S]*wh_cd: lineWarehouseCode\(line\)/);
 });
 
+test("direct sales/purchase entry narrows reference lookups before F4 save", () => {
+  assert.match(salesInventorySource, /async function referenceRowsForEntries\(rows: RawRow\[\]\)[\s\S]*lookupReferenceRows\("customers"[\s\S]*lookupReferenceRows\("products"[\s\S]*lookupReferenceRows\("warehouses"/);
+  assert.match(salesInventorySource, /const \[customers, products, warehouses\] = await referenceRowsForEntries\(rows\);/);
+  assert.match(salesInventorySource, /function sqlInFilter\(values: string\[\]\)[\s\S]*in\.\(\$\{values\.map/);
+  assert.doesNotMatch(salesInventorySource, /const \[customers, products, warehouses\] = await Promise\.all\(\[\s*referenceRows\("customers"\),\s*referenceRows\("products"\),\s*referenceRows\("warehouses"\),\s*\]\);/);
+});
+
+test("product search selection returns focus to quantity field", () => {
+  assert.match(pageSource, /body: JSON\.stringify\(\{ query: keyword, productAttribute: attributeFilter, includeInventory: false, limit: 50 \}\)/);
+  assert.match(pageSource, /setProductSearch\(\(prev\) => \(\{ \.\.\.prev, open: false \}\)\);[\s\S]*focusLineField\(productSearch\.lineIndex, "qty"\);/);
+  assert.doesNotMatch(pageSource, /function focusProductName/);
+});
+
 test("FN purchase entry uses supply amount instead of a separate visible unit-price column", () => {
   assert.match(pageSource, /"FN구매입력": \["일자", "거래처코드", "거래처명", "입고창고", "VAT 포함\/별도", "품목코드", "품목명", "수량", "공급가액", "합계금액", "메모"\]/);
   assert.doesNotMatch(pageSource, /"FN구매입력": \[[^\]]*"단가"/);

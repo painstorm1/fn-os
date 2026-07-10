@@ -437,16 +437,74 @@ function matchesAny(value: string, candidates: string[]) {
   return Boolean(key) && candidates.some((candidate) => lookupKey(candidate) === key);
 }
 
-async function referenceRows(table: "customers" | "products" | "warehouses") {
+async function allReferenceRows(table: "customers" | "products" | "warehouses") {
   return optionalRows(table, { order: "created_at.asc", limit: 50000 });
 }
 
-async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchases") {
-  const [customers, products, warehouses] = await Promise.all([
-    referenceRows("customers"),
-    referenceRows("products"),
-    referenceRows("warehouses"),
+function uniqueLookupValues(values: unknown[]) {
+  return Array.from(new Set(values.map(text).filter(Boolean)));
+}
+
+function sqlInFilter(values: string[]) {
+  return `in.(${values.map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
+}
+
+function referenceRowDedupeKey(row: RawRow, fallbackIndex: number) {
+  return text(row.id)
+    || [row.customer_code, row.cust_code, row.product_code, row.prod_cd, row.sku, row.warehouse_code, row.wh_cd, row.customer_name, row.product_name, row.warehouse_name]
+      .map(text)
+      .filter(Boolean)
+      .join("::")
+    || `row-${fallbackIndex}`;
+}
+
+async function lookupReferenceRows(
+  table: "customers" | "products" | "warehouses",
+  filters: Record<string, unknown[]>,
+) {
+  const distinctLookupValues = uniqueLookupValues(Object.values(filters).flat());
+  if (!distinctLookupValues.length) return [] as RawRow[];
+  if (distinctLookupValues.length > 120) return allReferenceRows(table);
+
+  const rowMap = new Map<string, RawRow>();
+  const entries = Object.entries(filters)
+    .map(([column, values]) => [column, uniqueLookupValues(values)] as const)
+    .filter(([, values]) => values.length > 0);
+
+  await Promise.all(entries.map(async ([column, values]) => {
+    const limit = Math.min(50000, Math.max(50, values.length * 20));
+    const rows = await optionalRows(table, { [column]: sqlInFilter(values), order: "created_at.asc", limit });
+    rows.forEach((row, index) => rowMap.set(referenceRowDedupeKey(row, rowMap.size + index), row));
+  }));
+  return Array.from(rowMap.values());
+}
+
+async function referenceRowsForEntries(rows: RawRow[]) {
+  return Promise.all([
+    lookupReferenceRows("customers", {
+      customer_code: rows.map((row) => row.cust_code || row.customer_code),
+      cust_code: rows.map((row) => row.cust_code || row.customer_code),
+      customer_name: rows.map((row) => row.cust_name || row.customer_name),
+      cust_name: rows.map((row) => row.cust_name || row.customer_name),
+    }),
+    lookupReferenceRows("products", {
+      product_code: rows.map((row) => row.prod_cd || row.product_code || row.sku),
+      prod_cd: rows.map((row) => row.prod_cd || row.product_code || row.sku),
+      sku: rows.map((row) => row.sku || row.prod_cd || row.product_code),
+      product_name: rows.map((row) => row.prod_name || row.product_name),
+      prod_name: rows.map((row) => row.prod_name || row.product_name),
+    }),
+    lookupReferenceRows("warehouses", {
+      warehouse_code: rows.map((row) => row.wh_cd || row.warehouse_code),
+      wh_cd: rows.map((row) => row.wh_cd || row.warehouse_code),
+      warehouse_name: rows.map((row) => row.wh_name || row.warehouse_name),
+      wh_name: rows.map((row) => row.wh_name || row.warehouse_name),
+    }),
   ]);
+}
+
+async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchases") {
+  const [customers, products, warehouses] = await referenceRowsForEntries(rows);
 
   const customerByCode = new Map<string, RawRow[]>();
   const customerByName = new Map<string, RawRow[]>();
