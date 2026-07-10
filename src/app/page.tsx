@@ -12809,19 +12809,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     mode: "sales" | "purchases",
   ) {
     if (!sourceRows.length) return sourceRows;
-    const customerRows = await fetch("/api/fnos/customers?pageSize=5000", { credentials: "include", cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => Array.isArray(data.customers) ? data.customers as Array<{ customer_code?: string; customer_name?: string }> : [])
-      .catch(() => []);
+    const [customerRows, purchasePriceOverrides] = await Promise.all([
+      fetch("/api/fnos/customers?pageSize=5000", { credentials: "include", cache: "no-store", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean })
+        .then((res) => res.json())
+        .then((data) => Array.isArray(data.customers) ? data.customers as Array<{ customer_code?: string; customer_name?: string }> : [])
+        .catch(() => []),
+      mode === "purchases"
+        ? fetch("/api/fnos/purchase-price-overrides", { credentials: "include", cache: "no-store", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean })
+          .then((res) => res.json())
+          .then((data) => data.overrides && typeof data.overrides === "object" ? data.overrides as Record<string, number> : {})
+          .catch(() => ({} as Record<string, number>))
+        : Promise.resolve({} as Record<string, number>),
+    ]);
     const customerByCode = new Map(customerRows.map((row) => [salesCellText(row.customer_code).toLowerCase(), row]));
     const customerByName = new Map(customerRows.map((row) => [salesCellText(row.customer_name).toLowerCase(), row]));
     const productListCache = new Map<string, FnOsProductSearchItem[]>();
-    const purchasePriceOverrides = mode === "purchases"
-      ? await fetch("/api/fnos/purchase-price-overrides", { credentials: "include", cache: "no-store" })
-        .then((res) => res.json())
-        .then((data) => data.overrides && typeof data.overrides === "object" ? data.overrides as Record<string, number> : {})
-        .catch(() => ({} as Record<string, number>))
-      : {} as Record<string, number>;
     const purchaseOverrideKey = (customerCode: string, customerName: string, productCode: string) => [salesCellText(customerCode) || salesCellText(customerName), salesCellText(productCode)].map((value) => value.toLowerCase()).join("::");
     async function findProducts(query: string) {
       const key = salesCellText(query).toLowerCase();
@@ -12833,7 +12835,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         fnosSkipBusyOverlay: true,
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, includeInventory: false, limit: 50 }),
       } as RequestInit & { fnosSkipBusyOverlay: boolean })
         .then((res) => res.json())
         .then((data) => {
@@ -12844,13 +12846,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       productListCache.set(key, rows);
       return rows;
     }
+    const productQueries = Array.from(new Set(sourceRows.flatMap((row) => [
+      salesCellText(row.품목코드),
+      salesCellText(row.품목명),
+    ].filter(Boolean).map((value) => value.toLowerCase()))));
+    const PRODUCT_LOOKUP_BATCH_SIZE = 12;
+    for (let index = 0; index < productQueries.length; index += PRODUCT_LOOKUP_BATCH_SIZE) {
+      await Promise.all(productQueries.slice(index, index + PRODUCT_LOOKUP_BATCH_SIZE).map((query) => findProducts(query)));
+    }
     async function resolveProduct(codeValue: string, nameValue: string): Promise<FnOsProductResolveResult> {
       const code = salesCellText(codeValue);
       const name = salesCellText(nameValue);
       const codeKey = code.toLowerCase();
       const nameKey = name.toLowerCase();
-      const byCode = code ? (await findProducts(code)).find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
-      const byName = name ? (await findProducts(name)).find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
+      const [codeProducts, nameProducts] = await Promise.all([
+        code ? findProducts(code) : Promise.resolve([] as FnOsProductSearchItem[]),
+        name ? findProducts(name) : Promise.resolve([] as FnOsProductSearchItem[]),
+      ]);
+      const byCode = code ? codeProducts.find((item) => salesCellText(item.code).toLowerCase() === codeKey) || null : null;
+      const byName = name ? nameProducts.find((item) => salesCellText(item.name).toLowerCase() === nameKey) || null : null;
       if (code && name) {
         if (byCode) return { product: byCode, error: "" };
         if (byName && salesCellText(byName.code).toLowerCase() === codeKey) return { product: byName, error: "" };
@@ -12860,6 +12874,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const product = byCode || byName;
       return product ? { product, error: "" } : { product: null, error: `품목(${code || name})을 FN OS 품목 DB에서 정확히 확인하지 못했습니다.` };
     }
+
     const enriched: Array<Record<string, string>> = [];
     const productErrors: string[] = [];
     for (const [rowIndex, row] of sourceRows.entries()) {
