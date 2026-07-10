@@ -7716,6 +7716,10 @@ function onlineOrderFallbackText(order: CollectedOnlineOrder, item: CollectedOnl
   return onlineOrderFirstDeepText(order.raw, keys) || onlineOrderFirstDeepText(item.raw, keys);
 }
 
+function onlineOrderItemFirstFallbackText(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem, keys: string[]) {
+  return onlineOrderFirstDeepText(item.raw, keys) || onlineOrderFirstDeepText(order.raw, keys);
+}
+
 function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
   const orderId = salesCellText(order.orderNo);
   const productId = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku);
@@ -7730,9 +7734,11 @@ function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnline
     return { apiOrderId: shppNo, apiProductOrderId: shppSeq, apiShipmentId: shppNo, apiExtraId: "" };
   }
   if (alias === "L") {
-    const odNo = onlineOrderFallbackText(order, item, ["odNo", "orderNo", "orderId", "od_no"]) || orderId;
-    const odSeq = onlineOrderFallbackText(order, item, ["odSeq", "odDtlSeq", "od_seq"]) || salesCellText(item.channelOptionCode) || "1";
-    const procSeq = onlineOrderFallbackText(order, item, ["procSeq", "proc_seq"]) || "1";
+    // LotteON can return multiple real product lines under the same order/bundle number.
+    // After order-level merge, order.raw is the first line, so line-specific IDs must prefer item.raw.
+    const odNo = onlineOrderItemFirstFallbackText(order, item, ["odNo", "orderNo", "orderId", "od_no"]) || orderId;
+    const odSeq = onlineOrderItemFirstFallbackText(order, item, ["odSeq", "odDtlSeq", "od_seq"]) || salesCellText(item.channelOptionCode) || "1";
+    const procSeq = onlineOrderItemFirstFallbackText(order, item, ["procSeq", "proc_seq"]) || "1";
     return { apiOrderId: odNo, apiProductOrderId: odSeq, apiShipmentId: bundleId || odNo, apiExtraId: procSeq };
   }
   if (alias === "T") {
