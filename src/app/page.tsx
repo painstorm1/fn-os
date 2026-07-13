@@ -11170,6 +11170,14 @@ function entryRowCustomer(row: Record<string, unknown>, mode: SalesPurchaseMode)
   return String(row.cust_name || row.customer_name || row.supplier_name || row.cust_code || (mode === "sales" ? "거래처" : "구매처") || "-");
 }
 
+function purchaseVoucherDateKey(row: Record<string, unknown>) {
+  return entryDateFilterKey(entryRowDate(row));
+}
+
+function purchaseVoucherCustomerName(row: Record<string, unknown>) {
+  return String(row.cust_name || row.customer_name || row.supplier_name || "").trim();
+}
+
 function entryRowProduct(row: Record<string, unknown>) {
   return String(row.representative_product_name || row.prod_name || row.product_name || row.representative_product_code || row.prod_cd || row.sku || "-");
 }
@@ -23480,6 +23488,35 @@ function SalesInventoryTable({
     onChanged();
   }
 
+  async function mergePurchaseVouchers() {
+    const targetRows = selectedRows();
+    if (mode !== "purchases" || isReturnHistory) return;
+    if (targetRows.length < 2) {
+      window.alert("전표통합할 구매 전표를 2개 이상 선택해 주세요.");
+      return;
+    }
+    const dates = new Set(targetRows.map(purchaseVoucherDateKey).filter(Boolean));
+    const customerNames = new Set(targetRows.map(purchaseVoucherCustomerName).filter(Boolean));
+    if (dates.size !== 1 || customerNames.size !== 1 || targetRows.some((row) => !purchaseVoucherDateKey(row) || !purchaseVoucherCustomerName(row))) {
+      window.alert("일자, 구매처명이 동일하지 않아서 전표통합 불가능");
+      return;
+    }
+    const res = await fetch("/api/purchases/import/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ group_keys: targetRows.map((row) => entryRowKey(row, mode)) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      window.alert(data.error || "전표통합 실패");
+      return;
+    }
+    setSelectedKeys([]);
+    window.alert("전표통합 성공");
+    onChanged();
+  }
+
   function statementLines(row: Record<string, unknown>) {
     const key = entryRowKey(row, mode);
     const matches = lineRows.filter((line, index) => entryRowKey(line, mode, index) === key);
@@ -23722,6 +23759,9 @@ ${body}`)) return;
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <ActionButton type="button" variant="danger" className="h-9 w-[50px] px-1 text-xs" onClick={() => void deleteSelected()}>삭제</ActionButton>
+          {mode === "purchases" && !isReturnHistory && (
+            <ActionButton type="button" variant="secondary" className="h-9 w-[66px] px-1 text-xs" onClick={() => void mergePurchaseVouchers()}>전표통합</ActionButton>
+          )}
           <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows); else window.alert("인쇄할 행을 선택해 주세요."); }}>인쇄</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 w-[50px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) void openStatement(targetRows, true); else window.alert("PDF로 저장할 행을 선택해 주세요."); }}>PDF</ActionButton>
           <ActionButton type="button" variant="secondary" className="h-9 w-[58px] px-1 text-xs" onClick={() => { const targetRows = selectedRows(); if (targetRows.length) emailStatement(targetRows); else window.alert("전송할 행을 선택해 주세요."); }}>전송</ActionButton>

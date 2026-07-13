@@ -7,6 +7,8 @@ const dashboardSource = readFileSync(new URL("../src/lib/main-dashboard.ts", imp
 const partnerBalancesSource = readFileSync(new URL("../src/lib/partner-balances.ts", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 const productMasterSource = readFileSync(new URL("../src/app/api/fnos/products/master/route.ts", import.meta.url), "utf8");
+const purchaseVoucherMergeSource = readFileSync(new URL("../src/lib/purchase-voucher-merge.ts", import.meta.url), "utf8");
+const purchaseVoucherMergeRouteSource = readFileSync(new URL("../src/app/api/purchases/import/merge/route.ts", import.meta.url), "utf8");
 
 test("sales/purchase imports preserve provided dates and still accept missing dates", () => {
   assert.match(salesInventorySource, /function importEntryDate\(row: RawRow, keys: string\[\]\)[\s\S]*text\(first\(row, keys\)\) \|\| todayCompact\(\)/);
@@ -25,6 +27,24 @@ test("uploaded sales/purchase batches are grouped by date and customer, not by w
   assert.match(salesInventorySource, /filters\.cust_code = `eq\.\$\{customerCode\}`;[\s\S]*filters\.cust_name = `eq\.\$\{customerName\}`;/);
   assert.match(pageSource, /function batchEntryRowKey[\s\S]*\["batch-entry", batchId, date, customerCode, customerName\]/);
   assert.doesNotMatch(pageSource, /entry_group_key \|\| \(batchId \? `batch:\$\{batchId\}`/);
+});
+
+test("purchase management can merge same-date same-vendor vouchers into one statement group", () => {
+  assert.match(pageSource, /function purchaseVoucherDateKey[\s\S]*entryDateFilterKey\(entryRowDate\(row\)\)/);
+  assert.match(pageSource, /function purchaseVoucherCustomerName[\s\S]*cust_name \|\| row\.customer_name \|\| row\.supplier_name/);
+  assert.match(pageSource, /async function mergePurchaseVouchers[\s\S]*targetRows\.length < 2/);
+  assert.match(pageSource, /window\.alert\("일자, 구매처명이 동일하지 않아서 전표통합 불가능"\)/);
+  assert.match(pageSource, /fetch\("\/api\/purchases\/import\/merge"/);
+  assert.match(pageSource, /window\.alert\("전표통합 성공"\)/);
+  assert.match(pageSource, /mode === "purchases" && !isReturnHistory[\s\S]*>전표통합<\/ActionButton>/);
+  assert.match(purchaseVoucherMergeRouteSource, /mergePurchaseEntryGroups\(groupKeys\)/);
+  assert.match(purchaseVoucherMergeRouteSource, /message: "전표통합 성공"/);
+  assert.match(purchaseVoucherMergeSource, /export async function mergePurchaseEntryGroups\(groupKeys: string\[\]\)/);
+  assert.match(purchaseVoucherMergeSource, /uniqueGroupKeys\.length < 2/);
+  assert.match(purchaseVoucherMergeSource, /throw new Error\("일자, 구매처명이 동일하지 않아서 전표통합 불가능"\)/);
+  assert.match(purchaseVoucherMergeSource, /createUploadBatch\("purchases", "FN_OS_PURCHASE_VOUCHER_MERGE", rows\.length\)/);
+  assert.match(purchaseVoucherMergeSource, /patchRows<RawRow>\("purchases", \{ id: `eq\.\$\{id\}` \}, \{[\s\S]*upload_batch_id: batch\.id[\s\S]*upload_ser_no: String\(index \+ 1\)[\s\S]*cust_code: canonicalCode[\s\S]*cust_name: canonicalName/);
+  assert.doesNotMatch(purchaseVoucherMergeSource, /deleteRows\("purchases"|importPurchaseRows\(/);
 });
 
 test("online order FN sales/purchase input uses today and does not require row date", () => {
