@@ -12274,19 +12274,27 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         if (snapshot.activeSheet && salesSheetHeaders[snapshot.activeSheet]) setActiveSheet(snapshot.activeSheet);
         if (snapshot.sheets) {
-          setSheets({
+          const restoredSheets: Record<SalesSheetName, string[][]> = {
             "발주 진행 단계": padSalesRows("발주 진행 단계", snapshot.sheets["발주 진행 단계"] || []),
             송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
             FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
             "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
             "FN구매입력": padSalesRows("FN구매입력", compactPurchaseEntryRows(snapshot.sheets["FN구매입력"] || [], [])),
-          });
+          };
+          const canonicalDirectShipping = rebuildCanonicalDirectShippingState(
+            restoredSheets,
+            snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] },
+          );
+          setSheets(restoredSheets);
+          setDirectShippingRows(canonicalDirectShipping.rows);
+          setDirectShippingSourceIndexes(canonicalDirectShipping.sourceIndexes);
+        } else {
+          setDirectShippingRows({ JB: [], 케이모아: [] });
+          setDirectShippingSourceIndexes({ JB: [], 케이모아: [] });
         }
         setCompletedSalesTasks(snapshot.completedSalesTasks || {});
         setOrderFilePassword(snapshot.orderFilePassword || "");
         setMessage(snapshot.message || "");
-        setDirectShippingRows(snapshot.directShippingRows || { JB: [], 케이모아: [] });
-        setDirectShippingSourceIndexes(snapshot.directShippingSourceIndexes || { JB: [], 케이모아: [] });
         if (snapshot.pendingManualOrderFileRows) writePendingOnlineOrderManualFileRows(snapshot.pendingManualOrderFileRows);
         const [storedUploaded, storedOrders, storedInvoices] = await Promise.all([
           loadSalesWorkspaceFiles("uploaded"),
@@ -12766,12 +12774,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index));
   }
 
-  function directShippingBundleRows(): DirectShippingBundleRow[] {
-    const exportSheets = applyProgressTrackingToShipping(sheets);
+  function directShippingBundleRows(
+    sourceSheets: Record<SalesSheetName, string[][]> = sheets,
+    sourceIndexesByPartner: DirectShippingSourceIndexes = directShippingSourceIndexes,
+  ): DirectShippingBundleRow[] {
+    const exportSheets = applyProgressTrackingToShipping(sourceSheets);
     const progressRows = exportSheets["발주 진행 단계"];
     const shippingRows = shippingRowsForExcelExport(exportSheets);
-    const jbStored = new Set(directShippingSourceIndexes.JB || []);
-    const kemoreStored = new Set(directShippingSourceIndexes.케이모아 || []);
+    const jbStored = new Set(sourceIndexesByPartner.JB || []);
+    const kemoreStored = new Set(sourceIndexesByPartner.케이모아 || []);
     const shippingOptionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
     return progressRows
       .map((progressRow, sourceIndex) => {
@@ -12789,6 +12800,44 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         };
       })
       .filter((_, sourceIndex) => rowHasValue(progressRows[sourceIndex] || []) || rowHasValue(shippingRows[sourceIndex] || []));
+  }
+
+  function rebuildCanonicalDirectShippingState(
+    sourceSheets: Record<SalesSheetName, string[][]>,
+    requestedSourceIndexes: DirectShippingSourceIndexes,
+  ) {
+    const bundleRows = directShippingBundleRows(sourceSheets, requestedSourceIndexes);
+    const exportSheets = applyProgressTrackingToShipping(sourceSheets);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    const progressRows = exportSheets["발주 진행 단계"];
+    const rows: Record<DirectShippingPartner, string[][]> = { JB: [], 케이모아: [] };
+    const sourceIndexes: DirectShippingSourceIndexes = { JB: [], 케이모아: [] };
+    const claimedSourceIndexes = new Set<number>();
+
+    directShippingPartnerOrder.forEach((partner) => {
+      const requested = (requestedSourceIndexes[partner]?.length
+        ? requestedSourceIndexes[partner]
+        : progressRows
+          .map((row, index) => progressValue(row, "직송거래처") === partner ? index : -1)
+          .filter((index) => index >= 0))
+        .filter((sourceIndex) => !claimedSourceIndexes.has(sourceIndex));
+      const grouped = groupDirectShippingSourceIndexes(requested, bundleRows)
+        .filter(({ sourceIndex }) => {
+          const sourceRow = shippingRows[sourceIndex];
+          return Boolean(sourceRow && rowHasValue(sourceRow));
+        });
+      const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
+      sourceIndexes[partner] = grouped.map(({ sourceIndex }) => sourceIndex);
+      sourceIndexes[partner].forEach((sourceIndex) => claimedSourceIndexes.add(sourceIndex));
+      rows[partner] = grouped
+        .map(({ sourceIndex, sequence }) => {
+          const sourceRow = shippingRows[sourceIndex];
+          return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, sequence) : null;
+        })
+        .filter((row): row is string[] => Array.isArray(row));
+    });
+
+    return { rows, sourceIndexes };
   }
 
   function directShippingSourceIndexesForPartner(partner: DirectShippingPartner) {
@@ -13180,13 +13229,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       JB: partner === "JB" ? nextSourceIndexes : otherSourceIndexes,
       케이모아: partner === "케이모아" ? nextSourceIndexes : otherSourceIndexes,
     };
+    setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
+    setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: nextSourceIndexes }));
     const nextPurchaseRows = await buildDirectShippingPurchaseRows(
       sheets["FN구매입력"],
       sheets["발주 진행 단계"],
       nextSourceIndexesByPartner,
     );
-    setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
-    setDirectShippingSourceIndexes(nextSourceIndexesByPartner);
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);

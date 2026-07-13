@@ -143,6 +143,18 @@ test("React popup과 저장/내보내기 경로가 묶음 helper를 사용한다
   assert.match(pageSource, /async function removeDirectShippingRows[\s\S]*splitDirectShippingDisplayedSources/);
   assert.match(pageSource, /화면 행과 원본 주문 연결 정보가 일치하지 않아 삭제하지 않았습니다/);
   assert.equal((pageSource.match(/const otherSourceIndexes = \[\.\.\.\(directShippingSourceIndexes\[otherPartner\] \|\| \[\]\)\];/g) || []).length, 2);
+  const restoreStart = pageSource.indexOf("    async function restoreWorkspace");
+  const restoreEnd = pageSource.indexOf("  useEffect(() => {", restoreStart + 1);
+  const restoreSource = pageSource.slice(restoreStart, restoreEnd);
+  assert.match(restoreSource, /rebuildCanonicalDirectShippingState/);
+  assert.doesNotMatch(restoreSource, /setDirectShippingRows\(snapshot\.directShippingRows/);
+  const removeStart = pageSource.indexOf("  async function removeDirectShippingRows");
+  const removeEnd = pageSource.indexOf("  async function enrichOnlineEntryRows", removeStart);
+  const removeSource = pageSource.slice(removeStart, removeEnd);
+  const sourceCommitIndex = removeSource.indexOf("setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: nextSourceIndexes }))");
+  const purchaseAwaitIndex = removeSource.indexOf("await buildDirectShippingPurchaseRows");
+  assert.ok(sourceCommitIndex >= 0 && purchaseAwaitIndex > sourceCommitIndex);
+  assert.doesNotMatch(removeSource.slice(purchaseAwaitIndex), /setDirectShippingSourceIndexes/);
   assert.doesNotMatch(pageSource, /function mergeDirectShippingRows/);
   assert.doesNotMatch(pageSource, /function directShippingCode/);
 });
