@@ -10,6 +10,10 @@ async function optionalRows(table: string, query?: Record<string, QueryValue>) {
   return selectRows<Row>(table, query).catch(() => []);
 }
 
+async function requiredRows(table: string, query?: Record<string, QueryValue>) {
+  return selectRows<Row>(table, query);
+}
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -208,15 +212,18 @@ function isReturnExchangeRow(row: Row) {
 }
 
 export async function salesHistorySummary() {
-  const [allSales, purchases] = await Promise.all([
+  const [allSales, purchases, inventoryMovements] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 1500 }),
     optionalRows("purchases", { order: "created_at.desc", limit: 1500 }),
+    requiredRows("inventory_movements", { order: "movement_date.desc", limit: 10000 }),
   ]);
   const returnExchangeRows = allSales.filter(isReturnExchangeRow);
   const sales = allSales.filter((row) => !isReturnExchangeRow(row));
+  const inventorySalesBasis = inventoryMovements.filter((row) => /^(sale_out|bom_consume|exchange_out)$/i.test(text(row.movement_type)) && numberValue(row.qty) < 0);
   return {
     sales_inventory_basis: sales.slice(0, 1500),
     purchase_inventory_basis: purchases.slice(0, 1500),
+    inventory_sales_basis: inventorySalesBasis.slice(0, 10000),
     recent_sales: summarizeEntryRows(sales, "sales", 80),
     recent_returns: summarizeEntryRows(returnExchangeRows, "sales", 100),
     recent_purchases: summarizeEntryRows(purchases, "purchases", 80),

@@ -47,6 +47,41 @@ function loadXlsxModule() {
   return xlsxModulePromise;
 }
 
+export function tradeAnalysisVoucherExportMatrix(rows: Array<Record<string, unknown>>): string[][] {
+  return rows.flatMap((row) => {
+    const lines = Array.isArray(row.lines) ? row.lines as Array<Record<string, unknown>> : [];
+    const header = [
+      String(row.typeLabel || ""),
+      String(row.displayNo || row.no || ""),
+      String(row.date || ""),
+      String(row.customer || ""),
+      String(row.warehouse || ""),
+      "전표합계",
+      String(row.itemCount || ""),
+      String(row.qty || ""),
+      String(Math.round(Number(row.avg || 0))),
+      "",
+      `${String(row.memo || "")} / 전표합계: ${String(Math.round(Number(row.amount || 0)))}`,
+      "",
+    ];
+    const detail = lines.map((line) => [
+      String(row.typeLabel || ""),
+      String(row.displayNo || row.no || ""),
+      String(row.date || ""),
+      String(row.customer || ""),
+      String(row.warehouse || ""),
+      String(line.actualProductCode || ""),
+      String(line.actualProductName || ""),
+      String(line.actualQty ?? line.qty ?? 0),
+      String(Math.round(Number(line.unitPrice || 0))),
+      String(Math.round(Number(line.amount || 0))),
+      String(line.memo || ""),
+      line.isBom ? `${String(line.sourceProductCode || "")} / ${String(line.sourceProductName || "")}` : "",
+    ]);
+    return [header, ...detail, ["", "", "", "", "", "", "", "", "", "", "", ""]];
+  });
+}
+
 function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key !== "Enter") return;
   if (event.nativeEvent.isComposing) return;
@@ -14899,6 +14934,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const amount = entryRowAmount(row);
       const rawPrice = Number(row.price ?? row.unit_price ?? row.in_price ?? row.out_price ?? 0);
       const unitPrice = rawPrice || (qty ? amount / qty : 0);
+      const sourceId = String(row.id || "").trim();
+      const sourceRefId = String(row.source_ref_id || "").trim();
       return {
         type,
         typeLabel: type === "sales" ? "판매" : "구매",
@@ -14917,6 +14954,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         sourceProductName: productName,
         sourceQty: qty,
         sourceAmount: amount,
+        sourceId,
+        sourceRefId,
+        salesKey: type === "sales" ? (sourceId || sourceRefId || [entryRowDate(row), productCode, entryRowWarehouse(row), qty, amount].join("|")) : "",
         bom: (product?.bom || []).map((item) => ({
           componentCode: String(item.component_product_code || item.component_sku || "").trim(),
           componentName: String(item.component_product_name || item.component_product_code || item.component_sku || "").trim(),
@@ -14929,6 +14969,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     );
     const salesAnalysisRows = firstAnalysisRows(analysisSummary?.sales_inventory_basis, analysisSummary?.recent_sales_lines, analysisSummary?.recent_sales);
     const purchaseAnalysisRows = firstAnalysisRows(analysisSummary?.purchase_inventory_basis, analysisSummary?.recent_purchase_lines, analysisSummary?.recent_purchases);
+    const inventorySalesAnalysisRows = firstAnalysisRows(analysisSummary?.inventory_sales_basis, analysisSummary?.recent_inventory_movements)
+      .filter((row) => /^(sale_out|bom_consume|exchange_out)$/i.test(String(row.movement_type || "").trim()) && Number(row.qty || 0) < 0)
+      .map((row) => {
+        const productCode = entryRowProductCode(row);
+        const product = productMap.get(productCode);
+        return {
+          sourceRefId: String(row.source_ref_id || "").trim(),
+          movementType: String(row.movement_type || "").trim(),
+          date: entryRowDate(row),
+          warehouse: entryRowWarehouse(row),
+          productCode,
+          productName: entryRowProduct(row) || (product ? inventoryProductName(product) : productCode),
+          qty: Math.abs(entryRowQty(row)),
+        };
+      });
     const baseRows = [
       ...salesAnalysisRows.map((row) => normalizeAnalysisRow(row, "sales")),
       ...purchaseAnalysisRows.map((row) => normalizeAnalysisRow(row, "purchase")),
@@ -14944,6 +14999,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     })).filter((warehouse) => warehouse.code || warehouse.name)).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const customerOptionsJson = JSON.stringify(Array.from(customerOptionMap.values())).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const safeJson = JSON.stringify(baseRows).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const inventorySalesJson = JSON.stringify(inventorySalesAnalysisRows).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const productsJson = JSON.stringify(inventoryProducts.map((product) => ({
       code: inventoryProductCode(product),
       name: inventoryProductName(product),
@@ -14960,38 +15016,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const title = "거래 분석";
     (window as unknown as { __fnosDownloadTradeAnalysisXlsx?: (rows: Array<Record<string, unknown>>) => void }).__fnosDownloadTradeAnalysisXlsx = (rows) => {
       if (String(rows[0]?.__exportType || "") === "voucher") {
-        const exportRows = rows.flatMap((row) => {
-          const lines = Array.isArray(row.lines) ? row.lines as Array<Record<string, unknown>> : [];
-          const header = [
-            String(row.typeLabel || ""),
-            String(row.displayNo || row.no || ""),
-            String(row.date || ""),
-            String(row.customer || ""),
-            String(row.warehouse || ""),
-            "전표합계",
-            String(row.itemCount || ""),
-            String(row.qty || ""),
-            String(Math.round(Number(row.avg || 0))),
-            String(Math.round(Number(row.amount || 0))),
-            String(row.memo || ""),
-            "",
-          ];
-          const detail = lines.map((line) => [
-            String(row.typeLabel || ""),
-            String(row.displayNo || row.no || ""),
-            String(row.date || ""),
-            String(row.customer || ""),
-            String(row.warehouse || ""),
-            String(line.actualProductCode || ""),
-            String(line.actualProductName || ""),
-            String(line.actualQty || ""),
-            String(Math.round(Number(line.unitPrice || 0))),
-            String(Math.round(Number(line.amount || 0))),
-            String(line.memo || ""),
-            line.isBom ? `${String(line.sourceProductCode || "")} / ${String(line.sourceProductName || "")}` : "",
-          ]);
-          return [header, ...detail, ["", "", "", "", "", "", "", "", "", "", "", ""]];
-        });
+        const exportRows = tradeAnalysisVoucherExportMatrix(rows);
         void downloadTableXlsx(`거래명세서별_${entryDateToday()}.xlsx`, "거래명세서별", ["구분", "일자 NO", "일자", "거래처", "창고", "품목코드", "품목명", "수량", "단가", "금액", "메모", "원 입력품목"], exportRows);
         return;
       }
@@ -15002,19 +15027,21 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         String(row.warehouse || ""),
         String(row.actualProductCode || ""),
         String(row.actualProductName || ""),
-        String(row.actualQty || ""),
+        String(row.actualQty ?? row.qty ?? 0),
         String(Math.round(Number(row.unitPrice || 0))),
         String(Math.round(Number(row.amount || 0))),
-        row.isBom ? `${String(row.sourceProductCode || "")} / ${String(row.sourceProductName || "")}` : "",
+        row.type === "sales"
+          ? `${row.outboundConfirmed ? `실제출고 확인(${String(row.movementType || "movement")})` : "실제출고 미연결"} / ${String(row.movementDate || row.date || "-")} / ${String(row.movementWarehouse || row.warehouse || "-")} / ${String(row.movementProductCode || row.actualProductCode || "-")} / 원 입력: ${String(row.sourceProductCode || "")} / ${String(row.sourceProductName || "")}`
+          : row.isBom ? `${String(row.sourceProductCode || "")} / ${String(row.sourceProductName || "")}` : "",
         String(row.memo || ""),
       ]);
-      void downloadTableXlsx(`거래분석_${entryDateToday()}.xlsx`, "거래분석", ["구분", "일자", "거래처", "창고", "실제 품목코드", "실제 품목명", "수량", "단가", "금액", "원 입력품목", "메모"], exportRows);
+      void downloadTableXlsx(`거래분석_${entryDateToday()}.xlsx`, "거래분석", ["구분", "일자", "거래처", "창고", "실제 품목코드", "실제 품목명", "수량(판매=실제출고)", "단가", "금액", "출고확인/원 입력품목", "메모"], exportRows);
     };
     const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.headerActions{display:flex;align-items:center;gap:8px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
-      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}
+      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}.loadStatus{margin-left:auto;color:#b45309;font-size:12px;font-weight:900}.loadStatus.error{color:#b91c1c}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
       .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:148px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,.72fr);gap:20px;align-items:center;box-shadow:0 8px 20px rgba(15,23,42,.05)}.summaryCard.salesCard{background:linear-gradient(135deg,#effbff 0%,#f8fdff 62%,#edf8ff 100%);border-color:#cfeaf7}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff3eb 0%,#ffe0cf 100%);border-color:#f6b48d}.summaryCard>div:first-child{display:block;min-width:0}.summaryTitle{margin:0 0 12px;font-size:34px;line-height:1;font-weight:950;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#1378ef}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);gap:10px 28px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}.metricLabel{font-size:14px;color:#334155;font-weight:900;white-space:nowrap}.metricValue{font-size:22px;font-weight:950;color:#0f172a;white-space:nowrap}.totalLine{grid-column:1/3;font-size:22px;font-weight:950;color:#0f172a;white-space:nowrap}.scopeLine{grid-column:1/3;display:flex;flex-wrap:wrap;gap:24px;align-items:center;color:#334155;font-size:14px;font-weight:900}.scopeLine span{white-space:nowrap}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:21px;font-weight:950;cursor:pointer;padding:0}.rankList{display:grid;gap:7px;border-left:1px solid rgba(15,23,42,.08);padding-left:18px;min-width:0}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 3px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(112px,1fr) 122px;gap:10px;align-items:center;font-size:12px;font-weight:900}.rankName{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.rankBar{height:6px;border-radius:999px;background:#38bdf8;margin-top:3px}.rankAmount{text-align:right;font-size:12px;font-weight:950;color:#0f172a;white-space:nowrap}.purchaseSide{justify-self:end;width:154px;border-radius:10px;background:rgba(255,255,255,.78);padding:14px 12px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}.purchaseSideLabel{font-size:15px;font-weight:900}.purchaseSideDate{font-size:22px;line-height:1.12;margin:8px 0 16px;white-space:nowrap}.purchaseSideCycle{font-size:15px;font-weight:900}.purchaseSideDays{font-size:26px;line-height:1.1;font-weight:950;white-space:nowrap}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
@@ -15022,13 +15049,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       .pickerBackdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);z-index:10}.pickerBackdrop.open{display:flex}.picker{width:min(760px,calc(100vw - 36px));max-height:86vh;display:flex;flex-direction:column;border-radius:14px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.25);overflow:hidden}.pickerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e2e8f0;padding:20px 24px}.pickerTitle{font-size:20px;font-weight:900}.pickerBody{display:flex;min-height:0;flex:1;flex-direction:column;padding:20px 24px 0;overflow:hidden}.pickerSearch{display:grid;grid-template-columns:1fr 80px;flex:0 0 auto;gap:8px;margin-bottom:12px}.pickerTableWrap{max-height:54vh;min-height:0;overflow:auto}.pickerTableWrap th{top:0}.pickerTabs{display:flex;gap:6px;padding:16px 24px 22px;border-top:1px solid #e2e8f0}.pickerTabs button{height:38px;border:0;border-radius:8px;background:#fff;color:#334155;padding:0 11px;font-size:13px;font-weight:900;cursor:pointer}.pickerTabs button.active{background:#ff6a00;color:#fff}.pickerFooter{display:flex;align-items:center;justify-content:flex-start}.picker table{min-width:690px}.picker tr.active{background:#fff7ed}.picker tr.selected{background:#eff6ff}.clickable{cursor:pointer}.selectNumber{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:5px;border:1px solid #cbd5e1;color:#94a3b8;font-size:12px;font-weight:950}.selectNumber.selected{border-color:#2563eb;background:#2563eb;color:#fff}.pickerPrimary{height:38px;border:0;border-radius:8px;background:#ffb27c;color:#fff;padding:0 14px;font-size:13px;font-weight:900}.pickerPrimary.enabled{background:#ff6a00}
       @media(max-width:1380px){.filters{flex-wrap:wrap}.summary{grid-template-columns:1fr}.summaryCard{grid-template-columns:1fr}.purchaseSide{justify-self:start}.filterSpacer{display:none}}
     </style></head><body><div class="app">
-      <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매/구매 라인을 품목, 창고, 날짜, 거래처 기준으로 분석합니다.</div></div><div class="headerActions"><button id="resetAnalysis" class="btn secondary" type="button">F5초기화</button><button class="btn secondary" onclick="window.close()">닫기</button></div></div>
+      <div class="header"><div><div class="title">거래 분석</div><div class="sub">판매 금액은 판매 원장 기준으로 1회 집계하고, 판매 수량은 재고 이동 기준 실제 출고수량으로 표시합니다.</div></div><div class="headerActions"><button id="resetAnalysis" class="btn secondary" type="button">F5초기화</button><button class="btn secondary" onclick="window.close()">닫기</button></div></div>
       <div class="panel">
         <div class="topFilters">
           <select id="type" class="field"><option value="all">전체</option><option value="sales">판매</option><option value="purchase">구매</option></select>
-          <select id="basis" class="field"><option value="actual">BOM설정 기준</option><option value="entry">입력 품목 기준</option></select>
+          <select id="basis" class="field"><option value="actual">실제 출고 기준</option><option value="entry">입력 품목 기준</option></select>
           <select id="group" class="field"><option value="detail">상세내역</option><option value="voucher">거래명세서별</option><option value="product">품목별</option><option value="warehouse">창고별</option><option value="customer">거래처별</option><option value="date">날짜별</option><option value="month">월별</option></select>
-          <div id="selectedBar" class="selectedBar"></div>
+          <div id="selectedBar" class="selectedBar"></div><button id="toggleUnlinkedOutbound" class="btn secondary" type="button">미연결 출고 0건 보기</button><div id="loadStatus" class="loadStatus"></div>
         </div>
         <div class="filters" style="margin-top:8px">
           <input id="product" class="field searchInput" placeholder="품목 검색">
@@ -15040,10 +15067,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         </div>
       </div>
       <div class="summary">
-        <div class="summaryCard salesCard"><div><div class="summaryTitle salesText" data-view-action="type" data-type="sales">판매</div><div class="summaryGrid"><div class="metricLine"><span class="metricLabel">수량</span><span id="salesQty" class="metricValue">0개</span></div><div class="metricLine"><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div><div id="salesScope" class="scopeLine"></div></div></div><div id="salesRank" class="rankList"></div></div>
+        <div class="summaryCard salesCard"><div><div class="summaryTitle salesText" data-view-action="type" data-type="sales">판매</div><div class="summaryGrid"><div class="metricLine"><span class="metricLabel">실제 출고</span><span id="salesQty" class="metricValue">0개</span></div><div class="metricLine"><span class="metricLabel">단가</span><span id="salesAvg" class="metricValue">0원</span></div><div id="salesAmount" class="totalLine">총 금액 0원</div><div id="salesScope" class="scopeLine"></div></div></div><div id="salesRank" class="rankList"></div></div>
         <div class="summaryCard purchaseCard"><div><div class="summaryTitle purchaseText" data-view-action="type" data-type="purchase">구매</div><div class="summaryGrid"><div class="metricLine"><span class="metricLabel">수량</span><span id="purchaseQty" class="metricValue">0개</span></div><div class="metricLine"><span class="metricLabel">단가</span><span id="purchaseAvg" class="metricValue">0원</span></div><div id="purchaseAmount" class="totalLine">총 금액 0원</div><div id="purchaseScope" class="scopeLine"></div></div></div><div id="purchaseSide" class="purchaseSide"></div></div>
       </div>
-      <div id="analysisNav" class="analysisNav"><button id="navBack" class="navTextButton" type="button" disabled>&lt;</button><span id="navLabel" class="navLabel">전체-BOM설정 기준-상세내역</span><button id="navForward" class="navTextButton" type="button" disabled>&gt;</button></div>
+      <div id="analysisNav" class="analysisNav"><button id="navBack" class="navTextButton" type="button" disabled>&lt;</button><span id="navLabel" class="navLabel">전체-실제 출고 기준-상세내역</span><button id="navForward" class="navTextButton" type="button" disabled>&gt;</button></div>
       <div class="tableWrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
       <div id="pickerBackdrop" class="pickerBackdrop">
         <div class="picker">
@@ -15057,6 +15084,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       </div>
     </div><script>
       let baseRows = ${safeJson};
+      let inventorySalesBasis = ${inventorySalesJson};
       const products = ${productsJson};
       const warehouseOptions = ${warehouseOptionsJson};
       let customerOptions = ${customerOptionsJson};
@@ -15077,6 +15105,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       let lastRows = [];
       let lastExportRows = [];
       let expandedVoucherKey = "";
+      let showUnlinkedOutbound = false;
       let customerDirectory = [];
       let customerDirectoryLoaded = false;
       let viewHistory = [];
@@ -15171,10 +15200,57 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         selected.customer.forEach((item) => chips.push("<span class='chip customer'>거래처 " + esc(optionLabel(item)) + "</span>"));
         bar.innerHTML = chips.join("") || "<span class='emptySelection'>선택 없음</span>";
       }
+      function isSellingMovement(row){
+        return /^(sale_out|bom_consume|exchange_out)$/i.test(String(row.movementType || row.movement_type || "").trim()) && Number(row.qty || 0) > 0;
+      }
+      function movementRowsForSale(row){
+        const refs = new Set([row.sourceId, row.sourceRefId].map((value) => String(value || "").trim()).filter(Boolean));
+        if (!refs.size) return [];
+        return inventorySalesBasis.filter((movement) => isSellingMovement(movement) && refs.has(String(movement.sourceRefId || "").trim()));
+      }
+      function salesRowsByBasis(row, basis){
+        const movements = movementRowsForSale(row);
+        if (basis === "entry") {
+          const qty = movements.reduce((sum, movement) => sum + Number(movement.qty || 0), 0);
+          return [{...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: qty, amount: row.sourceAmount, isBom: false, outboundConfirmed: movements.length > 0, movementType: Array.from(new Set(movements.map((movement) => movement.movementType))).join(","), movementSourceRefId: movements.map((movement) => movement.sourceRefId).filter(Boolean).join(","), movementProductCode: movements.map((movement) => movement.productCode).filter(Boolean).join(","), movementWarehouse: movements.map((movement) => movement.warehouse).filter(Boolean).join(","), movementDate: movements.map((movement) => movement.date).filter(Boolean).join(",")}];
+        }
+        if (movements.length) return movements.map((movement, index) => ({...row, actualProductCode: movement.productCode || row.productCode, actualProductName: movement.productName || movement.productCode || row.productName, actualQty: Number(movement.qty || 0), amount: index === 0 ? row.sourceAmount : 0, isBom: movement.movementType === "bom_consume", outboundConfirmed: true, movementType: movement.movementType, movementSourceRefId: movement.sourceRefId, movementProductCode: movement.productCode, movementWarehouse: movement.warehouse, movementDate: movement.date}));
+        const fallback = row.bom && row.bom.length ? row.bom : [{ componentCode: row.productCode, componentName: row.productName, qtyPerUnit: 1 }];
+        return fallback.map((item, index) => ({...row, actualProductCode: item.componentCode || row.productCode, actualProductName: item.componentName || item.componentCode || row.productName, actualQty: 0, amount: index === 0 ? row.sourceAmount : 0, theoreticalQty: row.qty * item.qtyPerUnit, isBom: Boolean(row.bom && row.bom.length), outboundConfirmed: false, movementType: "", movementSourceRefId: "", movementProductCode: "", movementWarehouse: "", movementDate: ""}));
+      }
       function rowsByBasis(){
         const basis = document.getElementById("basis").value;
-        if (basis === "entry") return baseRows.map((row) => ({...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}));
-        return baseRows.flatMap((row) => row.bom && row.bom.length ? row.bom.map((item) => ({...row, actualProductCode: item.componentCode || row.productCode, actualProductName: item.componentName || item.componentCode || row.productName, actualQty: row.qty * item.qtyPerUnit, isBom: true})) : [{...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}]);
+        return baseRows.flatMap((row) => {
+          if (row.type === "sales") return salesRowsByBasis(row, basis);
+          return [{...row, actualProductCode: row.productCode, actualProductName: row.productName, actualQty: row.qty, isBom: false}];
+        });
+      }
+      function unlinkedOutboundRows(){
+        const matchedMovements = new Set(baseRows.filter((row) => row.type === "sales").flatMap(movementRowsForSale));
+        const type = document.getElementById("type").value;
+        const range = currentDateRange();
+        const product = text(document.getElementById("product").value.trim());
+        const warehouse = text(document.getElementById("warehouse").value.trim());
+        const customer = text(document.getElementById("customer").value.trim());
+        const productKeys = selectedSet("product");
+        const warehouseKeys = selectedSet("warehouse");
+        const customerKeys = selectedSet("customer");
+        if (type === "purchase" || customer || customerKeys.size) return [];
+        return inventorySalesBasis.filter((movement) => {
+          if (!isSellingMovement(movement) || matchedMovements.has(movement)) return false;
+          if (range.from && movement.date < range.from) return false;
+          if (range.to && movement.date > range.to) return false;
+          const candidate = { actualProductCode: movement.productCode || "", actualProductName: movement.productName || "", sourceProductCode: movement.productCode || "", sourceProductName: movement.productName || "" };
+          if (productKeys.size) {
+            if (!selected.product.some((item) => selectedProductMatchesRow(candidate, item))) return false;
+          } else if (product && !text(movement.productCode + " " + movement.productName).includes(product)) return false;
+          if (warehouseKeys.size) {
+            if (!selected.warehouse.some((item) => movement.warehouse === item.code || movement.warehouse === item.name)) return false;
+          } else if (warehouse && !text(movement.warehouse).includes(warehouse)) return false;
+          return true;
+        }).map((movement, index) => ({
+          type: "unlinked", typeLabel: "미연결 출고", date: movement.date, month: String(movement.date || "").slice(0, 7), no: movement.sourceRefId || "movement", customer: "-", warehouse: movement.warehouse || "-", productCode: movement.productCode || "", productName: movement.productName || movement.productCode || "-", qty: Number(movement.qty || 0), unitPrice: 0, amount: 0, memo: "판매 원장 미연결 재고 출고", sourceProductCode: movement.productCode || "", sourceProductName: movement.productName || movement.productCode || "-", sourceQty: Number(movement.qty || 0), sourceAmount: 0, sourceId: "", sourceRefId: movement.sourceRefId || "", salesKey: "unlinked-movement|" + [movement.sourceRefId, movement.date, movement.warehouse, movement.productCode, index].join("|"), bom: [], actualProductCode: movement.productCode || "", actualProductName: movement.productName || movement.productCode || "-", actualQty: Number(movement.qty || 0), isBom: movement.movementType === "bom_consume", outboundConfirmed: false, movementType: movement.movementType, movementSourceRefId: movement.sourceRefId, movementProductCode: movement.productCode, movementWarehouse: movement.warehouse, movementDate: movement.date,
+        }));
       }
       function rawText(value){ return String(value ?? "").trim(); }
       function rawNumber(value){
@@ -15219,6 +15295,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const rawPrice = rawNumber(row.price ?? row.unit_price ?? row.in_price ?? row.out_price);
         const unitPrice = rawPrice || (qty ? amount / qty : 0);
         const date = rawEntryDate(row);
+        const sourceId = rawText(row.id);
+        const sourceRefId = rawText(row.source_ref_id);
         return {
           type,
           typeLabel: type === "sales" ? "판매" : "구매",
@@ -15237,8 +15315,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           sourceProductName: productName,
           sourceQty: qty,
           sourceAmount: amount,
+          sourceId,
+          sourceRefId,
+          salesKey: type === "sales" ? (sourceId || sourceRefId || [date, productCode, rawEntryWarehouse(row), qty, amount].join("|")) : "",
           bom: [],
         };
+      }
+      function normalizeFetchedMovement(row){
+        const movementType = rawText(row.movement_type);
+        const qty = rawNumber(row.qty);
+        if (!/^(sale_out|bom_consume|exchange_out)$/i.test(movementType) || qty >= 0) return null;
+        return { sourceRefId: rawText(row.source_ref_id), movementType, date: rawEntryDate(row), warehouse: rawEntryWarehouse(row), productCode: rawEntryProductCode(row), productName: rawEntryProductName(row), qty: Math.abs(qty) };
       }
       function rebuildCustomerOptions(){
         const map = new Map();
@@ -15260,22 +15347,34 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById("toDay").value = latest;
       }
       function refreshEmptyBaseRows(){
-        if (baseRows.length) return;
-        fetch("/api/dashboard/summary?tradeAnalysisRefresh=" + Date.now(), { credentials: "include", cache: "no-store" })
-          .then((res) => res.json())
+        if (baseRows.length && inventorySalesBasis.length) return;
+        const loadStatus = document.getElementById("loadStatus");
+        fetch("/api/dashboard/summary?scope=sales-history&tradeAnalysisRefresh=" + Date.now(), { credentials: "include", cache: "no-store" })
+          .then((res) => {
+            if (!res.ok) throw new Error("거래분석 보강 조회 실패 (HTTP " + res.status + ")");
+            return res.json();
+          })
           .then((data) => {
             const salesRows = firstRows(data.sales_inventory_basis, data.recent_sales_lines, data.recent_sales);
             const purchaseRows = firstRows(data.purchase_inventory_basis, data.recent_purchase_lines, data.recent_purchases);
-            baseRows = [
+            const fetchedBaseRows = [
               ...salesRows.map((row) => normalizeFetchedRow(row, "sales")),
               ...purchaseRows.map((row) => normalizeFetchedRow(row, "purchase")),
             ].filter((row) => row.date);
+            if (!baseRows.length && fetchedBaseRows.length) baseRows = fetchedBaseRows;
+            inventorySalesBasis = firstRows(data.inventory_sales_basis, data.recent_inventory_movements).map(normalizeFetchedMovement).filter(Boolean);
             rebuildCustomerOptions();
             resetPeriodToBaseRows();
             render();
             resetViewHistory();
+            loadStatus.textContent = "실제 출고 조회 " + fmt.format(inventorySalesBasis.length) + "건";
+            loadStatus.classList.remove("error");
           })
-          .catch(() => {});
+          .catch((error) => {
+            console.error("[FNOS 거래분석] sales-history 보강 조회 실패", error);
+            loadStatus.textContent = "보강 조회 실패: " + (error instanceof Error ? error.message : String(error));
+            loadStatus.classList.add("error");
+          });
       }
       function monthEnd(month){
         if (!month) return "";
@@ -15335,6 +15434,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         document.getElementById("fromDay").value = "${analysisDefaultDay}";
         document.getElementById("toDay").value = "${analysisDefaultDay}";
         expandedVoucherKey = "";
+        showUnlinkedOutbound = false;
         updatePeriodInputVisibility();
         render();
         resetViewHistory();
@@ -15374,7 +15474,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         rows.forEach((row) => {
           const key = keyFn(row) || "-";
           const item = map.get(key) || { key, salesQty: 0, salesAmount: 0, purchaseQty: 0, purchaseAmount: 0, customers: new Set(), warehouses: new Set(), latest: "" };
-          const qty = Number(row.actualQty || row.qty || 0);
+          const qty = Number(row.actualQty ?? row.qty ?? 0);
           const amount = Number(row.amount || 0);
           if (row.type === "sales") { item.salesQty += qty; item.salesAmount += amount; }
           else { item.purchaseQty += qty; item.purchaseAmount += amount; }
@@ -15388,7 +15488,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         rows.forEach((row) => {
           const key = [row.type, row.date, row.no || "-", row.customer || "-", row.warehouse || "-"].join("||");
           const item = map.get(key) || { __exportType: "voucher", key, type: row.type, typeLabel: row.typeLabel, date: row.date, no: row.no || "-", customer: row.customer || "-", warehouse: row.warehouse || "-", qty: 0, amount: 0, avg: 0, itemCount: 0, memo: "", detailSummary: "", lines: [], productKeys: new Set(), memos: new Set() };
-          const qty = Number(row.actualQty || row.qty || 0);
+          const qty = Number(row.actualQty ?? row.qty ?? 0);
           const amount = Number(row.amount || 0);
           item.qty += qty;
           item.amount += amount;
@@ -15402,7 +15502,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           item.itemCount = item.productKeys.size;
           item.avg = item.qty ? item.amount / item.qty : 0;
           item.memo = Array.from(item.memos).slice(0, 3).join(" / ") || "-";
-          item.detailSummary = item.lines.map((line) => (line.actualProductCode || "-") + " " + (line.actualProductName || "-") + " " + fmt.format(Number(line.actualQty || line.qty || 0)) + "개 " + krw(line.amount || 0)).join(" | ");
+          item.detailSummary = item.lines.map((line) => (line.actualProductCode || "-") + " " + (line.actualProductName || "-") + " " + fmt.format(Number(line.actualQty ?? line.qty ?? 0)) + "개 " + krw(line.amount || 0)).join(" | ");
           return item;
         }).sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(b.no).localeCompare(String(a.no)));
         const dateCounts = new Map();
@@ -15423,7 +15523,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return "전체";
       }
       function basisViewLabel(value){
-        return value === "entry" ? "입력 품목 기준" : "BOM설정 기준";
+        return value === "entry" ? "입력 품목 기준" : "실제 출고 기준";
       }
       function groupViewLabel(value){
         const labels = { detail: "상세내역", voucher: "거래명세서별", product: "품목별", warehouse: "창고별", customer: "거래처별", date: "날짜별", month: "월별" };
@@ -15464,7 +15564,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         applyView(next);
       }
       function renderSummary(type, rows){
-        const qty = rows.reduce((s,r)=>s+Number(r.actualQty||r.qty||0),0);
+        const qty = rows.reduce((s,r)=>s+Number(r.actualQty ?? r.qty ?? 0),0);
         const amount = rows.reduce((s,r)=>s+Number(r.amount||0),0);
         const avg = qty ? Math.round(amount / qty) : 0;
         const customers = uniqueCodes(rows, "customer");
@@ -15534,7 +15634,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           const supply = Math.round(totalAmount / 1.1);
           const vat = totalAmount - supply;
           const statementLineLimit = 20;
-          const lineRows = lines.slice(0, statementLineLimit).map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty||0)+"</td><td class='num'>"+fmt.format(Math.round(Number(line.unitPrice||0)))+"</td><td class='num'>"+fmt.format(Math.round(Number(line.amount||0)))+"</td><td></td><td></td></tr>").join("");
+          const lineRows = lines.slice(0, statementLineLimit).map((line) => "<tr><td>"+esc(line.actualProductCode||"")+"</td><td class='left'>"+esc(line.actualProductName||"")+"</td><td class='num'>"+fmt.format(line.actualQty ?? line.qty ?? 0)+"</td><td class='num'>"+fmt.format(Math.round(Number(line.unitPrice||0)))+"</td><td class='num'>"+fmt.format(Math.round(Number(line.amount||0)))+"</td><td></td><td></td></tr>").join("");
           const blankRows = Array.from({length: Math.max(0, statementLineLimit - Math.min(statementLineLimit, lines.length))}, () => "<tr class='blank'><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>").join("");
           const receiver = customerRecord(voucher.customer);
           const receiverBusinessNo = customerField(receiver, ["business_no", "business_number", "biz_no", "registration_no"]);
@@ -15562,7 +15662,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           const sales = row.type === "sales" ? amount : 0;
           const purchase = row.type === "purchase" ? amount : 0;
           if (!isLine) { salesTotal += sales; purchaseTotal += purchase; balance += sales - purchase; }
-          const desc = isLine ? (String(row.actualProductName || row.productName || "-") + " / " + fmt.format(Number(row.actualQty || row.qty || 0)) + " * " + fmt.format(Math.round(Number(row.unitPrice || 0)))) : [row.customer, row.warehouse, row.memo].filter(Boolean).join(" / ");
+          const desc = isLine ? (String(row.actualProductName || row.productName || "-") + " / " + fmt.format(Number(row.actualQty ?? row.qty ?? 0)) + " * " + fmt.format(Math.round(Number(row.unitPrice || 0)))) : [row.customer, row.warehouse, row.memo].filter(Boolean).join(" / ");
           return "<tr class='"+(isLine ? "lineRow" : "headRow")+"'><td>"+(isLine ? "" : esc(row.date || ""))+"</td><td class='left'>"+esc(desc || "-")+"</td><td class='num salesCell'>"+(sales ? fmt.format(sales) : "")+"</td><td class='num purchaseCell'>"+(purchase ? fmt.format(purchase) : "")+"</td><td class='num balanceCell'>"+(isLine ? "" : fmt.format(balance))+"</td></tr>";
         }).join("");
         const monthLabel = (range.to || "").slice(0,7).replace("-","/");
@@ -15575,13 +15675,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const group = document.getElementById("group").value;
         const groupLabel = document.getElementById("group").selectedOptions[0]?.textContent || "상세내역";
         const typeLabel = document.getElementById("type").selectedOptions[0]?.textContent || "전체";
-        const basisLabel = document.getElementById("basis").selectedOptions[0]?.textContent || "BOM설정 기준";
+        const basisLabel = document.getElementById("basis").selectedOptions[0]?.textContent || "실제 출고 기준";
         const range = currentDateRange();
         const rows = (lastRows.length ? lastRows : filtered()).slice();
         const salesRows = rows.filter((row) => row.type === "sales");
         const purchaseRows = rows.filter((row) => row.type === "purchase");
-        const salesQty = salesRows.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
-        const purchaseQty = purchaseRows.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
+        const salesQty = salesRows.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
+        const purchaseQty = purchaseRows.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
         const salesAmount = salesRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
         const purchaseAmount = purchaseRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
         const selectedCustomerItem = selected.customer.length === 1 ? selected.customer[0] : null;
@@ -15601,7 +15701,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         function detailRowsHtml(sourceRows){
           const sorted = sourceRows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)) || String(a.customer).localeCompare(String(b.customer)));
-          return sorted.map((row) => "<tr><td>"+esc(row.typeLabel)+"</td><td>"+esc(row.date||"-")+"</td><td>"+esc(row.customer||"-")+"</td><td>"+esc(row.warehouse||"-")+"</td><td>"+esc(row.actualProductCode||"-")+"</td><td class='left'>"+esc(row.actualProductName||"-")+"</td><td class='num'>"+fmt.format(Number(row.actualQty||row.qty||0))+"</td><td class='num'>"+krw(row.unitPrice||0)+"</td><td class='num'>"+krw(row.amount||0)+"</td><td class='left'>"+esc(row.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='10' class='empty'>조회되는 내역이 없습니다.</td></tr>";
+          return sorted.map((row) => "<tr><td>"+esc(row.typeLabel)+"</td><td>"+esc(row.date||"-")+"</td><td>"+esc(row.customer||"-")+"</td><td>"+esc(row.warehouse||"-")+"</td><td>"+esc(row.actualProductCode||"-")+"</td><td class='left'>"+esc(row.actualProductName||"-")+"</td><td class='num'>"+fmt.format(Number(row.actualQty ?? row.qty ?? 0))+"</td><td class='num'>"+krw(row.unitPrice||0)+"</td><td class='num'>"+krw(row.amount||0)+"</td><td class='left'>"+esc(row.type === "sales" ? outboundStatusText(row) + " / " + (row.memo||"-") : (row.memo||"-"))+"</td></tr>").join("") || "<tr><td colspan='10' class='empty'>조회되는 내역이 없습니다.</td></tr>";
         }
         function voucherReportRowsHtml(){
           const vouchers = (activeVouchers().length ? activeVouchers() : buildVoucherRows(rows)).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)) || String(a.displayNo || a.no || "").localeCompare(String(b.displayNo || b.no || "")));
@@ -15636,7 +15736,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               const lineAmount = Math.round(Number(line.amount || 0));
               const lineSales = line.type === "sales" ? lineAmount : 0;
               const lineCollection = line.type === "purchase" ? lineAmount : 0;
-              const desc = esc(line.actualProductCode||"-")+" / "+esc(line.actualProductName||"-")+" / "+fmt.format(Number(line.actualQty||line.qty||0))+" * "+krw(line.unitPrice||0)+(line.isBom ? " / 원 입력품목: "+esc(line.sourceProductCode+" / "+line.sourceProductName) : "");
+              const desc = esc(line.actualProductCode||"-")+" / "+esc(line.actualProductName||"-")+" / "+fmt.format(Number(line.actualQty ?? line.qty ?? 0))+" * "+krw(line.unitPrice||0)+(line.type === "sales" ? " / "+esc(outboundStatusText(line)) : line.isBom ? " / 원 입력품목: "+esc(line.sourceProductCode+" / "+line.sourceProductName) : "");
               return "<tr class='voucherLine'><td></td><td class='left detailText'>"+desc+"</td><td class='num salesCell'>"+(lineSales ? krw(lineSales) : "")+"</td><td class='num collectionCell'>"+(lineCollection ? krw(lineCollection) : "")+"</td><td></td></tr>";
             }).join("");
             parts.push(header + lines);
@@ -15672,7 +15772,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         if (!vouchers.length) { window.alert("거래명세서별 화면에서 조회된 전표가 없습니다."); return; }
         const customers = Array.from(new Set(vouchers.map((voucher) => String(voucher.customer || "").trim()).filter(Boolean)));
         if (customers.length !== 1) { window.alert("전송은 거래처 한 곳의 전표만 보낼 수 있습니다. 거래처를 검색하거나 전표 하나를 펼친 뒤 눌러주세요."); return; }
-        const channel = window.prompt("전송 방법을 선택해 주세요.\n\n1. E-mail\n2. 카카오톡 (준비중)", "1");
+        const channel = window.prompt("전송 방법을 선택해 주세요.\\n\\n1. E-mail\\n2. 카카오톡 (준비중)", "1");
         if (!channel) return;
         if (/2|카카오|kakao/i.test(channel)) { window.alert("카카오톡 전송은 아직 연결 전입니다. 현재는 E-mail만 발송할 수 있습니다."); return; }
         await ensureCustomerDirectory();
@@ -15683,9 +15783,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         const menuName = vouchers.every((voucher) => voucher.type === "purchase") ? "구매 거래명세서" : "판매 거래명세서";
         const subject = docDate + " '" + menuName + "' 거래처명:" + customerName;
         const pdfFilename = docDate.replace(/\D/g, "") + "_" + customerName.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "") + "_" + menuName.replace(/\s+/g, "") + ".pdf";
-        const body = "안녕하세요. 에프엔입니다.\n\n" + docDate + " '" + menuName + "' 보내드립니다.\n거래처명: " + customerName + "\n첨부: " + pdfFilename + "\n\n확인 부탁드립니다.\n감사합니다.\n에프엔";
+        const body = "안녕하세요. 에프엔입니다.\\n\\n" + docDate + " '" + menuName + "' 보내드립니다.\\n거래처명: " + customerName + "\\n첨부: " + pdfFilename + "\\n\\n확인 부탁드립니다.\\n감사합니다.\\n에프엔";
         const pdfHtml = statementHtml(vouchers);
-        if (!window.confirm("아래 내용으로 E-mail을 바로 발송할까요?\n\n수신: " + email + "\n제목: " + subject + "\n첨부: " + pdfFilename + "\n\n" + body)) return;
+        if (!window.confirm("아래 내용으로 E-mail을 바로 발송할까요?\\n\\n수신: " + email + "\\n제목: " + subject + "\\n첨부: " + pdfFilename + "\\n\\n" + body)) return;
         try {
           const res = await fetch("/api/fnos/email/send", {
             method: "POST",
@@ -15695,45 +15795,58 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) throw new Error(data.error || "메일 발송에 실패했습니다.");
-          window.alert("E-mail 발송이 완료되었습니다.\n첨부: " + (Array.isArray(data.attachments) ? data.attachments.join(", ") : pdfFilename));
+          window.alert("E-mail 발송이 완료되었습니다.\\n첨부: " + (Array.isArray(data.attachments) ? data.attachments.join(", ") : pdfFilename));
         } catch (error) {
           window.alert(error instanceof Error ? error.message : "메일 발송에 실패했습니다.");
         }
       }
+      function outboundStatusText(row){
+        if (row.type === "unlinked") return "미연결 inventory movement / ref:" + (row.movementSourceRefId || "없음");
+        if (row.type !== "sales") return row.isBom ? (row.sourceProductCode + " / " + row.sourceProductName) : "-";
+        if (!row.outboundConfirmed) return "실제출고 미연결 / 원 입력: " + (row.sourceProductCode || "-") + " / " + (row.sourceProductName || "-");
+        return "실제출고 확인(" + (row.movementType || "movement") + ") / ref:" + (row.movementSourceRefId || "-") + " / " + (row.movementDate || row.date || "-") + " / " + (row.movementWarehouse || row.warehouse || "-") + " / " + (row.movementProductCode || row.actualProductCode || "-") + " / 원 입력: " + (row.sourceProductCode || "-") + " / " + (row.sourceProductName || "-");
+      }
       function rowsHtml(rows){
-        return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
+        return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty ?? r.qty ?? 0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(outboundStatusText(r))+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
       }
       function voucherRowsHtml(vouchers){
         if (!vouchers.length) return "<tr><td colspan='10' class='muted'>조회되는 거래명세서가 없습니다.</td></tr>";
         return vouchers.map((voucher) => {
           const detailOpen = voucher.key === expandedVoucherKey;
-          const detail = detailOpen ? voucher.lines.map((r)=>"<tr class='voucherDetail "+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td></td><td class='detailIndent'>품목</td><td colspan='2'>"+esc(r.actualProductCode||"-")+" / "+esc(r.actualProductName||"-")+"</td><td class='num'>1</td><td class='num'>"+fmt.format(r.actualQty||0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td>"+esc(r.memo||"-")+"</td><td class='muted'>"+esc(r.isBom ? (r.sourceProductCode+" / "+r.sourceProductName) : "-")+"</td></tr>").join("") : "";
+          const detail = detailOpen ? voucher.lines.map((r)=>"<tr class='voucherDetail "+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td></td><td class='detailIndent'>품목</td><td colspan='2'>"+esc(r.actualProductCode||"-")+" / "+esc(r.actualProductName||"-")+"</td><td class='num'>1</td><td class='num'>"+fmt.format(r.actualQty ?? r.qty ?? 0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td>"+esc(r.memo||"-")+"</td><td class='muted'>"+esc(outboundStatusText(r))+"</td></tr>").join("") : "";
           return "<tr class='voucherRow "+(voucher.type === "sales" ? "rowSales" : "rowPurchase")+"' data-voucher-key='"+esc(voucher.key)+"'><td><span class='badge "+esc(voucher.type)+"'>"+esc(voucher.typeLabel)+"</span></td><td>"+esc(voucher.displayNo||voucher.no||"-")+"</td><td>"+esc(voucher.customer||"-")+"</td><td>"+esc(voucher.warehouse||"-")+"</td><td class='num'>"+fmt.format(voucher.itemCount||0)+"</td><td class='num'>"+fmt.format(voucher.qty||0)+"</td><td class='num'>"+krw(voucher.avg||0)+"</td><td class='num'>"+krw(voucher.amount||0)+"</td><td>"+esc(voucher.memo||"-")+"</td><td class='muted'>"+(detailOpen ? "접기" : "펼치기")+"</td></tr>" + detail;
         }).join("");
       }
       function render(){
         const group = document.getElementById("group").value;
         const rows = filtered();
+        const unlinkedRows = unlinkedOutboundRows();
+        const unlinkedQty = unlinkedRows.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
+        const connectedOutboundRows = rows.filter((row) => row.type === "sales" && row.outboundConfirmed);
+        const connectedQty = connectedOutboundRows.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
+        const unlinkedToggle = document.getElementById("toggleUnlinkedOutbound");
+        unlinkedToggle.textContent = (showUnlinkedOutbound ? "미연결 출고 숨기기" : "미연결 출고 보기") + " (" + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개)";
         lastRows = rows;
         lastExportRows = rows;
         const salesRows = rows.filter((row) => row.type === "sales");
         const purchaseRows = rows.filter((row) => row.type === "purchase");
         renderSummary("sales", salesRows);
+        document.getElementById("salesScope").innerHTML += "<span>연결 출고 " + fmt.format(connectedOutboundRows.length) + "건 / " + fmt.format(connectedQty) + "개</span><span>미연결 출고 " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개</span>";
         renderSummary("purchase", purchaseRows);
         renderSelectedBar();
         if (group === "detail") {
-          thead.innerHTML = "<tr><th>구분</th><th>일자</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량</th><th class='num'>단가</th><th class='num'>금액</th><th>원 입력품목</th><th>메모</th></tr>";
+          thead.innerHTML = "<tr><th>구분</th><th>일자</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량(판매=실제출고)</th><th class='num'>단가</th><th class='num'>금액</th><th>출고확인/원 입력품목</th><th>메모</th></tr>";
           const sorted = rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
           if (selected.product.length > 1) {
             tbody.innerHTML = selected.product.map((item) => {
               const part = sorted.filter((r) => selectedProductMatchesRow(r, item));
-              const qty = part.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
+              const qty = part.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
               const amount = part.reduce((sum, row) => sum + Number(row.amount || 0), 0);
               const avg = qty ? amount / qty : 0;
               return "<tr class='groupRow'><td colspan='6' class='groupSummaryName'>품목 " + esc(optionLabel(item)) + " / " + fmt.format(part.length) + "건</td><td class='num groupSummaryMetric'>" + fmt.format(qty) + "</td><td class='num groupSummaryMetric'>" + (qty ? krw(avg) : "-") + "</td><td class='num groupSummaryMetric'>" + krw(amount) + "</td><td colspan='2'></td></tr>" + rowsHtml(part);
-            }).join("");
+            }).join("") + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='11' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
           } else {
-            tbody.innerHTML = rowsHtml(sorted);
+            tbody.innerHTML = rowsHtml(sorted) + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='11' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
           }
           updateNav();
           return;
@@ -15759,7 +15872,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           tbody.innerHTML = selected.product.map((item) => {
             const part = rows.filter((r) => selectedProductMatchesRow(r, item));
             const productGrouped = aggregate(part, keyFns[group]);
-            const qty = part.reduce((sum, row) => sum + Number(row.actualQty || row.qty || 0), 0);
+            const qty = part.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
             const amount = part.reduce((sum, row) => sum + Number(row.amount || 0), 0);
             const header = "<tr class='groupRow'><td colspan='4' class='groupSummaryName'>품목 " + esc(optionLabel(item)) + " / " + fmt.format(part.length) + "건</td><td class='num groupSummaryMetric'>" + fmt.format(qty) + "</td><td class='num groupSummaryMetric'>" + krw(amount) + "</td><td colspan='4'></td></tr>";
             return header + (productGrouped.length ? groupedRowsHtml(productGrouped) : "<tr><td colspan='10' class='muted'>조회되는 내역이 없습니다.</td></tr>");
@@ -15920,6 +16033,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }));
       document.addEventListener("mouseup", () => { pickerDragMode = null; });
       document.getElementById("search").addEventListener("click",renderAndReset);
+      document.getElementById("toggleUnlinkedOutbound").addEventListener("click", () => {
+        showUnlinkedOutbound = !showUnlinkedOutbound;
+        if (showUnlinkedOutbound) document.getElementById("group").value = "detail";
+        renderAndReset();
+      });
       document.getElementById("resetAnalysis").addEventListener("click", resetAnalysisDefaults);
       document.addEventListener("keydown", (event) => {
         const pickerOpen = document.getElementById("pickerBackdrop").classList.contains("open");
