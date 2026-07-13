@@ -27,6 +27,13 @@ import {
   useF4SaveShortcut,
 } from "@/components/fn-ui";
 import { cachedJson as cachedClientJson, invalidateClientCache, markClientCacheReady, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
+import {
+  groupDirectShippingSourceIndexes,
+  planDirectShippingBundleSelection,
+  resolveDirectShippingBundleSelection,
+  type DirectShippingBundleRow,
+  type DirectShippingBundleSelectionPlan,
+} from "@/lib/direct-shipping-bundles";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => null,
@@ -11819,6 +11826,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
   const partnerBalanceCacheRef = useRef<Record<string, PartnerBalanceRow[]>>({});
   const [directPartnerPickerOpen, setDirectPartnerPickerOpen] = useState(false);
+  const [directShippingBundlePrompt, setDirectShippingBundlePrompt] = useState<DirectShippingBundleSelectionPlan | null>(null);
   const [invoiceMemoText, setInvoiceMemoText] = useState("");
   const [salesSheetHighlightedRows, setSalesSheetHighlightedRows] = useState<Partial<Record<SalesSheetName, number[]>>>({});
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
@@ -11850,6 +11858,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const isMasterSection = section === "master";
 
   useEscapeToClose(directPartnerPickerOpen, () => setDirectPartnerPickerOpen(false));
+  useEscapeToClose(Boolean(directShippingBundlePrompt), () => setDirectShippingBundlePrompt(null));
   useEscapeToClose(Boolean(invoiceMemoText), () => setInvoiceMemoText(""));
   useEscapeToClose(Boolean(entryModalMode), () => setEntryModalMode(null));
   useEscapeToClose(collectionPopupOpen, () => setCollectionPopupOpen(false));
@@ -12756,20 +12765,54 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return shippingRows.filter((row, index) => rowHasValue(row) && !directIndexes.has(index));
   }
 
+  function directShippingBundleRows(): DirectShippingBundleRow[] {
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const progressRows = exportSheets["발주 진행 단계"];
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    const jbStored = new Set(directShippingSourceIndexes.JB || []);
+    const kemoreStored = new Set(directShippingSourceIndexes.케이모아 || []);
+    const shippingOptionIndex = salesSheetHeaders.송장출력용.indexOf("주문옵션");
+    return progressRows
+      .map((progressRow, sourceIndex) => {
+        const shippingRow = shippingRows[sourceIndex] || [];
+        const assignedText = progressValue(progressRow, "직송거래처");
+        const assignedPartner: DirectShippingPartner | "" = assignedText === "JB" || assignedText === "케이모아" ? assignedText : "";
+        const storedPartner: DirectShippingPartner | "" = jbStored.has(sourceIndex) ? "JB" : kemoreStored.has(sourceIndex) ? "케이모아" : "";
+        return {
+          sourceIndex,
+          bundleOrderNo: progressValue(progressRow, "묶음주문번호"),
+          recipient: progressValue(progressRow, "수취인"),
+          orderOption: salesCellText(shippingRow[shippingOptionIndex]) || progressValue(progressRow, "쇼핑몰품목key"),
+          assignedPartner,
+          storedPartner,
+        };
+      })
+      .filter((_, sourceIndex) => rowHasValue(progressRows[sourceIndex] || []) || rowHasValue(shippingRows[sourceIndex] || []));
+  }
+
+  function directShippingSourceIndexesForPartner(partner: DirectShippingPartner) {
+    const storedSourceIndexes = directShippingSourceIndexes[partner] || [];
+    if (storedSourceIndexes.length) return storedSourceIndexes;
+    return sheets["발주 진행 단계"]
+      .map((row, index) => progressValue(row, "직송거래처") === partner ? index : -1)
+      .filter((index) => index >= 0);
+  }
+
+  function groupedDirectShippingSources(partner: DirectShippingPartner) {
+    return groupDirectShippingSourceIndexes(
+      directShippingSourceIndexesForPartner(partner),
+      directShippingBundleRows(),
+    );
+  }
+
   function currentDirectShippingRows(partner: DirectShippingPartner) {
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
     const exportSheets = applyProgressTrackingToShipping(sheets);
     const shippingRows = shippingRowsForExcelExport(exportSheets);
-    const storedSourceIndexes = directShippingSourceIndexes[partner] || [];
-    const sourceIndexes = storedSourceIndexes.length
-      ? storedSourceIndexes
-      : exportSheets["발주 진행 단계"]
-          .map((row, index) => progressValue(row, "직송거래처") === partner ? index : -1)
-          .filter((index) => index >= 0);
-    return sourceIndexes
-      .map((sourceIndex, index) => {
+    return groupedDirectShippingSources(partner)
+      .map(({ sourceIndex, sequence }) => {
         const sourceRow = shippingRows[sourceIndex];
-        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
+        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, sequence) : null;
       })
       .filter((row): row is string[] => Array.isArray(row));
   }
@@ -13013,59 +13056,81 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function makeDirectShippingFile(partner: DirectShippingPartner) {
-    const selectedRows = selectedShippingRows();
-    const selectedIndexes = selectedOrderRowIndexes();
-    if (!selectedRows.length) {
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    const selectedIndexes = selectedOrderRowIndexes()
+      .filter((sourceIndex) => rowHasValue(shippingRows[sourceIndex] || []));
+    if (!selectedIndexes.length) {
       window.alert("직송 저장할 주문건을 먼저 선택해 주세요.");
       setDirectPartnerPickerOpen(false);
       return;
     }
 
-    const headers = partner === "JB" ? jbDirectHeaders : kemoreDirectHeaders;
+    const plan = planDirectShippingBundleSelection({
+      partner,
+      selectedSourceIndexes: selectedIndexes,
+      rows: directShippingBundleRows(),
+    });
+    if (plan.bundles.length) {
+      setDirectPartnerPickerOpen(false);
+      setDirectShippingBundlePrompt(plan);
+      return;
+    }
+    await saveDirectShippingSelection(partner, plan.selectedSourceIndexes);
+  }
+
+  async function applyDirectShippingBundleDecision(decision: "include-eligible" | "selected-only") {
+    const plan = directShippingBundlePrompt;
+    if (!plan) return;
+    setDirectShippingBundlePrompt(null);
+    const sourceIndexes = resolveDirectShippingBundleSelection(plan, decision);
+    if (sourceIndexes.length) await saveDirectShippingSelection(plan.partner, sourceIndexes);
+  }
+
+  async function saveDirectShippingSelection(partner: DirectShippingPartner, requestedSourceIndexes: number[]) {
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
-    const previousRows = directShippingRows[partner] || [];
-    const previousSourceIndexes = directShippingSourceIndexes[partner] || [];
     const otherPartner: DirectShippingPartner = partner === "JB" ? "케이모아" : "JB";
-    const alreadyDirectIndexes = new Set([...previousSourceIndexes, ...(directShippingSourceIndexes[otherPartner] || [])]);
+    const bundleRows = directShippingBundleRows();
+    const bundleRowBySourceIndex = new Map(bundleRows.map((row) => [row.sourceIndex, row]));
+    const previousSourceIndexes = groupedDirectShippingSources(partner).map(({ sourceIndex }) => sourceIndex);
+    const previousSourceSet = new Set(previousSourceIndexes);
+    const otherSourceIndexes = groupedDirectShippingSources(otherPartner).map(({ sourceIndex }) => sourceIndex);
+    const otherSourceSet = new Set(otherSourceIndexes);
     const exportSheets = applyProgressTrackingToShipping(sheets);
     const shippingRows = shippingRowsForExcelExport(exportSheets);
-    const appendRows: string[][] = [];
-    const appendSourceIndexes: number[] = [];
+    const appendSourceIndexes = Array.from(new Set(requestedSourceIndexes))
+      .sort((left, right) => left - right)
+      .filter((sourceIndex) => {
+        if (previousSourceSet.has(sourceIndex) || otherSourceSet.has(sourceIndex)) return false;
+        const sourceRow = shippingRows[sourceIndex];
+        const assignedPartner = bundleRowBySourceIndex.get(sourceIndex)?.assignedPartner || "";
+        return Boolean(sourceRow && rowHasValue(sourceRow) && (!assignedPartner || assignedPartner === partner));
+      });
 
-    selectedRows.forEach((_sourceRow, selectedOffset) => {
-      const sourceIndex = selectedIndexes[selectedOffset];
-      if (sourceIndex == null || alreadyDirectIndexes.has(sourceIndex)) return;
-      const sourceRow = shippingRows[sourceIndex];
-      if (!sourceRow || !rowHasValue(sourceRow)) return;
-      const preview = mapper(sourceRow, previousRows.length + appendRows.length + 1);
-      const isDuplicate = previousRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"))
-        || appendRows.some((row) => row.slice(1).join("\t") === preview.slice(1).join("\t"));
-      if (!isDuplicate) {
-        appendRows.push(preview);
-        appendSourceIndexes.push(sourceIndex);
-      }
-    });
-
-    if (!appendRows.length) {
+    if (!appendSourceIndexes.length) {
       window.alert("이미 직송파일에 들어갔거나 다른 직송거래처로 지정된 주문입니다.");
       setDirectPartnerPickerOpen(false);
       return;
     }
 
-    const savedSourceIndexes = [...previousSourceIndexes, ...appendSourceIndexes];
-    const savedRows = savedSourceIndexes
-      .map((sourceIndex, index) => {
+    const savedSources = groupDirectShippingSourceIndexes(
+      [...previousSourceIndexes, ...appendSourceIndexes],
+      bundleRows,
+    );
+    const savedSourceIndexes = savedSources.map(({ sourceIndex }) => sourceIndex);
+    const savedRows = savedSources
+      .map(({ sourceIndex, sequence }) => {
         const sourceRow = shippingRows[sourceIndex];
-        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, index + 1) : null;
+        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, sequence) : null;
       })
       .filter((row): row is string[] => Array.isArray(row));
-    setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
-    setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: savedSourceIndexes }));
-
     const nextSourceIndexesByPartner: DirectShippingSourceIndexes = {
-      ...directShippingSourceIndexes,
-      [partner]: savedSourceIndexes,
+      JB: partner === "JB" ? savedSourceIndexes : otherSourceIndexes,
+      케이모아: partner === "케이모아" ? savedSourceIndexes : otherSourceIndexes,
     };
+    setDirectShippingRows((prev) => ({ ...prev, [partner]: savedRows }));
+    setDirectShippingSourceIndexes(nextSourceIndexesByPartner);
+
     const nextPurchaseRows = await buildDirectShippingPurchaseRows(
       sheets["FN구매입력"],
       sheets["발주 진행 단계"],
@@ -13085,7 +13150,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return next;
     });
     setCompletedSalesTasks((prev) => ({ ...prev, directShipping: true }));
-    setMessage(`${partner} 직송 주문 ${appendRows.length}건을 저장했습니다. 엑셀 내보내기 때 직송파일과 FN구매입력에 반영됩니다.`);
+    setMessage(`${partner} 직송 주문 ${appendSourceIndexes.length}건을 저장했습니다. 엑셀 내보내기 때 직송파일과 FN구매입력에 반영됩니다.`);
     setDirectPartnerPickerOpen(false);
   }
 
@@ -13097,18 +13162,28 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     const ok = window.confirm(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 송장엑셀 행으로 복원할까요?`);
     if (!ok) return;
-    const removedSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => targets.has(index));
-    const nextRows = (directShippingRows[partner] || [])
-      .filter((_, index) => !targets.has(index))
-      .map((row, index) => {
-        const next = [...row];
-        next[0] = directShippingCode(partner, index + 1);
-        return next;
-      });
-    const nextSourceIndexes = (directShippingSourceIndexes[partner] || []).filter((_, index) => !targets.has(index));
+    const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
+    const bundleRows = directShippingBundleRows();
+    const currentSources = groupedDirectShippingSources(partner);
+    const removedSourceIndexes = currentSources.filter((_, index) => targets.has(index)).map(({ sourceIndex }) => sourceIndex);
+    const nextSources = groupDirectShippingSourceIndexes(
+      currentSources.filter((_, index) => !targets.has(index)).map(({ sourceIndex }) => sourceIndex),
+      bundleRows,
+    );
+    const nextSourceIndexes = nextSources.map(({ sourceIndex }) => sourceIndex);
+    const exportSheets = applyProgressTrackingToShipping(sheets);
+    const shippingRows = shippingRowsForExcelExport(exportSheets);
+    const nextRows = nextSources
+      .map(({ sourceIndex, sequence }) => {
+        const sourceRow = shippingRows[sourceIndex];
+        return sourceRow && rowHasValue(sourceRow) ? mapper(sourceRow, sequence) : null;
+      })
+      .filter((row): row is string[] => Array.isArray(row));
+    const otherPartner: DirectShippingPartner = partner === "JB" ? "케이모아" : "JB";
+    const otherSourceIndexes = groupedDirectShippingSources(otherPartner).map(({ sourceIndex }) => sourceIndex);
     const nextSourceIndexesByPartner: DirectShippingSourceIndexes = {
-      ...directShippingSourceIndexes,
-      [partner]: nextSourceIndexes,
+      JB: partner === "JB" ? nextSourceIndexes : otherSourceIndexes,
+      케이모아: partner === "케이모아" ? nextSourceIndexes : otherSourceIndexes,
     };
     const nextPurchaseRows = await buildDirectShippingPurchaseRows(
       sheets["FN구매입력"],
@@ -13116,7 +13191,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       nextSourceIndexesByPartner,
     );
     setDirectShippingRows((prev) => ({ ...prev, [partner]: nextRows }));
-    setDirectShippingSourceIndexes((prev) => ({ ...prev, [partner]: nextSourceIndexes }));
+    setDirectShippingSourceIndexes(nextSourceIndexesByPartner);
     setSheets((prev) => {
       const next = { ...prev };
       const progressRows = next["발주 진행 단계"].map((row) => [...row]);
@@ -17329,6 +17404,63 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
               </div>
             </SelectionModal>
+          )}
+          {directShippingBundlePrompt && (
+            <FormModal
+              title="묶음배송 누락 확인"
+              onClose={() => setDirectShippingBundlePrompt(null)}
+              size="xl"
+              footer={(
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void applyDirectShippingBundleDecision("selected-only")}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
+                  >
+                    아니요, 해당건만 파일생성
+                  </button>
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() => void applyDirectShippingBundleDecision("include-eligible")}
+                    className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-black text-white hover:bg-orange-600"
+                  >
+                    네, 직송파일 함께 생성
+                  </button>
+                </div>
+              )}
+            >
+              <div className="space-y-4">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+                  선택하지 않은 같은 묶음배송 행이 있습니다. 미배정 또는 {directShippingBundlePrompt.partner} 행만 함께 생성할 수 있으며, 다른 직송처 행은 자동 포함되지 않습니다.
+                </div>
+                {directShippingBundlePrompt.bundles.map((bundle) => (
+                  <section key={bundle.bundleOrderNo} className="overflow-hidden rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
+                      <strong className="text-sm text-slate-800">묶음주문번호 {bundle.bundleOrderNo}</strong>
+                      <span className="text-xs font-bold text-slate-500">누락 {bundle.rows.length.toLocaleString("ko-KR")}건</span>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {bundle.rows.map((row) => {
+                        const isBlocked = row.status === "opposite-partner";
+                        const statusText = isBlocked
+                          ? `다른 직송처가 섞여 있음 / 자동 포함 불가 (${row.storedPartner || row.assignedPartner})`
+                          : row.status === "same-partner"
+                            ? `${directShippingBundlePrompt.partner} 배정 · 함께 생성 가능`
+                            : "미배정 · 함께 생성 가능";
+                        return (
+                          <div key={row.sourceIndex} className="grid gap-2 px-4 py-3 md:grid-cols-[110px_minmax(0,1fr)_minmax(240px,auto)] md:items-center">
+                            <div className="text-sm font-black text-slate-800">{row.recipient || "수취인 미입력"}</div>
+                            <div className="min-w-0 truncate text-sm font-semibold text-slate-600" title={row.orderOption}>{row.orderOption || "주문옵션 미입력"}</div>
+                            <div className={`text-xs font-black ${isBlocked ? "text-rose-600" : "text-emerald-600"}`}>{statusText}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </FormModal>
           )}
           {invoiceMemoText && (
             <FormModal
