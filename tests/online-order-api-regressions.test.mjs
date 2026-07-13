@@ -262,6 +262,8 @@ test("롯데ON 출고 API 식별자는 병합 주문의 대표 raw가 아니라 
   assert.match(lotteonBranch, /onlineOrderItemFirstFallbackText\(order, item, \["odSeq", "odDtlSeq", "od_seq"\]\)/);
   assert.match(lotteonBranch, /onlineOrderItemFirstFallbackText\(order, item, \["procSeq", "proc_seq"\]\)/);
   assert.doesNotMatch(lotteonBranch, /const odSeq = onlineOrderFallbackText\(order, item/, "병합 주문의 첫 raw odSeq를 모든 상품행에 재사용하면 안 됩니다.");
+  assert.doesNotMatch(lotteonBranch, /const odSeq =[^;]+\|\| "1"/, "롯데ON odSeq 누락을 1로 기본값 처리하면 안 됩니다.");
+  assert.doesNotMatch(lotteonBranch, /const procSeq =[^;]+\|\| "1"/, "롯데ON procSeq 누락을 1로 기본값 처리하면 안 됩니다.");
 
   const orderRaw = { odNo: "LO-ORDER-1", odSeq: "1", procSeq: "1" };
   const secondItemRaw = { odNo: "LO-ORDER-1", odSeq: "2", procSeq: "1" };

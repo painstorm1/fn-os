@@ -275,9 +275,9 @@ export async function POST(request: NextRequest) {
           quantity: text(row.quantity || row.qty),
           procSeq: rowApiExtraId(row),
           deliveryMethod: text(row.deliveryMethod || row.delivery_method) || "DELIVERY",
-          deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || "CJGLS",
+          deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || (adapterCode === "LOTTEON" ? "" : "CJGLS"),
           trackingNumber: text(row.trackingNumber || row.tracking_number),
-        })).filter((row) => (row.productOrderId || row.orderId || row.shipmentBoxId) && row.trackingNumber);
+        })).filter((row) => adapterCode === "LOTTEON" || ((row.productOrderId || row.orderId || row.shipmentBoxId) && row.trackingNumber));
         const result = adapter.dispatchOrders
           ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
           : { ok: false, error: "해당 쇼핑몰은 발송처리를 지원하지 않습니다." };

@@ -7310,7 +7310,7 @@ function buildOrderProgressRows(sheets: Record<SalesSheetName, string[][]>) {
     setProgressValue(progress, "묶음주문번호", salesCellText(invoice.묶음주문번호));
     setProgressValue(progress, "API주문ID", salesCellText(invoice.주문번호));
     setProgressValue(progress, "API배송묶음ID", salesCellText(invoice.묶음주문번호));
-    setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || "CJGLS");
+    setProgressValue(progress, "배송방법코드", salesCellText(invoice.배송방법코드) || onlineOrderDefaultDeliveryCompanyCode(channelName, ""));
     setProgressValue(progress, "송장번호", salesCellText(shipping.송장번호 || invoice.송장번호));
     setProgressValue(progress, "주문상태", salesCellText(invoice.송장번호 || shipping.송장번호) ? "출고대기" : "신규주문");
     setProgressValue(progress, "수취인", salesCellText(shipping.수취인));
@@ -7614,6 +7614,10 @@ function onlineOrderChannelAlias(channelName: unknown, channelCode: unknown) {
   return codeAlias[code] || code || "FN";
 }
 
+function onlineOrderDefaultDeliveryCompanyCode(channelName: unknown, channelCode: unknown) {
+  return onlineOrderChannelAlias(channelName, channelCode) === "L" ? "" : "CJGLS";
+}
+
 function onlineOrderSettlementExportAmount(value: unknown, _alias: string, _channelName: unknown) {
   const amount = salesMoneyValue(value);
   if (!amount) return salesCellText(value);
@@ -7746,8 +7750,8 @@ function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnline
     // LotteON can return multiple real product lines under the same order/bundle number.
     // After order-level merge, order.raw is the first line, so line-specific IDs must prefer item.raw.
     const odNo = onlineOrderItemFirstFallbackText(order, item, ["odNo", "orderNo", "orderId", "od_no"]) || orderId;
-    const odSeq = onlineOrderItemFirstFallbackText(order, item, ["odSeq", "odDtlSeq", "od_seq"]) || salesCellText(item.channelOptionCode) || "1";
-    const procSeq = onlineOrderItemFirstFallbackText(order, item, ["procSeq", "proc_seq"]) || "1";
+    const odSeq = onlineOrderItemFirstFallbackText(order, item, ["odSeq", "odDtlSeq", "od_seq"]) || salesCellText(item.channelOptionCode);
+    const procSeq = onlineOrderItemFirstFallbackText(order, item, ["procSeq", "proc_seq"]);
     return { apiOrderId: odNo, apiProductOrderId: odSeq, apiShipmentId: bundleId || odNo, apiExtraId: procSeq };
   }
   if (alias === "T") {
@@ -8025,7 +8029,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(invoice, "FN송장입력", "쇼핑몰코드", generatedMallCode);
       setSalesSheetCell(invoice, "FN송장입력", "주문번호", actionIds.apiOrderId || orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", actionIds.apiShipmentId || order.bundleOrderNo || orderNo);
-      setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", "CJGLS");
+      setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", onlineOrderDefaultDeliveryCompanyCode(channelName, channelCode));
       invoiceRows.push(invoice);
       appendedActionIds.push(actionIds);
     });
@@ -10219,7 +10223,7 @@ function OnlineOrderProgressList({
                   <td className="px-2 py-2">
                     <select
                       className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-black text-slate-700 outline-orange-400"
-                      value={progressValue(row, "배송방법코드") || "CJGLS"}
+                      value={progressValue(row, "배송방법코드") || onlineOrderDefaultDeliveryCompanyCode(progressValue(row, "온라인몰명"), progressValue(row, "온라인몰코드"))}
                       onChange={(event) => updateDeliveryCompany(index, event.target.value)}
                     >
                       <option value="CJGLS">CJ대한통운</option>
@@ -13758,7 +13762,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         procSeq: progressValue(row, "API보조ID"),
         quantity: progressValue(row, "수량"),
         deliveryMethod: "DELIVERY",
-        deliveryCompanyCode: progressValue(row, "배송방법코드") || "CJGLS",
+        deliveryCompanyCode: progressValue(row, "배송방법코드") || onlineOrderDefaultDeliveryCompanyCode(progressValue(row, "온라인몰명"), progressValue(row, "온라인몰코드")),
         trackingNumber: progressValue(row, "송장번호"),
       };
     });

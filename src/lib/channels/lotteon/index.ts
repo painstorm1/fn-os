@@ -73,60 +73,113 @@ function mergeOrders(orders: NormalizedOrder[]) {
 
 
 function lotteonRequestRows(params: Record<string, unknown>, key: "confirmProductOrders" | "dispatchProductOrders") { const value = params[key]; return Array.isArray(value) ? value.map(record) : []; }
+function lotteonPositiveInteger(value: unknown) {
+  const raw = text(value);
+  if (!/^[1-9]\d*$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
 function lotteonIds(row: AnyRecord) {
   return {
-    odNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id),
-    odSeq: firstText(row.productOrderId, row.product_order_id, row.odSeq, row.od_seq) || "1",
-    procSeq: firstText(row.procSeq, row.proc_seq) || "1",
+    odNo: firstText(row.orderNo, row.order_no, row.orderId, row.order_id, row.odNo, row.od_no),
+    odSeq: firstText(row.productOrderId, row.product_order_id, row.odSeq, row.od_seq),
+    procSeq: firstText(row.procSeq, row.proc_seq),
     slQty: numberValue(row.quantity || row.qty) || 1,
   };
+}
+function lotteonValidatedIds(row: AnyRecord) {
+  const ids = lotteonIds(row);
+  const odSeq = lotteonPositiveInteger(ids.odSeq);
+  const procSeq = lotteonPositiveInteger(ids.procSeq);
+  if (!ids.odNo || odSeq === null || procSeq === null) return null;
+  return { odNo: ids.odNo, odSeq, procSeq, slQty: ids.slQty };
 }
 // 롯데ON dvCoCd 공식 코드표: 0001 롯데택배, 0002 CJ대한통운, 0004 우체국, 0005 로젠, 0006 한진, 0024 경동, 9999 기타
 function lotteonCarrierCode(value: unknown) {
   const raw = text(value).toUpperCase();
-  if (/^\d{4}$/.test(raw)) return raw;
-  if (!raw || raw.includes("CJ")) return "0002";
-  if (raw.includes("LOTTE") || raw.includes("HYUNDAI") || raw.includes("롯데")) return "0001";
-  if (raw.includes("POST") || raw.includes("우체국")) return "0004";
-  if (raw === "KGB" || raw.includes("LOGEN") || raw.includes("로젠")) return "0005";
-  if (raw.includes("HANJIN") || raw.includes("한진")) return "0006";
-  if (raw.includes("KDEXP") || raw.includes("KYUNGDONG") || raw.includes("경동")) return "0024";
-  return "9999";
+  const allowedCodes = new Set(["0001", "0002", "0004", "0005", "0006", "0024", "9999"]);
+  if (allowedCodes.has(raw)) return raw;
+  const compact = raw.replace(/[\s_-]+/g, "");
+  if (["CJ", "CJGLS", "CJLOGISTICS", "CJ대한통운"].includes(compact)) return "0002";
+  if (["LOTTE", "HYUNDAI", "LOTTELOGIS", "LOTTEGLOBALLOGIS", "롯데", "롯데택배", "롯데글로벌로지스"].includes(compact)) return "0001";
+  if (["POST", "EPOST", "KOREAPOST", "우체국", "우체국택배"].includes(compact)) return "0004";
+  if (["KGB", "LOGEN", "로젠", "로젠택배"].includes(compact)) return "0005";
+  if (["HANJIN", "한진", "한진택배"].includes(compact)) return "0006";
+  if (["KDEXP", "KYUNGDONG", "경동", "경동택배"].includes(compact)) return "0024";
+  if (["OTHER", "기타"].includes(compact)) return "9999";
+  return "";
+}
+function lotteonResponseContainers(data: unknown) {
+  const root = record(data);
+  const candidates = [root, record(root.data), record(root.result)];
+  const seen = new Set<AnyRecord>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate)) return false;
+    seen.add(candidate);
+    return true;
+  });
 }
 function lotteonFailList(data: unknown) {
-  return arrayAt(data, [["failList"], ["data", "failList"], ["result", "failList"]]);
+  return lotteonResponseContainers(data).flatMap((container) => Array.isArray(container.failList) ? container.failList.map(record) : []);
 }
-function lotteonFailureMessage(data: unknown) {
-  const failures = lotteonFailList(data);
-  if (!failures.length) return "";
-  return failures
-    .map((row) => firstText(row.rsltMsg, row.resultMessage, row.message, row.errorMessage, row.rsltCd))
-    .filter(Boolean)
-    .join(" / ") || `롯데ON 처리 실패 ${failures.length}건`;
+function lotteonResponseFailureMessage(data: unknown) {
+  const messages: string[] = [];
+  for (const container of lotteonResponseContainers(data)) {
+    const code = firstText(container.rsltCd, container.resultCode, container.returnCode, container.code);
+    if (code && !["0000", "0", "SUCCESS", "OK"].includes(code.toUpperCase())) {
+      messages.push(firstText(container.rsltMsg, container.resultMessage, container.message, container.errorMessage, code));
+    }
+  }
+  for (const failure of lotteonFailList(data)) {
+    messages.push(firstText(failure.rsltMsg, failure.resultMessage, failure.message, failure.errorMessage, failure.rsltCd));
+  }
+  return Array.from(new Set(messages.filter(Boolean))).join(" / ");
 }
-function lotteonProgressPayload(rows: AnyRecord[], odPrgsStepCd: "12" | "13") {
+function lotteonDispatchPayload(ids: { odNo: string; odSeq: number; procSeq: number; slQty: number }, trackingNumber: string, carrierCode: string) {
   return {
-    deliveryProgressStateList: rows.map((source) => {
-      const ids = lotteonIds(source);
-      const trackingNumber = text(source.trackingNumber || source.tracking_number).replace(/\D/g, "");
-      const item: AnyRecord = {
-        odNo: ids.odNo,
-        odSeq: Number(ids.odSeq),
-        procSeq: Number(ids.procSeq),
-        odPrgsStepCd,
-        dvTrcStatDttm: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace(/[-:T.Z]/g, "").slice(0, 14),
-        slQty: ids.slQty,
-        dvRtrvDvsCd: "DV",
-      };
-      if (odPrgsStepCd === "13") {
-        // V2 스펙: invcNbr(송장개수, 숫자) + invcNoList(송장번호 리스트). invcNbr은 invcNoList 길이와 같아야 한다.
-        item.invcNbr = 1;
-        item.dvCoCd = lotteonCarrierCode(source.deliveryCompanyCode || source.delivery_company_code);
-        item.invcNoList = [trackingNumber];
-      }
-      return item;
-    }),
+    deliveryProgressStateList: [{
+      odNo: ids.odNo,
+      odSeq: ids.odSeq,
+      procSeq: ids.procSeq,
+      odPrgsStepCd: "13",
+      dvTrcStatDttm: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace(/[-:T.Z]/g, "").slice(0, 14),
+      slQty: ids.slQty,
+      dvRtrvDvsCd: "DV",
+      invcNbr: 1,
+      dvCoCd: carrierCode,
+      invcNoList: [trackingNumber],
+    }],
   };
+}
+function lotteonReadbackRows(data: unknown) {
+  const rows = record(record(data).data).deliveryProgressStateList;
+  return Array.isArray(rows) ? rows.map(record) : [];
+}
+function lotteonReadbackInvoiceValues(row: AnyRecord) {
+  const values: string[] = [];
+  if (Array.isArray(row.invcNoList)) {
+    for (const value of row.invcNoList) {
+      const invoice = record(value);
+      const next = firstText(invoice.invcNo, invoice.invoiceNo, invoice.trackingNo, invoice.waybillNo, typeof value === "string" || typeof value === "number" ? value : "");
+      if (next) values.push(next);
+    }
+  }
+  const direct = firstText(row.invcNo, row.invoiceNo, row.invNo, row.trackingNo, row.waybillNo);
+  if (direct) values.push(direct);
+  return values;
+}
+function lotteonReadbackVerification(data: unknown, ids: { odNo: string; odSeq: number; procSeq: number }, trackingNumber: string) {
+  const exactRow = lotteonReadbackRows(data).find((row) => (
+    text(row.odNo) === ids.odNo
+    && lotteonPositiveInteger(row.odSeq) === ids.odSeq
+    && lotteonPositiveInteger(row.procSeq) === ids.procSeq
+  ));
+  if (!exactRow) return { ok: false, error: "요청 식별자와 일치하는 배송상태 행이 없습니다." };
+  const stage = text(exactRow.odPrgsStepCd);
+  if (!["13", "14", "15"].includes(stage)) return { ok: false, error: `배송단계 ${stage || "미확인"}은 출고완료 상태가 아닙니다.` };
+  const invoices = lotteonReadbackInvoiceValues(exactRow);
+  if (invoices.length && !invoices.includes(trackingNumber)) return { ok: false, error: "조회된 송장번호가 요청 송장번호와 일치하지 않습니다." };
+  return { ok: true, row: exactRow };
 }
 
 export class LotteonChannelAdapter implements SalesChannelAdapter {
@@ -194,27 +247,31 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
   async confirmOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
     const apiKey = text(params.api_key || params.access_key);
     if (!apiKey) return { ok: false, data: null, error: "롯데ON OpenAPI Key를 먼저 저장해주세요." };
-    const rows = lotteonRequestRows(params, "confirmProductOrders").filter((row) => lotteonIds(row).odNo);
+    const rows = lotteonRequestRows(params, "confirmProductOrders");
     if (!rows.length) return { ok: false, data: null, error: "롯데ON 주문확인에 필요한 주문번호/주문순번이 없습니다." };
+    const validatedRows = rows.map(lotteonValidatedIds);
+    if (validatedRows.some((ids) => !ids)) return { ok: false, data: null, error: "롯데ON 주문확인 필수 식별자(odNo/odSeq/procSeq)가 누락되었거나 올바른 양의 정수가 아닙니다." };
     try {
       const baseUrl = text(params.api_base_url) || LOTTEON_BASE_URL;
       // 공식 플로우: 주문 수신 후 연동완료 통보(ifCplYN=Y)를 필히 수행해야 상품준비 전환 + 고객 즉시취소 차단이 된다.
-      const path = text(params.confirm_path || params.if_complete_path) || "/v1/openapi/delivery/v1/SellerIfCompleteInform";
+      const path = "/v1/openapi/delivery/v1/SellerIfCompleteInform";
       const results: unknown[] = [];
       const failureMessages: string[] = [];
       for (let index = 0; index < rows.length; index += 100) {
         const payload = {
-          ifCompleteList: rows.slice(index, index + 100).map((source) => {
-            const ids = lotteonIds(source);
-            return { dvRtrvDvsCd: "DV", odNo: ids.odNo, odSeq: Number(ids.odSeq), procSeq: Number(ids.procSeq), ifCplYN: "Y" };
-          }),
+          ifCompleteList: validatedRows.slice(index, index + 100).map((ids) => ({
+            dvRtrvDvsCd: "DV",
+            odNo: ids!.odNo,
+            odSeq: ids!.odSeq,
+            procSeq: ids!.procSeq,
+            ifCplYN: "Y",
+          })),
         };
         const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(payload) });
         const data = await readJson(response);
-        const rslt = record(record(data).data);
-        const rsltCd = text(rslt.rsltCd);
-        if (rsltCd && rsltCd !== "0000") failureMessages.push(firstText(rslt.rsltMsg, rsltCd));
-        const failureMessage = lotteonFailureMessage(data);
+        const dataResult = record(record(data).data);
+        if (!text(dataResult.rsltCd)) failureMessages.push("롯데ON 주문확인 결과 코드(data.rsltCd)가 누락되었습니다.");
+        const failureMessage = lotteonResponseFailureMessage(data);
         if (failureMessage) failureMessages.push(failureMessage);
         results.push(data);
       }
@@ -226,23 +283,57 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
   async dispatchOrders(params: Record<string, unknown>): Promise<ChannelResult<unknown>> {
     const apiKey = text(params.api_key || params.access_key);
     if (!apiKey) return { ok: false, data: null, error: "롯데ON OpenAPI Key를 먼저 저장해주세요." };
-    const rows = lotteonRequestRows(params, "dispatchProductOrders").filter((row) => lotteonIds(row).odNo && text(row.trackingNumber || row.tracking_number));
-    if (!rows.length) return { ok: false, data: null, error: "롯데ON 발송완료에 필요한 주문번호/주문순번/송장번호가 없습니다." };
+    const rows = lotteonRequestRows(params, "dispatchProductOrders");
+    if (!rows.length) return { ok: false, data: null, error: "롯데ON 발송완료에 필요한 주문정보가 없습니다." };
+    if (rows.length > 1) return { ok: false, data: null, error: "롯데ON 발송완료는 부분 반영 방지를 위해 한 번에 단일 주문행 1건만 처리할 수 있습니다." };
+
+    const source = rows[0];
+    const ids = lotteonValidatedIds(source);
+    if (!ids) return { ok: false, data: null, error: "롯데ON 발송완료 필수 식별자(odNo/odSeq/procSeq)가 누락되었거나 올바른 양의 정수가 아닙니다." };
+    const trackingNumber = firstText(source.trackingNumber, source.tracking_number);
+    if (!trackingNumber) return { ok: false, data: null, error: "롯데ON 발송완료 송장번호가 누락되었습니다." };
+    if (trackingNumber.length > 30) return { ok: false, data: null, error: "롯데ON 송장번호는 최대 30자까지 입력할 수 있습니다." };
+    const carrierCode = lotteonCarrierCode(firstText(source.deliveryCompanyCode, source.delivery_company_code));
+    if (!carrierCode) return { ok: false, data: null, error: "롯데ON 배송사가 누락되었거나 지원하지 않는 배송사입니다." };
+
     try {
       const baseUrl = text(params.api_base_url) || LOTTEON_BASE_URL;
-      const path = text(params.status_path) || "/v1/openapi/delivery/v2/SellerDeliveryProgressStateInform";
-      const results: unknown[] = [];
-      const failureMessages: string[] = [];
-      // 통보 목록은 1회 최대 500건 — 100건 단위로 나눠 보낸다.
-      for (let index = 0; index < rows.length; index += 100) {
-        const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(lotteonProgressPayload(rows.slice(index, index + 100), "13")) });
-        const data = await readJson(response);
-        const failureMessage = lotteonFailureMessage(data);
-        if (failureMessage) failureMessages.push(failureMessage);
-        results.push(data);
+      const mutationPath = "/v1/openapi/delivery/v2/SellerDeliveryProgressStateInform";
+      const readbackPath = "/v1/openapi/delivery/v1/SellerDeliveryProgressStateSearch";
+      const requestHeaders = { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` };
+
+      // API298 mutation은 재시도하지 않는다. 성공 응답 뒤 API140 readback만 최대 3회 수행한다.
+      const mutationResponse = await fetch(`${baseUrl}${mutationPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(lotteonDispatchPayload(ids, trackingNumber, carrierCode)) });
+      const mutationData = await readJson(mutationResponse);
+      const mutationFailure = lotteonResponseFailureMessage(mutationData);
+      if (mutationFailure) return { ok: false, data: mutationData, error: `롯데ON 발송완료 실패: ${mutationFailure}` };
+
+      const readbacks: unknown[] = [];
+      let lastVerificationError = "롯데ON 배송상태를 확인하지 못했습니다.";
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const readbackResponse = await fetch(`${baseUrl}${readbackPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify({ odNo: ids.odNo }) });
+          const readbackData = await readJson(readbackResponse);
+          readbacks.push(readbackData);
+          const readbackFailure = lotteonResponseFailureMessage(readbackData);
+          if (readbackFailure) {
+            lastVerificationError = readbackFailure;
+            continue;
+          }
+          const verification = lotteonReadbackVerification(readbackData, ids, trackingNumber);
+          if (verification.ok) {
+            return {
+              ok: true,
+              data: { mutation: mutationData, readback: readbackData },
+              message: "롯데ON 발송완료 1건 처리 및 배송상태 확인 완료",
+            };
+          }
+          lastVerificationError = verification.error || "롯데ON 배송상태 검증 실패";
+        } catch (error) {
+          lastVerificationError = error instanceof Error ? error.message : "롯데ON 배송상태 조회 실패";
+        }
       }
-      if (failureMessages.length) return { ok: false, data: results, error: `롯데ON 발송완료 일부 실패: ${failureMessages.join(" / ")}` };
-      return { ok: true, data: results, message: `롯데ON 발송완료 ${rows.length}건 요청 완료` };
+      return { ok: false, data: { mutation: mutationData, readbacks }, error: `롯데ON 발송완료 후 API140 확인 실패: ${lastVerificationError}` };
     } catch (error) { return { ok: false, data: null, error: error instanceof Error ? error.message : "롯데ON 발송완료 처리 실패" }; }
   }
 }
