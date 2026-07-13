@@ -14,6 +14,7 @@ const workerId = process.env.FN_WORKER_ID || `${os.hostname()}-fn-worker`;
 const pollMs = Math.max(1000, Number(process.env.FN_WORKER_POLL_MS || 5_000));
 const jobType = process.env.FN_WORKER_JOB_TYPE || "";
 const once = args.has("--once") || process.env.FN_WORKER_ONCE === "1";
+const automationAgentToken = envValue("AUTOMATION_AGENT_TOKEN");
 const localApiKey = envValue("FN_OS_API_KEY") || envValue("FN_OS_AUTH_TOKEN") || envValue("FN_OS_PASSWORD") || "fnos-local-dev";
 const productionEnv = readEnvFile(path.join(repoRoot, ".env.vercel.production.local"));
 const remoteApiKey = text(productionEnv.FN_OS_API_KEY || productionEnv.FN_OS_AUTH_TOKEN || productionEnv.FN_OS_PASSWORD) || localApiKey;
@@ -49,7 +50,13 @@ function appendLog(job, line) {
 }
 
 async function request(path, init = {}) {
-  return requestFrom(origin, path, init);
+  return requestFrom(origin, path, {
+    ...init,
+    headers: {
+      "x-automation-agent-token": automationAgentToken,
+      ...(init.headers || {}),
+    },
+  });
 }
 
 async function requestFrom(baseUrl, path, init = {}) {
@@ -231,6 +238,10 @@ async function main() {
     if (once) break;
     await delay(pollMs);
   }
+}
+
+if (!automationAgentToken) {
+  throw new Error("AUTOMATION_AGENT_TOKEN is required before automation worker polling can start.");
 }
 
 await main();

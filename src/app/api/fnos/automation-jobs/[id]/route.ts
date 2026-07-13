@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertAutomationJobAuth, automationApiError } from "@/lib/automation-agent-api";
 import {
   getAutomationJob,
   getAutomationRunAsJob,
@@ -16,8 +17,9 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    assertAutomationJobAuth(request);
     const { id } = await context.params;
     try {
       const job = await getAutomationJob(id);
@@ -30,13 +32,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const logs = await listAutomationRunLogs(id);
     return NextResponse.json({ ok: true, job, logs });
   } catch (error) {
-    const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "자동화 작업 상세 조회 실패" }, { status });
+    return automationApiError(error, "자동화 작업 상세 조회 실패");
   }
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    assertAutomationJobAuth(request);
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));
     try {
@@ -50,7 +52,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const logs = await listAutomationRunLogs(id);
     return NextResponse.json({ ok: true, job, logs });
   } catch (error) {
-    const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "자동화 작업 상태 업데이트 실패" }, { status });
+    return automationApiError(error, "자동화 작업 상태 업데이트 실패");
   }
 }

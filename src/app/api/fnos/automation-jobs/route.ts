@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertAutomationJobAuth, automationApiError } from "@/lib/automation-agent-api";
 import { createAutomationRun, listAutomationRunsAsJobs } from "@/lib/automation-jobs";
-import { FnosDbError } from "@/lib/fnos-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    assertAutomationJobAuth(request);
     const jobs = await listAutomationRunsAsJobs({
       jobType: request.nextUrl.searchParams.get("job_type") || undefined,
       status: request.nextUrl.searchParams.get("status") || undefined,
@@ -14,13 +15,13 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, jobs, total: jobs.length });
   } catch (error) {
-    const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "자동화 작업 조회 실패" }, { status });
+    return automationApiError(error, "자동화 작업 조회 실패");
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    assertAutomationJobAuth(request);
     const body = await request.json().catch(() => ({}));
     const run = await createAutomationRun({
       ...body,
@@ -33,7 +34,6 @@ export async function POST(request: NextRequest) {
     const job = jobs[0];
     return NextResponse.json({ ok: true, job });
   } catch (error) {
-    const status = error instanceof FnosDbError ? error.status : 500;
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "자동화 작업 생성 실패" }, { status });
+    return automationApiError(error, "자동화 작업 생성 실패");
   }
 }
