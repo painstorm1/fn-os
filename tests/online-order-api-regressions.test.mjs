@@ -19,6 +19,7 @@ const coupangSource = source("src/lib/channels/coupang/index.ts");
 const elevenstSource = source("src/lib/channels/elevenst/index.ts");
 const lotteonSource = source("src/lib/channels/lotteon/index.ts");
 const ssgSource = source("src/lib/channels/ssg/index.ts");
+const tossSource = source("src/lib/channels/toss/index.ts");
 const todayhouseSource = source("src/lib/channels/todayhouse/index.ts");
 
 function assertNotMatch(haystack, pattern, message) {
@@ -122,6 +123,28 @@ function loadLotteonAdapterWithMocks() {
   };
   new Function("require", "exports", "module", compiled)(localRequire, cjsModule.exports, cjsModule);
   return cjsModule.exports.LotteonChannelAdapter;
+}
+
+function loadTossAdapterWithMocks() {
+  const filename = resolve(projectRoot, "src/lib/channels/toss/index.ts");
+  const compiled = ts.transpileModule(tossSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      strict: true,
+    },
+    fileName: filename,
+  }).outputText;
+  const cjsModule = { exports: {} };
+  const localRequire = (specifier) => {
+    if (specifier === "../common/api-response") {
+      return { readJsonApiResponse: async (response) => response.json() };
+    }
+    return createRequire(filename)(specifier);
+  };
+  new Function("require", "exports", "module", compiled)(localRequire, cjsModule.exports, cjsModule);
+  return cjsModule.exports.TossChannelAdapter;
 }
 
 function statusAfterRebuild(existingStatus, rebuiltStatus) {
@@ -364,6 +387,56 @@ test("11번가 등 합포장 행은 같은 API배송묶음ID 기준으로 빈 �
   assert.equal(next[1].trackingNo, "1234567890");
   assert.equal(next[2].trackingNo, "", "같은 API배송묶음ID라도 수취인/연락처/주소가 다르면 전파 금지");
   assert.equal(next[3].trackingNo, "");
+});
+
+test("토스 출고완료는 일반 택배 송장번호의 하이픈/공백을 제거해 숫자만 전송한다", async () => {
+  const TossChannelAdapter = loadTossAdapterWithMocks();
+  const adapter = new TossChannelAdapter();
+  const previousFetch = globalThis.fetch;
+  const captured = {};
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).includes("oauth2.cert.toss.im")) {
+      return { json: async () => ({ access_token: "test-token", expires_in: 3600 }) };
+    }
+    captured.url = String(url);
+    captured.body = JSON.parse(String(init.body || "{}"));
+    return { json: async () => ({ resultType: "SUCCESS", success: {} }) };
+  };
+  try {
+    const result = await adapter.dispatchOrders({
+      access_key: "test-access",
+      secret_key: "test-secret",
+      dispatchProductOrders: [{ productOrderId: "12345", deliveryCompanyCode: "CJGLS", trackingNumber: "1234-5678 9012" }],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(captured.body.deliveryCompany, "CJ대한통운");
+    assert.equal(captured.body.trackingNumber, "123456789012");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("토스 출고완료는 일반 택배 송장번호에 숫자 외 문자가 남으면 API 호출 전 실패한다", async () => {
+  const TossChannelAdapter = loadTossAdapterWithMocks();
+  const adapter = new TossChannelAdapter();
+  const previousFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return { json: async () => ({ resultType: "SUCCESS", success: {} }) };
+  };
+  try {
+    const result = await adapter.dispatchOrders({
+      access_key: "test-access",
+      secret_key: "test-secret",
+      dispatchProductOrders: [{ productOrderId: "12345", deliveryCompanyCode: "CJGLS", trackingNumber: "CJ-12345" }],
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /송장번호 형식 오류/);
+    assert.equal(fetchCalls, 0, "형식 오류는 토스 토큰/배송 API 호출 전 차단되어야 합니다.");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("상태 API route는 채널별 native ID와 송장번호 원문을 adapter까지 보존한다", () => {

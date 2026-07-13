@@ -31,6 +31,23 @@ function tossDateWindows(start: string, end: string) {
   return windows;
 }
 function tossDeliveryCompany(value: unknown) { const raw = first(value); const aliases: Record<string, string> = { CJGLS: "CJ대한통운", CJ: "CJ대한통운", KGB: "로젠택배", LOGEN: "로젠택배", HANJIN: "한진택배", LOTTE: "롯데택배", HYUNDAI: "롯데택배", EPOST: "우체국택배", POST: "우체국택배", KDEXP: "경동택배", KYUNGDONG: "경동택배", DAESIN: "대신택배", CVSNET: "GS25편의점택배", CUPOST: "CU편의점택배" }; return aliases[raw.toUpperCase()] || raw; }
+function tossTrackingValidationExemptCompany(value: unknown) { return /직접전달|직접배송|DIRECT/i.test(first(value)); }
+function tossTrackingLetterAllowedCompany(value: unknown) { return /팀프레시|TEAM\s*FRESH|TEAMFRESH/i.test(first(value)); }
+function tossTrackingNumber(value: unknown, deliveryCompany: unknown) {
+  const raw = first(value);
+  if (!raw) return "";
+  if (tossTrackingValidationExemptCompany(deliveryCompany)) return raw;
+  // 토스 문서 기준 일반 택배 송장번호는 숫자 문자열(\\d+)만 허용된다.
+  // UI/엑셀에 표시용 하이픈이 남아있어도 API 전송 전 제거해 형식 오류를 막는다.
+  return raw.replace(/[\s\u00A0\-‐‑‒–—―]/g, "");
+}
+function tossTrackingNumberValid(value: unknown, deliveryCompany: unknown) {
+  const trackingNumber = first(value);
+  if (!trackingNumber) return false;
+  if (tossTrackingValidationExemptCompany(deliveryCompany)) return true;
+  if (tossTrackingLetterAllowedCompany(deliveryCompany)) return /^[0-9A-Za-z]+$/.test(trackingNumber);
+  return /^\d+$/.test(trackingNumber);
+}
 async function readJson(response: Response) { return readJsonApiResponse(response, "토스", { successCodes: ["SUCCESS", "OK", "0"], resultPaths: [["resultType"], ["code"], ["status"]] }); }
 // 토스 문서: 호출마다 토큰을 재발급하면 API 이용이 제한될 수 있다 (토큰 유효기간 약 1년).
 const tossTokenCache = new Map<string, { token: string; expiresAt: number }>();
@@ -122,14 +139,19 @@ export class TossChannelAdapter implements SalesChannelAdapter {
     if (!accessKey || !secretKey) return { ok: false, data: null, error: "토스 Access Key와 Secret Key를 저장해주세요." };
     const rows = (Array.isArray(params.dispatchProductOrders) ? params.dispatchProductOrders : [])
     .map(record)
-    .map((row) => ({
-      orderProductId: first(row.orderProductId, row.productOrderId, row.product_order_id, row.channelOptionCode, row.channel_option_code),
-      deliveryCompany: tossDeliveryCompany(first(row.deliveryCompany, row.deliveryCompanyCode, row.delivery_company_code)),
-      trackingNumber: first(row.trackingNumber, row.tracking_number),
-      partnerName: first(row.partnerName, row.partner_name, params.partner_name),
-    }))
+    .map((row) => {
+      const deliveryCompany = tossDeliveryCompany(first(row.deliveryCompany, row.deliveryCompanyCode, row.delivery_company_code));
+      return {
+        orderProductId: first(row.orderProductId, row.productOrderId, row.product_order_id, row.channelOptionCode, row.channel_option_code),
+        deliveryCompany,
+        trackingNumber: tossTrackingNumber(first(row.trackingNumber, row.tracking_number), deliveryCompany),
+        partnerName: first(row.partnerName, row.partner_name, params.partner_name),
+      };
+    })
     .filter((row) => row.orderProductId && row.deliveryCompany && row.trackingNumber);
     if (!rows.length) return { ok: false, data: null, error: "토스 발송처리에 필요한 orderProductId/택배사/송장번호가 없습니다." };
+    const invalidTrackingRows = rows.filter((row) => !tossTrackingNumberValid(row.trackingNumber, row.deliveryCompany));
+    if (invalidTrackingRows.length) return { ok: false, data: invalidTrackingRows, error: `토스 송장번호 형식 오류: 일반 택배사는 하이픈/공백 제거 후 숫자만 전송할 수 있습니다. 숫자 외 문자가 포함된 ${invalidTrackingRows.length}건을 확인해 주세요.` };
     try {
     const baseUrl = text(params.api_base_url) || TOSS_BASE_URL;
     const tokenUrl = text(params.token_url) || TOSS_TOKEN_URL;
