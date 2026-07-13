@@ -6729,16 +6729,10 @@ function aggregateSalesEntryRows(
   });
 }
 
-function salesSupplyAmountTotal(rows: string[][]) {
-  const supplyIndex = salesSheetHeaders["FN판매입력"].indexOf("공급가액");
-  if (supplyIndex < 0) return 0;
-  return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
-}
-
-function salesPurchaseAmountTotal(rows: string[][]) {
-  const supplyIndex = salesSheetHeaders["FN구매입력"].indexOf("공급가액");
-  if (supplyIndex < 0) return 0;
-  return rows.reduce((sum, row) => sum + salesMoneyValue(row[supplyIndex]), 0);
+function salesEntryTotalAmountTotal(sheet: "FN판매입력" | "FN구매입력", rows: string[][]) {
+  const totalIndex = salesSheetHeaders[sheet].indexOf("합계금액");
+  if (totalIndex < 0) return 0;
+  return rows.filter(rowHasValue).reduce((sum, row) => sum + salesMoneyValue(row[totalIndex]), 0);
 }
 
 function importResultText(data: Record<string, unknown>, fallback = "") {
@@ -8741,6 +8735,12 @@ function directShippingDeliveryFeeRecord(partner: DirectShippingPartner, deliver
 
 function directShippingPurchaseRecordToRow(record: Record<string, string>) {
   return salesSheetHeaders["FN구매입력"].map((header) => record[header] || "");
+}
+
+function compactPurchaseEntryRows(baseRows: string[][], appendedRows: string[][]) {
+  return [...baseRows, ...appendedRows]
+    .filter(rowHasValue)
+    .map((row) => [...row]);
 }
 
 function normalizeRange(a: SalesGridCell, b: SalesGridCell): SalesGridRange {
@@ -11910,8 +11910,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   useEffect(() => {
     sheetsRef.current = sheets;
   }, [sheets]);
-  const salesSupplyTotal = salesSupplyAmountTotal(sheets["FN판매입력"]);
-  const purchaseSupplyTotal = salesPurchaseAmountTotal(sheets["FN구매입력"]);
+  const salesTotalAmount = salesEntryTotalAmountTotal("FN판매입력", sheets["FN판매입력"]);
+  const purchaseTotalAmount = salesEntryTotalAmountTotal("FN구매입력", sheets["FN구매입력"]);
   const shippingPreviewSourceIndexes = useMemo(() => (
     sheets.송장출력용
       .map((row, index) => rowHasValue(row) ? index : -1)
@@ -12269,7 +12269,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             송장출력용: padSalesRows("송장출력용", snapshot.sheets.송장출력용 || []),
             FN송장입력: padSalesRows("FN송장입력", snapshot.sheets.FN송장입력 || []),
             "FN판매입력": padSalesRows("FN판매입력", snapshot.sheets["FN판매입력"] || []),
-            "FN구매입력": padSalesRows("FN구매입력", snapshot.sheets["FN구매입력"] || []),
+            "FN구매입력": padSalesRows("FN구매입력", compactPurchaseEntryRows(snapshot.sheets["FN구매입력"] || [], [])),
           });
         }
         setCompletedSalesTasks(snapshot.completedSalesTasks || {});
@@ -13009,7 +13009,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         directRows.push(directShippingPurchaseRecordToRow(directShippingDeliveryFeeRecord(feePartner, deliveryCount)));
       }
     }
-    return [...baseRows, ...directRows];
+    return compactPurchaseEntryRows(baseRows, directRows);
   }
 
   async function makeDirectShippingFile(partner: DirectShippingPartner) {
@@ -17067,7 +17067,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <SalesExcelGrid sheet="FN판매입력" rows={sheets["FN판매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN판매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN판매입력"] || []} />
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
-                <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesSupplyTotal).toLocaleString("ko-KR")}원</span>
+                <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesTotalAmount).toLocaleString("ko-KR")}원</span>
                 <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
               </div>
             </div>
@@ -17082,7 +17082,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <SalesExcelGrid sheet="FN구매입력" rows={sheets["FN구매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN구매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN구매입력"] || []} />
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
-                <span className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">구매입력 총 금액: {Math.round(purchaseSupplyTotal).toLocaleString("ko-KR")}원</span>
+                <span className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">구매입력 총 금액: {Math.round(purchaseTotalAmount).toLocaleString("ko-KR")}원</span>
                 <div className="flex gap-2"><label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendPurchaseInput()}>저장</ActionButton></div>
               </div>
             </div>

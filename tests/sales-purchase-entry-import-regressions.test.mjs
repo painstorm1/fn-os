@@ -95,17 +95,36 @@ test("FN purchase entry uses supply amount instead of a separate visible unit-pr
   assert.match(salesInventorySource, /const price = rawPrice \|\| explicitSupply;/);
 });
 
+test("online sales and purchase modal footers sum total amount from non-empty displayed rows", () => {
+  assert.match(pageSource, /function salesEntryTotalAmountTotal\(sheet: "FN판매입력" \| "FN구매입력", rows: string\[\]\[\]\)[\s\S]*indexOf\("합계금액"\)[\s\S]*rows\.filter\(rowHasValue\)\.reduce/);
+  assert.match(pageSource, /const salesTotalAmount = salesEntryTotalAmountTotal\("FN판매입력", sheets\["FN판매입력"\]\);/);
+  assert.match(pageSource, /const purchaseTotalAmount = salesEntryTotalAmountTotal\("FN구매입력", sheets\["FN구매입력"\]\);/);
+  assert.match(pageSource, /판매입력 총 금액: \{Math\.round\(salesTotalAmount\)/);
+  assert.match(pageSource, /구매입력 총 금액: \{Math\.round\(purchaseTotalAmount\)/);
+  assert.doesNotMatch(pageSource, /판매입력 총 금액: \{Math\.round\(salesSupplyTotal\)/);
+  assert.doesNotMatch(pageSource, /구매입력 총 금액: \{Math\.round\(purchaseSupplyTotal\)/);
+});
+
 test("direct-shipping purchase input appends grouped delivery fee rows by recipient phone and address", () => {
   assert.match(pageSource, /directShippingDeliveryFeeUnit[\s\S]*케이모아: 4500,[\s\S]*JB: 2500/);
   assert.match(pageSource, /directShippingDeliveryFeeProduct[\s\S]*code: "ETC_01",[\s\S]*name: "직송 배송비"/);
   assert.match(pageSource, /function directShippingDeliveryIdentity[\s\S]*progressValue\(row, "수취인"\)[\s\S]*progressValue\(row, "수취인연락처1"\) \|\| progressValue\(row, "수취인연락처2"\)[\s\S]*progressValue\(row, "주소"\)/);
   assert.match(pageSource, /function directShippingDeliveryCount[\s\S]*identities\.add\(directShippingDeliveryIdentity\(row, sourceIndex\)\)/);
+  assert.match(pageSource, /function compactPurchaseEntryRows\(baseRows: string\[\]\[\], appendedRows: string\[\]\[\]\)[\s\S]*\[\.\.\.baseRows, \.\.\.appendedRows\][\s\S]*filter\(rowHasValue\)/);
   assert.match(pageSource, /async function buildDirectShippingPurchaseRows\([\s\S]*options\?: \{ enrich\?: boolean \}/);
   assert.match(pageSource, /if \(options\?\.enrich !== false\) \{[\s\S]*enrichedPurchaseSourceRows = await enrichOnlineEntryRows\(purchaseSourceRows, "purchases"\)/);
+  const buildPurchaseStart = pageSource.indexOf("  async function buildDirectShippingPurchaseRows(");
+  const buildPurchaseSource = pageSource.slice(buildPurchaseStart, pageSource.indexOf("  async function makeDirectShippingFile", buildPurchaseStart));
+  assert.match(buildPurchaseSource, /return compactPurchaseEntryRows\(baseRows, directRows\);/);
+  assert.doesNotMatch(buildPurchaseSource, /directRows\s*\[[^\]]*(?:sourceIndex|rowIndex)[^\]]*\]\s*=/);
   const sendPurchaseStart = pageSource.indexOf("  async function sendPurchaseInput()");
   const sendPurchasePreflight = pageSource.slice(sendPurchaseStart, pageSource.indexOf("    const missingRequired", sendPurchaseStart));
   assert.match(sendPurchasePreflight, /const purchaseInputRows = sheets\["FN구매입력"\];/);
-  assert.doesNotMatch(sendPurchasePreflight, /buildDirectShippingPurchaseRows|setSheets\(\(prev\) => \(\{ \.\.\.prev, "FN구매입력": purchaseInputRows \}\)\)/);
+  assert.doesNotMatch(sendPurchasePreflight, /buildDirectShippingPurchaseRows|directShippingSourceIndexes|setSheets\(\(prev\) => \(\{ \.\.\.prev, "FN구매입력": purchaseInputRows \}\)\)/);
+  const restoreWorkspaceStart = pageSource.indexOf("    async function restoreWorkspace()");
+  const restoreWorkspaceSource = pageSource.slice(restoreWorkspaceStart, pageSource.indexOf("    void restoreWorkspace();", restoreWorkspaceStart));
+  assert.match(restoreWorkspaceSource, /"FN구매입력": padSalesRows\("FN구매입력", compactPurchaseEntryRows\(snapshot\.sheets\["FN구매입력"\] \|\| \[\], \[\]\)\)/);
+  assert.doesNotMatch(restoreWorkspaceSource, /buildDirectShippingPurchaseRows/);
   assert.match(pageSource, /purchaseOverrideRows = sourceRows[\s\S]*__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch\(item\)/);
   assert.match(pageSource, /directRows\.push\(directShippingPurchaseRecordToRow\(directShippingDeliveryFeeRecord\(feePartner, deliveryCount\)\)\)/);
 });
