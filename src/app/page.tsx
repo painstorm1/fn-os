@@ -8770,6 +8770,7 @@ function SalesExcelGrid({
   resetKey = 0,
   highlightedRows = [],
   copyAssistRows = [],
+  fillHeight = false,
 }: {
   sheet: SalesSheetName;
   rows: string[][];
@@ -8780,6 +8781,7 @@ function SalesExcelGrid({
   resetKey?: number;
   highlightedRows?: number[];
   copyAssistRows?: number[];
+  fillHeight?: boolean;
 }) {
   const headers = salesSheetHeaders[sheet];
   const displayHeaders = salesSheetDisplayHeaders(sheet);
@@ -9231,7 +9233,7 @@ function SalesExcelGrid({
   }
   const showEntryToolbarInTitleSlot = isSalesEntrySheet(sheet);
   return (
-    <div className="rounded-md border border-slate-200 bg-white">
+    <div className={`flex min-h-0 flex-col rounded-md border border-slate-200 bg-white ${fillHeight ? "flex-1" : ""}`}>
       <div className={`flex items-center border-b border-slate-200 px-3 py-2 ${showEntryToolbarInTitleSlot ? "justify-start" : "justify-between"}`}>
         {!showEntryToolbarInTitleSlot && <strong>{sheet}</strong>}
         <div className="flex items-center gap-2">
@@ -9278,7 +9280,7 @@ function SalesExcelGrid({
         onMouseUp={() => {
           setSelecting(false);
         }}
-        className="max-h-[760px] overflow-auto outline-none"
+        className={`${fillHeight ? "min-h-0 flex-1" : "max-h-[760px]"} overflow-auto outline-none`}
       >
         <table className="table-fixed border-collapse text-xs" style={{ width: 54 + visibleColIndexes.reduce((sum, colIndex) => sum + (colWidths[colIndex] || 95), 0) }}>
           <colgroup>
@@ -10665,11 +10667,13 @@ function DirectShippingPreviewGrid({
   rows,
   onChange,
   onDeleteRows,
+  fillHeight = false,
 }: {
   headers: string[];
   rows: string[][];
   onChange?: (rows: string[][], sourceOrder?: number[]) => void;
   onDeleteRows?: (rowIndexes: number[]) => void;
+  fillHeight?: boolean;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
@@ -10862,7 +10866,7 @@ function DirectShippingPreviewGrid({
   }
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white">
+    <div className={`flex min-h-0 flex-col rounded-md border border-slate-200 bg-white ${fillHeight ? "flex-1" : ""}`}>
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
         <strong>직송파일</strong>
         <div className="flex items-center gap-2">
@@ -10873,7 +10877,7 @@ function DirectShippingPreviewGrid({
       <div
         ref={gridRef}
         tabIndex={0}
-        className="max-h-[60vh] overflow-auto outline-none"
+        className={`${fillHeight ? "min-h-0 flex-1" : "max-h-[60vh]"} overflow-auto outline-none`}
         onCopy={copyRange}
         onPaste={pasteRange}
         onKeyDown={onGridKeyDown}
@@ -16889,8 +16893,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 <div><h2 className="text-lg font-black">송장 엑셀</h2><p className="mt-1 text-sm font-bold text-slate-500">송장출력용과 직송파일 현재 값을 확인하고 내보냅니다.</p></div>
                 <label htmlFor="online-shipping-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto p-5">
-                <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
+                <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
                   <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>송장엑셀</button>
                   <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
                   <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
@@ -16910,15 +16914,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                     <option value="케이모아">케이모아 직송저장</option>
                   </select>
                 </div>
-                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir, _rows, selectedRows) => sortOnlineShippingRowsByExportColumn(colIndex, dir, selectedRows)} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} />}
-                {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} onChange={(rows, sourceOrder) => {
-                  setDirectShippingRows((prev) => ({ ...prev, JB: rows }));
-                  if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, JB: sourceOrder.map((index) => prev.JB[index]).filter((index): index is number => typeof index === "number") }));
-                }} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
-                {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} onChange={(rows, sourceOrder) => {
-                  setDirectShippingRows((prev) => ({ ...prev, 케이모아: rows }));
-                  if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, 케이모아: sourceOrder.map((index) => prev.케이모아[index]).filter((index): index is number => typeof index === "number") }));
-                }} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir, _rows, selectedRows) => sortOnlineShippingRowsByExportColumn(colIndex, dir, selectedRows)} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} fillHeight />}
+                  {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} fillHeight onChange={(rows, sourceOrder) => {
+                    setDirectShippingRows((prev) => ({ ...prev, JB: rows }));
+                    if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, JB: sourceOrder.map((index) => prev.JB[index]).filter((index): index is number => typeof index === "number") }));
+                  }} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
+                  {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} fillHeight onChange={(rows, sourceOrder) => {
+                    setDirectShippingRows((prev) => ({ ...prev, 케이모아: rows }));
+                    if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, 케이모아: sourceOrder.map((index) => prev.케이모아[index]).filter((index): index is number => typeof index === "number") }));
+                  }} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
+                </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
                 <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>송장 내보내기</button>
