@@ -31,6 +31,7 @@ import {
   groupDirectShippingSourceIndexes,
   planDirectShippingBundleSelection,
   resolveDirectShippingBundleSelection,
+  splitDirectShippingDisplayedSources,
   type DirectShippingBundleRow,
   type DirectShippingBundleSelectionPlan,
 } from "@/lib/direct-shipping-bundles";
@@ -12974,24 +12975,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
   }
 
-  function directShippingCode(partner: DirectShippingPartner, sequence: number) {
-    return partner === "JB" ? `${todayMmdd()}-JB-${String(sequence).padStart(3, "0")}` : `${todayMmdd()}-에프엔-${String(sequence).padStart(3, "0")}`;
-  }
-
-  function mergeDirectShippingRows(partner: DirectShippingPartner, existingRows: string[][], nextRows: string[][]) {
-    const seen = new Set(existingRows.map((row) => row.slice(1).join("\t")));
-    const merged = [...existingRows];
-    for (const row of nextRows) {
-      const key = row.slice(1).join("\t");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const nextRow = [...row];
-      nextRow[0] = directShippingCode(partner, merged.length + 1);
-      merged.push(nextRow);
-    }
-    return merged;
-  }
-
   async function saveDirectShippingWorkbook(partner: DirectShippingPartner, headers: string[], rows: string[][]) {
     const fileName = `${todayMmdd()}_${partner}직송.xlsx`;
     await downloadTableXlsx(fileName, `${partner}직송`, headers, rows);
@@ -13164,10 +13147,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!ok) return;
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
     const bundleRows = directShippingBundleRows();
-    const currentSources = groupedDirectShippingSources(partner);
-    const removedSourceIndexes = currentSources.filter((_, index) => targets.has(index)).map(({ sourceIndex }) => sourceIndex);
+    const groupedSourceIndexes = groupedDirectShippingSources(partner).map(({ sourceIndex }) => sourceIndex);
+    const storedDisplaySourceIndexes = directShippingSourceIndexes[partner] || [];
+    const displaySourceIndexes = storedDisplaySourceIndexes.length === (directShippingRows[partner] || []).length
+      ? storedDisplaySourceIndexes
+      : groupedSourceIndexes;
+    const { removedSourceIndexes, retainedSourceIndexes } = splitDirectShippingDisplayedSources(
+      displaySourceIndexes,
+      Array.from(targets),
+    );
     const nextSources = groupDirectShippingSourceIndexes(
-      currentSources.filter((_, index) => !targets.has(index)).map(({ sourceIndex }) => sourceIndex),
+      retainedSourceIndexes,
       bundleRows,
     );
     const nextSourceIndexes = nextSources.map(({ sourceIndex }) => sourceIndex);

@@ -31,6 +31,7 @@ const {
   groupDirectShippingSourceIndexes,
   planDirectShippingBundleSelection,
   resolveDirectShippingBundleSelection,
+  splitDirectShippingDisplayedSources,
 } = loadHelper();
 
 const row = (sourceIndex, bundleOrderNo = "", extra = {}) => ({
@@ -113,6 +114,17 @@ test("yes/no/cancel 결정은 eligible/원선택/빈 목록으로 고정된다",
   assert.deepEqual(resolveDirectShippingBundleSelection(plan, "cancel"), []);
 });
 
+test("수동 정렬 또는 stale workspace 화면의 삭제 행은 표시 source index로 해석한다", () => {
+  assert.deepEqual(
+    splitDirectShippingDisplayedSources([5, 4, 7, 6], [0]),
+    { removedSourceIndexes: [5], retainedSourceIndexes: [4, 7, 6] },
+  );
+  assert.deepEqual(
+    splitDirectShippingDisplayedSources([4, 5, 6, 7], [1]),
+    { removedSourceIndexes: [5], retainedSourceIndexes: [4, 6, 7] },
+  );
+});
+
 test("React popup과 저장/내보내기 경로가 묶음 helper를 사용한다", () => {
   assert.match(pageSource, /title="묶음배송 누락 확인"/);
   assert.match(pageSource, />\s*네, 직송파일 함께 생성\s*</);
@@ -127,6 +139,9 @@ test("React popup과 저장/내보내기 경로가 묶음 helper를 사용한다
   assert.doesNotMatch(pageSource.slice(makeStart, makeEnd), /window\.confirm/);
   assert.match(pageSource, /function currentDirectShippingRows[\s\S]*groupedDirectShippingSources\(partner\)[\s\S]*mapper\(sourceRow, sequence\)/);
   assert.match(pageSource, /async function removeDirectShippingRows[\s\S]*groupDirectShippingSourceIndexes/);
+  assert.match(pageSource, /async function removeDirectShippingRows[\s\S]*splitDirectShippingDisplayedSources/);
+  assert.doesNotMatch(pageSource, /function mergeDirectShippingRows/);
+  assert.doesNotMatch(pageSource, /function directShippingCode/);
 });
 
 test("기존 직송 mapping schema와 쇼핑몰코드 패턴을 유지한다", () => {

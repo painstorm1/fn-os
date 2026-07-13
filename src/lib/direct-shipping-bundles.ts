@@ -37,6 +37,18 @@ function normalizedBundleOrderNo(value: string | undefined) {
   return String(value || "").trim();
 }
 
+export function splitDirectShippingDisplayedSources(
+  displayedSourceIndexes: number[],
+  deletedDisplayRowIndexes: number[],
+) {
+  const deletedRows = new Set(deletedDisplayRowIndexes.filter((value) => Number.isInteger(value) && value >= 0));
+  return displayedSourceIndexes.reduce<{ removedSourceIndexes: number[]; retainedSourceIndexes: number[] }>((result, sourceIndex, displayRowIndex) => {
+    if (deletedRows.has(displayRowIndex)) result.removedSourceIndexes.push(sourceIndex);
+    else result.retainedSourceIndexes.push(sourceIndex);
+    return result;
+  }, { removedSourceIndexes: [], retainedSourceIndexes: [] });
+}
+
 /**
  * Orders saved source rows by first appearance in the original worksheet while
  * keeping every non-empty bundle contiguous. Blank bundle numbers deliberately
