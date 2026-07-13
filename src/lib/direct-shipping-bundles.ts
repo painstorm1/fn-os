@@ -40,7 +40,9 @@ function normalizedBundleOrderNo(value: string | undefined) {
 export function splitDirectShippingDisplayedSources(
   displayedSourceIndexes: number[],
   deletedDisplayRowIndexes: number[],
+  displayedRowCount: number,
 ) {
+  if (displayedSourceIndexes.length !== displayedRowCount) return null;
   const deletedRows = new Set(deletedDisplayRowIndexes.filter((value) => Number.isInteger(value) && value >= 0));
   return displayedSourceIndexes.reduce<{ removedSourceIndexes: number[]; retainedSourceIndexes: number[] }>((result, sourceIndex, displayRowIndex) => {
     if (deletedRows.has(displayRowIndex)) result.removedSourceIndexes.push(sourceIndex);

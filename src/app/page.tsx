@@ -13077,7 +13077,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const bundleRowBySourceIndex = new Map(bundleRows.map((row) => [row.sourceIndex, row]));
     const previousSourceIndexes = groupedDirectShippingSources(partner).map(({ sourceIndex }) => sourceIndex);
     const previousSourceSet = new Set(previousSourceIndexes);
-    const otherSourceIndexes = groupedDirectShippingSources(otherPartner).map(({ sourceIndex }) => sourceIndex);
+    const otherSourceIndexes = [...(directShippingSourceIndexes[otherPartner] || [])];
     const otherSourceSet = new Set(otherSourceIndexes);
     const exportSheets = applyProgressTrackingToShipping(sheets);
     const shippingRows = shippingRowsForExcelExport(exportSheets);
@@ -13143,19 +13143,24 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("삭제할 직송 주문을 선택해 주세요.");
       return;
     }
+    const storedDisplaySourceIndexes = directShippingSourceIndexes[partner] || [];
+    const displayedRowCount = (directShippingRows[partner] || []).length;
+    const splitSources = splitDirectShippingDisplayedSources(
+      storedDisplaySourceIndexes,
+      Array.from(targets),
+      displayedRowCount,
+    );
+    if (!splitSources) {
+      const warning = `${partner} 직송파일의 화면 행과 원본 주문 연결 정보가 일치하지 않아 삭제하지 않았습니다. 직송파일을 다시 저장한 뒤 삭제해 주세요.`;
+      window.alert(warning);
+      setMessage(warning);
+      return;
+    }
     const ok = window.confirm(`${partner} 직송파일에서 ${targets.size.toLocaleString("ko-KR")}건을 삭제하고 송장엑셀 행으로 복원할까요?`);
     if (!ok) return;
     const mapper = partner === "JB" ? mapJbDirectRow : mapKemoreDirectRow;
     const bundleRows = directShippingBundleRows();
-    const groupedSourceIndexes = groupedDirectShippingSources(partner).map(({ sourceIndex }) => sourceIndex);
-    const storedDisplaySourceIndexes = directShippingSourceIndexes[partner] || [];
-    const displaySourceIndexes = storedDisplaySourceIndexes.length === (directShippingRows[partner] || []).length
-      ? storedDisplaySourceIndexes
-      : groupedSourceIndexes;
-    const { removedSourceIndexes, retainedSourceIndexes } = splitDirectShippingDisplayedSources(
-      displaySourceIndexes,
-      Array.from(targets),
-    );
+    const { removedSourceIndexes, retainedSourceIndexes } = splitSources;
     const nextSources = groupDirectShippingSourceIndexes(
       retainedSourceIndexes,
       bundleRows,
@@ -13170,7 +13175,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       })
       .filter((row): row is string[] => Array.isArray(row));
     const otherPartner: DirectShippingPartner = partner === "JB" ? "케이모아" : "JB";
-    const otherSourceIndexes = groupedDirectShippingSources(otherPartner).map(({ sourceIndex }) => sourceIndex);
+    const otherSourceIndexes = [...(directShippingSourceIndexes[otherPartner] || [])];
     const nextSourceIndexesByPartner: DirectShippingSourceIndexes = {
       JB: partner === "JB" ? nextSourceIndexes : otherSourceIndexes,
       케이모아: partner === "케이모아" ? nextSourceIndexes : otherSourceIndexes,

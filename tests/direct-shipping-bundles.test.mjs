@@ -116,13 +116,14 @@ test("yes/no/cancel 결정은 eligible/원선택/빈 목록으로 고정된다",
 
 test("수동 정렬 또는 stale workspace 화면의 삭제 행은 표시 source index로 해석한다", () => {
   assert.deepEqual(
-    splitDirectShippingDisplayedSources([5, 4, 7, 6], [0]),
+    splitDirectShippingDisplayedSources([5, 4, 7, 6], [0], 4),
     { removedSourceIndexes: [5], retainedSourceIndexes: [4, 7, 6] },
   );
   assert.deepEqual(
-    splitDirectShippingDisplayedSources([4, 5, 6, 7], [1]),
+    splitDirectShippingDisplayedSources([4, 5, 6, 7], [1], 4),
     { removedSourceIndexes: [5], retainedSourceIndexes: [4, 6, 7] },
   );
+  assert.equal(splitDirectShippingDisplayedSources([5, 4, 7], [0], 4), null);
 });
 
 test("React popup과 저장/내보내기 경로가 묶음 helper를 사용한다", () => {
@@ -140,6 +141,8 @@ test("React popup과 저장/내보내기 경로가 묶음 helper를 사용한다
   assert.match(pageSource, /function currentDirectShippingRows[\s\S]*groupedDirectShippingSources\(partner\)[\s\S]*mapper\(sourceRow, sequence\)/);
   assert.match(pageSource, /async function removeDirectShippingRows[\s\S]*groupDirectShippingSourceIndexes/);
   assert.match(pageSource, /async function removeDirectShippingRows[\s\S]*splitDirectShippingDisplayedSources/);
+  assert.match(pageSource, /화면 행과 원본 주문 연결 정보가 일치하지 않아 삭제하지 않았습니다/);
+  assert.equal((pageSource.match(/const otherSourceIndexes = \[\.\.\.\(directShippingSourceIndexes\[otherPartner\] \|\| \[\]\)\];/g) || []).length, 2);
   assert.doesNotMatch(pageSource, /function mergeDirectShippingRows/);
   assert.doesNotMatch(pageSource, /function directShippingCode/);
 });
