@@ -11751,6 +11751,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const requestedHistoryMode = normalizeSalesHistoryMode(searchParams.get("salesMode"));
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
+  const [onlineSaveToast, setOnlineSaveToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const onlineSaveToastSequence = useRef(0);
   const [showJsonTool, setShowJsonTool] = useState(false);
   const [historyMode, setHistoryMode] = useState<SalesHistoryMode>(requestedHistoryMode);
   const [entryModalMode, setEntryModalMode] = useState<SalesHistoryMode | null>(null);
@@ -11918,6 +11920,15 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   function openOnlineSheetPreview(target: "sales" | "purchase") {
     const input = document.getElementById(target === "sales" ? "online-sales-sheet-toggle" : "online-purchase-sheet-toggle");
     if (input instanceof HTMLInputElement) input.checked = true;
+  }
+
+  function showOnlineSaveToast(message: string, tone: "success" | "error") {
+    const sequence = onlineSaveToastSequence.current + 1;
+    onlineSaveToastSequence.current = sequence;
+    setOnlineSaveToast({ message, tone });
+    window.setTimeout(() => {
+      if (onlineSaveToastSequence.current === sequence) setOnlineSaveToast(null);
+    }, tone === "success" ? 4500 : 8000);
   }
 
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
@@ -13399,48 +13410,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: "",
         };
       });
-    try {
-      sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "품목코드와 품목명 검증에 실패했습니다.");
-      return;
-    }
-    const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
-    if (missingRequired.length) {
-      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
-      return;
-    }
-    const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
-    const rows = aggregatedRows.map((item, index) => ({
-      sale_date: item.일자,
-      io_date: item.일자,
-      upload_ser_no: String(index + 1),
-      cust_code: item.거래처코드,
-      cust_name: item.거래처명,
-      wh_cd: item.출하창고,
-      prod_cd: item.품목코드,
-      prod_name: item.품목명,
-      qty: item.수량,
-      price: item.단가,
-      tax_amt: "",
-      supply_amt: item.공급가액,
-      total_amount: item.합계금액,
-      remarks: "",
-      vat_type: item["VAT 포함/별도"],
-    }));
-    if (!rows.length) {
+    if (!sourceRows.length) {
       window.alert("전송할 판매입력 행이 없습니다.");
       return;
     }
-    if (onlineSheetImportInFlight.current) return;
+    const initialMissingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
+    if (initialMissingRequired.length) {
+      window.alert(`FN판매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${initialMissingRequired.length}건)`);
+      return;
+    }
     if (completedSalesTasks.salesSent) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const confirmMessage = sourceRows.length === rows.length
-        ? `${rows.length}개 품목 행을 FN OS 판매 DB에 저장합니다. 계속할까요?`
-        : `${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 판매 DB에 저장합니다. 계속할까요?`;
-      const ok = window.confirm(confirmMessage);
+      const ok = window.confirm(`${sourceRows.length}개 입력 행의 검증 및 FN OS 판매 DB 저장을 시작합니다. 계속할까요?`);
       if (!ok) return;
     }
     onlineSheetImportInFlight.current = "sales";
@@ -13448,6 +13431,30 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
+      sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
+      const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
+      if (missingRequired.length) {
+        throw new Error(`필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
+      }
+      const aggregatedRows = aggregateSalesEntryRows(sourceRows, "sales");
+      const rows = aggregatedRows.map((item, index) => ({
+        sale_date: item.일자,
+        io_date: item.일자,
+        upload_ser_no: String(index + 1),
+        cust_code: item.거래처코드,
+        cust_name: item.거래처명,
+        wh_cd: item.출하창고,
+        prod_cd: item.품목코드,
+        prod_name: item.품목명,
+        qty: item.수량,
+        price: item.단가,
+        tax_amt: "",
+        supply_amt: item.공급가액,
+        total_amount: item.합계금액,
+        remarks: "",
+        vat_type: item["VAT 포함/별도"],
+      }));
+      if (!rows.length) throw new Error("전송할 판매입력 행이 없습니다.");
       const res = await fetch("/api/sales/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -13457,20 +13464,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       const popup = importResultText(data, "FN OS 판매입력 결과");
-      window.alert(popup);
+      const failed = !res.ok || data.ok === false || Number(data.fail_count || 0) > 0;
       if (!res.ok || data.ok === false) {
         setMessage(data.error || data.message || "판매입력 전송 실패");
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
         setMessage(`판매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
       }
-      if (!res.ok || data.ok === false || Number(data.fail_count || 0) > 0) openOnlineSheetPreview("sales");
+      if (failed) {
+        showOnlineSaveToast(popup, "error");
+        openOnlineSheetPreview("sales");
+      } else {
+        showOnlineSaveToast(`판매입력 저장 완료: ${data.success_count || rows.length}건`, "success");
+      }
       invalidateSalesInventoryCaches();
       loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
-      window.alert(`FN OS 판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
       setMessage(`판매입력 전송 실패: ${reason}`);
+      showOnlineSaveToast(`판매입력 저장 실패\n${reason}`, "error");
       openOnlineSheetPreview("sales");
     } finally {
       onlineSheetImportInFlight.current = null;
@@ -13499,57 +13511,20 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           메모: item.메모,
         };
       });
-    try {
-      sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "품목코드와 품목명 검증에 실패했습니다.");
-      return;
-    }
-    const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
-    if (missingRequired.length) {
-      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
-      return;
-    }
-    const purchaseOverrideRows = sourceRows
-      .filter((item) => item.__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch(item))
-      .map((item) => ({
-        customer_code: item.거래처코드,
-        customer_name: item.거래처명,
-        product_code: item.품목코드,
-        product_name: item.품목명,
-        price: item.단가 || item.공급가액,
-      }));
-    const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
-    const rows = aggregatedRows.map((item, index) => ({
-      purchase_date: item.일자,
-      io_date: item.일자,
-      upload_ser_no: String(index + 1),
-      cust_code: item.거래처코드,
-      cust_name: item.거래처명,
-      wh_cd: item.입고창고,
-      prod_cd: item.품목코드,
-      prod_name: item.품목명,
-      qty: item.수량,
-      price: item.단가 || item.공급가액,
-      tax_amt: "",
-      supply_amt: item.공급가액,
-      total_amount: item.합계금액,
-      remarks: item.메모,
-      vat_type: item["VAT 포함/별도"],
-    }));
-    if (!rows.length) {
+    if (!sourceRows.length) {
       window.alert("전송할 구매입력 행이 없습니다.");
       return;
     }
-    if (onlineSheetImportInFlight.current) return;
+    const initialMissingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
+    if (initialMissingRequired.length) {
+      window.alert(`FN구매입력 필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${initialMissingRequired.length}건)`);
+      return;
+    }
     if (completedSalesTasks.purchaseSent) {
       const ok = window.confirm("구매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
     } else {
-      const confirmMessage = sourceRows.length === rows.length
-        ? `${rows.length}개 품목 행을 FN OS 구매 DB에 저장합니다. 계속할까요?`
-        : `${sourceRows.length}개 엑셀 행을 ${rows.length}개 품목 행으로 합산해 FN OS 구매 DB에 저장합니다. 계속할까요?`;
-      const ok = window.confirm(confirmMessage);
+      const ok = window.confirm(`${sourceRows.length}개 입력 행의 검증 및 FN OS 구매 DB 저장을 시작합니다. 계속할까요?`);
       if (!ok) return;
     }
     onlineSheetImportInFlight.current = "purchase";
@@ -13557,6 +13532,39 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
+      sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
+      const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
+      if (missingRequired.length) {
+        throw new Error(`필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
+      }
+      const purchaseOverrideRows = sourceRows
+        .filter((item) => item.__purchaseOverrideCandidate === "1" && !directShippingDeliveryFeeRowMatch(item))
+        .map((item) => ({
+          customer_code: item.거래처코드,
+          customer_name: item.거래처명,
+          product_code: item.품목코드,
+          product_name: item.품목명,
+          price: item.단가 || item.공급가액,
+        }));
+      const aggregatedRows = aggregateSalesEntryRows(sourceRows, "purchases");
+      const rows = aggregatedRows.map((item, index) => ({
+        purchase_date: item.일자,
+        io_date: item.일자,
+        upload_ser_no: String(index + 1),
+        cust_code: item.거래처코드,
+        cust_name: item.거래처명,
+        wh_cd: item.입고창고,
+        prod_cd: item.품목코드,
+        prod_name: item.품목명,
+        qty: item.수량,
+        price: item.단가 || item.공급가액,
+        tax_amt: "",
+        supply_amt: item.공급가액,
+        total_amount: item.합계금액,
+        remarks: item.메모,
+        vat_type: item["VAT 포함/별도"],
+      }));
+      if (!rows.length) throw new Error("전송할 구매입력 행이 없습니다.");
       if (purchaseOverrideRows.length) {
         await fetch("/api/fnos/purchase-price-overrides", {
           method: "POST",
@@ -13575,20 +13583,25 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       const popup = importResultText(data, "FN OS 구매입력 결과");
-      window.alert(popup);
+      const failed = !res.ok || data.ok === false || Number(data.fail_count || 0) > 0;
       if (!res.ok || data.ok === false) {
         setMessage(data.error || data.message || "구매입력 전송 실패");
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, purchaseSent: true }));
         setMessage(`구매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
       }
-      if (!res.ok || data.ok === false || Number(data.fail_count || 0) > 0) openOnlineSheetPreview("purchase");
+      if (failed) {
+        showOnlineSaveToast(popup, "error");
+        openOnlineSheetPreview("purchase");
+      } else {
+        showOnlineSaveToast(`구매입력 저장 완료: ${data.success_count || rows.length}건`, "success");
+      }
       invalidateSalesInventoryCaches();
       loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
-      window.alert(`FN OS 구매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
       setMessage(`구매입력 전송 실패: ${reason}`);
+      showOnlineSaveToast(`구매입력 저장 실패\n${reason}`, "error");
       openOnlineSheetPreview("purchase");
     } finally {
       onlineSheetImportInFlight.current = null;
@@ -17046,6 +17059,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           </div>
         }
       />
+      {onlineSaveToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed bottom-5 right-5 z-[100] flex max-w-md items-start gap-3 rounded-xl border px-4 py-3 text-sm font-bold shadow-2xl ${onlineSaveToast.tone === "success" ? "border-emerald-200 bg-emerald-600 text-white" : "border-rose-200 bg-rose-600 text-white"}`}
+        >
+          <span className="min-w-0 whitespace-pre-line">{onlineSaveToast.message}</span>
+          <button type="button" className="shrink-0 text-lg leading-none text-white/80 hover:text-white" aria-label="알림 닫기" onClick={() => setOnlineSaveToast(null)}>×</button>
+        </div>
+      )}
       {quickLookupOpen && (
         <FormModal
           title="상품 간편 조회"

@@ -86,8 +86,11 @@ test("direct F4 save hides the modal while the request runs and restores the dra
   assert.match(pageSource, /\{localError && <p[^>]*>\{localError\}<\/p>\}/);
 });
 
-test("online sales/purchase save closes before import, skips busy overlay, and reopens on failure", () => {
+test("online sales/purchase save confirms immediately, runs in background, and reports with toast", () => {
   assert.match(pageSource, /const onlineSheetImportInFlight = useRef<"sales" \| "purchase" \| null>\(null\);/);
+  assert.match(pageSource, /const \[onlineSaveToast, setOnlineSaveToast\] = useState/);
+  assert.match(pageSource, /function showOnlineSaveToast\(/);
+  assert.match(pageSource, /\{onlineSaveToast && \([\s\S]*role="status"[\s\S]*\{onlineSaveToast\.message\}/);
   const openPreviewStart = pageSource.indexOf("  function openOnlineSheetPreview(");
   const openPreviewSource = pageSource.slice(openPreviewStart, pageSource.indexOf("  const [sheets", openPreviewStart));
   assert.match(openPreviewSource, /target: "sales" \| "purchase"/);
@@ -96,24 +99,29 @@ test("online sales/purchase save closes before import, skips busy overlay, and r
   const salesStart = pageSource.indexOf("  async function sendSalesInput()");
   const salesSource = pageSource.slice(salesStart, pageSource.indexOf("  async function sendPurchaseInput()", salesStart));
   assert.match(salesSource, /if \(onlineSheetImportInFlight\.current\) return;/);
-  assert.match(salesSource, /onlineSheetImportInFlight\.current = "sales";[\s\S]*closeOnlineSheetPreview\("sales"\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*fetch\("\/api\/sales\/import"/);
-  const salesImportSource = salesSource.slice(salesSource.indexOf("fetch(\"/api/sales/import\""), salesSource.indexOf("const data", salesSource.indexOf("fetch(\"/api/sales/import\"")));
+  assert.match(salesSource, /window\.confirm[\s\S]*onlineSheetImportInFlight\.current = "sales";[\s\S]*closeOnlineSheetPreview\("sales"\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*enrichOnlineEntryRows\(sourceRows, "sales"\)[\s\S]*fetch\("\/api\/sales\/import"/);
+  assert.ok(salesSource.indexOf("window.confirm") < salesSource.indexOf("enrichOnlineEntryRows(sourceRows, \"sales\")"));
+  const salesImportStart = salesSource.indexOf("fetch(\"/api/sales/import\"");
+  const salesImportSource = salesSource.slice(salesImportStart, salesSource.indexOf("const data", salesImportStart));
   assert.match(salesImportSource, /fnosSkipBusyOverlay: true/);
-  assert.match(salesSource, /if \(!res\.ok \|\| data\.ok === false \|\| Number\(data\.fail_count \|\| 0\) > 0\) openOnlineSheetPreview\("sales"\);/);
-  assert.match(salesSource, /catch \(error\) \{[\s\S]*openOnlineSheetPreview\("sales"\);[\s\S]*finally \{[\s\S]*onlineSheetImportInFlight\.current = null;/);
+  const salesAfterConfirm = salesSource.slice(salesSource.indexOf("onlineSheetImportInFlight.current = \"sales\""));
+  assert.doesNotMatch(salesAfterConfirm, /window\.alert/);
+  assert.match(salesAfterConfirm, /showOnlineSaveToast\([\s\S]*openOnlineSheetPreview\("sales"\)/);
 
   const purchaseStart = pageSource.indexOf("  async function sendPurchaseInput()");
   const purchaseSource = pageSource.slice(purchaseStart, pageSource.indexOf("  async function matchInvoiceNumbers", purchaseStart));
   assert.match(purchaseSource, /if \(onlineSheetImportInFlight\.current\) return;/);
-  assert.match(purchaseSource, /onlineSheetImportInFlight\.current = "purchase";[\s\S]*closeOnlineSheetPreview\("purchase"\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*fetch\("\/api\/purchases\/import"/);
+  assert.match(purchaseSource, /window\.confirm[\s\S]*onlineSheetImportInFlight\.current = "purchase";[\s\S]*closeOnlineSheetPreview\("purchase"\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*enrichOnlineEntryRows\(sourceRows, "purchases"\)[\s\S]*fetch\("\/api\/purchases\/import"/);
+  assert.ok(purchaseSource.indexOf("window.confirm") < purchaseSource.indexOf("enrichOnlineEntryRows(sourceRows, \"purchases\")"));
   const purchaseImportStart = purchaseSource.indexOf("fetch(\"/api/purchases/import\"");
   const purchaseImportSource = purchaseSource.slice(purchaseImportStart, purchaseSource.indexOf("const data", purchaseImportStart));
   assert.match(purchaseImportSource, /fnosSkipBusyOverlay: true/);
   const overrideStart = purchaseSource.indexOf("fetch(\"/api/fnos/purchase-price-overrides\"");
   const overrideSource = purchaseSource.slice(overrideStart, purchaseSource.indexOf(".catch(() => null)", overrideStart));
   assert.match(overrideSource, /fnosSkipBusyOverlay: true/);
-  assert.match(purchaseSource, /if \(!res\.ok \|\| data\.ok === false \|\| Number\(data\.fail_count \|\| 0\) > 0\) openOnlineSheetPreview\("purchase"\);/);
-  assert.match(purchaseSource, /catch \(error\) \{[\s\S]*openOnlineSheetPreview\("purchase"\);[\s\S]*finally \{[\s\S]*onlineSheetImportInFlight\.current = null;/);
+  const purchaseAfterConfirm = purchaseSource.slice(purchaseSource.indexOf("onlineSheetImportInFlight.current = \"purchase\""));
+  assert.doesNotMatch(purchaseAfterConfirm, /window\.alert/);
+  assert.match(purchaseAfterConfirm, /showOnlineSaveToast\([\s\S]*openOnlineSheetPreview\("purchase"\)/);
 });
 
 test("direct sales/purchase entry narrows reference lookups before F4 save", () => {
