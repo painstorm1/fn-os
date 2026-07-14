@@ -11915,8 +11915,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     });
   }
 
+  function openOnlineSheetPreview(target: "sales" | "purchase") {
+    const input = document.getElementById(target === "sales" ? "online-sales-sheet-toggle" : "online-purchase-sheet-toggle");
+    if (input instanceof HTMLInputElement) input.checked = true;
+  }
+
   const [sheets, setSheets] = useState<Record<SalesSheetName, string[][]>>(salesInitialSheets);
   const sheetsRef = useRef<Record<SalesSheetName, string[][]>>(sheets);
+  const onlineSheetImportInFlight = useRef<"sales" | "purchase" | null>(null);
   const productMappingSaveInFlight = useRef(0);
   const productMappingRefreshHoldUntil = useRef(0);
   useEffect(() => {
@@ -13373,6 +13379,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function sendSalesInput() {
+    if (onlineSheetImportInFlight.current) return;
     let sourceRows: Array<Record<string, string>> = sheets["FN판매입력"]
       .filter(rowHasValue)
       .map((row) => {
@@ -13425,6 +13432,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("전송할 판매입력 행이 없습니다.");
       return;
     }
+    if (onlineSheetImportInFlight.current) return;
     if (completedSalesTasks.salesSent) {
       const ok = window.confirm("판매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
@@ -13435,14 +13443,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm(confirmMessage);
       if (!ok) return;
     }
+    onlineSheetImportInFlight.current = "sales";
+    closeOnlineSheetPreview("sales");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
       const res = await fetch("/api/sales/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ rows, source_file_name: "FN_OS_ONLINE_ORDER" }),
-      });
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       const popup = importResultText(data, "FN OS 판매입력 결과");
       window.alert(popup);
@@ -13451,18 +13463,22 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, salesSent: true }));
         setMessage(`판매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
-        if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("sales");
       }
+      if (!res.ok || data.ok === false || Number(data.fail_count || 0) > 0) openOnlineSheetPreview("sales");
       invalidateSalesInventoryCaches();
       loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
       window.alert(`FN OS 판매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
       setMessage(`판매입력 전송 실패: ${reason}`);
+      openOnlineSheetPreview("sales");
+    } finally {
+      onlineSheetImportInFlight.current = null;
     }
   }
 
   async function sendPurchaseInput() {
+    if (onlineSheetImportInFlight.current) return;
     const purchaseInputRows = sheets["FN구매입력"];
     let sourceRows: Array<Record<string, string>> = purchaseInputRows
       .filter(rowHasValue)
@@ -13525,6 +13541,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       window.alert("전송할 구매입력 행이 없습니다.");
       return;
     }
+    if (onlineSheetImportInFlight.current) return;
     if (completedSalesTasks.purchaseSent) {
       const ok = window.confirm("구매입력을 이미 전송한 것으로 보입니다. 중복 전송 위험이 있습니다. 계속할까요?");
       if (!ok) return;
@@ -13535,6 +13552,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const ok = window.confirm(confirmMessage);
       if (!ok) return;
     }
+    onlineSheetImportInFlight.current = "purchase";
+    closeOnlineSheetPreview("purchase");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
       if (purchaseOverrideRows.length) {
@@ -13542,15 +13562,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
+          fnosSkipBusyOverlay: true,
           body: JSON.stringify({ rows: purchaseOverrideRows }),
-        }).catch(() => null);
+        } as RequestInit & { fnosSkipBusyOverlay: boolean }).catch(() => null);
       }
       const res = await fetch("/api/purchases/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ rows, source_file_name: "FN_OS_DIRECT_SHIPPING_PURCHASE" }),
-      });
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       const popup = importResultText(data, "FN OS 구매입력 결과");
       window.alert(popup);
@@ -13559,14 +13581,17 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } else {
         setCompletedSalesTasks((prev) => ({ ...prev, purchaseSent: true }));
         setMessage(`구매입력 처리 완료: 성공 ${data.success_count || 0}건 / 실패 ${data.fail_count || 0}건`);
-        if (Number(data.fail_count || 0) === 0) closeOnlineSheetPreview("purchase");
       }
+      if (!res.ok || data.ok === false || Number(data.fail_count || 0) > 0) openOnlineSheetPreview("purchase");
       invalidateSalesInventoryCaches();
       loadSummary(true, { skipBusyOverlay: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "알 수 없는 오류";
       window.alert(`FN OS 구매입력 결과\nDB 저장: 0건\n성공: 0건\n실패: ${rows.length}건\n이유: ${reason}`);
       setMessage(`구매입력 전송 실패: ${reason}`);
+      openOnlineSheetPreview("purchase");
+    } finally {
+      onlineSheetImportInFlight.current = null;
     }
   }
 
