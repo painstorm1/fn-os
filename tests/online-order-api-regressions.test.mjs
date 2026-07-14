@@ -125,6 +125,59 @@ function loadLotteonAdapterWithMocks() {
   return cjsModule.exports.LotteonChannelAdapter;
 }
 
+function loadSyncRouteWithMocks({ adapters, selectRows }) {
+  const filename = resolve(projectRoot, "src/app/api/fnos/online-orders/sync/route.ts");
+  const compiled = ts.transpileModule(syncRouteSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      strict: true,
+    },
+    fileName: filename,
+  }).outputText;
+  const cjsModule = { exports: {} };
+  const localRequire = (specifier) => {
+    if (specifier === "next/server") {
+      class NextResponse {
+        constructor(body, init = {}) { this.body = body; this.status = init.status || 200; this.headers = init.headers || {}; }
+        static json(body, init = {}) { return { body, status: init.status || 200, headers: init.headers || {} }; }
+      }
+      return { NextRequest: class NextRequest {}, NextResponse };
+    }
+    if (specifier === "fs") {
+      return { promises: { readdir: async () => { const error = new Error("fixture has no manual-order directory"); error.code = "ENOENT"; throw error; } } };
+    }
+    if (specifier === "xlsx") return {};
+    if (specifier === "officecrypto-tool") return {};
+    if (specifier === "@/lib/channels/common/order-status") return { normalizeCollectableOnlineOrders: (orders) => orders };
+    if (specifier === "@/lib/channels/registry") {
+      return {
+        ONLINE_ORDER_UNSUPPORTED_MESSAGE: "unsupported",
+        onlineOrderAdapterCodeForChannel: (channel) => String(channel.channel_code || "").toUpperCase(),
+        onlineOrderAdapterForChannel: (channel) => adapters[String(channel.channel_code || "").toUpperCase()],
+      };
+    }
+    if (specifier === "@/lib/automation-jobs") return { createAutomationJob: async () => ({ id: "job-test" }) };
+    if (specifier === "@/lib/fnos-db") {
+      class FnosDbError extends Error { constructor(message) { super(message); this.status = 500; } }
+      return {
+        FnosDbError,
+        hasDbConfig: () => true,
+        selectRows,
+        deleteRows: async () => [],
+        insertRows: async () => [],
+        patchRows: async () => [],
+        upsertRows: async () => [],
+      };
+    }
+    if (specifier === "@/lib/sales-channel-credentials") return { readChannelCredentials: async () => [{ key: "api_key", value: "test-key" }] };
+    return createRequire(filename)(specifier);
+  };
+  new Function("require", "exports", "module", compiled)(localRequire, cjsModule.exports, cjsModule);
+  return cjsModule.exports;
+}
+
 function loadTossAdapterWithMocks() {
   const filename = resolve(projectRoot, "src/lib/channels/toss/index.ts");
   const compiled = ts.transpileModule(tossSource, {
@@ -269,6 +322,19 @@ test("롯데ON 출고 API 식별자는 병합 주문의 대표 raw가 아니라 
   const secondItemRaw = { odNo: "LO-ORDER-1", odSeq: "2", procSeq: "1" };
   const itemFirst = (key) => String(secondItemRaw[key] || orderRaw[key] || "").trim();
   assert.equal(itemFirst("odSeq"), "2", "같은 주문번호의 두 번째 상품행은 두 번째 odSeq로 출고 API가 호출되어야 합니다.");
+});
+
+test("SSG 병합 주문은 각 상품행의 row key와 shppSeq를 우선한다", () => {
+  const ssgStart = pageSource.indexOf('if (alias === "S")');
+  const nextBranch = pageSource.indexOf('if (alias === "L")', ssgStart);
+  const ssgBranch = pageSource.slice(ssgStart, nextBranch);
+  assert.match(ssgBranch, /const shppNo = onlineOrderItemFirstFallbackText\(/);
+  assert.match(ssgBranch, /const shppSeq = onlineOrderItemFirstFallbackText\(/);
+
+  const rowKeyStart = pageSource.indexOf("function onlineOrderApiRowKey(");
+  const rowKeyEnd = pageSource.indexOf("function onlineOrderManualFileNameFromRaw(", rowKeyStart);
+  const rowKeyBlock = pageSource.slice(rowKeyStart, rowKeyEnd);
+  assert.match(rowKeyBlock, /alias === "S"[\s\S]*itemRaw\.__fnosRowKey \|\| orderRaw\.__fnosRowKey/);
 });
 
 test("F2/F5 송장업로드는 기존 진행상태/API 식별자를 보존하고 직접 재빌드로 덮지 않는다", () => {
@@ -569,4 +635,99 @@ test("온라인 주문수집은 쇼핑몰별 제한 병렬 처리하고 완료 �
   assert.ok(flowMatch, "runOrderCollectionFlow 블록을 찾지 못했습니다.");
   assert.match(flowMatch[0], /await revealOrderCollectionStatuses\(finalStatuses\)/);
   assertNotMatch(flowMatch[0], /window\.alert\("작업 완료"\)/, "F1 주문수집 완료 후 새창 alert가 다시 켜졌습니다.");
+});
+
+test("롯데ON confirmed 수집은 요청 전 기간을 유지하고 일별 반복행/범위 밖/배송시작 행을 제거한다", async () => {
+  const LotteonChannelAdapter = loadLotteonAdapterWithMocks();
+  const adapter = new LotteonChannelAdapter();
+  const previousFetch = globalThis.fetch;
+  const confirmedRows = [
+    { odNo: "LO-0713", odSeq: "1", procSeq: "1", spdNo: "P-13", spdNm: "7월 13일 주문", ordQty: 1, odCmptDttm: "20260713013000" },
+    { odNo: "LO-0714", odSeq: "1", procSeq: "1", spdNo: "P-14", spdNm: "7월 14일 주문", ordQty: 1, odCmptDttm: "20260714093000" },
+    { odNo: "LO-STALE", odSeq: "1", procSeq: "1", spdNo: "P-12", spdNm: "범위 밖 주문", ordQty: 1, odCmptDttm: "20260712120000" },
+    { odNo: "LO-SHIPPED", odSeq: "1", procSeq: "1", spdNo: "P-SHIP", spdNm: "배송시작 주문", ordQty: 1, odCmptDttm: "20260713130000", invoiceNo: "TRACK-1" },
+  ];
+  globalThis.fetch = async (_url, init = {}) => {
+    const body = JSON.parse(String(init.body || "{}"));
+    return { json: async () => ({ returnCode: "0000", deliveryOrderList: body.ifCplYN === "Y" ? confirmedRows : [] }) };
+  };
+  try {
+    const result = await adapter.collectOrders({ api_key: "test-key", from: "2026-07-13", to: "2026-07-14", channel_code: "LOTTEON", channel_name: "롯데온" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.map((order) => order.orderNo).sort(), ["LO-0713", "LO-0714"]);
+    assert.equal(result.data.length, 2, "일별 API가 같은 confirmed 행을 반복해도 주문은 중복되면 안 됩니다.");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("F1 동일 기간 재수집은 SSG KST DB fallback과 mixed API 병합으로 active 주문을 복원한다", async () => {
+  const channels = [
+    { id: "lotte", channel_name: "롯데온", channel_code: "LOTTEON", customer_code: "L" },
+    { id: "ssg", channel_name: "SSG신세계", channel_code: "SSG", customer_code: "S" },
+  ];
+  const ssgDbRows = [
+    { id: "ssg-a", channel_name: "SSG신세계", order_no: "SSG-0713-A", bundle_order_no: "SHP-A", order_date: "2026-07-12T16:10:00.000Z", order_status: "주문확인", raw_payload: { ordNo: "SSG-0713-A", shppNo: "SHP-A" } },
+    { id: "ssg-b", channel_name: "SSG신세계", order_no: "SSG-0713-B", bundle_order_no: "SHP-B", order_date: "2026-07-13T05:00:00.000Z", order_status: "주문확인", raw_payload: { ordNo: "SSG-0713-B", shppNo: "SHP-B" } },
+    { id: "ssg-c", channel_name: "SSG신세계", order_no: "SSG-0714-EARLY", bundle_order_no: "SHP-C", order_date: "2026-07-13T15:20:00.000Z", order_status: "주문확인", raw_payload: { ordNo: "SSG-0714-EARLY", shppNo: "SHP-C" } },
+    { id: "ssg-complete", channel_name: "SSG신세계", order_no: "SSG-COMPLETE", bundle_order_no: "SHP-COMPLETE", order_date: "2026-07-13T02:00:00.000Z", order_status: "출고완료", raw_payload: { ordNo: "SSG-COMPLETE", shppNo: "SHP-COMPLETE" } },
+    { id: "ssg-dispatched", channel_name: "SSG신세계", order_no: "SSG-DISPATCHED", bundle_order_no: "SHP-DISPATCHED", order_date: "2026-07-13T03:00:00.000Z", order_status: "주문확인", raw_payload: { ordNo: "SSG-DISPATCHED", shppNo: "SHP-DISPATCHED" } },
+  ];
+  const itemRows = ssgDbRows.map((row) => ({ order_id: row.id, channel_product_code: `P-${row.id}`, channel_option_code: `O-${row.id}`, channel_product_name: row.order_no, qty: 1, raw_payload: { __fnosRowKey: row.bundle_order_no } }));
+  const dispatchJob = {
+    input_json: { action: "dispatch", rows: [{ channelName: "SSG신세계", orderNo: "SSG-DISPATCHED", shppNo: "SHP-DISPATCHED" }] },
+    result_json: { results: [{ channel_name: "SSG신세계", ok: true }] },
+  };
+  const fallbackQueries = [];
+  let dbConfirmed = false;
+  const selectRows = async (table, query = {}) => {
+    if (table === "sales_channels") return channels;
+    if (table === "automation_jobs") return [dispatchJob];
+    if (table === "order_items") return itemRows.filter((row) => String(query.order_id || "").includes(row.order_id));
+    if (table !== "orders") return [];
+    if (query.and) {
+      fallbackQueries.push(query);
+      return dbConfirmed ? ssgDbRows : [];
+    }
+    if (!dbConfirmed) return [];
+    const inFilter = String(query.order_no || "");
+    return ssgDbRows.filter((row) => inFilter.includes(`\"${row.order_no}\"`));
+  };
+  const lotteOrders = ["LO-0713", "LO-0714"].map((orderNo, index) => ({
+    channelCode: "LOTTEON", channelName: "롯데온", orderNo, orderDate: `2026-07-${13 + index}`, orderStatus: "주문확인", items: [{ channelProductName: orderNo, qty: 1 }], raw: { odNo: orderNo },
+  }));
+  const ssgOrder = (orderNo, shppNo, orderDate = "2026-07-14T01:00:00+09:00") => ({
+    channelCode: "SSG", channelName: "SSG신세계", orderNo, bundleOrderNo: shppNo, orderDate, orderStatus: "주문확인", items: [{ channelProductName: orderNo, channelOptionCode: shppNo, qty: 1, raw: { __fnosRowKey: shppNo } }], raw: { ordNo: orderNo, shppNo },
+  });
+  let phase = "initial";
+  const adapters = {
+    LOTTEON: { collectOrders: async () => ({ ok: true, data: lotteOrders, message: "lotte fixture" }) },
+    SSG: { collectOrders: async () => ({
+      ok: true,
+      data: phase === "recollect" ? [] : phase === "mixed"
+        ? [ssgOrder("SSG-0713-B", "SHP-B"), ssgOrder("SSG-NEW", "SHP-NEW"), ssgOrder("SSG-COMPLETE", "SHP-COMPLETE"), ssgOrder("SSG-DISPATCHED", "SHP-DISPATCHED")]
+        : [ssgOrder("SSG-0713-A", "SHP-A", "2026-07-13T01:10:00+09:00"), ssgOrder("SSG-0713-B", "SHP-B"), ssgOrder("SSG-0714-EARLY", "SHP-C", "2026-07-14T00:20:00+09:00")],
+      message: "ssg fixture",
+    }) },
+  };
+  const route = loadSyncRouteWithMocks({ adapters, selectRows });
+  const collect = async () => (await route.POST({ json: async () => ({ from: "2026-07-13", to: "2026-07-14", dry_run: true, worker_direct: true }), nextUrl: { origin: "http://fixture" } })).body;
+
+  const initial = await collect();
+  assert.equal(initial.orders.filter((order) => order.channelCode === "LOTTEON").length, 2);
+  assert.equal(initial.orders.filter((order) => order.channelCode === "SSG").length, 3);
+
+  // 외부 confirm 성공 뒤 durable FNOS 주문만 남고 브라우저 workspace는 초기화된 상태를 모사한다.
+  dbConfirmed = true;
+  phase = "recollect";
+  const recollected = await collect();
+  assert.equal(recollected.orders.filter((order) => order.channelCode === "LOTTEON").length, 2, "confirm 후 workspace reset/F1 재수집에서도 롯데온 2건이 유지되어야 합니다.");
+  assert.deepEqual(recollected.orders.filter((order) => order.channelCode === "SSG").map((order) => order.orderNo).sort(), ["SSG-0713-A", "SSG-0713-B", "SSG-0714-EARLY"]);
+
+  phase = "mixed";
+  const mixed = await collect();
+  assert.deepEqual(mixed.orders.filter((order) => order.channelCode === "SSG").map((order) => order.orderNo).sort(), ["SSG-0713-A", "SSG-0713-B", "SSG-0714-EARLY", "SSG-NEW"]);
+  assert.equal(mixed.orders.filter((order) => order.orderNo === "SSG-0713-B").length, 1, "API와 fallback의 같은 주문은 stable orderNo로 dedupe되어야 합니다.");
+  assert.equal(mixed.orders.some((order) => order.orderNo === "SSG-COMPLETE" || order.orderNo === "SSG-DISPATCHED"), false, "DB 출고완료/최근 성공 dispatch 주문은 부활하면 안 됩니다.");
+  assert.ok(fallbackQueries.some((query) => String(query.and).includes("order_date.gte.2026-07-12T15:00:00.000Z") && String(query.and).includes("order_date.lt.2026-07-14T15:00:00.000Z")), "SSG fallback은 7/13~7/14 KST 경계를 명시적 UTC 반개구간으로 조회해야 합니다.");
 });

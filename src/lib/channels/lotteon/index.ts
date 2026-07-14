@@ -194,10 +194,10 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       const explicitStatusCode = text(params.odPrgsStepCd || params.order_status_code);
       // 공식 스펙: 조회 odPrgsStepCd는 11(출고지시)/23(회수지시)만 존재.
       // 신규/주문확인 구분은 ifCplYN(연동완료여부)로 한다: 빈 값=신규생성 주문, Y=연동완료(주문확인) 주문.
-      // 기본 수집은 최근 N일을 훑어 신규주문 누락을 복구하지만, ifCplYN=Y는 이미 판매자센터에서
-      // 출고완료된 과거 주문도 계속 반환될 수 있다. 주문확인 조회는 수집 종료일 주문만 유지해
-      // 어제/이전 처리완료 건이 오늘 발주 목록에 재등장하지 않게 한다.
-      const confirmedOrderYmd = compactYmd(end);
+      // 기본 수집은 요청한 전체 기간을 일 단위로 조회한다. API가 각 일자 호출에 같은 행이나
+      // 범위 밖 confirmed 행을 반복 반환할 수 있으므로, 행 자체의 주문일이 있으면 요청 범위로 한 번 더 제한한다.
+      const collectionStartYmd = compactYmd(start);
+      const collectionEndYmd = compactYmd(end);
       const stageQueries = explicitStatusCode
         ? [{ ifCplYN: text(params.ifCplYN || params.if_cpl_yn), stage: "", statusCode: explicitStatusCode }]
         : [
@@ -216,7 +216,11 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
           const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
           const data = await readJson(response);
           for (const row of findRows(data)) {
-            if (!explicitStatusCode && stageQuery.ifCplYN === "Y" && confirmedOrderYmd && lotteonOrderYmd(row) !== confirmedOrderYmd) continue;
+            const orderYmd = lotteonOrderYmd(row);
+            if (orderYmd && (
+              (collectionStartYmd && orderYmd < collectionStartYmd)
+              || (collectionEndYmd && orderYmd > collectionEndYmd)
+            )) continue;
             const key = [row.odNo, row.orderNo, row.odSeq, row.odDtlSeq, row.procSeq, row.spdNo, row.pdNo, row.sitmNo].map(text).join("|");
             if (key && seenRowKeys.has(key)) continue;
             if (key) seenRowKeys.add(key);

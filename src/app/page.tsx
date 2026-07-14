@@ -7779,8 +7779,8 @@ function onlineOrderActionIds(order: CollectedOnlineOrder, item: CollectedOnline
   const alias = onlineOrderChannelAlias(channelName, channelCode);
 
   if (alias === "S") {
-    const shppNo = onlineOrderFallbackText(order, item, ["shppNo", "shipmentBoxId", "shipment_box_id"]) || bundleId || orderId;
-    const shppSeq = onlineOrderFallbackText(order, item, ["shppSeq", "shpp_seq"]) || salesCellText(item.channelOptionCode) || "1";
+    const shppNo = onlineOrderItemFirstFallbackText(order, item, ["shppNo", "shipmentBoxId", "shipment_box_id"]) || bundleId || orderId;
+    const shppSeq = onlineOrderItemFirstFallbackText(order, item, ["shppSeq", "shpp_seq"]) || salesCellText(item.channelOptionCode) || "1";
     return { apiOrderId: shppNo, apiProductOrderId: shppSeq, apiShipmentId: shppNo, apiExtraId: "" };
   }
   if (alias === "L") {
@@ -7829,11 +7829,13 @@ function onlineOrderManualRowKey(order: CollectedOnlineOrder, item: CollectedOnl
 function onlineOrderApiRowKey(order: CollectedOnlineOrder, item: CollectedOnlineOrderItem) {
   const orderRaw = onlineOrderRecord(order.raw);
   const itemRaw = onlineOrderRecord(item.raw);
-  const rowKey = salesCellText(orderRaw.__fnosRowKey || itemRaw.__fnosRowKey);
-  if (!rowKey) return "";
   const channelName = salesCellText(order.customerName || order.channelName);
   const channelCode = salesCellText(order.customerCode || order.channelCode);
   const alias = onlineOrderChannelAlias(channelName, channelCode) || channelName || channelCode || "api";
+  const rowKey = salesCellText(alias === "S"
+    ? itemRaw.__fnosRowKey || orderRaw.__fnosRowKey
+    : orderRaw.__fnosRowKey || itemRaw.__fnosRowKey);
+  if (!rowKey) return "";
   return ["api", alias, rowKey].filter(Boolean).join("|");
 }
 

@@ -157,6 +157,30 @@ function kstYmd(date = new Date()) {
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
 }
 
+function dateYmd(value: unknown, fallback: string) {
+  const compact = text(value).replace(/\D/g, "");
+  return compact.length >= 8 ? `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}` : fallback;
+}
+
+function kstMidnightUtc(ymd: string, dayOffset = 0) {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + dayOffset) - 9 * 60 * 60 * 1000).toISOString();
+}
+
+function requestedKstOrderWindow(params: AnyRecord) {
+  const today = kstYmd();
+  const requestedFrom = dateYmd(params.fromDate ?? params.from, today);
+  const requestedTo = dateYmd(params.toDate ?? params.to, requestedFrom);
+  const from = requestedFrom <= requestedTo ? requestedFrom : requestedTo;
+  const to = requestedFrom <= requestedTo ? requestedTo : requestedFrom;
+  return {
+    from,
+    to,
+    startUtc: kstMidnightUtc(from),
+    endExclusiveUtc: kstMidnightUtc(to, 1),
+  };
+}
+
 function orderNoFilterValue(value: string) {
   return value.replace(/"/g, "\\\"");
 }
@@ -235,6 +259,82 @@ function persistedOrderIdentities(row: AnyRecord) {
   return ids;
 }
 
+function normalizedOrderIdentities(order: NormalizedOrder) {
+  const ids = new Set<string>();
+  const raw = record(order.raw);
+  const nested = record(raw.shppDirection || raw.order || raw.item);
+  [
+    order.orderNo,
+    order.bundleOrderNo,
+    raw.ordNo,
+    raw.orordNo,
+    raw.orderNo,
+    raw.shppNo,
+    raw.shppDirectionNo,
+    raw.dircNo,
+    nested.ordNo,
+    nested.orordNo,
+    nested.orderNo,
+    nested.shppNo,
+    nested.shppDirectionNo,
+    nested.dircNo,
+  ].forEach((value) => addIdentity(ids, value));
+  return ids;
+}
+
+function hasDispatchedIdentity(ids: Set<string>, dispatchedIds: Set<string>) {
+  return Array.from(ids).some((id) => dispatchedIds.has(id));
+}
+
+function ssgItemIdentity(item: NormalizedOrderItem) {
+  const raw = record(item.raw);
+  return firstText(
+    raw.__fnosRowKey,
+    item.channelOptionCode,
+    [item.channelProductCode, item.channelOptionName, item.sku, item.channelProductName].map(text).filter(Boolean).join("|"),
+  );
+}
+
+function mergeSsgCollectedOrders(apiOrders: NormalizedOrder[], fallbackOrders: NormalizedOrder[]) {
+  const merged: NormalizedOrder[] = [];
+  const orderIndexByIdentity = new Map<string, number>();
+  for (const order of [...apiOrders, ...fallbackOrders]) {
+    const identities = normalizedOrderIdentities(order);
+    let existingIndex: number | undefined;
+    for (const identity of identities) {
+      const candidate = orderIndexByIdentity.get(identity);
+      if (candidate !== undefined) {
+        existingIndex = candidate;
+        break;
+      }
+    }
+    if (existingIndex === undefined) {
+      existingIndex = merged.length;
+      merged.push({ ...order, items: [...order.items] });
+    } else {
+      const existing = merged[existingIndex];
+      const itemKeys = new Set(existing.items.map(ssgItemIdentity).filter(Boolean));
+      const missingItems = order.items.filter((item) => {
+        const key = ssgItemIdentity(item);
+        if (!key || itemKeys.has(key)) return false;
+        itemKeys.add(key);
+        return true;
+      });
+      if (missingItems.length) existing.items.push(...missingItems);
+      if (!existing.bundleOrderNo) existing.bundleOrderNo = order.bundleOrderNo;
+      if (!existing.orderDate) existing.orderDate = order.orderDate;
+      if (!existing.receiverName) existing.receiverName = order.receiverName;
+      if (!existing.phone1) existing.phone1 = order.phone1;
+      if (!existing.phone2) existing.phone2 = order.phone2;
+      if (!existing.zipcode) existing.zipcode = order.zipcode;
+      if (!existing.address) existing.address = order.address;
+      if (!existing.deliveryMessage) existing.deliveryMessage = order.deliveryMessage;
+    }
+    normalizedOrderIdentities(merged[existingIndex]).forEach((identity) => orderIndexByIdentity.set(identity, existingIndex!));
+  }
+  return merged;
+}
+
 async function recentlyDispatchedOrderNos(channel: AnyRecord) {
   const rows = await selectRows<AnyRecord>("automation_jobs", {
     job_type: "eq.online_order_status_update",
@@ -251,26 +351,25 @@ async function recentlyDispatchedOrderNos(channel: AnyRecord) {
     const jobRows = Array.isArray(input.rows) ? input.rows.map(record) : [];
     jobRows.forEach((row) => {
       const rowChannel = firstText(row.channelName, row.channel_name, row.mallName, row.mall_name);
-      if (rowChannel && channelName && rowChannel !== channelName) return;
+      if (rowChannel && channelName && !sameChannelName(rowChannel, channelName)) return;
       statusJobRowIdentities(row).forEach((id) => dispatched.add(id));
     });
   });
   return dispatched;
 }
 
-async function ssgFallbackConfirmedOrders(channel: AnyRecord) {
-  const today = kstYmd();
+async function ssgFallbackConfirmedOrders(channel: AnyRecord, params: AnyRecord, dispatchedIds?: Set<string>) {
+  const window = requestedKstOrderWindow(params);
   const rows = await selectRows<AnyRecord>("orders", {
     channel_name: `eq.${text(channel.channel_name)}`,
-    order_date: `gte.${today}`,
+    and: `(order_date.gte.${window.startUtc},order_date.lt.${window.endExclusiveUtc})`,
     order: "updated_at.desc",
-    limit: 20,
+    limit: 1000,
   }).catch(() => []);
-  const dispatchedIds = await recentlyDispatchedOrderNos(channel);
+  const recentDispatchIds = dispatchedIds || await recentlyDispatchedOrderNos(channel);
   const activeRows = rows.filter((row) => {
     if (orderStatusAdvanceRank(row.order_status) >= orderStatusRank["출고완료"]) return false;
-    const ids = persistedOrderIdentities(row);
-    return !Array.from(ids).some((id) => dispatchedIds.has(id));
+    return !hasDispatchedIdentity(persistedOrderIdentities(row), recentDispatchIds);
   });
   if (!activeRows.length) return [] as NormalizedOrder[];
   const itemRows = await selectRows<AnyRecord>("order_items", {
@@ -303,7 +402,7 @@ async function ssgFallbackConfirmedOrders(channel: AnyRecord) {
       orderNo: text(row.order_no),
       bundleOrderNo: text(row.bundle_order_no),
       orderDate: text(row.order_date),
-      // SSG listShppDirection은 발주확인 후 빈 목록을 반환하므로, 당일 기존 수집건은 주문확인으로 유지해 F1 재수집에서 0건으로 사라지지 않게 한다.
+      // SSG API가 발주확인 후 행을 숨겨도 요청한 KST 기간의 durable active 주문은 F1 작업목록에 유지한다.
       orderStatus: "주문확인",
       receiverName: text(row.receiver_name),
       phone1: text(row.phone1),
@@ -314,6 +413,15 @@ async function ssgFallbackConfirmedOrders(channel: AnyRecord) {
       items: items.length ? items : [{ channelProductName: "SSG 주문", qty: 1, raw }],
       raw,
     } satisfies NormalizedOrder;
+  });
+}
+
+async function activeSsgApiOrders(channel: AnyRecord, orders: NormalizedOrder[], dispatchedIds: Set<string>) {
+  const existingByNo = await existingOrdersByNo(channel, orders.map((order) => order.orderNo));
+  return orders.filter((order) => {
+    const existing = existingByNo.get(order.orderNo);
+    if (orderStatusAdvanceRank(existing?.order_status) >= orderStatusRank["출고완료"]) return false;
+    return !hasDispatchedIdentity(normalizedOrderIdentities(order), dispatchedIds);
   });
 }
 
@@ -772,8 +880,13 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
         return orderStatusAdvanceRank(existing?.order_status) <= orderStatusAdvanceRank(order.orderStatus);
       });
     }
-    if (result.ok && adapterCode === "SSG" && !orders.length) {
-      orders = await ssgFallbackConfirmedOrders(channel);
+    if (result.ok && adapterCode === "SSG") {
+      const dispatchedIds = await recentlyDispatchedOrderNos(channel);
+      const [activeApiOrders, fallbackOrders] = await Promise.all([
+        activeSsgApiOrders(channel, orders, dispatchedIds),
+        ssgFallbackConfirmedOrders(channel, body, dispatchedIds),
+      ]);
+      orders = mergeSsgCollectedOrders(activeApiOrders, fallbackOrders);
     }
     if (result.ok && !dryRun) {
       await persistOrders(channel, orders);
