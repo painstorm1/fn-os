@@ -6,6 +6,7 @@ import officeCrypto from "officecrypto-tool";
 import { normalizeCollectableOnlineOrders } from "@/lib/channels/common/order-status";
 import type { ChannelResult, NormalizedOrder, NormalizedOrderItem } from "@/lib/channels/common/types";
 import { onlineOrderAdapterCodeForChannel, onlineOrderAdapterForChannel, ONLINE_ORDER_UNSUPPORTED_MESSAGE } from "@/lib/channels/registry";
+import { applyCurrentSsgOrderStatuses } from "@/lib/channels/ssg";
 import { createAutomationJob } from "@/lib/automation-jobs";
 import { deleteRows, FnosDbError, hasDbConfig, insertRows, patchRows, selectRows, upsertRows } from "@/lib/fnos-db";
 import { readChannelCredentials } from "@/lib/sales-channel-credentials";
@@ -189,11 +190,9 @@ async function existingOrdersByNo(channel: AnyRecord, orderNos: string[]) {
   const uniqueNos = Array.from(new Set(orderNos.map(text).filter(Boolean)));
   if (!uniqueNos.length) return new Map<string, AnyRecord>();
   const rows = await selectRows<AnyRecord>("orders", {
-    channel_name: `eq.${text(channel.channel_name)}`,
     order_no: `in.(${uniqueNos.map((orderNo) => `"${orderNoFilterValue(orderNo)}"`).join(",")})`,
-    limit: Math.max(1, uniqueNos.length),
-  }).catch(() => []);
-  return new Map(rows.map((row) => [text(row.order_no), row]));
+  });
+  return new Map(rows.filter((row) => sameChannelName(row.channel_name, channel.channel_name)).map((row) => [text(row.order_no), row]));
 }
 
 function addIdentity(set: Set<string>, value: unknown) {
@@ -202,61 +201,11 @@ function addIdentity(set: Set<string>, value: unknown) {
   if (next && next.length > 2) set.add(next);
 }
 
-function statusJobRowIdentities(row: AnyRecord) {
-  const ids = new Set<string>();
-  [
-    row.orderNo,
-    row.order_no,
-    row.orderId,
-    row.order_id,
-    row.bundleOrderNo,
-    row.bundle_order_no,
-    row.shipmentBoxId,
-    row.shipment_box_id,
-    row.shppNo,
-    row.shpp_no,
-    row.odNo,
-    row.od_no,
-  ].forEach((value) => addIdentity(ids, value));
-  return ids;
-}
-
 function sameChannelName(left: unknown, right: unknown) {
-  const a = text(left);
-  const b = text(right);
+  const compact = (value: unknown) => text(value).toLowerCase().replace(/[\s_.-]+/g, "");
+  const a = compact(left);
+  const b = compact(right);
   return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
-}
-
-function statusJobChannelSucceeded(job: AnyRecord, channelName: string) {
-  const result = record(job.result_json);
-  const results = Array.isArray(result.results) ? result.results.map(record) : [];
-  if (!results.length) return true;
-  const matchingResults = results.filter((row) => sameChannelName(firstText(row.channel_name, row.channelName, row.mallName, row.mall_name), channelName));
-  if (!matchingResults.length) return false;
-  return matchingResults.some((row) => row.ok !== false);
-}
-
-function persistedOrderIdentities(row: AnyRecord) {
-  const ids = new Set<string>();
-  const raw = record(row.raw_payload);
-  const nested = record(raw.shppDirection || raw.order || raw.item);
-  [
-    row.order_no,
-    row.bundle_order_no,
-    raw.ordNo,
-    raw.orordNo,
-    raw.orderNo,
-    raw.shppNo,
-    raw.shppDirectionNo,
-    raw.dircNo,
-    nested.ordNo,
-    nested.orordNo,
-    nested.orderNo,
-    nested.shppNo,
-    nested.shppDirectionNo,
-    nested.dircNo,
-  ].forEach((value) => addIdentity(ids, value));
-  return ids;
 }
 
 function normalizedOrderIdentities(order: NormalizedOrder) {
@@ -280,10 +229,6 @@ function normalizedOrderIdentities(order: NormalizedOrder) {
     nested.dircNo,
   ].forEach((value) => addIdentity(ids, value));
   return ids;
-}
-
-function hasDispatchedIdentity(ids: Set<string>, dispatchedIds: Set<string>) {
-  return Array.from(ids).some((id) => dispatchedIds.has(id));
 }
 
 function ssgItemIdentity(item: NormalizedOrderItem) {
@@ -335,42 +280,15 @@ function mergeSsgCollectedOrders(apiOrders: NormalizedOrder[], fallbackOrders: N
   return merged;
 }
 
-async function recentlyDispatchedOrderNos(channel: AnyRecord) {
-  const rows = await selectRows<AnyRecord>("automation_jobs", {
-    job_type: "eq.online_order_status_update",
-    status: "eq.success",
-    order: "created_at.desc",
-    limit: 20,
-  }).catch(() => []);
-  const channelName = text(channel.channel_name);
-  const dispatched = new Set<string>();
-  rows.forEach((job) => {
-    const input = record(job.input_json);
-    if (text(input.action) !== "dispatch") return;
-    if (!statusJobChannelSucceeded(job, channelName)) return;
-    const jobRows = Array.isArray(input.rows) ? input.rows.map(record) : [];
-    jobRows.forEach((row) => {
-      const rowChannel = firstText(row.channelName, row.channel_name, row.mallName, row.mall_name);
-      if (rowChannel && channelName && !sameChannelName(rowChannel, channelName)) return;
-      statusJobRowIdentities(row).forEach((id) => dispatched.add(id));
-    });
-  });
-  return dispatched;
-}
-
-async function ssgFallbackConfirmedOrders(channel: AnyRecord, params: AnyRecord, dispatchedIds?: Set<string>) {
+async function ssgFallbackConfirmedOrders(channel: AnyRecord, params: AnyRecord) {
   const window = requestedKstOrderWindow(params);
   const rows = await selectRows<AnyRecord>("orders", {
     channel_name: `eq.${text(channel.channel_name)}`,
     and: `(order_date.gte.${window.startUtc},order_date.lt.${window.endExclusiveUtc})`,
     order: "updated_at.desc",
     limit: 1000,
-  }).catch(() => []);
-  const recentDispatchIds = dispatchedIds || await recentlyDispatchedOrderNos(channel);
-  const activeRows = rows.filter((row) => {
-    if (orderStatusAdvanceRank(row.order_status) >= orderStatusRank["출고완료"]) return false;
-    return !hasDispatchedIdentity(persistedOrderIdentities(row), recentDispatchIds);
   });
+  const activeRows = rows.filter((row) => orderStatusAdvanceRank(row.order_status) < orderStatusRank["출고완료"]);
   if (!activeRows.length) return [] as NormalizedOrder[];
   const itemRows = await selectRows<AnyRecord>("order_items", {
     order_id: `in.(${activeRows.map((row) => text(row.id)).filter(Boolean).join(",")})`,
@@ -416,12 +334,11 @@ async function ssgFallbackConfirmedOrders(channel: AnyRecord, params: AnyRecord,
   });
 }
 
-async function activeSsgApiOrders(channel: AnyRecord, orders: NormalizedOrder[], dispatchedIds: Set<string>) {
+async function activeSsgApiOrders(channel: AnyRecord, orders: NormalizedOrder[]) {
   const existingByNo = await existingOrdersByNo(channel, orders.map((order) => order.orderNo));
   return orders.filter((order) => {
     const existing = existingByNo.get(order.orderNo);
-    if (orderStatusAdvanceRank(existing?.order_status) >= orderStatusRank["출고완료"]) return false;
-    return !hasDispatchedIdentity(normalizedOrderIdentities(order), dispatchedIds);
+    return orderStatusAdvanceRank(existing?.order_status) < orderStatusRank["출고완료"];
   });
 }
 
@@ -868,28 +785,35 @@ async function collectChannel(channel: AnyRecord, body: AnyRecord) {
       seller_id: text(channel.seller_id),
     };
     const result: ChannelResult<NormalizedOrder[]> = await adapter.collectOrders(params);
-    let orders: NormalizedOrder[] = normalizeCollectableOnlineOrders(result.data || []);
+    const collectedOrders = result.data || [];
+    const terminalSsgOrders = adapterCode === "SSG"
+      ? collectedOrders.filter((order) => orderStatusAdvanceRank(order.orderStatus) >= orderStatusRank["출고완료"])
+      : [];
+
+    let orders: NormalizedOrder[] = normalizeCollectableOnlineOrders(collectedOrders);
     if (result.ok && adapterCode === "LOTTEON" && orders.length) {
-      const [existingByNo, dispatchedOrderNos] = await Promise.all([
-        existingOrdersByNo(channel, orders.map((order) => order.orderNo)),
-        recentlyDispatchedOrderNos(channel),
-      ]);
+      const existingByNo = await existingOrdersByNo(channel, orders.map((order) => order.orderNo));
       orders = orders.filter((order) => {
-        if (dispatchedOrderNos.has(order.orderNo)) return false;
         const existing = existingByNo.get(order.orderNo) as AnyRecord | undefined;
         return orderStatusAdvanceRank(existing?.order_status) <= orderStatusAdvanceRank(order.orderStatus);
       });
     }
     if (result.ok && adapterCode === "SSG") {
-      const dispatchedIds = await recentlyDispatchedOrderNos(channel);
       const [activeApiOrders, fallbackOrders] = await Promise.all([
-        activeSsgApiOrders(channel, orders, dispatchedIds),
-        ssgFallbackConfirmedOrders(channel, body, dispatchedIds),
+        activeSsgApiOrders(channel, orders),
+        ssgFallbackConfirmedOrders(channel, body),
       ]);
-      orders = mergeSsgCollectedOrders(activeApiOrders, fallbackOrders);
+      const currentFallbackOrders = await applyCurrentSsgOrderStatuses(
+        text(credentials.api_key || credentials.access_key),
+        text(credentials.api_base_url) || "https://eapi.ssgadm.com",
+        fallbackOrders,
+      );
+      terminalSsgOrders.push(...currentFallbackOrders.filter((order) => orderStatusAdvanceRank(order.orderStatus) >= orderStatusRank["출고완료"]));
+      orders = mergeSsgCollectedOrders(activeApiOrders, normalizeCollectableOnlineOrders(currentFallbackOrders));
     }
     if (result.ok && !dryRun) {
-      await persistOrders(channel, orders);
+      const ordersToPersist = Array.from(new Map([...orders, ...terminalSsgOrders].map((order) => [order.orderNo, order])).values());
+      await persistOrders(channel, ordersToPersist);
       await patchRows("sales_channels", { id: `eq.${text(channel.id)}` }, {
         last_synced_at: new Date().toISOString(),
         api_status: "connected",

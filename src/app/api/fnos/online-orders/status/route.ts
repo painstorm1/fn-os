@@ -44,10 +44,11 @@ function credentialReadError(rows: Array<{ error?: string }>) {
 }
 
 function channelMatches(channel: AnyRecord, value: string) {
-  const needle = text(value);
+  const compact = (input: unknown) => text(input).toLowerCase().replace(/[\s_.-]+/g, "");
+  const needle = compact(value);
   if (!needle) return false;
   return [channel.channel_name, channel.customer_name, channel.channel_code]
-    .map(text)
+    .map(compact)
     .some((value) => value === needle || (value && (value.includes(needle) || needle.includes(value))));
 }
 
@@ -107,78 +108,34 @@ function rowApiExtraId(row: AnyRecord) {
 
 const orderStatusRank: Record<string, number> = { 신규주문: 0, 주문확인: 1, 출고대기: 2, 출고완료: 3 };
 
-function addIdentity(set: Set<string>, value: unknown) {
-  const next = text(value);
-  if (next && next.length > 2) set.add(next);
-}
-
-function rowIdentities(row: AnyRecord) {
-  const ids = new Set<string>();
-  [
-    row.orderNo,
-    row.order_no,
-    row.orderId,
-    row.order_id,
-    row.bundleOrderNo,
-    row.bundle_order_no,
-    row.shipmentBoxId,
-    row.shipment_box_id,
-    row.shppNo,
-    row.shpp_no,
-    row.odNo,
-    row.od_no,
-  ].forEach((value) => addIdentity(ids, value));
-  return ids;
-}
-
-function persistedOrderIdentities(row: AnyRecord) {
-  const ids = new Set<string>();
-  const raw = row.raw_payload && typeof row.raw_payload === "object" && !Array.isArray(row.raw_payload) ? row.raw_payload as AnyRecord : {};
-  const nested = raw.shppDirection && typeof raw.shppDirection === "object" && !Array.isArray(raw.shppDirection) ? raw.shppDirection as AnyRecord : {};
-  [
-    row.order_no,
-    row.bundle_order_no,
-    raw.ordNo,
-    raw.orordNo,
-    raw.orderNo,
-    raw.shppNo,
-    raw.shppDirectionNo,
-    raw.dircNo,
-    nested.ordNo,
-    nested.orordNo,
-    nested.orderNo,
-    nested.shppNo,
-    nested.shppDirectionNo,
-    nested.dircNo,
-  ].forEach((value) => addIdentity(ids, value));
-  return ids;
-}
-
 function shouldAdvanceStatus(current: unknown, next: string) {
   const currentRank = orderStatusRank[text(current)] ?? -1;
   const nextRank = orderStatusRank[next] ?? -1;
   return nextRank >= 0 && currentRank < nextRank;
 }
 
+function persistedOrderNos(rows: AnyRecord[]) {
+  return Array.from(new Set(rows
+    .map((row) => text(row.persistedOrderNo || row.persisted_order_no || row.orderNo || row.order_no))
+    .filter(Boolean)));
+}
+
 async function updatePersistedOrderStatuses(channel: AnyRecord, channelRows: AnyRecord[], nextStatus: "주문확인" | "출고완료") {
-  const targetIds = new Set<string>();
-  channelRows.forEach((row) => rowIdentities(row).forEach((id) => targetIds.add(id)));
-  if (!targetIds.size) return 0;
+  const orderNos = persistedOrderNos(channelRows);
+  if (!orderNos.length) return 0;
   const orders = await selectRows<AnyRecord>("orders", {
-    channel_name: `eq.${text(channel.channel_name)}`,
-    order: "updated_at.desc",
-    limit: 500,
-  }).catch(() => []);
+    order_no: `in.(${orderNos.map((orderNo) => `"${orderNo.replace(/"/g, "\\\"")}"`).join(",")})`,
+  });
   const now = new Date().toISOString();
-  let patched = 0;
-  for (const order of orders) {
-    if (!shouldAdvanceStatus(order.order_status, nextStatus)) continue;
-    const ids = persistedOrderIdentities(order);
-    if (!Array.from(ids).some((id) => targetIds.has(id))) continue;
-    const saved = await patchRows<AnyRecord>("orders", { id: `eq.${text(order.id)}` }, { order_status: nextStatus, updated_at: now }).catch(() => []);
-    if (saved.length) patched += 1;
+  let persisted = 0;
+  for (const order of orders.filter((row) => channelMatches(channel, text(row.channel_name)))) {
+    if (shouldAdvanceStatus(order.order_status, nextStatus)) {
+      const saved = await patchRows<AnyRecord>("orders", { id: `eq.${text(order.id)}` }, { order_status: nextStatus, updated_at: now });
+      if (!saved.length) throw new Error(`${text(order.order_no)} FNOS 주문 상태 저장 결과가 없습니다.`);
+    }
+    persisted += 1;
   }
-  return patched;
+  return persisted;
 }
 
 export async function POST(request: NextRequest) {
@@ -255,7 +212,9 @@ export async function POST(request: NextRequest) {
           ? await adapter.confirmOrders({ ...baseParams, productOrderIds, confirmProductOrders })
           : { ok: false, error: "해당 쇼핑몰은 발주확인을 지원하지 않습니다." };
         const persisted_count = result.ok ? await updatePersistedOrderStatuses(channel, channelRows, "주문확인") : 0;
-        results.push({ channel_name: text(channel.channel_name), ok: result.ok, count: Math.max(productOrderIds.length, confirmProductOrders.length), persisted_count, message: result.message || result.error || "", raw: result.data });
+        const expectedPersistedCount = persistedOrderNos(channelRows).length;
+        const persistenceError = result.ok && persisted_count !== expectedPersistedCount ? `쇼핑몰 처리는 성공했지만 FNOS 주문 상태는 ${persisted_count}/${expectedPersistedCount}건만 저장되었습니다.` : "";
+        results.push({ channel_name: text(channel.channel_name), ok: result.ok && !persistenceError, count: Math.max(productOrderIds.length, confirmProductOrders.length), persisted_count, message: persistenceError || result.message || result.error || "", raw: result.data });
       }
       if (action === "dispatch") {
         const dispatchProductOrders = channelRows.map((row) => ({
@@ -282,7 +241,9 @@ export async function POST(request: NextRequest) {
           ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
           : { ok: false, error: "해당 쇼핑몰은 발송처리를 지원하지 않습니다." };
         const persisted_count = result.ok ? await updatePersistedOrderStatuses(channel, channelRows, "출고완료") : 0;
-        results.push({ channel_name: text(channel.channel_name), ok: result.ok, count: dispatchProductOrders.length, persisted_count, message: result.message || result.error || "", raw: result.data });
+        const expectedPersistedCount = persistedOrderNos(channelRows).length;
+        const persistenceError = result.ok && persisted_count !== expectedPersistedCount ? `쇼핑몰 처리는 성공했지만 FNOS 주문 상태는 ${persisted_count}/${expectedPersistedCount}건만 저장되었습니다.` : "";
+        results.push({ channel_name: text(channel.channel_name), ok: result.ok && !persistenceError, count: dispatchProductOrders.length, persisted_count, message: persistenceError || result.message || result.error || "", raw: result.data });
       }
     }
 

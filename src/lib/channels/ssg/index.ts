@@ -146,6 +146,7 @@ function findRows(data: unknown) {
 }
 const SSG_NEW_ORDER_CODES = ["11", "011", "PAYED", "PAID", "PAYMENTCOMPLETED", "PAYMENTCOMPLETE", "ORDERPAID", "NEW", "NEWORDER", "NOTYET", "NOTYETPLACE", "결제완료", "신규주문", "발주전"];
 const SSG_CONFIRMED_ORDER_CODES = ["12", "012", "20", "020", "21", "021", "PLACEORDEROK", "PLACEORDER", "ORDERCONFIRMED", "CONFIRMED", "READYTOSHIP", "READYFORDISPATCH", "READYFORDELIVERY", "SHIPPINGREADY", "DELIVERYREADY", "WAITINGDELIVERY", "발주확인", "주문확인", "발송대기", "배송준비", "출고대기"];
+const SSG_TERMINAL_ORDER_ITEM_STATUSES = new Set(["160", "170", "180", "380", "390"]);
 
 function ssgOrderStatus(row: AnyRecord) {
   // shppProgStatDtlCd/Nm은 배송진행 상세 단계(구체적)를 가리키므로, ordItemStatNm/ordStatNm 같은
@@ -170,6 +171,33 @@ function ssgOrderStatus(row: AnyRecord) {
   if (SSG_CONFIRMED_ORDER_CODES.includes(compact)) return "주문확인";
   if (code) return code;
   return "신규주문";
+}
+
+async function readCurrentSsgOrderItemStatuses(apiKey: string, baseUrl: string, orderNo: string) {
+  try {
+    const response = await fetch(`${baseUrl}/api/claim/v2/order/${encodeURIComponent(orderNo)}`, {
+      headers: { Authorization: apiKey, Accept: "application/xml" },
+    });
+    if (!response.ok) return [];
+    const body = await response.text();
+    return Array.from(body.matchAll(/<ordItemStat(?:\s[^>]*)?>\s*([^<\s]+)\s*<\/ordItemStat>/gi), (match) => match[1]);
+  } catch {
+    return [];
+  }
+}
+
+export async function applyCurrentSsgOrderStatuses(apiKey: string, baseUrl: string, orders: NormalizedOrder[]) {
+  const orderNos = Array.from(new Set(orders.map((order) => firstText(record(order.raw).orordNo, record(order.raw).ordNo)).filter(Boolean)));
+  const statusesByOrderNo = new Map(await Promise.all(orderNos.map(async (orderNo) => [
+    orderNo,
+    await readCurrentSsgOrderItemStatuses(apiKey, baseUrl, orderNo),
+  ] as const)));
+  return orders.map((order) => {
+    const raw = record(order.raw);
+    const currentStatuses = statusesByOrderNo.get(firstText(raw.orordNo, raw.ordNo)) || [];
+    if (!currentStatuses.some((status) => SSG_TERMINAL_ORDER_ITEM_STATUSES.has(status))) return order;
+    return { ...order, orderStatus: "출고완료", raw: { ...raw, __fnosSsgCurrentOrderItemStatuses: currentStatuses } };
+  });
 }
 
 function normalizeRow(row: AnyRecord, base: { channelCode: string; channelName: string; customerCode?: string; customerName?: string }): NormalizedOrder {
@@ -257,7 +285,10 @@ export class SsgChannelAdapter implements SalesChannelAdapter {
       const data = await readBody(response);
       const rows = findRows(data);
       const base = { channelCode: text(params.channel_code) || "SSG", channelName: text(params.channel_name) || "SSG", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
-      return { ok: true, data: rows.flatMap((row) => arrayify(row).map((item) => normalizeRow(record(item), base))).filter((order) => order.orderNo), message: `SSG 주문 ${rows.length}건을 수집했습니다.` };
+      const orders = rows.flatMap((row) => arrayify(row).map((item) => normalizeRow(record(item), base))).filter((order) => order.orderNo);
+      const currentOrders = await applyCurrentSsgOrderStatuses(apiKey, baseUrl, orders);
+      const terminalCount = currentOrders.filter((order) => order.orderStatus === "출고완료").length;
+      return { ok: true, data: currentOrders, message: `SSG 주문 ${rows.length}건 조회, 현재 출고완료 ${terminalCount}건 제외.` };
     } catch (error) {
       return { ok: false, data: [], error: error instanceof Error ? error.message : "SSG 주문 수집 실패" };
     }

@@ -13902,6 +13902,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         product_order_id: productOrderId,
         orderNo,
         order_no: orderNo,
+        persistedOrderNo: progressValue(row, "주문번호"),
         bundleOrderNo: progressValue(row, "API배송묶음ID") || progressValue(row, "묶음주문번호"),
         bundle_order_no: progressValue(row, "API배송묶음ID") || progressValue(row, "묶음주문번호"),
         shipmentBoxId: progressValue(row, "API배송묶음ID"),

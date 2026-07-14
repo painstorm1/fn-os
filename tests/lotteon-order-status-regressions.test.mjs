@@ -75,11 +75,19 @@ function loadStatusRoute(captured) {
       return {
         FnosDbError,
         hasDbConfig: () => true,
-        patchRows: async () => [],
-        selectRows: async (table) => table === "sales_channels" ? [
-          { id: "lotte", channel_name: "롯데ON", channel_code: "LOTTEON" },
-          { id: "ssg", channel_name: "SSG신세계", channel_code: "SSG" },
-        ] : [],
+        patchRows: async (_table, filters) => [{ id: String(filters.id || "saved") }],
+        selectRows: async (table, query) => {
+          if (table === "sales_channels") return [
+            { id: "lotte", channel_name: "롯데ON", channel_code: "LOTTEON" },
+            { id: "ssg", channel_name: "SSG신세계", channel_code: "SSG" },
+          ];
+          if (table !== "orders") return [];
+          return [
+            { id: "lotte-100", channel_name: "롯데ON", order_no: "OD-100", order_status: "주문확인" },
+            { id: "lotte-101", channel_name: "롯데ON", order_no: "OD-101", order_status: "주문확인" },
+            { id: "ssg-100", channel_name: "SSG신세계", order_no: "SSG-100", order_status: "주문확인" },
+          ].filter((row) => String(query.order_no || "").includes(row.order_no));
+        },
       };
     }
     if (specifier === "@/lib/sales-channel-credentials") {
@@ -322,9 +330,9 @@ test("상태 route는 롯데ON 누락 배송사를 비워 두고 다른 채널 C
       action: "dispatch",
       use_worker: false,
       rows: [
-        { channelName: "롯데ON", orderId: "OD-100", productOrderId: "2", procSeq: "3", trackingNumber: "LOTTE-TRACK" },
-        { channelName: "롯데ON", orderId: "OD-101", productOrderId: "4", procSeq: "5", trackingNumber: "" },
-        { channelName: "SSG신세계", orderId: "SSG-100", productOrderId: "SSG-2", trackingNumber: "SSG-TRACK" },
+        { channelName: "롯데ON", persistedOrderNo: "OD-100", orderId: "OD-100", productOrderId: "2", procSeq: "3", trackingNumber: "LOTTE-TRACK" },
+        { channelName: "롯데ON", persistedOrderNo: "OD-101", orderId: "OD-101", productOrderId: "4", procSeq: "5", trackingNumber: "" },
+        { channelName: "SSG신세계", persistedOrderNo: "SSG-100", orderId: "SSG-100", productOrderId: "SSG-2", trackingNumber: "SSG-TRACK" },
       ],
     }),
   });
