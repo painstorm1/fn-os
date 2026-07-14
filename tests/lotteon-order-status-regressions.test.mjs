@@ -124,6 +124,83 @@ async function withFetchMock(mock, run) {
   }
 }
 
+test("롯데ON 수집은 API140 exact 상태만 권위로 사용하고 odNo별 한 번만 조회한다", async () => {
+  const Adapter = loadLotteonAdapter();
+  const calls = [];
+  const api139Rows = [
+    { odNo: "OD-MULTI", odSeq: "1", procSeq: "1", spdNo: "P-1", spdNm: "상품 1", odCmptDttm: "20260714100000" },
+    { odNo: "OD-MULTI", odSeq: "2", procSeq: "1", spdNo: "P-2", spdNm: "상품 2", odCmptDttm: "20260714100000" },
+    { odNo: "OD-STALE-13", odSeq: "1", procSeq: "1", spdNo: "P-13", spdNm: "stale confirmed", odCmptDttm: "20260714100000" },
+    { odNo: "OD-12", odSeq: "1", procSeq: "1", spdNo: "P-12", spdNm: "상품준비", odCmptDttm: "20260714100000" },
+    { odNo: "OD-14", odSeq: "1", procSeq: "1", spdNo: "P-14", spdNm: "배송중", odCmptDttm: "20260714100000" },
+    { odNo: "OD-15", odSeq: "1", procSeq: "1", spdNo: "P-15", spdNm: "배송완료", odCmptDttm: "20260714100000" },
+  ];
+  const readbackRows = {
+    "OD-MULTI": [
+      { odNo: "OD-MULTI", odSeq: 1, procSeq: 1, odPrgsStepCd: "11", invcNbr: 0 },
+      { odNo: "OD-MULTI", odSeq: 2, procSeq: 1, odPrgsStepCd: "13", invcNbr: 1 },
+    ],
+    "OD-STALE-13": [{ odNo: "OD-STALE-13", odSeq: 1, procSeq: 1, odPrgsStepCd: "13", invcNbr: 1 }],
+    "OD-12": [{ odNo: "OD-12", odSeq: 1, procSeq: 1, odPrgsStepCd: "12", invcNbr: 0 }],
+    "OD-14": [{ odNo: "OD-14", odSeq: 1, procSeq: 1, odPrgsStepCd: "14", invcNbr: 1 }],
+    "OD-15": [{ odNo: "OD-15", odSeq: 1, procSeq: 1, odPrgsStepCd: "15", invcNbr: 1 }],
+  };
+
+  const result = await withFetchMock(async (url, init = {}) => {
+    const call = { url: String(url), body: JSON.parse(String(init.body || "{}")) };
+    calls.push(call);
+    if (call.url.endsWith("SellerDeliveryProgressStateSearch")) {
+      return jsonResponse({ data: { deliveryProgressStateList: readbackRows[call.body.odNo] || [] } });
+    }
+    return jsonResponse({ returnCode: "0000", deliveryOrderList: call.body.ifCplYN === "Y" ? api139Rows : [] });
+  }, () => new Adapter().collectOrders({ api_key: "test-key", from: "20260714", to: "20260714" }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.map(({ orderNo, orderStatus }) => [orderNo, orderStatus]).sort(), [
+    ["OD-12", "주문확인"],
+    ["OD-MULTI", "신규주문"],
+  ]);
+  assert.equal(result.data.find((order) => order.orderNo === "OD-MULTI").items.length, 1, "같은 주문의 API140 stage13 상품행은 제외해야 합니다.");
+  const readbackCalls = calls.filter((call) => call.url.endsWith("SellerDeliveryProgressStateSearch"));
+  assert.equal(readbackCalls.length, 5);
+  assert.equal(new Set(readbackCalls.map((call) => call.body.odNo)).size, 5);
+});
+
+test("롯데ON 수집은 API140 exact 행이 틀리거나 없으면 API139 후보를 포함하지 않는다", async () => {
+  const Adapter = loadLotteonAdapter();
+  const result = await withFetchMock(async (url, init = {}) => {
+    const body = JSON.parse(String(init.body || "{}"));
+    if (String(url).endsWith("SellerDeliveryProgressStateSearch")) {
+      return jsonResponse({ data: { deliveryProgressStateList: body.odNo === "OD-WRONG"
+        ? [{ odNo: "OD-WRONG", odSeq: 999, procSeq: 1, odPrgsStepCd: "11" }]
+        : [] } });
+    }
+    return jsonResponse({ returnCode: "0000", deliveryOrderList: body.ifCplYN ? [] : [
+      { odNo: "OD-WRONG", odSeq: "1", procSeq: "1", spdNm: "wrong", odCmptDttm: "20260714100000" },
+      { odNo: "OD-MISSING", odSeq: "1", procSeq: "1", spdNm: "missing", odCmptDttm: "20260714100000" },
+    ] });
+  }, () => new Adapter().collectOrders({ api_key: "test-key", from: "20260714", to: "20260714" }));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.data, []);
+  assert.match(result.error, /API140.*일치/);
+});
+
+test("롯데ON 수집은 API140 조회 실패 시 stale API139 결과 없이 실패한다", async () => {
+  const Adapter = loadLotteonAdapter();
+  const result = await withFetchMock(async (url, init = {}) => {
+    if (String(url).endsWith("SellerDeliveryProgressStateSearch")) throw new Error("API140 unavailable");
+    const body = JSON.parse(String(init.body || "{}"));
+    return jsonResponse({ returnCode: "0000", deliveryOrderList: body.ifCplYN ? [] : [
+      { odNo: "OD-STALE", odSeq: "1", procSeq: "1", spdNm: "stale", odCmptDttm: "20260714100000" },
+    ] });
+  }, () => new Adapter().collectOrders({ api_key: "test-key", from: "20260714", to: "20260714" }));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.data, []);
+  assert.match(result.error, /API140 unavailable/);
+});
+
 test("롯데ON 주문확인은 API210 ifCompleteList/ifCplYN=Y만 사용한다", async () => {
   const Adapter = loadLotteonAdapter();
   const calls = [];

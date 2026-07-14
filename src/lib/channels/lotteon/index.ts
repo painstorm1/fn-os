@@ -189,11 +189,13 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
     try {
       const baseUrl = text(params.api_base_url) || LOTTEON_BASE_URL;
       const path = text(params.orders_path) || "/v1/openapi/delivery/v1/SellerDeliveryOrdersSearch";
+      const readbackPath = "/v1/openapi/delivery/v1/SellerDeliveryProgressStateSearch";
+      const requestHeaders = { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` };
       const start = formatDate(params.fromDate ?? params.from, "start");
       const end = formatDate(params.toDate ?? params.to, "end");
       const explicitStatusCode = text(params.odPrgsStepCd || params.order_status_code);
-      // 공식 스펙: 조회 odPrgsStepCd는 11(출고지시)/23(회수지시)만 존재.
-      // 신규/주문확인 구분은 ifCplYN(연동완료여부)로 한다: 빈 값=신규생성 주문, Y=연동완료(주문확인) 주문.
+      // API139는 odPrgsStepCd 11 후보만 모으고, 최종 신규/주문확인 여부는 아래 API140 exact 행으로 판정한다.
+      // ifCplYN 빈 값/Y를 모두 조회해야 신규생성/연동완료 후보를 빠뜨리지 않는다.
       // 기본 수집은 요청한 전체 기간을 일 단위로 조회한다. API가 각 일자 호출에 같은 행이나
       // 범위 밖 confirmed 행을 반복 반환할 수 있으므로, 행 자체의 주문일이 있으면 요청 범위로 한 번 더 제한한다.
       const collectionStartYmd = compactYmd(start);
@@ -213,7 +215,7 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
         const bodyExtra: AnyRecord = { ...extra, odPrgsStepCd: stageQuery.statusCode };
         if (stageQuery.ifCplYN) bodyExtra.ifCplYN = stageQuery.ifCplYN;
         for (const body of dailySearchBodies(start, end, bodyExtra)) {
-          const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+          const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) });
           const data = await readJson(response);
           for (const row of findRows(data)) {
             const orderYmd = lotteonOrderYmd(row);
@@ -230,7 +232,24 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       }
 
       const base = { channelCode: text(params.channel_code) || "LOTTEON", channelName: text(params.channel_name) || "롯데ON", customerCode: text(params.customer_code), customerName: text(params.customer_name) };
-      const collectableRows = rows.filter(({ row }) => !lotteonShipmentStarted(row));
+      const unshippedRows = rows.filter(({ row }) => !lotteonShipmentStarted(row));
+      const readbacks = new Map<string, AnyRecord[]>();
+      for (const odNo of Array.from(new Set(unshippedRows.map(({ row }) => lotteonIds(row).odNo).filter(Boolean)))) {
+        const response = await fetch(`${baseUrl}${readbackPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify({ odNo }) });
+        readbacks.set(odNo, lotteonReadbackRows(await readJson(response)));
+      }
+      const collectableRows = unshippedRows.flatMap(({ row }) => {
+        const ids = lotteonValidatedIds(row);
+        if (!ids) throw new Error("롯데ON API140 현재 상태 확인에 필요한 주문 식별자가 누락되었습니다.");
+        const exactRow = readbacks.get(ids.odNo)?.find((candidate) => (
+          text(candidate.odNo) === ids.odNo
+          && lotteonPositiveInteger(candidate.odSeq) === ids.odSeq
+          && lotteonPositiveInteger(candidate.procSeq) === ids.procSeq
+        ));
+        if (!exactRow) throw new Error("롯데ON API140 응답에서 주문 식별자와 일치하는 현재 상태를 찾지 못했습니다.");
+        const stage = text(exactRow.odPrgsStepCd);
+        return stage === "11" || stage === "12" ? [{ row, stage: stage === "11" ? "신규주문" : "주문확인" }] : [];
+      });
       const excludedShipmentCount = rows.length - collectableRows.length;
       const normalizedOrders = collectableRows.map(({ row, stage }) => normalizeRow(row, base, stage)).filter((order) => order.orderNo);
       const mergedOrders = mergeOrders(normalizedOrders);
