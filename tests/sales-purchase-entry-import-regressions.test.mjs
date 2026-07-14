@@ -75,6 +75,17 @@ test("direct sales/purchase statement save uses the user-selected statement date
   assert.doesNotMatch(saveRowsSource, /fallbackEntryDate = mode === "returns" \? entryDate : entryDateToday\(\)/);
 });
 
+test("direct F4 save hides the modal while the request runs and restores the draft on failure", () => {
+  const saveRowsStart = pageSource.indexOf("  async function saveRows()");
+  assert.notEqual(saveRowsStart, -1);
+  const saveRowsSource = pageSource.slice(saveRowsStart, pageSource.indexOf("  const allLinesSelected", saveRowsStart));
+  assert.match(saveRowsSource, /setBackgroundSaving\(true\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*await fetch/);
+  assert.match(saveRowsSource, /let saved = false;[\s\S]*saved = true;[\s\S]*finally \{[\s\S]*if \(!saved\) setBackgroundSaving\(false\);/);
+  assert.match(saveRowsSource, /if \(saved\) window\.alert\("저장은 완료됐지만 화면 갱신에 실패했습니다\. 새로고침해 주세요\."\);[\s\S]*else setLocalError/);
+  assert.match(pageSource, /if \(backgroundSaving\) return null;/);
+  assert.match(pageSource, /\{localError && <p[^>]*>\{localError\}<\/p>\}/);
+});
+
 test("direct sales/purchase entry narrows reference lookups before F4 save", () => {
   assert.match(salesInventorySource, /async function referenceRowsForEntries\(rows: RawRow\[\]\)[\s\S]*lookupReferenceRows\("customers"[\s\S]*lookupReferenceRows\("products"[\s\S]*lookupReferenceRows\("warehouses"/);
   assert.match(salesInventorySource, /const \[customers, products, warehouses\] = await referenceRowsForEntries\(rows\);/);

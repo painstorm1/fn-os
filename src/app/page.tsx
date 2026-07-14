@@ -18487,6 +18487,7 @@ function SalesPurchaseEntryModal({
   const [warehouseCode, setWarehouseCode] = useState(initialDraft?.warehouseCode || "100");
   const [vatMode, setVatMode] = useState<SalesPurchaseVatMode>(initialDraft?.vatMode || "included");
   const [lines, setLines] = useState<SalesPurchaseEntryLine[]>(prefillLines);
+  const [backgroundSaving, setBackgroundSaving] = useState(false);
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [customers, setCustomers] = useState<FnCustomer[]>([]);
   const [warehouses, setWarehouses] = useState<FnWarehouse[]>([]);
@@ -19099,7 +19100,10 @@ function SalesPurchaseEntryModal({
         vat_type: effectiveVatMode === "included" ? "VAT포함" : "VAT별도",
       };
     });
+    let saved = false;
     setSaving(true);
+    setBackgroundSaving(true);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     try {
       const endpoint = mode === "purchases" ? "/api/purchases/import" : "/api/sales/import";
       if (initialDraft?.replaceGroupKey) {
@@ -19131,6 +19135,7 @@ function SalesPurchaseEntryModal({
         setLocalError(data.duplicate_count ? "이미 저장된 입력으로 처리되어 새로 추가된 행이 없습니다." : "저장된 행이 없습니다. 입력값을 확인해 주세요.");
         return;
       }
+      saved = true;
       invalidateClientCache("/api/dashboard/summary");
       invalidateClientCache("/api/sales/import");
       invalidateClientCache("/api/purchases/import");
@@ -19145,15 +19150,19 @@ function SalesPurchaseEntryModal({
         source_file_name: initialDraft?.sourceFileName || (mode === "returns" ? "FN_OS_RETURN_EXCHANGE_ENTRY" : mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY"),
       })));
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "저장 실패");
+      if (saved) window.alert("저장은 완료됐지만 화면 갱신에 실패했습니다. 새로고침해 주세요.");
+      else setLocalError(error instanceof Error ? error.message : "저장 실패");
     } finally {
       setSaving(false);
+      if (!saved) setBackgroundSaving(false);
     }
   }
 
   const allLinesSelected = lines.length > 0 && selectedLineIds.length === lines.length;
   const allProductSearchResultsSelected = productSearch.results.length > 0
     && productSearch.results.every((product, index) => productSearchSelectedKeys.includes(productSearchKey(product, index)));
+
+  if (backgroundSaving) return null;
 
   return (
     <FormModal
@@ -19172,6 +19181,7 @@ function SalesPurchaseEntryModal({
       }
     >
       <div ref={formRef} className="space-y-4">
+        {localError && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{localError}</p>}
         <div className="flex justify-end gap-2">
           <ActionButton type="button" variant="secondary" onClick={() => excelFileInputRef.current?.click()}>엑셀등록</ActionButton>
           <ActionButton type="button" variant="secondary" onClick={downloadCurrentEntry}>현재 다운로드</ActionButton>
