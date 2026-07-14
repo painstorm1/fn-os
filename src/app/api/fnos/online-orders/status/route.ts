@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
       api_enabled: "eq.true",
     });
     const activeChannels = channels.filter((channel) => ONLINE_ORDER_ADAPTERS[adapterCodeForChannel(channel)]);
-    const results = [];
+    const results: AnyRecord[] = [];
 
     for (const channel of activeChannels) {
       const channelRows = rowsForChannel(rows, channel);
@@ -237,20 +237,43 @@ export async function POST(request: NextRequest) {
           deliveryCompanyCode: text(row.deliveryCompanyCode || row.delivery_company_code) || (adapterCode === "LOTTEON" ? "" : "CJGLS"),
           trackingNumber: text(row.trackingNumber || row.tracking_number),
         })).filter((row) => adapterCode === "LOTTEON" || ((row.productOrderId || row.orderId || row.shipmentBoxId) && row.trackingNumber));
-        const result = adapter.dispatchOrders
-          ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
-          : { ok: false, error: "해당 쇼핑몰은 발송처리를 지원하지 않습니다." };
-        const persisted_count = result.ok ? await updatePersistedOrderStatuses(channel, channelRows, "출고완료") : 0;
-        const expectedPersistedCount = persistedOrderNos(channelRows).length;
-        const persistenceError = result.ok && persisted_count !== expectedPersistedCount ? `쇼핑몰 처리는 성공했지만 FNOS 주문 상태는 ${persisted_count}/${expectedPersistedCount}건만 저장되었습니다.` : "";
-        results.push({ channel_name: text(channel.channel_name), ok: result.ok && !persistenceError, count: dispatchProductOrders.length, persisted_count, message: persistenceError || result.message || result.error || "", raw: result.data });
+        if (adapterCode === "LOTTEON" && adapter.dispatchOrders) {
+          const rowResults: Array<{ ok: boolean; data?: unknown; error?: string; message?: string }> = [];
+          for (const dispatchProductOrder of dispatchProductOrders) {
+            try {
+              rowResults.push(await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders: [dispatchProductOrder] }));
+            } catch (error) {
+              rowResults.push({ ok: false, data: null, error: error instanceof Error ? error.message : "롯데ON 발송처리 실패" });
+            }
+          }
+          const failedOrderNos = new Set(channelRows
+            .filter((_, index) => !rowResults[index]?.ok)
+            .map((row) => text(row.persistedOrderNo || row.persisted_order_no || row.orderNo || row.order_no)));
+          const persistableRows = channelRows.filter((row, index) => rowResults[index]?.ok && !failedOrderNos.has(text(row.persistedOrderNo || row.persisted_order_no || row.orderNo || row.order_no)));
+          const persisted_count = await updatePersistedOrderStatuses(channel, persistableRows, "출고완료");
+          const expectedPersistedCount = persistedOrderNos(persistableRows).length;
+          const succeededCount = rowResults.filter((result) => result.ok).length;
+          const failedCount = rowResults.length - succeededCount;
+          const persistenceError = persisted_count !== expectedPersistedCount ? `FNOS 주문 상태는 ${persisted_count}/${expectedPersistedCount}건만 저장되었습니다.` : "";
+          const failureMessage = rowResults.filter((result) => !result.ok).map((result) => text(result.error || result.message)).filter(Boolean).join(" / ");
+          const dispatchMessage = failedCount ? `롯데ON 발송처리 ${succeededCount}/${rowResults.length}건 성공, ${failedCount}건 실패${failureMessage ? `: ${failureMessage}` : ""}` : `롯데ON 발송처리 ${succeededCount}/${rowResults.length}건 성공`;
+          results.push({ channel_name: text(channel.channel_name), ok: failedCount === 0 && !persistenceError, partial: succeededCount > 0 && failedCount > 0, count: rowResults.length, success_count: succeededCount, failed_count: failedCount, persisted_count, message: [persistenceError, dispatchMessage].filter(Boolean).join(" / "), raw: rowResults });
+        } else {
+          const result = adapter.dispatchOrders
+            ? await adapter.dispatchOrders({ ...baseParams, dispatchProductOrders })
+            : { ok: false, error: "해당 쇼핑몰은 발송처리를 지원하지 않습니다." };
+          const persisted_count = result.ok ? await updatePersistedOrderStatuses(channel, channelRows, "출고완료") : 0;
+          const expectedPersistedCount = persistedOrderNos(channelRows).length;
+          const persistenceError = result.ok && persisted_count !== expectedPersistedCount ? `쇼핑몰 처리는 성공했지만 FNOS 주문 상태는 ${persisted_count}/${expectedPersistedCount}건만 저장되었습니다.` : "";
+          results.push({ channel_name: text(channel.channel_name), ok: result.ok && !persistenceError, count: dispatchProductOrders.length, persisted_count, message: persistenceError || result.message || result.error || "", raw: result.data });
+        }
       }
     }
 
     if (!results.length) return jsonResponse({ ok: false, error: "처리 가능한 쇼핑몰 주문이 없습니다.", results }, { status: 400 });
     const failedResults = results.filter((result) => !result.ok);
     const succeededResults = results.filter((result) => result.ok);
-    const partial = failedResults.length > 0 && succeededResults.length > 0;
+    const partial = failedResults.length > 0 && succeededResults.length > 0 || results.some((result) => result.partial === true);
     const error = failedResults
       .map((result) => [text(result.channel_name), text(result.message)].filter(Boolean).join(": "))
       .filter(Boolean)
