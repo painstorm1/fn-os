@@ -250,7 +250,7 @@ export async function importAdRows(rows: AnyRecord[], channel: string, sourceFil
   const previewReports = rows
     .filter((row) => !isAggregateRow(row))
     .map((row) => normalizeReport(row, "__preview__", normalizedChannel, usdKrwRate))
-    .filter(hasAdSignal);
+    .filter((row) => hasAdSignal(row) || (normalizedChannel === "네이버GFA" && row.campaign_name !== "-"));
   const reportDates = Array.from(new Set(previewReports.map((row) => text(row.report_date)).filter(Boolean))).sort();
   let replacedCount = 0;
   const replacedReportIds = new Set<string>();
