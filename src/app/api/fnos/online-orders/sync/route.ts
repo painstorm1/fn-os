@@ -348,7 +348,9 @@ const ESM_CHANNEL_CODE = "2208183676";
 const ESM_CHANNEL_NAME = "ESM이에스엠";
 const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
 const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
-type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "unknown";
+const KAKAO_CUSTOMER_CODE = "8918800985";
+const KAKAO_CUSTOMER_NAME = "카카오 스토어";
+type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "kakao" | "unknown";
 
 type ManualOrderFileResult = {
   fileName: string;
@@ -459,6 +461,7 @@ function manualSourceFromFileName(fileName: string): ManualOrderSource {
 }
 
 function manualSourceSiteName(source: ManualOrderSource) {
+  if (source === "kakao") return KAKAO_CUSTOMER_NAME;
   if (source === "todayhouse") return TODAYHOUSE_CUSTOMER_NAME;
   if (source === "toss") return "토스";
   if (source === "ezwel") return "현대이지웰";
@@ -529,6 +532,17 @@ function isEsmManualRow(row: AnyRecord) {
   return Boolean(row["판매아이디"] !== undefined && row["주문번호"] !== undefined && (row["배송번호"] !== undefined || row["상품번호"] !== undefined));
 }
 
+function isKakaoManualRow(row: AnyRecord) {
+  return Boolean(
+    row["결제번호"] !== undefined
+    && row["주문번호"] !== undefined
+    && row["채널상품번호"] !== undefined
+    && row["수령인명"] !== undefined
+    && row["배송지주소"] !== undefined
+    && text(row["채널"]).includes("톡스토어")
+  );
+}
+
 function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrder | null {
   const orderNo = cleanId(pick(row, ["주문번호"]));
   const receiverName = firstText(pick(row, ["수령인명"]), pick(row, ["구매자명"]));
@@ -571,7 +585,7 @@ function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrde
 function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSource, config: {
   code: string; name: string; orderKeys: string[]; bundleKeys: string[]; dateKeys: string[]; receiverKeys: string[]; phoneKeys: string[];
   zipcodeKeys: string[]; addressKeys: string[]; detailAddressKeys?: string[]; memoKeys: string[]; productCodeKeys?: string[]; optionCodeKeys?: string[];
-  productKeys: string[]; optionKeys: string[]; qtyKeys: string[]; amountKeys: string[];
+  productKeys: string[]; optionKeys: string[]; qtyKeys: string[]; amountKeys: string[]; settlementAmountKeys?: string[];
 }): NormalizedOrder | null {
   const orderNo = cleanId(pick(row, config.orderKeys));
   const receiverName = firstText(pick(row, config.receiverKeys));
@@ -587,7 +601,7 @@ function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSo
     sku: productCode || undefined,
     qty: numberValue(pick(row, config.qtyKeys)) || 1,
     salesAmount: numberValue(pick(row, config.amountKeys)) || undefined,
-    settlementAmount: numberValue(pick(row, config.amountKeys)) || undefined,
+    settlementAmount: numberValue(pick(row, config.settlementAmountKeys || config.amountKeys)) || undefined,
     raw: row,
   };
   return {
@@ -612,6 +626,12 @@ function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSo
 
 function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrderSource): NormalizedOrder | null {
   if (source === "esm") return normalizeEsmManualRow(row, fileName);
+  if (source === "kakao") return makeManualOrder(row, fileName, source, {
+    code: KAKAO_CUSTOMER_CODE, name: KAKAO_CUSTOMER_NAME, orderKeys: ["주문번호"], bundleKeys: ["결제번호", "주문번호"], dateKeys: ["주문일"],
+    receiverKeys: ["수령인명"], phoneKeys: ["수령인연락처1", "수령인연락처2"], zipcodeKeys: ["우편번호"], addressKeys: ["배송지주소"],
+    memoKeys: ["배송메세지"], productCodeKeys: ["채널상품번호", "판매자상품번호", "옵션코드"], optionCodeKeys: ["옵션코드", "판매자상품번호", "채널상품번호"], productKeys: ["상품명"], optionKeys: ["옵션"],
+    qtyKeys: ["수량"], amountKeys: ["상품금액"], settlementAmountKeys: ["정산기준금액"],
+  });
   if (source === "todayhouse") return makeManualOrder(row, fileName, source, {
     code: TODAYHOUSE_CUSTOMER_CODE, name: TODAYHOUSE_CUSTOMER_NAME, orderKeys: ["주문번호"], bundleKeys: ["묶음배송그룹", "주문번호"], dateKeys: ["주문결제완료일", "출고예정일"],
     receiverKeys: ["수취인명"], phoneKeys: ["수취인 연락처"], zipcodeKeys: ["수취인 우편번호"], addressKeys: ["수취인 주소"], detailAddressKeys: ["수취인 주소상세"],
@@ -637,6 +657,7 @@ async function parseManualOrderFile(fileName: string, buffer: Buffer): Promise<M
   const rawRows = await workbookRows(buffer, fileName);
   let source = manualSourceFromFileName(fileName);
   if (source === "unknown" && rawRows.some(isEsmManualRow)) source = "esm";
+  if (source === "unknown" && /^\d{14}\.(?:xlsx|xls|xlsm|csv)$/i.test(fileName) && rawRows.some(isKakaoManualRow)) source = "kakao";
   if (source === "unknown") return [];
   const rows = fillManualCarryForwardRows(rawRows, source);
   const bySite = new Map<string, NormalizedOrder[]>();

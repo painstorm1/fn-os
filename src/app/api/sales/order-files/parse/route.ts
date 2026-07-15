@@ -5,9 +5,11 @@ import * as XLSX from "xlsx";
 export const runtime = "nodejs";
 
 type SheetName = "송장출력용" | "FN송장입력" | "FN판매입력";
-type OrderSource = "legacy" | "esm" | "todayhouse" | "toss" | "ezwell" | "unknown";
+type OrderSource = "legacy" | "esm" | "todayhouse" | "toss" | "ezwell" | "kakao" | "unknown";
 const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
 const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
+const KAKAO_CUSTOMER_CODE = "8918800985";
+const KAKAO_CUSTOMER_NAME = "카카오 스토어";
 type ParsedInvoiceRow = {
   trackingNo: string;
   itemCount: number;
@@ -235,6 +237,12 @@ function classifyOrderFileName(fileName: string): OrderSource {
   return "unknown";
 }
 
+function isKakaoOrderFile(fileName: string, row: Record<string, unknown>) {
+  return /^\d{14}\.(?:xlsx|xls|xlsm|csv)$/i.test(fileName)
+    && ["결제번호", "주문번호", "채널상품번호", "수령인명", "배송지주소"].every((key) => Object.prototype.hasOwnProperty.call(row, key))
+    && clean(row["채널"]).includes("톡스토어");
+}
+
 function mallAlias(mallName: string, mallCode: string, forcedAlias = "") {
   if (forcedAlias) return forcedAlias;
   const name = mallName.toLowerCase();
@@ -305,14 +313,15 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
 
     const qty = Math.max(1, parseNumber(pick(source, ["수량", "M 수량"])) || 1);
     const rawAmount = parseNumber(pick(source, ["정산예정금액", "공급가액", "주문금액", "실주문금액", "판매가 * 수량"]));
-    const isSettlementDeducted =
+    const isSettlementDeducted = source.__settlementExplicit !== true && (
       ["C", "T", "S", "L", "K"].includes(alias) ||
       mallName.includes("쿠팡") ||
       mallName.includes("토스") ||
       mallName.includes("신세계") ||
       mallName.includes("롯데") ||
       mallName.includes("카카오") ||
-      mallName.includes("톡딜");
+      mallName.includes("톡딜")
+    );
     const amount = isSettlementDeducted ? rawAmount * 0.88 : rawAmount;
     const unit = qty ? amount / qty : amount;
     const { contact1, contact2 } = normalizeContacts(pick(source, ["수취인연락처1"]), pick(source, ["수취인연락처2"]));
@@ -348,11 +357,13 @@ function buildFromDownRows(rows: Record<string, unknown>[]) {
     const productCode = clean(pick(source, ["품목코드(ERP)", "품목코드"]));
     const customerCode = clean(pick(source, ["거래처코드", "customer_code"]));
     const customerName = clean(pick(source, ["거래처명", "customer_name"])) || mallName;
-    if (alias === "O") {
+    const saleCustomerCode = alias === "O" ? customerCode || TODAYHOUSE_CUSTOMER_CODE : customerCode || KAKAO_CUSTOMER_CODE;
+    const saleCustomerName = alias === "O" ? customerName || TODAYHOUSE_CUSTOMER_NAME : customerName || KAKAO_CUSTOMER_NAME;
+    if (alias === "O" || alias === "K") {
       sale.push([
         dateDigits(date),
-        customerCode || TODAYHOUSE_CUSTOMER_CODE,
-        customerName || TODAYHOUSE_CUSTOMER_NAME,
+        saleCustomerCode,
+        saleCustomerName,
         "100",
         "포함",
         productCode,
@@ -446,6 +457,36 @@ function toCanonicalRows(rows: Record<string, unknown>[], source: OrderSource) {
         정산예정금액: pick(row, ["정산예정금액", "판매금액", "판매단가"]),
         품목코드: sellerCode,
         품목명: pick(row, ["상품명"]),
+      };
+    }
+
+    if (source === "kakao") {
+      const productCode = cleanOrderId(pick(row, ["채널상품번호", "판매자상품번호", "옵션코드"]));
+      const option = joinText(pick(row, ["상품명"]), pick(row, ["옵션"]));
+      return {
+        __alias: "K",
+        __settlementExplicit: true,
+        수집일자: pick(row, ["주문일"]),
+        쇼핑몰명: KAKAO_CUSTOMER_NAME,
+        쇼핑몰코드: KAKAO_CUSTOMER_CODE,
+        거래처코드: KAKAO_CUSTOMER_CODE,
+        거래처명: KAKAO_CUSTOMER_NAME,
+        주문번호: cleanOrderId(pick(row, ["주문번호"])),
+        묶음주문번호: cleanOrderId(pick(row, ["결제번호", "주문번호"])),
+        배송방법코드: pick(row, ["택배사코드"]),
+        송장번호: pick(row, ["송장번호"]),
+        수취인: pick(row, ["수령인명"]),
+        수취인연락처1: pick(row, ["수령인연락처1"]),
+        수취인연락처2: pick(row, ["수령인연락처2", "수령인연락처1"]),
+        우편번호: pick(row, ["우편번호"]),
+        주소: pick(row, ["배송지주소"]),
+        주문옵션: option,
+        쇼핑몰상품코드: productCode,
+        쇼핑몰품목key: option,
+        수량: pick(row, ["수량"]),
+        배송요청사항: pick(row, ["배송메세지"]),
+        판매금액: pick(row, ["상품금액"]),
+        정산예정금액: pick(row, ["정산기준금액"]),
       };
     }
 
@@ -726,7 +767,9 @@ export async function POST(request: Request) {
         const rows = rowsFromWorksheet(worksheet).filter((row) => Object.values(row).some((value) => clean(value)));
         if (!rows.length) continue;
 
-        const detectedSource = source === "unknown" && rows.some((row) => hasKeys(row, ["판매아이디", "배송번호", "장바구니번호(결제번호)"])) ? "esm" : source;
+        const detectedSource = source === "unknown" && rows.some((row) => isKakaoOrderFile(file.name, row))
+          ? "kakao"
+          : source === "unknown" && rows.some((row) => hasKeys(row, ["판매아이디", "배송번호", "장바구니번호(결제번호)"])) ? "esm" : source;
         if (detectedSource !== "unknown" && detectedSource !== "legacy") {
           downRows.push(...toCanonicalRows(rows, detectedSource));
           continue;
