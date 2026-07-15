@@ -39,7 +39,7 @@ import {
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => null,
 });
-const ArchiveWorkspace = dynamic(() => import("./archive-workspace"), {
+const KnowledgeCenterWorkspace = dynamic(() => import("./knowledge-center-workspace"), {
   loading: () => null,
 });
 const AutomationCenter = dynamic(() => import("./automation-center"), {
@@ -289,7 +289,7 @@ const mainMenus = [
   "수입관리",
   "광고분석",
   "회계/비용",
-  "아카이브",
+  "Cooljam 지식센터",
   "자동화센터",
 ];
 
@@ -333,10 +333,10 @@ const menuSlugs: Record<string, string> = {
   광고분석: "ads",
   자동화센터: "automation",
   "회계/비용": "accounting",
-  아카이브: "archive",
+  "Cooljam 지식센터": "knowledge",
 };
 
-const slugMenus = Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key]));
+const slugMenus: Record<string, string> = { ...Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key])), archive: "Cooljam 지식센터" };
 
 function goToInternal(href: string) {
   window.location.href = href;
@@ -33076,8 +33076,8 @@ function HomeContent() {
             <AdsAnalysisWorkspace />
           ) : activeSlug === "automation" ? (
             <AutomationCenter />
-          ) : activeSlug === "archive" ? (
-            <ArchiveWorkspace />
+          ) : activeSlug === "knowledge" || activeSlug === "archive" ? (
+            <KnowledgeCenterWorkspace />
           ) : activeSlug === "fnSettings" ? (
             <FnSettingsWorkspace />
           ) : (

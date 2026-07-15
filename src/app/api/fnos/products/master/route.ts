@@ -159,11 +159,11 @@ async function bomItemRows() {
 }
 
 async function importLinkRows() {
-  return selectRows<AnyRecord>("import_product_sku_links", { order: "created_at.asc", limit: 10000 }).catch(() => []);
+  return selectRows<AnyRecord>("import_product_sku_links", { order: "created_at.asc", limit: 10000 });
 }
 
 async function importProductRows() {
-  return selectRows<AnyRecord>("import_erp_products", { order: "id.asc", limit: 5000 }).catch(() => []);
+  return selectRows<AnyRecord>("import_erp_products", { order: "id.asc", limit: 5000 });
 }
 
 async function saveProductRows(product: AnyRecord, values: AnyRecord, createdAt: string) {
@@ -534,6 +534,15 @@ export async function GET(request: NextRequest) {
           import_option_name: text(item.import_option_name || item.import_option_key || item.match_group_label || item.variant_label),
           default_qty: numberValue(item.default_qty),
           default_ratio: numberValue(item.default_ratio) || 1,
+          image_url: text(importProduct?.image_url || importProduct?.image_path),
+          product_url: text(importProduct?.product_url),
+          options: text(importProduct?.options),
+          hs_code: text(importProduct?.hs_code),
+          moq: numberValue(importProduct?.moq),
+          source_price: numberValue(importProduct?.std_price || importProduct?.standard_price || importProduct?.price),
+          currency: text(importProduct?.currency),
+          source_note: text(importProduct?.note),
+          factory_id: text(importProduct?.factory_id),
         };
       });
       return {

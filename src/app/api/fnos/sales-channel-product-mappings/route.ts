@@ -104,8 +104,8 @@ function channelWithCurrentCustomer(channel: AnyRecord, customers: AnyRecord[]) 
 
 async function activeChannelLookup() {
   const [channels, customers] = await Promise.all([
-    selectRows<AnyRecord>("sales_channels", { order: "channel_name.asc", limit: 5000 }).catch(() => []),
-    selectRows<AnyRecord>("customers", { order: "customer_name.asc", limit: 5000 }).catch(() => []),
+    selectRows<AnyRecord>("sales_channels", { order: "channel_name.asc", limit: 5000 }),
+    selectRows<AnyRecord>("customers", { order: "customer_name.asc", limit: 5000 }),
   ]);
   const byCode = new Map<string, AnyRecord>();
   const byName = new Map<string, AnyRecord>();
@@ -131,7 +131,7 @@ function mappingWithCurrentChannel(mapping: AnyRecord, lookup: Awaited<ReturnTyp
 }
 
 async function activeProductLookup() {
-  const products = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 10000 }).catch(() => []);
+  const products = await selectRows<AnyRecord>("products", { order: "product_name.asc", limit: 10000 });
   const byId = new Map<string, AnyRecord>();
   const byCode = new Map<string, AnyRecord>();
   products.filter(isActiveProduct).forEach((product) => {

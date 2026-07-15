@@ -15,6 +15,9 @@ export const AUTOMATION_JOB_TYPES = [
   "content_draft",
   "accounting_collect",
   "sourcing_research",
+  "knowledge_daily_capture",
+  "knowledge_action",
+  "product_card_upsert",
 ] as const;
 
 export type AutomationJobType = (typeof AUTOMATION_JOB_TYPES)[number];
@@ -51,6 +54,9 @@ export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
   content_draft: "콘텐츠 초안",
   accounting_collect: "회계자료 수집",
   sourcing_research: "소싱 리서치",
+  knowledge_daily_capture: "오늘 입력 Obsidian 저장",
+  knowledge_action: "지식센터 처리",
+  product_card_upsert: "제품 지식카드 생성/갱신",
 };
 
 export const AUTOMATION_JOB_STATUSES = [
