@@ -75,6 +75,13 @@ test("direct sales/purchase statement save uses the user-selected statement date
   assert.doesNotMatch(saveRowsSource, /fallbackEntryDate = mode === "returns" \? entryDate : entryDateToday\(\)/);
 });
 
+test("direct F2 purchase readback preserves input line order without reordering other vouchers", () => {
+  assert.match(salesInventorySource, /function normalizePurchase[\s\S]*const uploadSerNo = text\(first\(row, \["순번", "upload_ser_no", "UPLOAD_SER_NO"\]\)\) \|\| String\(index \+ 1\);[\s\S]*upload_ser_no: uploadSerNo/);
+  assert.match(dashboardSource, /function orderDirectPurchaseEntryLines\(rows: Row\[\]\)[\s\S]*\^FN_OS_PURCHASE_ENTRY\(\?:_EDIT\)\?\$[\s\S]*groups\.set\(key,[\s\S]*if \(!group\) return \[row\];[\s\S]*entryLineNo\(left\) - entryLineNo\(right\)/);
+  assert.match(dashboardSource, /recent_purchase_lines: orderDirectPurchaseEntryLines\(purchases\.slice\(0, 500\)\)/);
+  assert.doesNotMatch(dashboardSource, /recent_sales_lines: orderDirectPurchaseEntryLines/);
+});
+
 test("direct F4 save hides the modal while the request runs and restores the draft on failure", () => {
   const saveRowsStart = pageSource.indexOf("  async function saveRows()");
   assert.notEqual(saveRowsStart, -1);

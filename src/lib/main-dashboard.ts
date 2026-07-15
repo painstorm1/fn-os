@@ -165,6 +165,26 @@ function entryLineNo(row: Row) {
   return parsed > 0 ? parsed : Number.POSITIVE_INFINITY;
 }
 
+function orderDirectPurchaseEntryLines(rows: Row[]) {
+  const groups = new Map<string, Row[]>();
+  rows.forEach((row) => {
+    if (!/^FN_OS_PURCHASE_ENTRY(?:_EDIT)?$/.test(text(row.source_file_name))) return;
+    const key = entryGroupKey(row, "purchases");
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  });
+  const emitted = new Set<string>();
+  return rows.flatMap((row) => {
+    const key = entryGroupKey(row, "purchases");
+    const group = groups.get(key);
+    if (!group) return [row];
+    if (emitted.has(key)) return [];
+    emitted.add(key);
+    return [...group].sort((left, right) => entryLineNo(left) - entryLineNo(right));
+  });
+}
+
 function summarizeEntryRows(rows: Row[], mode: "sales" | "purchases", limit: number) {
   const groups = new Map<string, { rows: Row[]; firstSeen: number }>();
   rows.forEach((row, index) => {
@@ -229,7 +249,7 @@ export async function salesHistorySummary() {
     recent_purchases: summarizeEntryRows(purchases, "purchases", 80),
     recent_sales_lines: sales.slice(0, 500),
     recent_return_lines: returnExchangeRows.slice(0, 500),
-    recent_purchase_lines: purchases.slice(0, 500),
+    recent_purchase_lines: orderDirectPurchaseEntryLines(purchases.slice(0, 500)),
   };
 }
 
