@@ -313,7 +313,8 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
     const source = rows[0];
     const ids = lotteonValidatedIds(source);
     if (!ids) return { ok: false, data: null, error: "롯데ON 발송완료 필수 식별자(odNo/odSeq/procSeq)가 누락되었거나 올바른 양의 정수가 아닙니다." };
-    const trackingNumber = firstText(source.trackingNumber, source.tracking_number);
+    // FNOS UI가 표시용 하이픈(0000-0000-0000)을 저장값에 포함하므로 숫자만 남긴다. 하이픈 포함 시 롯데ON이 "잘못된 [송장번호리스트]"로 거절.
+    const trackingNumber = firstText(source.trackingNumber, source.tracking_number).replace(/\D/g, "");
     if (!trackingNumber) return { ok: false, data: null, error: "롯데ON 발송완료 송장번호가 누락되었습니다." };
     if (trackingNumber.length > 30) return { ok: false, data: null, error: "롯데ON 송장번호는 최대 30자까지 입력할 수 있습니다." };
     const carrierCode = lotteonCarrierCode(firstText(source.deliveryCompanyCode, source.delivery_company_code));
