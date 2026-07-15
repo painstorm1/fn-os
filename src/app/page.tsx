@@ -8627,6 +8627,20 @@ type CollectionPopupMode = "collection" | "status-change" | "invoice-upload";
 type OrderProgressStatusChangeStage = "api-running" | "fnos-waiting" | "fnos-applying" | "done" | "failed";
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
 
+function onlineOrderStatusDisplaySiteKey(value: unknown) {
+  const key = salesCellText(value).replace(/\s+/g, "").toUpperCase();
+  return inferSalesChannelPlatform(key) === "TODAYHOUSE" ? "TODAYHOUSE" : key;
+}
+
+function mergeConfirmOrderStatusDisplayItems(items: OnlineApiStatusItem[], extras: OnlineApiStatusItem[], preferExtras = false, overrideTodayhouse = false) {
+  const hasTodayhouseManualExtra = overrideTodayhouse && extras.some((item) => item.source === "manual" && onlineOrderStatusDisplaySiteKey(item.name) === "TODAYHOUSE");
+  if (!hasTodayhouseManualExtra) return [...items, ...extras];
+  const hasTodayhouseItem = items.some((item) => onlineOrderStatusDisplaySiteKey(item.name) === "TODAYHOUSE");
+  return preferExtras
+    ? [...items.filter((item) => onlineOrderStatusDisplaySiteKey(item.name) !== "TODAYHOUSE"), ...extras]
+    : [...items, ...extras.filter((item) => onlineOrderStatusDisplaySiteKey(item.name) !== "TODAYHOUSE" || !hasTodayhouseItem)];
+}
+
 const orderProgressStatusFilterLabels = ["전체", "신규주문", "주문확인", "출고대기", "출고완료"] as const;
 const orderProgressStatusChangeEnabledFilters = new Set<string>(["신규주문", "주문확인", "출고대기"]);
 
@@ -13828,8 +13842,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const grouped = indexes.reduce<Record<string, { count: number; source: "api" | "manual" }>>((acc, index) => {
       const row = sheets["발주 진행 단계"][index] || [];
       const name = orderProgressSiteName(row);
-      const source = fnosOnly || onlineOrderStatusApiUnsupportedSite(row) ? "manual" : "api";
-      const key = `${source}:${name}`;
+      const overrideTodayhouseDisplay = orderProgressStatusFilter === "신규주문" && targetStatus === "주문확인" && onlineOrderStatusDisplaySiteKey(`${name} ${progressValue(row, "쇼핑몰코드")}`) === "TODAYHOUSE";
+      const source = fnosOnly || onlineOrderStatusApiUnsupportedSite(row) || overrideTodayhouseDisplay ? "manual" : "api";
+      const key = `${source}:${overrideTodayhouseDisplay ? "오늘의 집" : name}`;
       const previous = acc[key] || { count: 0, source };
       acc[key] = { ...previous, count: previous.count + 1 };
       return acc;
@@ -13992,7 +14007,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return { successIndexes, failedIndexes, failureMessage };
   }
 
-  async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[], extraStatuses: OnlineApiStatusItem[] = []) {
+  async function callOnlineOrderStatusApi(action: "confirm" | "dispatch", indexes: number[], extraStatuses: OnlineApiStatusItem[] = [], overrideTodayhouseDisplay = false) {
     const rows = onlineOrderApiPayload(indexes);
     const targetStatus = action === "confirm" ? "주문확인" : "출고완료";
     const grouped = rows.reduce<Record<string, number>>((acc, row) => {
@@ -14008,7 +14023,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }));
     setCollectionPopupMode("status-change");
     setCollectionPopupTitle(action === "confirm" ? "진행상태 변경: 주문확인 API 호출" : "진행상태 변경: 출고완료 API 호출");
-    setCollectionStatuses(baseStatuses.length ? [...baseStatuses, ...extraStatuses] : [{ name: "쇼핑몰", source: "api", status: "running", message: "API 호출 중" }, ...extraStatuses]);
+    setCollectionStatuses(mergeConfirmOrderStatusDisplayItems(baseStatuses.length ? baseStatuses : [{ name: "쇼핑몰", source: "api", status: "running", message: "API 호출 중" }], extraStatuses, true, overrideTodayhouseDisplay));
     setCollectionPopupOpen(true);
 
     const body = { action, rows };
@@ -14030,7 +14045,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     let res = await postStatus("/api/fnos/online-orders/status", shouldRunDirect ? { run_direct: true, use_worker: false } : {});
     let data = await res.json().catch(() => ({}));
     if (!isLocalPage && !shouldRunDirect && data.queued) {
-      setCollectionStatuses([...baseStatuses.map((item) => ({ ...item, message: "미니PC 주문처리 워커 대기 중" })), ...extraStatuses]);
+      setCollectionStatuses(mergeConfirmOrderStatusDisplayItems(baseStatuses.map((item) => ({ ...item, message: "미니PC 주문처리 워커 대기 중" })), extraStatuses, true, overrideTodayhouseDisplay));
     }
     if (data.queued && data.job_id) {
       const jobId = salesCellText(data.job_id);
@@ -14045,7 +14060,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           break;
         }
         if (status === "failed" || status === "cancelled") throw new Error(salesCellText(job.error_message) || "온라인 주문 처리 실패");
-        setCollectionStatuses((prev) => (prev.length ? prev : [...baseStatuses, ...extraStatuses]).map((item) => {
+        setCollectionStatuses((prev) => (prev.length ? prev : mergeConfirmOrderStatusDisplayItems(baseStatuses, extraStatuses, true, overrideTodayhouseDisplay)).map((item) => {
           if ((item.source || "api") === "manual") return item;
           return {
             ...item,
@@ -14058,15 +14073,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     }
     const results = Array.isArray(data.results) ? data.results as Array<{ channel_name?: string; ok?: boolean; count?: number; message?: string }> : [];
     if (results.length) {
-      setCollectionStatuses([
-        ...results.map((item) => ({
-          name: salesCellText(item.channel_name) || "쇼핑몰",
-          source: "api" as const,
-          status: item.ok ? "done" as const : "failed" as const,
-          message: item.ok ? `${Number(item.count || 0).toLocaleString("ko-KR")}건 API 호출 완료 · FNOS 적용 대기` : salesCellText(item.message || "처리 실패"),
-        })),
-        ...extraStatuses,
-      ]);
+      setCollectionStatuses(mergeConfirmOrderStatusDisplayItems(results.map((item) => ({
+        name: salesCellText(item.channel_name) || "쇼핑몰",
+        source: "api" as const,
+        status: item.ok ? "done" as const : "failed" as const,
+        message: item.ok ? `${Number(item.count || 0).toLocaleString("ko-KR")}건 API 호출 완료 · FNOS 적용 대기` : salesCellText(item.message || "처리 실패"),
+      })), extraStatuses, true, overrideTodayhouseDisplay));
     }
     if (!res.ok || data.ok === false) {
       const hasSucceededResult = results.some((item) => item.ok);
@@ -14264,7 +14276,11 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       : `${apiMessage}${manualMessage}`;
     const ok = window.confirm(baseConfirmMessage);
     if (!ok) return;
+    const overrideTodayhouseStatusDisplay = orderProgressStatusFilter === "신규주문" && status === "주문확인";
     const manualWaitingStatuses = orderProgressStatusChangeItems(eligibleIndexes, status, "fnos-waiting").filter((item) => item.source === "manual");
+    const confirmManualStatuses = (stage: OrderProgressStatusChangeStage) => overrideTodayhouseStatusDisplay
+      ? orderProgressStatusChangeItems(eligibleIndexes, status, stage).filter((item) => item.source === "manual" && onlineOrderStatusDisplaySiteKey(item.name) === "TODAYHOUSE")
+      : [];
     openOrderProgressStatusPopup(eligibleIndexes, status, shouldCallApi ? "api-running" : "fnos-waiting", fnosOnlyStatusMove);
     await new Promise((resolve) => window.setTimeout(resolve, 50));
     const validated = await validateAndNormalizeProgressProducts(eligibleIndexes);
@@ -14280,7 +14296,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       if (shouldCallApi) {
         let successfulApiIndexes = apiIndexes;
         const data = shouldConfirmApi && apiIndexes.length
-          ? await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses)
+          ? await callOnlineOrderStatusApi("confirm", apiIndexes, manualWaitingStatuses, overrideTodayhouseStatusDisplay)
           : shouldDispatchApi && apiIndexes.length
             ? await callOnlineOrderStatusApi("dispatch", apiIndexes, manualWaitingStatuses)
             : null;
@@ -14302,10 +14318,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const failedApiStatusItems = failedApiIndexes.length
       ? orderProgressStatusChangeItems(failedApiIndexes, status, "failed").map((item) => ({ ...item, message: partialFailureMessage || "API 처리 실패" }))
       : [];
-    setCollectionStatuses([
+    setCollectionStatuses(mergeConfirmOrderStatusDisplayItems([
       ...orderProgressStatusChangeItems(statusApplyIndexes, status, "fnos-applying", fnosOnlyStatusMove),
       ...failedApiStatusItems,
-    ]);
+    ], confirmManualStatuses("fnos-applying"), false, overrideTodayhouseStatusDisplay));
     await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
     let manualFilesToCleanup: string[] = [];
     setSheets((prev) => {
@@ -14319,10 +14335,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       manualFilesToCleanup = status === "출고완료" ? completedPendingOnlineOrderManualFiles(next["발주 진행 단계"]) : [];
       return next;
     });
-    setCollectionStatuses([
+    setCollectionStatuses(mergeConfirmOrderStatusDisplayItems([
       ...orderProgressStatusChangeItems(statusApplyIndexes, status, "done", fnosOnlyStatusMove),
       ...failedApiStatusItems,
-    ]);
+    ], confirmManualStatuses("done"), false, overrideTodayhouseStatusDisplay));
     setMessage(`${status} 처리 ${failedApiIndexes.length ? "부분 완료" : "완료"}: ${statusApplyIndexes.length}건${failedApiIndexes.length ? ` / API 실패 ${failedApiIndexes.length}건` : ""}`);
     if (partialFailureMessage) window.alert(`일부 쇼핑몰 처리는 실패했고, 성공한 쇼핑몰만 FNOS 상태를 변경했습니다.\n${partialFailureMessage}`);
     if (status === "출고완료") {
