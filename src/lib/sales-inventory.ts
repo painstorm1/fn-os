@@ -357,11 +357,17 @@ async function existingSourceRefs(table: "sales" | "purchases", refs: string[]) 
   if (!uniqueRefs.length) return new Set<string>();
   const existing = new Set<string>();
   const chunkSize = 100;
+  const chunks: string[][] = [];
   for (let index = 0; index < uniqueRefs.length; index += chunkSize) {
-    const chunk = uniqueRefs.slice(index, index + chunkSize);
-    const escaped = chunk.map((ref) => `"${String(ref).replace(/"/g, '\\"')}"`).join(",");
-    const rows = await optionalRows(table, { source_ref_id: `in.(${escaped})`, limit: chunk.length });
-    rows.forEach((row) => {
+    chunks.push(uniqueRefs.slice(index, index + chunkSize));
+  }
+  const batchSize = 12;
+  for (let index = 0; index < chunks.length; index += batchSize) {
+    const rowGroups = await Promise.all(chunks.slice(index, index + batchSize).map((chunk) => {
+      const escaped = chunk.map((ref) => `"${String(ref).replace(/"/g, '\\"')}"`).join(",");
+      return optionalRows(table, { source_ref_id: `in.(${escaped})`, limit: chunk.length });
+    }));
+    rowGroups.flat().forEach((row) => {
       const ref = text(row.source_ref_id);
       if (ref) existing.add(ref);
     });
@@ -669,6 +675,7 @@ async function validateEntryReferences(rows: RawRow[], kind: "sales" | "purchase
       next.prod_name = productName(product);
       next.product_name = productName(product);
       next.product_id = text(product.id) || null;
+      next.size_des = text(next.size_des || product.size_des);
     }
 
     return next;
@@ -729,6 +736,7 @@ async function expandBomInventoryRows(row: RawRow, fallbackMovementType: "sale_o
         sku: text(component?.sku) || code,
         prod_name: componentName,
         product_name: componentName,
+        size_des: text(component?.size_des || item.size_des),
         qty: componentQty,
         parent_product_id: productId || text(row.product_id) || null,
         parent_prod_cd: productCode(product) || text(row.prod_cd || row.product_code),
@@ -743,24 +751,37 @@ async function expandBomInventoryRows(row: RawRow, fallbackMovementType: "sale_o
 
 async function validateVirtualInventoryBomRows(rows: RawRow[]) {
   const errors: string[] = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    const product = await findProduct(row);
-    if (!isVirtualInventoryProduct(product || row)) continue;
-    const productId = text(product?.id);
-    const items = await activeBomItems(productId);
-    const validItems = items.filter((item) => numberValue(item.qty_per_unit ?? 1) > 0 && (text(item.component_product_id || item.product_id) || text(item.component_sku || item.sku || item.product_code || item.prod_cd)));
-    if (validItems.length) continue;
-    const code = productCode(product) || text(row.prod_cd || row.product_code || row.sku);
-    const name = productName(product) || text(row.prod_name || row.product_name) || code || "RG/SET 품목";
-    errors.push(`${index + 1}행: RG/SET 품목 '${name}'${code ? `(${code})` : ""}은 활성 BOM 구성품이 없어 재고 차감 대상이 없습니다. BOM 등록 후 저장해 주세요.`);
+  const batchSize = 12;
+  for (let startIndex = 0; startIndex < rows.length; startIndex += batchSize) {
+    const batchErrors = await Promise.all(rows.slice(startIndex, startIndex + batchSize).map(async (row, offset) => {
+      const index = startIndex + offset;
+      const product = await findProduct(row);
+      if (!isVirtualInventoryProduct(product || row)) return "";
+      const productId = text(product?.id);
+      const items = await activeBomItems(productId);
+      const validItems = items.filter((item) => numberValue(item.qty_per_unit ?? 1) > 0 && (text(item.component_product_id || item.product_id) || text(item.component_sku || item.sku || item.product_code || item.prod_cd)));
+      if (validItems.length) return "";
+      const code = productCode(product) || text(row.prod_cd || row.product_code || row.sku);
+      const name = productName(product) || text(row.prod_name || row.product_name) || code || "RG/SET 품목";
+      return `${index + 1}행: RG/SET 품목 '${name}'${code ? `(${code})` : ""}은 활성 BOM 구성품이 없어 재고 차감 대상이 없습니다. BOM 등록 후 저장해 주세요.`;
+    }));
+    errors.push(...batchErrors.filter(Boolean));
   }
   return errors;
 }
 
 async function updateCurrentInventory(row: RawRow, deltaQty: number) {
-  const product = await findProduct(row);
-  const warehouse = await findWarehouse(row);
+  const hasResolvedProduct = text(row.product_id)
+    && text(row.prod_cd || row.product_code || row.sku)
+    && text(row.prod_name || row.product_name)
+    && text(row.size_des);
+  const hasResolvedWarehouse = text(row.warehouse_id)
+    && text(row.wh_cd || row.warehouse_code)
+    && text(row.wh_name || row.warehouse_name);
+  const [product, warehouse] = await Promise.all([
+    hasResolvedProduct ? null : findProduct(row),
+    hasResolvedWarehouse ? null : findWarehouse(row),
+  ]);
   const productId = text(row.product_id || product?.id);
   const productCode = text(row.prod_cd || row.product_code || product?.product_code || product?.prod_cd || row.sku);
   const productName = text(row.prod_name || row.product_name || product?.product_name || product?.prod_name);
@@ -789,10 +810,10 @@ async function updateCurrentInventory(row: RawRow, deltaQty: number) {
     product_id: productId || null,
     sku,
     wh_cd: whCd,
-    wh_name: warehouseName(warehouse) || text(current?.wh_name),
+    wh_name: text(row.wh_name || row.warehouse_name) || warehouseName(warehouse) || text(current?.wh_name),
     prod_cd: productCode,
     prod_name: productName,
-    size_des: text(row.size_des || product?.size_des),
+    size_des: text(row.size_des || product?.size_des || current?.size_des),
     on_hand_qty: nextQty,
     available_qty: nextQty - numberValue(current?.reserved_qty),
     bal_qty: nextQty,

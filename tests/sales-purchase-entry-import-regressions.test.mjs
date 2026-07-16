@@ -89,8 +89,15 @@ test("direct F4 save hides the modal while the request runs and restores the dra
   assert.match(saveRowsSource, /setBackgroundSaving\(true\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*await fetch/);
   assert.match(saveRowsSource, /let saved = false;[\s\S]*saved = true;[\s\S]*finally \{[\s\S]*if \(!saved\) setBackgroundSaving\(false\);/);
   assert.match(saveRowsSource, /if \(saved\) window\.alert\("저장은 완료됐지만 화면 갱신에 실패했습니다\. 새로고침해 주세요\."\);[\s\S]*else setLocalError/);
+  const directDeleteStart = saveRowsSource.indexOf("const deleteRes = await fetch(endpoint");
+  const directDeleteSource = saveRowsSource.slice(directDeleteStart, saveRowsSource.indexOf("const deleteData", directDeleteStart));
+  assert.match(directDeleteSource, /fnosSkipBusyOverlay: true/);
+  const directPostStart = saveRowsSource.indexOf("const res = await fetch(endpoint");
+  const directPostSource = saveRowsSource.slice(directPostStart, saveRowsSource.indexOf("const data", directPostStart));
+  assert.match(directPostSource, /fnosSkipBusyOverlay: true/);
   assert.match(pageSource, /if \(backgroundSaving\) return null;/);
   assert.match(pageSource, /\{localError && <p[^>]*>\{localError\}<\/p>\}/);
+  assert.match(pageSource, /onSaved=\{\(savedRows\) => \{[\s\S]*loadSummary\(true, \{ skipBusyOverlay: true \}\);/);
 });
 
 test("online sales/purchase save confirms immediately, runs in background, and reports with toast", () => {

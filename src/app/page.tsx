@@ -18487,7 +18487,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             invalidateSalesInventoryCaches();
             setEntryPrefill(null);
             setEntryModalMode(null);
-            loadSummary(true);
+            loadSummary(true, { skipBusyOverlay: true });
           }}
         />
       )}
@@ -19280,8 +19280,9 @@ function SalesPurchaseEntryModal({
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
+          fnosSkipBusyOverlay: true,
           body: JSON.stringify({ group_keys: [initialDraft.replaceGroupKey] }),
-        });
+        } as RequestInit & { fnosSkipBusyOverlay: boolean });
         const deleteData = await deleteRes.json().catch(() => ({}));
         if (!deleteRes.ok || deleteData.ok === false) {
           setLocalError(deleteData.error || "기존 입력 삭제 실패");
@@ -19292,8 +19293,9 @@ function SalesPurchaseEntryModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        fnosSkipBusyOverlay: true,
         body: JSON.stringify({ rows, source_file_name: initialDraft?.sourceFileName || (mode === "returns" ? "FN_OS_RETURN_EXCHANGE_ENTRY" : mode === "sales" ? "FN_OS_SALES_ENTRY" : "FN_OS_PURCHASE_ENTRY") }),
-      });
+      } as RequestInit & { fnosSkipBusyOverlay: boolean });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         setLocalError(data.error || "저장 실패");
