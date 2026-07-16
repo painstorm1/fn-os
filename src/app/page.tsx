@@ -35,6 +35,7 @@ import {
   type DirectShippingBundleRow,
   type DirectShippingBundleSelectionPlan,
 } from "@/lib/direct-shipping-bundles";
+import { buildSalesShipmentList, type SalesShipmentPage, type SalesShipmentSlot } from "@/lib/sales-shipment-list";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => null,
@@ -11134,6 +11135,54 @@ function htmlEscape(value: unknown) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch] || ch));
 }
 
+function salesShipmentQuantityText(value: number) {
+  return value.toLocaleString("ko-KR", { maximumFractionDigits: 6 });
+}
+
+function salesShipmentSvgColumn(slots: SalesShipmentSlot[], x: number, y: number, key: string, rowHeight: number) {
+  const width = 362;
+  const nameWidth = 300;
+  const headerHeight = 20;
+  const definitions: string[] = [];
+  const rows = slots.map((slot, rowIndex) => {
+    const rowY = y + headerHeight + rowIndex * rowHeight;
+    const clipId = `shipment-${key}-${rowIndex}`;
+    definitions.push(`<clipPath id="${clipId}"><rect x="${x + 5}" y="${rowY + 1}" width="${nameWidth - 10}" height="${rowHeight - 2}" /></clipPath>`);
+    const item = slot && !("separator" in slot) ? slot : null;
+    const fill = item?.direct ? "#fff09a" : "#ffffff";
+    return `<g>
+      <rect x="${x}" y="${rowY}" width="${nameWidth}" height="${rowHeight}" fill="${fill}" stroke="#222" stroke-width="0.7" />
+      <rect x="${x + nameWidth}" y="${rowY}" width="${width - nameWidth}" height="${rowHeight}" fill="${fill}" stroke="#222" stroke-width="0.7" />
+      ${item ? `<text x="${x + 5}" y="${rowY + rowHeight * 0.72}" clip-path="url(#${clipId})" font-size="8.5" font-weight="600">${htmlEscape(item.productName)}</text><text x="${x + width - 6}" y="${rowY + rowHeight * 0.72}" text-anchor="end" font-size="9" font-weight="800">${htmlEscape(salesShipmentQuantityText(item.quantity))}</text>` : ""}
+    </g>`;
+  }).join("");
+  return `<defs>${definitions.join("")}</defs>
+    <rect x="${x}" y="${y}" width="${nameWidth}" height="${headerHeight}" fill="#e8edf3" stroke="#222" stroke-width="0.9" />
+    <rect x="${x + nameWidth}" y="${y}" width="${width - nameWidth}" height="${headerHeight}" fill="#e8edf3" stroke="#222" stroke-width="0.9" />
+    <text x="${x + nameWidth / 2}" y="${y + 14}" text-anchor="middle" font-size="11" font-weight="900">품목명</text>
+    <text x="${x + nameWidth + (width - nameWidth) / 2}" y="${y + 14}" text-anchor="middle" font-size="11" font-weight="900">수량</text>
+    ${rows}`;
+}
+
+function salesShipmentPageSvg(page: SalesShipmentPage, format: "A5" | "A4", dateLabel: string, pageNumber: number, totalPages: number) {
+  const isA5 = format === "A5";
+  const width = 794;
+  const height = isA5 ? 559 : 1123;
+  const tableY = isA5 ? 112 : 96;
+  const rowHeight = isA5 ? 13 : 13.35;
+  const columns = isA5
+    ? salesShipmentSvgColumn(page.left, 216, tableY, `p${pageNumber}-left`, rowHeight)
+    : `${salesShipmentSvgColumn(page.left, 28, tableY, `p${pageNumber}-left`, rowHeight)}${salesShipmentSvgColumn(page.right, 404, tableY, `p${pageNumber}-right`, rowHeight)}`;
+  return `<svg class="shipment-page${pageNumber === 1 ? " active" : ""}" data-page="${pageNumber}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" style="font-family:Arial,'Malgun Gothic',sans-serif" role="img" aria-label="출고리스트 ${pageNumber}페이지">
+    <rect width="${width}" height="${height}" fill="#fff" />
+    <text x="${width / 2}" y="42" text-anchor="middle" font-size="29" font-weight="900">출고리스트</text>
+    <text x="${isA5 ? 216 : 28}" y="78" font-size="12" font-weight="800">날짜 ${htmlEscape(dateLabel)}</text>
+    <text x="${isA5 ? 578 : 766}" y="78" text-anchor="end" font-size="12" font-weight="800">출고창고 100</text>
+    ${columns}
+    <text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="8" fill="#555">${pageNumber} / ${totalPages}</text>
+  </svg>`;
+}
+
 function safeInlineJson(value: unknown) {
   return JSON.stringify(value)
     .replace(/</g, "\\u003c")
@@ -12938,22 +12987,74 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setMessage(`송장 엑셀 ${totalFiles}개 파일 내보내기를 실행했습니다.`);
   }
 
-  function exportSalesShipmentList() {
-    const productNameIndex = salesSheetHeaders["FN판매입력"].indexOf("품목명");
-    const qtyIndex = salesSheetHeaders["FN판매입력"].indexOf("수량");
-    const rows = sheets["FN판매입력"]
-      .filter(rowHasValue)
-      .map((row) => [salesCellText(row[productNameIndex]), salesCellText(row[qtyIndex])])
-      .filter(([productName, qty]) => productName || qty)
-      .sort((left, right) => left[0].localeCompare(right[0], "ko-KR", { numeric: true, sensitivity: "base" }));
-    if (!rows.length) {
-      window.alert("출고리스트를 생성할 FN판매입력 행이 없습니다.");
+  function openSalesShipmentListPopup() {
+    const progressRows = sheets["발주 진행 단계"];
+    const productNameIndex = salesSheetHeaders["발주 진행 단계"].indexOf("품목명(ERP)");
+    const qtyIndex = salesSheetHeaders["발주 진행 단계"].indexOf("수량");
+    const directPartnerIndex = salesSheetHeaders["발주 진행 단계"].indexOf("직송거래처");
+    const result = buildSalesShipmentList(
+      progressRows.flatMap((row, sourceIndex) => rowHasValue(row) ? [{
+        rowNumber: sourceIndex + 1,
+        sourceIndex,
+        productName: row[productNameIndex],
+        quantity: row[qtyIndex],
+        directShippingPartner: row[directPartnerIndex],
+      }] : []),
+      directShippingSourceIndexes,
+    );
+    if (!result.ok) {
+      window.alert(`출고리스트를 생성할 수 없습니다. 품목명 또는 수량을 확인해 주세요.\n행 번호: ${result.invalidRowNumbers.join(", ")}`);
       return;
     }
-    const fileBase = `${todayMmdd()}_출고리스트`;
-    if (!window.confirm(`${fileBase} ${rows.length.toLocaleString("ko-KR")}건 생성하시겠습니까?`)) return;
-    void downloadTableXlsx(`${fileBase}.xlsx`, "출고리스트", ["품목명", "수량"], rows);
-    setMessage(`${fileBase} 파일을 생성했습니다.`);
+    if (!result.items.length) {
+      window.alert("출고리스트를 생성할 발주 진행 행이 없습니다.");
+      return;
+    }
+
+    const popup = window.open("", "_blank", "width=1100,height=900");
+    if (!popup) {
+      window.alert("팝업이 차단되었습니다.");
+      return;
+    }
+    const now = new Date();
+    const dateLabel = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+    const totalPages = result.pages.length;
+    const pageSvgs = result.pages.map((page, index) => salesShipmentPageSvg(page, result.format, dateLabel, index + 1, totalPages)).join("");
+    const pageSize = result.format === "A5" ? "A5 landscape" : "A4 portrait";
+    const paperWidth = "210mm";
+    const paperHeight = result.format === "A5" ? "148mm" : "297mm";
+    popup.document.open();
+    popup.document.write(`<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>출고리스트</title>
+<style>
+  @page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Arial,'Malgun Gothic',sans-serif;background:#e8edf3;color:#111}
+  .pages{padding:18px 18px 82px}.shipment-page{display:none;width:${paperWidth};height:${paperHeight};max-width:100%;margin:0 auto;background:#fff;box-shadow:0 5px 24px rgba(15,23,42,.22)}.shipment-page.active{display:block}
+  .toolbar{position:fixed;z-index:10;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 20px;border-top:1px solid #cbd5e1;background:rgba(255,255,255,.97)}
+  .pager,.actions{display:flex;align-items:center;gap:8px}.toolbar button{height:40px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 16px;font-size:14px;font-weight:900;color:#334155;cursor:pointer}.toolbar button:hover{background:#f8fafc}.toolbar button:disabled{cursor:default;opacity:.35}.pager button{width:40px;padding:0}.pager strong{min-width:64px;text-align:center}.actions button:first-child{border-color:#86efac;color:#15803d}.actions button:nth-child(2){border-color:#fdba74;color:#c2410c}
+  @media print{html,body{background:#fff}.toolbar{display:none!important}.pages{padding:0}.shipment-page{display:block!important;width:${paperWidth};height:${paperHeight};max-width:none;margin:0;box-shadow:none;break-after:page;page-break-after:always}.shipment-page:last-child{break-after:auto;page-break-after:auto}}
+</style></head><body>
+<main class="pages">${pageSvgs}</main>
+<footer class="toolbar"><div class="pager"><button id="prev" type="button" aria-label="이전 페이지">&lt;</button><strong id="counter">1/${totalPages}</strong><button id="next" type="button" aria-label="다음 페이지">&gt;</button></div><div class="actions"><button id="capture" type="button">이미지 캡쳐</button><button id="print" type="button">인쇄/PDF저장</button><button id="close" type="button">닫기</button></div></footer>
+<script>
+(function(){
+  var pages=Array.from(document.querySelectorAll('.shipment-page'));var current=0;
+  var counter=document.getElementById('counter');var prev=document.getElementById('prev');var next=document.getElementById('next');
+  function show(index){current=Math.max(0,Math.min(pages.length-1,index));pages.forEach(function(page,i){page.classList.toggle('active',i===current);});counter.textContent=String(current+1)+'/'+String(pages.length);prev.disabled=current===0;next.disabled=current===pages.length-1;}
+  prev.addEventListener('click',function(){show(current-1);});next.addEventListener('click',function(){show(current+1);});show(0);
+  document.getElementById('print').addEventListener('click',function(){window.print();});document.getElementById('close').addEventListener('click',function(){window.close();});
+  document.getElementById('capture').addEventListener('click',async function(){
+    try{
+      if(!navigator.clipboard||typeof navigator.clipboard.write!=='function'||typeof ClipboardItem==='undefined')throw new Error('이 브라우저는 이미지 클립보드를 지원하지 않습니다.');
+      var svg=pages[current];var viewBox=svg.viewBox.baseVal;var serialized=new XMLSerializer().serializeToString(svg);var url=URL.createObjectURL(new Blob([serialized],{type:'image/svg+xml;charset=utf-8'}));var image=new Image();
+      await new Promise(function(resolve,reject){image.onload=resolve;image.onerror=function(){reject(new Error('이미지를 만들 수 없습니다.'));};image.src=url;});
+      var scale=2;var canvas=document.createElement('canvas');canvas.width=Math.round(viewBox.width*scale);canvas.height=Math.round(viewBox.height*scale);var context=canvas.getContext('2d');if(!context)throw new Error('이미지 캔버스를 사용할 수 없습니다.');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);
+      var png=await new Promise(function(resolve,reject){canvas.toBlob(function(blob){if(blob)resolve(blob);else reject(new Error('PNG 변환에 실패했습니다.'));},'image/png');});await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);window.alert('현재 페이지 전체 자료를 이미지로 복사했습니다.');
+    }catch(error){window.alert('이미지 캡쳐에 실패했습니다. 클립보드 권한과 브라우저 지원 여부를 확인해 주세요.\n'+(error instanceof Error?error.message:String(error)));}
+  });
+})();
+</script></body></html>`);
+    popup.document.close();
+    setMessage(`출고리스트 ${result.items.length.toLocaleString("ko-KR")}개 품목 팝업을 열었습니다.`);
   }
 
   function selectedShippingRows() {
@@ -17181,6 +17282,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-orange-50" onMouseDown={() => setShippingPreviewTab("shipping")}>송장 엑셀</label>
               <label htmlFor="online-sales-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-blue-300 bg-white px-3 text-sm font-black text-blue-600 hover:bg-blue-50">FN판매입력</label>
               <label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50">FN구매입력</label>
+              <button type="button" className="inline-flex h-9 items-center rounded-md border border-amber-300 bg-white px-3 text-sm font-black text-amber-700 hover:bg-amber-50" onClick={openSalesShipmentListPopup}>출고리스트</button>
             </div>
           </div>
           <OnlineOrderProgressList
