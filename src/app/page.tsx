@@ -11348,7 +11348,9 @@ function summarizeEntryDisplayRows(rows: Array<Record<string, unknown>>, mode: S
       representative_product_name: entryRowProduct(first),
       _recent_order: group.firstSeen,
     };
-  }).sort((left, right) => Number(left._recent_order) - Number(right._recent_order))
+  }).sort((left, right) =>
+    entryDateFilterKey(entryRowDate(right)).localeCompare(entryDateFilterKey(entryRowDate(left))) ||
+    Number(left._recent_order) - Number(right._recent_order))
     .map(({ _recent_order: _removed, ...row }) => row);
 }
 
