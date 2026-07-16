@@ -13049,7 +13049,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       await new Promise(function(resolve,reject){image.onload=resolve;image.onerror=function(){reject(new Error('이미지를 만들 수 없습니다.'));};image.src=url;});
       var scale=2;var canvas=document.createElement('canvas');canvas.width=Math.round(viewBox.width*scale);canvas.height=Math.round(viewBox.height*scale);var context=canvas.getContext('2d');if(!context)throw new Error('이미지 캔버스를 사용할 수 없습니다.');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);
       var png=await new Promise(function(resolve,reject){canvas.toBlob(function(blob){if(blob)resolve(blob);else reject(new Error('PNG 변환에 실패했습니다.'));},'image/png');});await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);window.alert('현재 페이지 전체 자료를 이미지로 복사했습니다.');
-    }catch(error){window.alert('이미지 캡쳐에 실패했습니다. 클립보드 권한과 브라우저 지원 여부를 확인해 주세요.\n'+(error instanceof Error?error.message:String(error)));}
+    }catch(error){window.alert('이미지 캡쳐에 실패했습니다. 클립보드 권한과 브라우저 지원 여부를 확인해 주세요.\\n'+(error instanceof Error?error.message:String(error)));}
   });
 })();
 </script></body></html>`);
