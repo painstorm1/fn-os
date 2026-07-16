@@ -418,7 +418,7 @@ function CalendarMemo() {
     function loadServerMemos() {
       const start = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
       const end = formatDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
-      const accountingUrl = `${ACCOUNTING_SUMMARY_ENDPOINT}?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}&v=${encodeURIComponent(ACCOUNTING_CACHE_VERSION)}`;
+      const accountingUrl = `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=fixed&from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}&v=${encodeURIComponent(ACCOUNTING_CACHE_VERSION)}`;
       Promise.allSettled([
         cachedJson<Record<string, Array<string | CalendarServerMemo>>>("/api/fnos/calendar-production-memos", 30_000),
         cachedJson<AccountingSummary>(accountingUrl, 30_000),

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Card, StatusBadge } from "@/components/fn-ui";
 import { cachedJson, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
+const MAIN_DASHBOARD_SUMMARY_URL = "/api/dashboard/summary?scope=main";
+
 type Row = Record<string, unknown>;
 type Point = {
   date?: string;
@@ -249,7 +251,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         >
           <span className="font-black text-slate-900">{dateText(row.order_date).slice(0, 10)}</span>
           <span className="grid min-w-0 grid-cols-[44px_1fr] items-center gap-3">
-            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" className="h-11 w-11 rounded-md object-cover" /> : <span className="h-11 w-11 rounded-md bg-slate-100" />}
+            {assetUrl(row.repr_image) ? <img src={assetUrl(row.repr_image)} alt="" loading="lazy" decoding="async" className="h-11 w-11 rounded-md object-cover" /> : <span className="h-11 w-11 rounded-md bg-slate-100" />}
             <span className="truncate font-black text-slate-800">{String(row.repr_product || titleFrom(row))}</span>
           </span>
           <span className="truncate font-bold text-slate-600">{String(row.factory_name || "-")}</span>
@@ -297,14 +299,14 @@ function FixedCostList({ rows }: { rows: Row[] }) {
 }
 
 export default function MainDashboard() {
-  const initialSummary = readInitialCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+  const initialSummary = readInitialCachedJson<DashboardSummary>(MAIN_DASHBOARD_SUMMARY_URL, { storageTtl: 60_000 });
   const [summary, setSummary] = useState<DashboardSummary | null>(initialSummary);
   const [loading, setLoading] = useState(!initialSummary);
 
   useEffect(() => {
     let alive = true;
     let cachedTimer: number | undefined;
-    const cached = readCachedJson<DashboardSummary>("/api/dashboard/summary", { storageTtl: 60_000 });
+    const cached = readCachedJson<DashboardSummary>(MAIN_DASHBOARD_SUMMARY_URL, { storageTtl: 60_000 });
     if (cached) {
       cachedTimer = window.setTimeout(() => {
         if (!alive) return;
@@ -312,7 +314,7 @@ export default function MainDashboard() {
         setLoading(false);
       }, 0);
     }
-    cachedJson<DashboardSummary>("/api/dashboard/summary", {
+    cachedJson<DashboardSummary>(MAIN_DASHBOARD_SUMMARY_URL, {
       ttl: 45_000,
       storageTtl: 60_000,
       onUpdate: (data) => {
