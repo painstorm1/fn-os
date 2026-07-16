@@ -15159,7 +15159,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           date: entryRowDate(row),
           warehouse: entryRowWarehouse(row),
           productCode,
-          productName: entryRowProduct(row) || (product ? inventoryProductName(product) : productCode),
+          productName: product ? inventoryProductName(product) : entryRowProduct(row) || productCode,
           qty: Math.abs(entryRowQty(row)),
         };
       });
@@ -15986,7 +15986,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         return "실제출고 확인(" + (row.movementType || "movement") + ") / ref:" + (row.movementSourceRefId || "-") + " / " + (row.movementDate || row.date || "-") + " / " + (row.movementWarehouse || row.warehouse || "-") + " / " + (row.movementProductCode || row.actualProductCode || "-") + " / 원 입력: " + (row.sourceProductCode || "-") + " / " + (row.sourceProductName || "-");
       }
       function rowsHtml(rows){
-        return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty ?? r.qty ?? 0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td class='muted'>"+esc(outboundStatusText(r))+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='11' class='muted'>조회되는 내역이 없습니다.</td></tr>";
+        return rows.map((r)=>"<tr class='"+(r.type === "sales" ? "rowSales" : "rowPurchase")+"'><td><span class='badge "+esc(r.type)+"'>"+esc(r.typeLabel)+"</span></td><td>"+esc(r.date)+"</td><td>"+esc(r.customer||"-")+"</td><td>"+esc(r.warehouse||"-")+"</td><td>"+esc(r.actualProductCode||"-")+"</td><td>"+esc(r.actualProductName||"-")+"</td><td class='num'>"+fmt.format(r.actualQty ?? r.qty ?? 0)+"</td><td class='num'>"+krw(r.unitPrice||0)+"</td><td class='num'>"+krw(r.amount||0)+"</td><td>"+esc(r.memo||"-")+"</td></tr>").join("") || "<tr><td colspan='10' class='muted'>조회되는 내역이 없습니다.</td></tr>";
       }
       function voucherRowsHtml(vouchers){
         if (!vouchers.length) return "<tr><td colspan='10' class='muted'>조회되는 거래명세서가 없습니다.</td></tr>";
@@ -16014,7 +16014,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         renderSummary("purchase", purchaseRows);
         renderSelectedBar();
         if (group === "detail") {
-          thead.innerHTML = "<tr><th>구분</th><th>일자</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량(판매=실제출고)</th><th class='num'>단가</th><th class='num'>금액</th><th>출고확인/원 입력품목</th><th>메모</th></tr>";
+          thead.innerHTML = "<tr><th>구분</th><th>일자</th><th>거래처</th><th>창고</th><th>실제 품목코드</th><th>실제 품목명</th><th class='num'>수량(판매=실제출고)</th><th class='num'>단가</th><th class='num'>금액</th><th>메모</th></tr>";
           const sorted = rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
           if (selected.product.length > 1) {
             tbody.innerHTML = selected.product.map((item) => {
@@ -16022,10 +16022,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               const qty = part.reduce((sum, row) => sum + Number(row.actualQty ?? row.qty ?? 0), 0);
               const amount = part.reduce((sum, row) => sum + Number(row.amount || 0), 0);
               const avg = qty ? amount / qty : 0;
-              return "<tr class='groupRow'><td colspan='6' class='groupSummaryName'>품목 " + esc(optionLabel(item)) + " / " + fmt.format(part.length) + "건</td><td class='num groupSummaryMetric'>" + fmt.format(qty) + "</td><td class='num groupSummaryMetric'>" + (qty ? krw(avg) : "-") + "</td><td class='num groupSummaryMetric'>" + krw(amount) + "</td><td colspan='2'></td></tr>" + rowsHtml(part);
-            }).join("") + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='11' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
+              return "<tr class='groupRow'><td colspan='6' class='groupSummaryName'>품목 " + esc(optionLabel(item)) + " / " + fmt.format(part.length) + "건</td><td class='num groupSummaryMetric'>" + fmt.format(qty) + "</td><td class='num groupSummaryMetric'>" + (qty ? krw(avg) : "-") + "</td><td class='num groupSummaryMetric'>" + krw(amount) + "</td><td></td></tr>" + rowsHtml(part);
+            }).join("") + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='10' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
           } else {
-            tbody.innerHTML = rowsHtml(sorted) + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='11' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
+            tbody.innerHTML = rowsHtml(sorted) + (showUnlinkedOutbound ? "<tr class='groupRow'><td colspan='10' class='groupSummaryName'>미연결 출고 감사행 / " + fmt.format(unlinkedRows.length) + "건 / " + fmt.format(unlinkedQty) + "개 (일반 판매 합계·출력 제외)</td></tr>" + rowsHtml(unlinkedRows) : "");
           }
           updateNav();
           return;

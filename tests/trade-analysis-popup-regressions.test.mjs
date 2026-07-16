@@ -237,7 +237,8 @@ test("generated trade-analysis popup script parses and reaches ready/render with
   assert.equal(window.__fnosTradeAnalysisReady, true);
   assert.match(elements.get("tbody").innerHTML, /Component A/);
   assert.match(elements.get("tbody").innerHTML, /Component B/);
-  assert.match(elements.get("tbody").innerHTML, /실제출고 확인\(bom_consume\)/);
+  assert.doesNotMatch(elements.get("thead").innerHTML, /출고확인\/원 입력품목/);
+  assert.doesNotMatch(elements.get("tbody").innerHTML, /실제출고 확인\(bom_consume\)/);
   assert.doesNotMatch(elements.get("tbody").innerHTML, /SHOULD-NOT-RENDER/);
   assert.equal(elements.get("salesQty").textContent, "5개", "actualQty=0 must not fall back to entered qty=7");
   assert.equal(elements.get("salesAmount").textContent, "총 금액 207원");
