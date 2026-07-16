@@ -13822,10 +13822,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function onlineOrderStatusApiUnsupportedSite(row: string[]) {
-    const site = orderProgressSiteName(row).toUpperCase();
-    const code = salesCellText(progressValue(row, "쇼핑몰코드")).toUpperCase();
-    const haystack = `${site} ${code}`;
-    return /ESM|카카오|KAKAO|톡스토어|선물하기|현대이지웰|이지웰|EZWEL|오늘의집|TODAYHOUSE|O\.RORA/.test(haystack);
+    const haystack = `${orderProgressSiteName(row)} ${progressValue(row, "쇼핑몰코드")}`.replace(/\s+/g, "").toUpperCase();
+    return /ESM|지마켓|G마켓|GMARKET|옥션|AUCTION|2208183676|KAKAO|카카오|톡스토어|선물하기|8918800985|오늘의집|TODAYHOUSE|OHOU|1198691245|현대이지웰|이지웰|EZWEL|O\.?RORA/.test(haystack);
   }
 
   function groupedUnsupportedStatusApiRows(indexes: number[]) {
@@ -14311,9 +14309,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "온라인 주문 처리 실패";
-      setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
-      window.alert(message);
-      return;
+      if (!unsupportedIndexes.size) {
+        setCollectionStatuses(orderProgressStatusChangeItems(eligibleIndexes, status, "failed").map((item) => ({ ...item, message })));
+        window.alert(message);
+        return;
+      }
+      statusApplyIndexes = eligibleIndexes.filter((index) => unsupportedIndexes.has(index));
+      failedApiIndexes = apiIndexes;
+      partialFailureMessage = message;
     }
     const failedApiStatusItems = failedApiIndexes.length
       ? orderProgressStatusChangeItems(failedApiIndexes, status, "failed").map((item) => ({ ...item, message: partialFailureMessage || "API 처리 실패" }))
