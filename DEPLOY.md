@@ -35,4 +35,4 @@ NEXT_PUBLIC_IMPORT_API_URL=https://your-import-api.example.com
 
 ## 제거된 방향
 
-외부 ERP API 연동용 환경변수와 API 라우트는 더 이상 사용하지 않는다. 주문, 송장, 판매, 구매, 재고, 광고, 비용, 아카이브 데이터는 FN OS 자체 DB 기준으로 확장한다.
+외부 ERP API 연동용 환경변수와 API 라우트는 더 이상 사용하지 않는다. 주문, 송장, 판매, 구매, 재고, 광고, 비용 데이터는 FN OS 자체 DB 기준으로 확장한다.

@@ -1,7 +1,6 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { envValue, loadEnvFiles } from "./env-utils.mjs";
@@ -19,32 +18,6 @@ const automationAgentToken = envValue("AUTOMATION_AGENT_TOKEN");
 const localApiKey = envValue("FN_OS_API_KEY") || envValue("FN_OS_AUTH_TOKEN") || envValue("FN_OS_PASSWORD") || "fnos-local-dev";
 const productionEnv = readEnvFile(path.join(repoRoot, ".env.vercel.production.local"));
 const remoteApiKey = text(productionEnv.FN_OS_API_KEY || productionEnv.FN_OS_AUTH_TOKEN || productionEnv.FN_OS_PASSWORD) || localApiKey;
-const hermesHome = process.env.HERMES_HOME || "D:/hermes/profiles/fn_cool";
-const knowledgeProcessor = process.env.FNOS_KNOWLEDGE_PROCESSOR || path.join(repoRoot, "tools", "fnos_knowledge_action_worker.py");
-const dailyCaptureProcessor = process.env.FNOS_KNOWLEDGE_DAILY_PROCESSOR || path.join(repoRoot, "tools", "fnos_knowledge_daily_worker.py");
-const productCardProcessor = process.env.FNOS_PRODUCT_CARD_PROCESSOR || path.join(repoRoot, "tools", "fnos_product_card_worker.py");
-
-function spawnFile(file, fileArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { timeoutMs = 330_000, maxOutput = 1_000_000, ...spawnOptions } = options;
-    const child = spawn(file, fileArgs, { ...spawnOptions, shell: false, windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const append = (current, chunk) => (current + String(chunk)).slice(-maxOutput);
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-    child.stdout?.on("data", (chunk) => { stdout = append(stdout, chunk); });
-    child.stderr?.on("data", (chunk) => { stderr = append(stderr, chunk); });
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: timedOut ? 124 : Number(code ?? 1), stdout, stderr: timedOut ? `${stderr}\nprocessor timed out` : stderr });
-    });
-  });
-}
 
 function now() {
   return new Date().toISOString();
@@ -129,7 +102,7 @@ async function patchJob(job, values) {
 async function claimJob() {
   const preferredJobTypes = jobType
     ? [jobType]
-    : ["collect_smartstore_orders", "collect_coupang_orders", "online_order_status_update", "knowledge_daily_capture", "knowledge_action", "product_card_upsert", ""];
+    : ["collect_smartstore_orders", "collect_coupang_orders", "online_order_status_update"];
   for (const preferredJobType of preferredJobTypes) {
     const data = await request("/api/fnos/automation-jobs/claim", {
       method: "POST",
@@ -142,54 +115,6 @@ async function claimJob() {
 
 async function runStubHandler(job) {
   const input = job.input_json && typeof job.input_json === "object" ? job.input_json : {};
-  if (["knowledge_daily_capture", "knowledge_action", "product_card_upsert"].includes(job.job_type)) {
-    const knowledgeId = text(input.knowledge_id);
-    const dailyId = text(input.daily_id);
-    const processor = job.job_type === "product_card_upsert"
-      ? productCardProcessor
-      : job.job_type === "knowledge_daily_capture" ? dailyCaptureProcessor : knowledgeProcessor;
-    const processorLabel = job.job_type === "product_card_upsert"
-      ? "product card"
-      : job.job_type === "knowledge_daily_capture" ? "daily capture" : "knowledge action";
-    try {
-      if (!fs.existsSync(processor)) throw new Error(`Processor not found: ${processor}`);
-      const python = process.env.FNOS_PYTHON || process.env.PYTHON || "python";
-      const processorArgs = [processor, "--job-json", JSON.stringify(input)];
-      if (input.dry_run === true) processorArgs.push("--dry-run");
-      const completed = await spawnFile(python, processorArgs, {
-        cwd: path.dirname(processor),
-        env: { ...process.env, HERMES_HOME: hermesHome },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      if (completed.code !== 0) throw new Error(text(completed.stderr || completed.stdout || `processor exited ${completed.code}`));
-      const processorReceipt = JSON.parse(text(completed.stdout));
-      const receipt = {
-        ...(processorReceipt && typeof processorReceipt === "object" ? processorReceipt : {}),
-        job_id: text(job.id),
-      };
-      if (knowledgeId || dailyId) {
-        await request("/api/fnos/knowledge-center", {
-          method: "PATCH",
-          body: JSON.stringify({ action: "receipt", ...(dailyId ? { daily_id: dailyId } : { id: knowledgeId }), ok: true, receipt }),
-        });
-      }
-      return {
-        status: "success",
-        result_json: { receipt, worker_id: workerId, handled_at: now() },
-        log_text: appendLog(job, `${processorLabel} completed: ${text(input.action || input.product?.product_code || input.target_path)}`),
-        error_message: "",
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : `${processorLabel} processor failed.`;
-      if (knowledgeId || dailyId) {
-        await request("/api/fnos/knowledge-center", {
-          method: "PATCH",
-          body: JSON.stringify({ action: "receipt", ...(dailyId ? { daily_id: dailyId } : { id: knowledgeId }), ok: false, error_message: message, receipt: { job_id: text(job.id), error: message } }),
-        }).catch(() => null);
-      }
-      throw error;
-    }
-  }
   if (job.job_type === "collect_smartstore_orders" || job.job_type === "collect_coupang_orders") {
     const requestedChannelCode = text(input.channel_code);
     const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/sync", {

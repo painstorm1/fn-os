@@ -13,6 +13,12 @@ import {
 
 type AnyRecord = Record<string, unknown>;
 
+const RETIRED_COOLJAM_JOB_TYPES = new Set<AutomationJobType>([
+  "knowledge_daily_capture",
+  "knowledge_action",
+  "product_card_upsert",
+]);
+
 export type AutomationJobListFilters = {
   id?: string;
   jobType?: string;
@@ -47,6 +53,22 @@ function normalizeJobType(value: unknown): AutomationJobType {
   const next = text(value);
   if (isAutomationJobType(next)) return next;
   throw new FnosDbError("작업 유형을 선택해 주세요.", 400);
+}
+
+function normalizeFnosOwnedJobType(value: unknown): AutomationJobType {
+  const jobType = normalizeJobType(value);
+  if (RETIRED_COOLJAM_JOB_TYPES.has(jobType)) {
+    throw new FnosDbError("Cooljam 작업은 독립 지식센터에서만 생성·실행할 수 있습니다.", 400);
+  }
+  return jobType;
+}
+
+function assertFnosOwnedRunType(value: unknown) {
+  const taskType = text(value);
+  if (isAutomationJobType(taskType) && RETIRED_COOLJAM_JOB_TYPES.has(taskType)) {
+    throw new FnosDbError("Cooljam 작업은 독립 지식센터에서만 생성·실행할 수 있습니다.", 400);
+  }
+  return taskType;
 }
 
 function normalizeStatus(value: unknown, fallback: AutomationJobStatus = "queued"): AutomationJobStatus {
@@ -322,7 +344,7 @@ export async function updateAutomationRun(id: string, body: AnyRecord) {
 
 export async function createAutomationRun(body: AnyRecord = {}) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??", 503);
-  const taskType = text(body.task_type || body.job_type);
+  const taskType = assertFnosOwnedRunType(body.task_type || body.job_type);
   if (!taskType) throw new FnosDbError("task_type is required.", 400);
   const now = new Date().toISOString();
   const values: AnyRecord = {
@@ -449,7 +471,7 @@ export async function reportAutomationRunFail(body: AnyRecord = {}) {
 
 export async function createAutomationJob(body: AnyRecord) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase 환경변수가 설정되지 않았습니다.", 503);
-  const jobType = normalizeJobType(body.job_type);
+  const jobType = normalizeFnosOwnedJobType(body.job_type);
   const status = normalizeStatus(body.status, "queued");
   const now = new Date().toISOString();
   let values: AnyRecord = {
@@ -503,7 +525,7 @@ export async function updateAutomationJob(id: string, body: AnyRecord) {
   if (!jobId) throw new FnosDbError("작업 ID가 필요합니다.", 400);
 
   const values: AnyRecord = {};
-  if ("job_type" in body) values.job_type = normalizeJobType(body.job_type);
+  if ("job_type" in body) values.job_type = normalizeFnosOwnedJobType(body.job_type);
   if ("title" in body) values.title = text(body.title) || (values.job_type ? automationJobLabel(values.job_type as AutomationJobType) : undefined);
   if ("requested_by" in body) values.requested_by = text(body.requested_by) || "manual";
   if ("assigned_agent" in body) values.assigned_agent = nullableText(body.assigned_agent);
@@ -566,7 +588,7 @@ export async function updateAutomationJob(id: string, body: AnyRecord) {
 
 export async function claimNextAutomationJob(body: AnyRecord = {}) {
   if (!hasDbConfig()) throw new FnosDbError("Supabase 환경변수가 설정되지 않았습니다.", 503);
-  const jobType = text(body.job_type);
+  const jobType = normalizeFnosOwnedJobType(body.job_type);
   const workerId = text(body.worker_id || body.workerId || "mini-pc-worker");
   const isOrderWorkerJob = ["collect_smartstore_orders", "collect_coupang_orders", "online_order_status_update"].includes(jobType);
   const query: Record<string, string | number> = {
@@ -574,7 +596,7 @@ export async function claimNextAutomationJob(body: AnyRecord = {}) {
     order: isOrderWorkerJob ? "created_at.desc" : "created_at.asc",
     limit: 10,
   };
-  if (jobType && isAutomationJobType(jobType)) query.job_type = `eq.${jobType}`;
+  query.job_type = `eq.${jobType}`;
   const queued = await selectRows<AnyRecord>("automation_jobs", query);
   const now = new Date().toISOString();
   for (const row of queued) {
@@ -788,6 +810,7 @@ export async function claimNextAutomationJobForAgent(agent: string) {
     const id = text(row.id);
     if (!id) continue;
     const jobType = text(row.job_type);
+    if (isAutomationJobType(jobType) && RETIRED_COOLJAM_JOB_TYPES.has(jobType)) continue;
     if (jobType) {
       const runningSameType = await selectRows<AnyRecord>("automation_jobs", {
         status: "eq.running",

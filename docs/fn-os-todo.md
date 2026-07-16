@@ -8,8 +8,6 @@ Last updated: 2026-06-02
 - Confirmed `schema_sales_inventory.sql` already includes:
   - `products.product_attribute`
   - `sales_channel_credentials`
-  - archive preview fields on `archive_items`
-  - `idx_archive_preview_status`
 - Confirmed dashboard code is split into:
   - `src/lib/main-dashboard.ts`
   - `src/app/main-dashboard.tsx`
@@ -24,9 +22,7 @@ Last updated: 2026-06-02
 
 - Review the existing untracked verification artifacts and decide whether to keep, move, or delete them:
   - `accounting-*-verify.png`
-  - `archive-*-verify.png`
   - `product-excel-icon-verify.png`
-  - `dev-archive-test.log`
   - `dev-inventory-verify.*.log`
 - Do not commit those artifacts without explicit confirmation.
 - Keep common DB changes centralized through `schema_sales_inventory.sql` or a clearly named migration document.
@@ -106,7 +102,6 @@ Last updated: 2026-06-02
   - import order date filters
 - Candidate screens to check next:
   - ads date range
-  - archive view/filter state
   - accounting sub-view or upload/detail mode if users expect Back/F5 preservation
   - sales/inventory section-specific filters where reload should not reset context
 
@@ -129,7 +124,6 @@ Last updated: 2026-06-02
   - transactional tables
   - accounting tables
   - ads tables
-  - archive tables
   - import linkage tables
 - Keep the SQL file as source of truth; the docs summary should not become a second migration source.
 

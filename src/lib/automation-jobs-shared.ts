@@ -15,6 +15,7 @@ export const AUTOMATION_JOB_TYPES = [
   "content_draft",
   "accounting_collect",
   "sourcing_research",
+  // Legacy compatibility only. Cooljam owns creation and execution of these jobs.
   "knowledge_daily_capture",
   "knowledge_action",
   "product_card_upsert",
@@ -54,9 +55,9 @@ export const AUTOMATION_JOB_TYPE_LABELS: Record<AutomationJobType, string> = {
   content_draft: "콘텐츠 초안",
   accounting_collect: "회계자료 수집",
   sourcing_research: "소싱 리서치",
-  knowledge_daily_capture: "오늘 입력 Obsidian 저장",
-  knowledge_action: "지식센터 처리",
-  product_card_upsert: "제품 지식카드 생성/갱신",
+  knowledge_daily_capture: "외부 Cooljam 오늘 입력 (이력)",
+  knowledge_action: "외부 Cooljam 지식 처리 (이력)",
+  product_card_upsert: "외부 Cooljam 제품 카드 (이력)",
 };
 
 export const AUTOMATION_JOB_STATUSES = [

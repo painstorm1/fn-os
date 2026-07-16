@@ -16,7 +16,6 @@ Core areas:
 - Import management
 - Advertising analysis
 - Accounting / expenses
-- Archive
 - Automation center
 - Agent/Hermes integrations
 

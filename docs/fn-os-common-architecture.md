@@ -8,7 +8,7 @@ This document is the current shared baseline for FN OS dashboard, common DB/API,
 
 FN OS uses its own database as the operating source of truth.
 
-- Sales, orders, shipments, purchases, inventory, import, ads, accounting, and archive data should flow into FN OS DB.
+- Sales, orders, shipments, purchases, inventory, import, ads, and accounting data should flow into FN OS DB.
 - Ecount/ERP compatibility fields may remain for import compatibility, but new UX copy should prefer FN OS wording.
 - Do not add common DB changes directly from a menu-specific task. First document the proposed SQL, affected screens, and migration risk.
 
@@ -19,7 +19,6 @@ FN OS uses its own database as the operating source of truth.
 - Import management
 - Ads analysis
 - Accounting / Cost
-- Archive
 
 ## Core Tables
 
@@ -58,22 +57,9 @@ Related API documents:
 
 - `docs/sales-channel-credentials.md`
 
-### Archive Preview
+### Cooljam Separation
 
-Confirmed archive preview fields on `archive_items`:
-
-- `original_url`
-- `description`
-- `preview_image_url`
-- `preview_status`
-- `preview_error`
-- `preview_generated_at`
-
-Confirmed index:
-
-- `idx_archive_preview_status`
-
-The existing `category_id + archive_categories` structure remains canonical. Do not add a duplicate `category` column.
+Cooljam knowledge center and its legacy Archive are independent from FN OS; FN OS does not own their UI, API, schema, or workers.
 
 ## Main Dashboard Data Rules
 

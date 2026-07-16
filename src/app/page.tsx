@@ -39,9 +39,6 @@ import {
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
   loading: () => null,
 });
-const KnowledgeCenterWorkspace = dynamic(() => import("./knowledge-center-workspace"), {
-  loading: () => null,
-});
 const AutomationCenter = dynamic(() => import("./automation-center"), {
   loading: () => null,
 });
@@ -289,7 +286,6 @@ const mainMenus = [
   "수입관리",
   "광고분석",
   "회계/비용",
-  "Cooljam 지식센터",
   "자동화센터",
 ];
 
@@ -333,10 +329,9 @@ const menuSlugs: Record<string, string> = {
   광고분석: "ads",
   자동화센터: "automation",
   "회계/비용": "accounting",
-  "Cooljam 지식센터": "knowledge",
 };
 
-const slugMenus: Record<string, string> = { ...Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key])), archive: "Cooljam 지식센터" };
+const slugMenus = Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key]));
 
 function goToInternal(href: string) {
   window.location.href = href;
@@ -25879,7 +25874,6 @@ type DashboardSummary = {
   recent_purchases?: Array<Record<string, unknown>>;
   recent_import_orders?: Array<Record<string, unknown>>;
   recent_ads?: Array<Record<string, unknown>>;
-  recent_archives?: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
 };
 
@@ -31271,7 +31265,6 @@ function DashboardNew() {
       <section className="grid gap-4 xl:grid-cols-3">
         <DashboardList title="최근 수입 발주" rows={summary?.recent_import_orders || []} primaryKey="order_no" amountKey="total_amount" />
         <DashboardList title="최근 광고 성과" rows={summary?.recent_ads || []} primaryKey="campaign_name" amountKey="spend_amount" />
-        <DashboardList title="최근 아카이브" rows={summary?.recent_archives || []} primaryKey="title" />
       </section>
     </div>
   );
@@ -33079,8 +33072,6 @@ function HomeContent() {
             <AdsAnalysisWorkspace />
           ) : activeSlug === "automation" ? (
             <AutomationCenter />
-          ) : activeSlug === "knowledge" || activeSlug === "archive" ? (
-            <KnowledgeCenterWorkspace />
           ) : activeSlug === "fnSettings" ? (
             <FnSettingsWorkspace />
           ) : (

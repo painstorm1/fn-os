@@ -147,7 +147,7 @@ function dataQualityWarnings({
 export async function buildAiSnapshot(options: SnapshotOptions = {}) {
   const to = isoDate(options.to) || todayKst();
   const from = isoDate(options.from) || defaultFrom(to);
-  const [dashboard, salesRows, purchaseRows, products, inventoryRows, importOrders, ads, accounting, archives] = await Promise.all([
+  const [dashboard, salesRows, purchaseRows, products, inventoryRows, importOrders, ads, accounting] = await Promise.all([
     mainDashboardSummary(),
     optionalRows("sales", { io_date: `gte.${from}`, order: "io_date.desc", limit: 3000 }),
     optionalRows("purchases", { io_date: `gte.${from}`, order: "io_date.desc", limit: 3000 }),
@@ -156,7 +156,6 @@ export async function buildAiSnapshot(options: SnapshotOptions = {}) {
     optionalRows("import_purchase_orders", { order: "order_date.desc", limit: 300 }),
     adsSummary({ from, to }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) })),
     accountingLedgerSummary({ from, to, scope: "dashboard" }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) })),
-    optionalRows("archive_items", { order: "created_at.desc", limit: 300 }),
   ]);
   const productCount = products.length;
   const activeInventoryRows = inventoryRows.filter((row) => numberValue(row.available_qty ?? row.on_hand_qty ?? row.bal_qty) !== 0);
@@ -226,10 +225,6 @@ export async function buildAiSnapshot(options: SnapshotOptions = {}) {
       date_range: dateRange(importOrders, ["order_date", "expected_inbound_date", "created_at"]),
       amount: sum(importOrders, (row) => row.total_won ?? row.total_amount ?? row.actual_payment_total_krw ?? row.actual_payment_total),
       recent_orders: stripRows(importOrders, ["order_code", "order_date", "status", "factory_name", "repr_product", "total_qty", "total_won"], 20),
-    },
-    archive: {
-      item_count: archives.length,
-      date_range: dateRange(archives, ["created_at", "updated_at"]),
     },
     data_quality: {
       warnings: dataQualityWarnings({

@@ -1321,94 +1321,6 @@ alter table import_purchase_sku_allocations add column if not exists warehouse_i
 alter table import_purchase_sku_allocations add column if not exists purchase_id uuid;
 alter table import_purchase_sku_allocations add column if not exists updated_at timestamptz default now();
 
-create table if not exists archive_items (
-  id uuid primary key default gen_random_uuid(),
-  archive_type text,
-  title text not null,
-  url text,
-  normalized_url text,
-  url_hash text,
-  source_type text,
-  content_type text default 'link',
-  source_ref_id text,
-  summary text,
-  original_url text,
-  description text,
-  preview_image_url text,
-  preview_status text default 'pending',
-  preview_error text,
-  preview_generated_at timestamptz,
-  thumbnail_url text,
-  file_url text,
-  status text default 'active',
-  is_favorite boolean default false,
-  category_id uuid,
-  reference_type text,
-  memo text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-alter table archive_items add column if not exists url text;
-alter table archive_items add column if not exists normalized_url text;
-alter table archive_items add column if not exists url_hash text;
-alter table archive_items add column if not exists content_type text default 'link';
-alter table archive_items add column if not exists summary text;
-alter table archive_items add column if not exists original_url text;
-alter table archive_items add column if not exists description text;
-alter table archive_items add column if not exists preview_image_url text;
-alter table archive_items add column if not exists preview_status text default 'pending';
-alter table archive_items add column if not exists preview_error text;
-alter table archive_items add column if not exists preview_generated_at timestamptz;
-alter table archive_items add column if not exists thumbnail_url text;
-alter table archive_items add column if not exists status text default 'active';
-alter table archive_items add column if not exists is_favorite boolean default false;
-alter table archive_items add column if not exists category_id uuid;
-alter table archive_items add column if not exists reference_type text;
-
-create table if not exists archive_categories (
-  id uuid primary key default gen_random_uuid(),
-  category_name text not null unique,
-  parent_category_id uuid references archive_categories(id) on delete set null,
-  sort_order integer default 0,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'archive_items_category_id_fkey'
-  ) then
-    alter table archive_items
-      add constraint archive_items_category_id_fkey
-      foreign key (category_id) references archive_categories(id) on delete set null;
-  end if;
-end $$;
-
-create table if not exists archive_tags (
-  id uuid primary key default gen_random_uuid(),
-  tag_name text not null unique,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists archive_item_tags (
-  id uuid primary key default gen_random_uuid(),
-  archive_item_id uuid not null references archive_items(id) on delete cascade,
-  tag_id uuid not null references archive_tags(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  unique (archive_item_id, tag_id)
-);
-
-create table if not exists archive_links (
-  id uuid primary key default gen_random_uuid(),
-  archive_item_id uuid not null references archive_items(id) on delete cascade,
-  linked_type text not null,
-  linked_id text not null,
-  created_at timestamptz not null default now(),
-  unique (archive_item_id, linked_type, linked_id)
-);
-
 create table if not exists ai_snapshots (
   id uuid primary key default gen_random_uuid(),
   snapshot_key text not null unique,
@@ -1467,7 +1379,8 @@ create table if not exists automation_jobs (
     'accounting_collect',
     'sourcing_research',
     'knowledge_daily_capture',
-    'knowledge_action'
+    'knowledge_action',
+    'product_card_upsert'
   )),
   constraint automation_jobs_status_check check (status in (
     'queued',
@@ -1519,98 +1432,6 @@ alter table automation_jobs add constraint automation_jobs_type_check check (job
   'knowledge_action',
   'product_card_upsert'
 ));
-
-create table if not exists knowledge_index (
-  id uuid primary key default gen_random_uuid(),
-  archive_id uuid references archive_items(id) on delete set null,
-  source_card_path text not null unique,
-  title text not null,
-  scope text not null default 'company',
-  category text,
-  source_date date,
-  value_score smallint,
-  value_label varchar(10),
-  status text not null default 'pending',
-  confirmation_method text,
-  relationship text,
-  target_hint varchar(500),
-  source_type text,
-  source_ref text,
-  source_url text,
-  obsidian_path text,
-  preview varchar(500),
-  legacy_decision text,
-  legacy_decided_at text,
-  requested_action text,
-  processing_status text not null default 'idle',
-  automation_job_id uuid references automation_jobs(id) on delete set null,
-  error_message text,
-  decided_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint knowledge_index_scope_check check (scope in ('company', 'personal')),
-  constraint knowledge_index_status_check check (status in ('confirmed', 'pending', 'rejected')),
-  constraint knowledge_index_confirmation_check check (confirmation_method is null or confirmation_method in ('merge', 'new')),
-  constraint knowledge_index_value_score_check check (value_score is null or value_score between 0 and 5),
-  constraint knowledge_index_action_check check (requested_action is null or requested_action in ('pending', 'rejected', 'confirm_new', 'confirm_merge')),
-  constraint knowledge_index_processing_check check (processing_status in ('idle', 'queued', 'running', 'success', 'failed'))
-);
-
-create table if not exists knowledge_daily_entries (
-  id uuid primary key default gen_random_uuid(),
-  entry_date date not null default current_date,
-  title text not null,
-  scope text not null default 'company',
-  entry_preview varchar(500) not null,
-  source_card_path text unique,
-  obsidian_path text,
-  processing_status text not null default 'idle',
-  automation_job_id uuid references automation_jobs(id) on delete set null,
-  error_message text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint knowledge_daily_scope_check check (scope in ('company', 'personal')),
-  constraint knowledge_daily_processing_check check (processing_status in ('idle', 'queued', 'running', 'success', 'failed'))
-);
-
-alter table knowledge_index enable row level security;
-alter table knowledge_daily_entries enable row level security;
-revoke all privileges on table knowledge_index from anon, authenticated;
-revoke all privileges on table knowledge_daily_entries from anon, authenticated;
-
-create index if not exists idx_knowledge_index_review on knowledge_index(status, processing_status, updated_at desc);
-create index if not exists idx_knowledge_index_scope_status on knowledge_index(scope, status, updated_at desc);
-create index if not exists idx_knowledge_index_archive on knowledge_index(archive_id);
-create index if not exists idx_knowledge_index_source_date on knowledge_index(source_date desc);
-create index if not exists idx_knowledge_index_value_score on knowledge_index(value_score desc nulls last, updated_at desc);
-create unique index if not exists idx_knowledge_index_source_ref_unique on knowledge_index(source_type, source_ref) where source_ref is not null;
-create index if not exists idx_knowledge_daily_date on knowledge_daily_entries(entry_date desc, created_at desc);
-
-insert into archive_categories (category_name, sort_order) values
-  ('영어', 1),
-  ('포토샵', 2),
-  ('일러스트', 3),
-  ('AI', 4),
-  ('소싱', 10),
-  ('광고소재', 20),
-  ('상세페이지', 30),
-  ('업무방법', 40),
-  ('경쟁사', 50),
-  ('디자인참고', 60),
-  ('캠핑', 110),
-  ('요리', 120),
-  ('살림', 130),
-  ('육아', 140),
-  ('여행', 150),
-  ('맛집', 155),
-  ('동기부여', 160),
-  ('유머', 170),
-  ('기타', 180),
-  ('패키지', 190),
-  ('공급처', 200),
-  ('SNS콘텐츠', 210),
-  ('상품아이디어', 220)
-on conflict (category_name) do nothing;
 
 create index if not exists idx_sales_io_date on sales(io_date);
 create index if not exists idx_sales_prod_cd on sales(prod_cd);
@@ -1850,16 +1671,3 @@ create index if not exists idx_import_product_sku_links_product on import_produc
 create index if not exists idx_import_purchase_alloc_order on import_purchase_sku_allocations(import_order_id);
 create index if not exists idx_import_purchase_alloc_item on import_purchase_sku_allocations(import_order_id, import_order_item_id);
 create index if not exists idx_import_purchase_alloc_product on import_purchase_sku_allocations(product_id);
-create index if not exists idx_archive_created on archive_items(created_at desc);
-create index if not exists idx_archive_category on archive_items(category_id);
-create index if not exists idx_archive_normalized_url on archive_items(normalized_url);
-create unique index if not exists archive_items_url_hash_uidx on archive_items(url_hash) where url_hash is not null;
-create index if not exists idx_archive_source on archive_items(source_type);
-create index if not exists idx_archive_content on archive_items(content_type);
-create index if not exists idx_archive_status on archive_items(status);
-create index if not exists idx_archive_preview_status on archive_items(preview_status);
-create index if not exists idx_archive_favorite on archive_items(is_favorite);
-create index if not exists idx_archive_item_tags_item on archive_item_tags(archive_item_id);
-create index if not exists idx_archive_item_tags_tag on archive_item_tags(tag_id);
-create index if not exists idx_archive_links_item on archive_links(archive_item_id);
-create index if not exists idx_archive_links_target on archive_links(linked_type, linked_id);

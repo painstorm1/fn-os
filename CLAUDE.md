@@ -12,7 +12,6 @@ This project is FNOS, the user's business operating system. Claude Code should a
 - Import management
 - Advertising analysis
 - Accounting / expenses
-- Archive
 - Automation center
 - Agent and Hermes workflows
 

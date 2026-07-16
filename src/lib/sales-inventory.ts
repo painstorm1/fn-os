@@ -1167,7 +1167,7 @@ function isReturnExchangeRow(row: RawRow) {
 }
 
 export async function dashboardSummary() {
-  const [allSales, purchases, inventory, orders, orderItems, shipments, channels, ads, expenses, legacyExpenses, importOrders, archives, logs] = await Promise.all([
+  const [allSales, purchases, inventory, orders, orderItems, shipments, channels, ads, expenses, legacyExpenses, importOrders, logs] = await Promise.all([
     optionalRows("sales", { order: "created_at.desc", limit: 500 }),
     optionalRows("purchases", { order: "created_at.desc", limit: 300 }),
     optionalRows("inventory_current", { order: "updated_at.desc", limit: 300 }),
@@ -1179,7 +1179,6 @@ export async function dashboardSummary() {
     optionalRows("expenses", { order: "expense_date.desc", limit: 120 }),
     optionalRows("expense_entries", { order: "expense_date.desc", limit: 120 }),
     optionalRows("import_purchase_orders", { order: "created_at.desc", limit: 50 }),
-    optionalRows("archive_items", { order: "created_at.desc", limit: 50 }),
     optionalRows("api_sync_logs", { order: "created_at.desc", limit: 20 }),
   ]);
   const returnExchangeRows = allSales.filter(isReturnExchangeRow);
@@ -1247,7 +1246,6 @@ export async function dashboardSummary() {
     recent_inventory_movements: await optionalRows("inventory_movements", { order: "created_at.desc", limit: 30 }),
     recent_import_orders: importOrders.slice(0, 10),
     recent_ads: ads.slice(0, 10),
-    recent_archives: archives.slice(0, 10),
     inventory: riskInventory.length ? riskInventory.slice(0, 50) : inventory.slice(0, 50),
     logs,
     sync_logs: logs,
