@@ -167,6 +167,7 @@ async function getUsdKrwRate() {
 function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKrwRate: number) {
   const isCoupang = channel.includes("쿠팡");
   const isMeta = channel.includes("메타");
+  const isNaverGfa = channel.replace(/[\s_]/g, "") === "네이버GFA";
   const isNaverSearch = channel.includes("네이버_검색광고") || channel.includes("네이버쇼핑검색") || channel.includes("네이버 검색");
   const impressions = numberValue(first(row, ["impressions", "노출수", "노출", "imp", "impCnt"]));
   const clicks = numberValue(first(row, ["clicks", "클릭수", "링크 클릭", "클릭(전체)", "클릭", "clk", "clkCnt"]));
@@ -176,7 +177,9 @@ function normalizeReport(row: AnyRecord, batchId: string, channel: string, usdKr
     ? (metaUsdCost ? Math.round(metaUsdCost * usdKrwRate) : baseCost)
     : baseCost;
 
-  const purchaseConversions = numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
+  const purchaseConversions = isNaverGfa
+    ? numberValue(row["구매완료 수"])
+    : numberValue(first(row, ["구매완료 전환수", "구매완료 수", "구매", "purchase_conversions"]));
   const rawPurchaseValue = isMeta
     ? metaPurchaseValue(row)
     : numberValue(first(row, ["구매완료 전환매출액", "구매 전환값", "purchase_conversion_value"]));
