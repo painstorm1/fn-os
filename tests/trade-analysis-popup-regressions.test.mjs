@@ -321,6 +321,42 @@ test("sales-history required inventory query propagates while optional sales/pur
   assert.equal(Array.from(result.purchase_inventory_basis).length, 0);
 });
 
+test("sales-history displays every entry menu newest date first with persisted-time tie breaking", async () => {
+  const calls = [];
+  const salesHistorySummary = loadSalesHistorySummary(async (table, query) => {
+    calls.push({ table, query });
+    if (table === "sales") return [
+      { id: "sale-old", io_date: "2026-07-14", created_at: "2026-07-16T10:00:00Z", cust_name: "old sale" },
+      { id: "return-new", io_date: "20260716", created_at: "2026-07-15T10:00:00Z", cust_name: "new return", return_exchange_type: "return_in" },
+      { id: "sale-new", io_date: "2026-07-16", created_at: "2026-07-14T10:00:00Z", cust_name: "new sale" },
+      { id: "return-old", io_date: "20260715", created_at: "2026-07-13T10:00:00Z", cust_name: "old return", return_exchange_type: "return_in" },
+    ];
+    if (table === "purchases") return [
+      { id: "purchase-old", io_date: "2026-07-14", created_at: "2026-07-16T10:00:00Z", cust_name: "old purchase" },
+      { id: "purchase-new-older", io_date: "20260716", created_at: "2026-07-14T10:00:00Z", cust_name: "new purchase, older save" },
+      { id: "purchase-new-newer", io_date: "2026-07-16", created_at: "2026-07-15T10:00:00Z", cust_name: "new purchase, newer save" },
+    ];
+    return [];
+  });
+
+  const summary = await salesHistorySummary();
+
+  for (const table of ["sales", "purchases"]) {
+    const query = calls.find((call) => call.table === table)?.query;
+    assert.equal(query?.order, "created_at.desc");
+    assert.equal(query?.limit, 1500);
+  }
+  assert.deepEqual(Array.from(summary.recent_sales, (row) => row.cust_name), ["new sale", "old sale"]);
+  assert.deepEqual(Array.from(summary.recent_returns, (row) => row.cust_name), ["new return", "old return"]);
+  assert.deepEqual(Array.from(summary.recent_purchases, (row) => row.cust_name), [
+    "new purchase, newer save",
+    "new purchase, older save",
+    "old purchase",
+  ]);
+  const displaySummarySource = pageSource.slice(pageSource.indexOf("function summarizeEntryDisplayRows"), pageSource.indexOf("function filterEntryRows"));
+  assert.match(displaySummarySource, /entryDateFilterKey\(entryRowDate\(right\)\)\.localeCompare\(entryDateFilterKey\(entryRowDate\(left\)\)\)/);
+});
+
 test("dashboard summary GET returns ok:false and 5xx when sales-history summary rejects", async () => {
   const GET = loadDashboardSummaryGet({ salesHistorySummary: async () => { throw new Error("inventory query failed"); } });
   const response = await GET(new Request("http://localhost/api/dashboard/summary?scope=sales-history"));

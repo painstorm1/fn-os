@@ -221,7 +221,10 @@ function summarizeEntryRows(rows: Row[], mode: "sales" | "purchases", limit: num
         _recent_order: group.firstSeen,
       };
     })
-    .sort((left, right) => numberValue(left._recent_order) - numberValue(right._recent_order))
+    .sort((left, right) =>
+      dateKey(entryDate(right, mode)).localeCompare(dateKey(entryDate(left, mode))) ||
+      text(right.created_at).localeCompare(text(left.created_at)) ||
+      numberValue(left._recent_order) - numberValue(right._recent_order))
     .slice(0, limit)
     .map(({ _recent_order: _removed, ...row }) => row);
 }
