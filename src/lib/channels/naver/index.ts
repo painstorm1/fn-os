@@ -411,11 +411,11 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       const token = await issueNaverToken(params);
       const ranges = naverDailyRanges(params.from, params.to);
       const fetchedRows: AnyRecord[] = [];
-      for (const range of ranges) {
+      for (const [index, range] of ranges.entries()) {
+        if (index > 0) await wait(700);
         fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "NOT_YET"));
         await wait(700);
         fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "OK"));
-        await wait(700);
       }
       const detailRows = uniqueNaverRows(fetchedRows);
       if (!detailRows.length) return { ok: true, data: [], message: "네이버 신규/주문확인 주문이 없습니다." };
