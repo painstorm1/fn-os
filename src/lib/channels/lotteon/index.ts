@@ -3,7 +3,6 @@ import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelA
 
 type AnyRecord = Record<string, unknown>;
 const LOTTEON_BASE_URL = "https://openapi.lotteon.com";
-const LOTTEON_READBACK_DELAYS_MS = [1000, 3000] as const;
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
@@ -162,33 +161,6 @@ function lotteonReadbackRows(data: unknown) {
   const rows = record(record(data).data).deliveryProgressStateList;
   return Array.isArray(rows) ? rows.map(record) : [];
 }
-function lotteonReadbackInvoiceValues(row: AnyRecord) {
-  const values: string[] = [];
-  if (Array.isArray(row.invcNoList)) {
-    for (const value of row.invcNoList) {
-      const invoice = record(value);
-      const next = firstText(invoice.invcNo, invoice.invoiceNo, invoice.trackingNo, invoice.waybillNo, typeof value === "string" || typeof value === "number" ? value : "");
-      if (next) values.push(next);
-    }
-  }
-  const direct = firstText(row.invcNo, row.invoiceNo, row.invNo, row.trackingNo, row.waybillNo);
-  if (direct) values.push(direct);
-  return values;
-}
-function lotteonReadbackVerification(data: unknown, ids: { odNo: string; odSeq: number; procSeq: number }, trackingNumber: string) {
-  const exactRow = lotteonReadbackRows(data).find((row) => (
-    text(row.odNo) === ids.odNo
-    && lotteonPositiveInteger(row.odSeq) === ids.odSeq
-    && lotteonPositiveInteger(row.procSeq) === ids.procSeq
-  ));
-  if (!exactRow) return { ok: false, error: "요청 식별자와 일치하는 배송상태 행이 없습니다." };
-  const stage = text(exactRow.odPrgsStepCd);
-  if (!["13", "14", "15"].includes(stage)) return { ok: false, error: `배송단계 ${stage || "미확인"}은 출고완료 상태가 아닙니다.` };
-  const invoices = lotteonReadbackInvoiceValues(exactRow);
-  if (invoices.length && !invoices.includes(trackingNumber)) return { ok: false, error: "조회된 송장번호가 요청 송장번호와 일치하지 않습니다." };
-  return { ok: true, row: exactRow };
-}
-
 export class LotteonChannelAdapter implements SalesChannelAdapter {
   async collectOrders(params: Record<string, unknown>): Promise<ChannelResult<NormalizedOrder[]>> {
     const apiKey = text(params.api_key || params.access_key);
@@ -331,42 +303,14 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
     try {
       const baseUrl = text(params.api_base_url) || LOTTEON_BASE_URL;
       const mutationPath = "/v1/openapi/delivery/v2/SellerDeliveryProgressStateInform";
-      const readbackPath = "/v1/openapi/delivery/v1/SellerDeliveryProgressStateSearch";
       const requestHeaders = { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": "ko", "X-Timezone": "GMT+09:00", Authorization: `Bearer ${apiKey}` };
 
-      // API298 mutation은 재시도하지 않는다. 성공 응답 뒤 API140 readback만 최대 3회 수행한다.
+      // API298은 재시도하지 않는다. 롯데ON 정상 응답을 발송완료 결과로 사용한다.
       const mutationResponse = await fetch(`${baseUrl}${mutationPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(lotteonDispatchPayload(ids, trackingNumber, carrierCode)) });
       const mutationData = await readJson(mutationResponse);
       const mutationFailure = lotteonResponseFailureMessage(mutationData);
       if (mutationFailure) return { ok: false, data: mutationData, error: `롯데ON 발송완료 실패: ${mutationFailure}` };
-
-      const readbacks: unknown[] = [];
-      let lastVerificationError = "롯데ON 배송상태를 확인하지 못했습니다.";
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, LOTTEON_READBACK_DELAYS_MS[attempt - 1]));
-          const readbackResponse = await fetch(`${baseUrl}${readbackPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify({ odNo: ids.odNo }) });
-          const readbackData = await readJson(readbackResponse);
-          readbacks.push(readbackData);
-          const readbackFailure = lotteonResponseFailureMessage(readbackData);
-          if (readbackFailure) {
-            lastVerificationError = readbackFailure;
-            continue;
-          }
-          const verification = lotteonReadbackVerification(readbackData, ids, trackingNumber);
-          if (verification.ok) {
-            return {
-              ok: true,
-              data: { mutation: mutationData, readback: readbackData },
-              message: "롯데ON 발송완료 1건 처리 및 배송상태 확인 완료",
-            };
-          }
-          lastVerificationError = verification.error || "롯데ON 배송상태 검증 실패";
-        } catch (error) {
-          lastVerificationError = error instanceof Error ? error.message : "롯데ON 배송상태 조회 실패";
-        }
-      }
-      return { ok: false, data: { mutation: mutationData, readbacks }, error: `롯데ON 발송완료 후 API140 확인 실패: ${lastVerificationError}` };
+      return { ok: true, data: mutationData, message: "롯데ON 발송완료 1건 처리 완료" };
     } catch (error) { return { ok: false, data: null, error: error instanceof Error ? error.message : "롯데ON 발송완료 처리 실패" }; }
   }
 }
