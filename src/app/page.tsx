@@ -8636,6 +8636,7 @@ type SalesGridSort = { col: number; dir: "asc" | "desc" } | null;
 type FnOsProductSearchItem = { id?: string; code?: string; name?: string; size?: string; inPrice?: string; outPrice?: string; productAttribute?: string; importLinked?: boolean };
 type FnOsProductResolveResult = { product: FnOsProductSearchItem | null; error: string };
 type OnlineApiStatusItem = { name: string; status: "waiting" | "running" | "done" | "failed" | "skipped"; message: string; source?: "api" | "manual" };
+type OrderCollectionStatusResponseItem = { source?: string; channel_code?: string; channel_name?: string; order_status?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string };
 type CollectionPopupMode = "collection" | "status-change" | "invoice-upload";
 type OrderProgressStatusChangeStage = "api-running" | "fnos-waiting" | "fnos-applying" | "done" | "failed";
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
@@ -12655,33 +12656,64 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function orderCollectionStatusItems(
-    statuses: Array<{ source?: string; channel_code?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }>,
+    statuses: OrderCollectionStatusResponseItem[],
     fallbackOk: boolean,
     fallbackMessage: string,
   ): OnlineApiStatusItem[] {
-    return statuses.length
-      ? statuses.map((item) => {
-          const displayCount = Number(item.item_count ?? item.count ?? 0);
-          const orderCount = Number(item.count ?? 0);
-          const itemCount = Number(item.item_count ?? displayCount);
-          const isSsg = salesCellText(item.channel_code).toUpperCase() === "SSG";
-          const countMessage = isSsg ? `${displayCount}건` : itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
-          const isManual = item.source === "manual";
-          return {
-            name: salesCellText(item.channel_name) || (isManual ? "수동 주문수집" : "쇼핑몰"),
-            status: item.ok ? "done" as const : (item.skipped ? "skipped" as const : "failed" as const),
-            message: item.ok ? countMessage : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
-            source: isManual ? "manual" as const : "api" as const,
-          };
-        })
-      : [
-          {
-            name: "쇼핑몰 API",
-            status: fallbackOk ? "done" as const : "failed" as const,
-            message: fallbackOk ? "" : fallbackMessage,
-            source: "api" as const,
-          },
-        ];
+    const orderCollectionApiDisplayChannels = [
+      { name: "네이버_에프엔FN", codes: ["NAVER_FN"], aliases: ["네이버_에프엔FN", "에프엔FN"] },
+      { name: "네이버_펀앤파인", codes: ["NAVER_FF"], aliases: ["네이버_펀앤파인", "펀앤파인"] },
+      { name: "쿠팡_WING", codes: ["COUPANG"], aliases: ["쿠팡", "WING"] },
+      { name: "11번가", codes: ["ELEVENST", "11ST"], aliases: ["11번가"] },
+      { name: "SSG신세계", codes: ["SSG"], aliases: ["SSG", "신세계"] },
+      { name: "롯데온", codes: ["LOTTEON", "LOTTE"], aliases: ["롯데온", "롯데ON"] },
+      { name: "토스", codes: ["TOSS"], aliases: ["토스"] },
+    ] as const;
+    const apiStatuses = statuses.filter((item) => item.source !== "manual");
+    const apiItems = orderCollectionApiDisplayChannels.map((channel) => {
+      const matching = apiStatuses.filter((item) => {
+        const code = salesCellText(item.channel_code).toUpperCase();
+        const name = salesCellText(item.channel_name);
+        return channel.codes.some((candidate) => code === candidate)
+          || channel.aliases.some((alias) => name.includes(alias));
+      });
+      const newCount = matching.reduce((sum, item) => {
+        const stage = salesCellText(item.order_status);
+        return sum + (!stage || stage === "신규주문" ? Math.max(0, Number(item.item_count) || 0) : 0);
+      }, 0);
+      const confirmedCount = matching.reduce((sum, item) => (
+        sum + (salesCellText(item.order_status) === "주문확인" ? Math.max(0, Number(item.item_count) || 0) : 0)
+      ), 0);
+      const failedItem = matching.find((item) => !item.ok && !item.skipped);
+      const skippedItem = matching.find((item) => item.skipped);
+      const status = failedItem
+        ? "failed" as const
+        : skippedItem
+          ? "skipped" as const
+          : matching.length || fallbackOk
+            ? "done" as const
+            : "failed" as const;
+      const countMessage = `신규: ${newCount}건${confirmedCount > 0 ? ` / 주문확인: ${confirmedCount}건` : ""}`;
+      return {
+        name: channel.name,
+        status,
+        message: status === "done"
+          ? countMessage
+          : salesCellText(failedItem?.message || skippedItem?.message || fallbackMessage || "수집 실패"),
+        source: "api" as const,
+      };
+    });
+    const manualItems = statuses
+      .filter((item) => item.source === "manual")
+      .map((item) => ({
+        name: salesCellText(item.channel_name) || "수동 주문수집",
+        status: item.ok ? "done" as const : (item.skipped ? "skipped" as const : "failed" as const),
+        message: item.ok
+          ? `${Math.max(0, Number(item.item_count) || 0)}건`
+          : salesCellText(item.message || (item.skipped ? "API 정보 재입력 필요" : "수집 실패")),
+        source: "manual" as const,
+      }));
+    return [...apiItems, ...manualItems];
   }
 
   async function revealOrderCollectionStatuses(finalStatuses: OnlineApiStatusItem[]) {
@@ -12771,7 +12803,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         if (data.queued) throw new Error("로컬 워커 처리 시간이 아직 완료되지 않았습니다. 잠시 후 새로고침해 결과를 확인해주세요.");
       }
-      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_code?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
+      const statuses = Array.isArray(data.statuses) ? data.statuses as OrderCollectionStatusResponseItem[] : [];
       const finalStatuses = orderCollectionStatusItems(
         statuses,
         res.ok && data.ok !== false,
@@ -17576,7 +17608,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                         <span>{label}</span>
                         <span className="h-px flex-1 bg-slate-200" />
                       </div>
-                      <div className="grid gap-2 md:grid-cols-2">
+                      <div className={`grid gap-2 ${collectionPopupMode === "collection" && source === "api" ? "grid-cols-2" : "md:grid-cols-2"}`}>
                         {items.map((item) => {
                           const isRunning = item.status === "running" || item.status === "waiting";
                           const isSkipped = item.status === "skipped";
