@@ -6709,7 +6709,7 @@ function aggregateSalesEntryRows(
       existing.qty += qty;
       existing.supply += supply;
       existing.total += total;
-      if (mode !== "sales" && salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
+      if (salesCellText(item.메모 || item.적요)) existing.memo.add(salesCellText(item.메모 || item.적요));
       return;
     }
     byLine.set(lineKey, {
@@ -6726,7 +6726,7 @@ function aggregateSalesEntryRows(
       qty,
       supply,
       total,
-      memo: new Set(mode === "sales" ? [] : [salesCellText(item.메모 || item.적요)].filter(Boolean)),
+      memo: new Set([salesCellText(item.메모 || item.적요)].filter(Boolean)),
       statementKey,
     });
   });
@@ -6740,7 +6740,7 @@ function aggregateSalesEntryRows(
       단가: String(Math.round(averagePrice)),
       공급가액: String(Math.round(averagePrice)),
       합계금액: String(Math.round(entry.total)),
-      메모: mode === "sales" ? "" : Array.from(entry.memo).join(" / "),
+      메모: Array.from(entry.memo).join(" / "),
     } as Record<string, string>;
   });
 }
@@ -13567,7 +13567,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           단가: item.단가,
           공급가액: item.공급가액,
           합계금액: item.합계금액,
-          메모: "",
+          메모: item.메모,
         };
       });
     if (!sourceRows.length) {
@@ -13613,7 +13613,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         tax_amt: "",
         supply_amt: item.공급가액,
         total_amount: item.합계금액,
-        remarks: "",
+        remarks: item.메모,
         vat_type: item["VAT 포함/별도"],
       }));
       if (!rows.length) throw new Error("전송할 판매입력 행이 없습니다.");

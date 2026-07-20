@@ -141,6 +141,20 @@ test("online sales/purchase save confirms immediately, runs in background, and r
   assert.match(purchaseAfterConfirm, /showOnlineSaveToast\([\s\S]*openOnlineSheetPreview\("purchase"\)/);
 });
 
+test("online FN sales input persists sheet memo into sales remarks", () => {
+  const aggregateStart = pageSource.indexOf("function aggregateSalesEntryRows(");
+  const aggregateSource = pageSource.slice(aggregateStart, pageSource.indexOf("function salesEntryTotalAmountTotal", aggregateStart));
+  assert.match(aggregateSource, /memo: new Set\(\[salesCellText\(item\.메모 \|\| item\.적요\)\]\.filter\(Boolean\)\)/);
+  assert.match(aggregateSource, /메모: Array\.from\(entry\.memo\)\.join\(" \/ "\)/);
+  assert.doesNotMatch(aggregateSource, /mode === "sales" \? \[\] :|mode === "sales" \? "" :/);
+
+  const salesStart = pageSource.indexOf("  async function sendSalesInput()");
+  const salesSource = pageSource.slice(salesStart, pageSource.indexOf("  async function sendPurchaseInput()", salesStart));
+  assert.match(salesSource, /합계금액: item\.합계금액,\s*메모: item\.메모,/);
+  assert.match(salesSource, /total_amount: item\.합계금액,\s*remarks: item\.메모,/);
+  assert.doesNotMatch(salesSource, /메모: ""|remarks: ""/);
+});
+
 test("complete online sales/purchase rows skip frontend enrichment while incomplete rows retain fallback", () => {
   const helperStart = pageSource.indexOf("function salesCellText(");
   const helperEnd = pageSource.indexOf("function normalizeEntryDateValue(", helperStart);
