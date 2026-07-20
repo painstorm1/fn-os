@@ -23,8 +23,7 @@ export function proxy(request: NextRequest) {
   const isTrustedLocalBridgeOrigin = request.headers.get("origin") === "https://fn-os.vercel.app";
   const requestedHeaders = new Set((request.headers.get("access-control-request-headers") || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
   const isLocalManualFileCleanupPreflight = request.method === "OPTIONS"
-    && request.nextUrl.hostname === "127.0.0.1"
-    && request.nextUrl.port === "3000"
+    && isLocalHost
     && pathname === "/api/fnos/online-orders/manual-files/cleanup"
     && isTrustedLocalBridgeOrigin
     && request.headers.get("access-control-request-method")?.toUpperCase() === "POST"
