@@ -19416,7 +19416,7 @@ function SalesPurchaseEntryModal({
             event.target.value = "";
           }} />
         </div>
-        <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 md:grid-cols-2">
+        <div className={`grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 ${isReturnExchangeMode ? "md:grid-cols-2" : "md:grid-cols-4"}`}>
           {isReturnExchangeMode && (
             <FormField label="반품/교환" required>
               <select
@@ -19565,6 +19565,7 @@ function SalesPurchaseEntryModal({
               );})}
             </tbody>
           </table>
+          <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 text-right text-sm font-black text-gray-700">합계금액 : {Math.round(entryLinesTotal).toLocaleString("ko-KR")}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActionButton type="button" variant="secondary" onClick={appendLine}>행 추가</ActionButton>

@@ -211,6 +211,13 @@ test("FN purchase entry uses supply amount instead of a separate visible unit-pr
   assert.match(salesInventorySource, /const price = rawPrice \|\| explicitSupply;/);
 });
 
+test("direct sales/purchase entry uses a four-column header and an in-card live total footer", () => {
+  const modalStart = pageSource.indexOf("function SalesPurchaseEntryModal");
+  const modalSource = pageSource.slice(modalStart, pageSource.indexOf("function SalesInventoryTable", modalStart));
+  assert.match(modalSource, /isReturnExchangeMode \? "md:grid-cols-2" : "md:grid-cols-4"/);
+  assert.match(modalSource, /<\/table>\s*<div[^>]*>합계금액 : \{Math\.round\(entryLinesTotal\)\.toLocaleString\("ko-KR"\)\}<\/div>\s*<\/div>\s*<div className="flex flex-wrap items-center gap-2">/);
+});
+
 test("online sales and purchase modal footers sum total amount from non-empty displayed rows", () => {
   assert.match(pageSource, /function salesEntryTotalAmountTotal\(sheet: "FN판매입력" \| "FN구매입력", rows: string\[\]\[\]\)[\s\S]*indexOf\("합계금액"\)[\s\S]*rows\.filter\(rowHasValue\)\.reduce/);
   assert.match(pageSource, /const salesTotalAmount = salesEntryTotalAmountTotal\("FN판매입력", sheets\["FN판매입력"\]\);/);
