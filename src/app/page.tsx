@@ -11168,16 +11168,17 @@ function salesShipmentPageSvg(page: SalesShipmentPage, format: "A5" | "A4", date
   const isA5 = format === "A5";
   const width = 794;
   const height = isA5 ? 559 : 1123;
-  const tableY = isA5 ? 112 : 96;
-  const rowHeight = isA5 ? 13 : 13.35;
+  const topOffset = 150;
+  const tableY = (isA5 ? 112 : 96) + topOffset;
+  const rowHeight = 18;
   const columns = isA5
     ? salesShipmentSvgColumn(page.left, 216, tableY, `p${pageNumber}-left`, rowHeight)
     : `${salesShipmentSvgColumn(page.left, 28, tableY, `p${pageNumber}-left`, rowHeight)}${salesShipmentSvgColumn(page.right, 404, tableY, `p${pageNumber}-right`, rowHeight)}`;
   return `<svg class="shipment-page${pageNumber === 1 ? " active" : ""}" data-page="${pageNumber}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" style="font-family:Arial,'Malgun Gothic',sans-serif" role="img" aria-label="출고리스트 ${pageNumber}페이지">
     <rect width="${width}" height="${height}" fill="#fff" />
-    <text x="${width / 2}" y="42" text-anchor="middle" font-size="29" font-weight="900">출고리스트</text>
-    <text x="${isA5 ? 216 : 28}" y="78" font-size="12" font-weight="800">날짜 ${htmlEscape(dateLabel)}</text>
-    <text x="${isA5 ? 578 : 766}" y="78" text-anchor="end" font-size="12" font-weight="800">출고창고 100</text>
+    <text x="${width / 2}" y="${42 + topOffset}" text-anchor="middle" font-size="29" font-weight="900">출고리스트</text>
+    <text x="${isA5 ? 216 : 28}" y="${78 + topOffset}" font-size="12" font-weight="800">날짜 ${htmlEscape(dateLabel)}</text>
+    <text x="${isA5 ? 578 : 766}" y="${78 + topOffset}" text-anchor="end" font-size="12" font-weight="800">출고창고 100</text>
     ${columns}
     <text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="8" fill="#555">${pageNumber} / ${totalPages}</text>
   </svg>`;

@@ -35,8 +35,8 @@ export type DirectShippingSourceIndexes = {
 };
 
 const A5_PRODUCT_LIMIT = 30;
-const A5_GRID_ROWS = 31;
-const A4_COLUMN_ROWS = 73;
+const A5_GRID_ROWS = 14;
+const A4_COLUMN_ROWS = 46;
 
 function normalizedProductName(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
@@ -117,7 +117,12 @@ export function buildSalesShipmentList(
   const pages: SalesShipmentPage[] = [];
 
   if (format === "A5") {
-    pages.push({ left: slots, right: [] });
+    for (let offset = 0; offset < slots.length; offset += A5_GRID_ROWS) {
+      pages.push({
+        left: fixedSlots(slots.slice(offset, offset + A5_GRID_ROWS), A5_GRID_ROWS),
+        right: [],
+      });
+    }
   } else {
     for (let offset = 0; offset < slots.length; offset += A4_COLUMN_ROWS * 2) {
       const pageSlots = slots.slice(offset, offset + A4_COLUMN_ROWS * 2);
