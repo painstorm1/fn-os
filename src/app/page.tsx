@@ -7566,7 +7566,7 @@ function isOrderProgressStatusAdvance(currentStatus: string, collectedStatus: st
   return collectedRank > currentRank;
 }
 
-const orderProgressPreservedHeaders = ["직송거래처", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"];
+const orderProgressPreservedHeaders = ["주문번호", "직송거래처", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"];
 
 function mergedOrderProgressStatus(existingStatus: string, rebuiltStatus: string) {
   if (!existingStatus) return rebuiltStatus;
@@ -7984,7 +7984,7 @@ function appendCollectedOnlineOrdersToSheets(
   const shippingRows: string[][] = [];
   const invoiceRows: string[][] = [];
   const mallCodeCounters = new Map<string, number>();
-  const appendedActionIds: Array<{ apiOrderId: string; apiProductOrderId: string; apiShipmentId: string; apiExtraId: string }> = [];
+  const appendedActionIds: Array<{ persistedOrderNo: string; apiOrderId: string; apiProductOrderId: string; apiShipmentId: string; apiExtraId: string }> = [];
   const appendedManualFileRows: OnlineOrderManualFileRowRef[] = [];
   const mallCodeDatePart = salesWorkspaceDayKey().replace(/\D/g, "").slice(4, 8);
   const mallCodeBaseRun = onlineOrderRunCode();
@@ -8066,7 +8066,7 @@ function appendCollectedOnlineOrdersToSheets(
       setSalesSheetCell(invoice, "FN송장입력", "묶음주문번호", actionIds.apiShipmentId || order.bundleOrderNo || orderNo);
       setSalesSheetCell(invoice, "FN송장입력", "배송방법코드", onlineOrderDefaultDeliveryCompanyCode(channelName, channelCode));
       invoiceRows.push(invoice);
-      appendedActionIds.push(actionIds);
+      appendedActionIds.push({ ...actionIds, persistedOrderNo: orderNo });
     });
   });
 
@@ -8080,6 +8080,7 @@ function appendCollectedOnlineOrdersToSheets(
   appendedActionIds.forEach((actionIds, offset) => {
     const progress = nextSheets["발주 진행 단계"][currentShippingRows.length + offset];
     if (!progress) return;
+    setProgressValue(progress, "주문번호", actionIds.persistedOrderNo);
     setProgressValue(progress, "API주문ID", actionIds.apiOrderId);
     setProgressValue(progress, "API상품주문ID", actionIds.apiProductOrderId);
     setProgressValue(progress, "API배송묶음ID", actionIds.apiShipmentId);
@@ -8092,8 +8093,7 @@ function appendCollectedOnlineOrdersToSheets(
     const orderNo = salesCellText(order.orderNo);
     (order.items || []).forEach((item) => {
       const productOrderId = salesCellText(item.channelOptionCode || item.channelProductCode || item.sku);
-      // SSG처럼 order.orderNo(ordNo)와 발주 진행 단계의 "주문번호"(actionIds.apiOrderId=shppNo)가
-      // 서로 다른 채널은 orderNo 키만으로 매칭이 안 되어 상태가 신규주문에 머무르므로 actionIds 키도 함께 등록한다.
+      // SSG처럼 stable orderNo(ordNo)와 외부 API ID(shppNo)가 다른 채널의 legacy/readback 행도 매칭한다.
       const actionIds = onlineOrderActionIds(order, item);
       [
         orderNo,

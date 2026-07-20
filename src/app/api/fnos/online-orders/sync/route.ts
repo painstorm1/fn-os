@@ -231,13 +231,14 @@ function normalizedOrderIdentities(order: NormalizedOrder) {
   return ids;
 }
 
-function ssgItemIdentity(item: NormalizedOrderItem) {
+function ssgItemIdentity(order: NormalizedOrder, item: NormalizedOrderItem) {
   const raw = record(item.raw);
-  return firstText(
-    raw.__fnosRowKey,
-    item.channelOptionCode,
-    [item.channelProductCode, item.channelOptionName, item.sku, item.channelProductName].map(text).filter(Boolean).join("|"),
-  );
+  const orderRaw = record(order.raw);
+  const rowKeyParts = text(raw.__fnosRowKey).split("|");
+  const orderIdentity = firstText(order.orderNo, orderRaw.ordNo, orderRaw.orordNo, orderRaw.orderNo);
+  const shippingIdentity = firstText(raw.shppNo, raw.shppDirectionNo, rowKeyParts[0], orderRaw.shppNo, order.bundleOrderNo);
+  const lineIdentity = firstText(raw.shppSeq, raw.ordItemSeq, raw.orordItemSeq, raw.itemSeq, item.channelOptionCode, rowKeyParts.slice(1).join("|"));
+  return [orderIdentity, shippingIdentity, lineIdentity].map(text).filter(Boolean).join("|");
 }
 
 function mergeSsgCollectedOrders(apiOrders: NormalizedOrder[], fallbackOrders: NormalizedOrder[]) {
@@ -258,9 +259,9 @@ function mergeSsgCollectedOrders(apiOrders: NormalizedOrder[], fallbackOrders: N
       merged.push({ ...order, items: [...order.items] });
     } else {
       const existing = merged[existingIndex];
-      const itemKeys = new Set(existing.items.map(ssgItemIdentity).filter(Boolean));
+      const itemKeys = new Set(existing.items.map((item) => ssgItemIdentity(existing, item)).filter(Boolean));
       const missingItems = order.items.filter((item) => {
-        const key = ssgItemIdentity(item);
+        const key = ssgItemIdentity(order, item);
         if (!key || itemKeys.has(key)) return false;
         itemKeys.add(key);
         return true;
