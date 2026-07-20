@@ -35,7 +35,7 @@ export type DirectShippingSourceIndexes = {
 };
 
 const A5_PRODUCT_LIMIT = 30;
-const A5_GRID_ROWS = 15;
+const A5_GRID_ROWS = 27;
 const A4_COLUMN_ROWS = 45;
 
 function normalizedProductName(value: unknown) {

@@ -11184,19 +11184,20 @@ function salesShipmentSvgColumn(slots: SalesShipmentSlot[], x: number, y: number
 
 function salesShipmentPageSvg(page: SalesShipmentPage, format: "A5" | "A4", dateLabel: string, pageNumber: number, totalPages: number) {
   const isA5 = format === "A5";
-  const width = 794;
-  const height = isA5 ? 559 : 1123;
+  const width = isA5 ? 559 : 794;
+  const height = isA5 ? 794 : 1123;
   const topOffset = 75;
   const tableY = (isA5 ? 112 : 96) + topOffset;
   const rowHeight = 19;
+  const tableX = isA5 ? (width - 362) / 2 : 28;
   const columns = isA5
-    ? salesShipmentSvgColumn(page.left, 216, tableY, `p${pageNumber}-left`, rowHeight)
+    ? salesShipmentSvgColumn(page.left, tableX, tableY, `p${pageNumber}-left`, rowHeight)
     : `${salesShipmentSvgColumn(page.left, 28, tableY, `p${pageNumber}-left`, rowHeight)}${salesShipmentSvgColumn(page.right, 404, tableY, `p${pageNumber}-right`, rowHeight)}`;
   return `<svg class="shipment-page${pageNumber === 1 ? " active" : ""}" data-page="${pageNumber}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" style="font-family:Arial,'Malgun Gothic',sans-serif" role="img" aria-label="출고리스트 ${pageNumber}페이지">
     <rect width="${width}" height="${height}" fill="#fff" />
     <text x="${width / 2}" y="${42 + topOffset}" text-anchor="middle" font-size="29" font-weight="900">출고리스트</text>
-    <text x="${isA5 ? 216 : 28}" y="${78 + topOffset}" font-size="12" font-weight="800">날짜 ${htmlEscape(dateLabel)}</text>
-    <text x="${isA5 ? 578 : 766}" y="${78 + topOffset}" text-anchor="end" font-size="12" font-weight="800">출고창고 100</text>
+    <text x="${tableX}" y="${78 + topOffset}" font-size="12" font-weight="800">날짜 ${htmlEscape(dateLabel)}</text>
+    <text x="${isA5 ? tableX + 362 : 766}" y="${78 + topOffset}" text-anchor="end" font-size="12" font-weight="800">출고창고 100</text>
     ${columns}
     <text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="8" fill="#555">${pageNumber} / ${totalPages}</text>
   </svg>`;
@@ -13071,9 +13072,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     const dateLabel = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
     const totalPages = result.pages.length;
     const pageSvgs = result.pages.map((page, index) => salesShipmentPageSvg(page, result.format, dateLabel, index + 1, totalPages)).join("");
-    const pageSize = result.format === "A5" ? "A5 landscape" : "A4 portrait";
-    const paperWidth = "210mm";
-    const paperHeight = result.format === "A5" ? "148mm" : "297mm";
+    const pageSize = result.format === "A5" ? "A5 portrait" : "A4 portrait";
+    const paperWidth = result.format === "A5" ? "148mm" : "210mm";
+    const paperHeight = result.format === "A5" ? "210mm" : "297mm";
     popup.document.open();
     popup.document.write(`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>출고리스트</title>
