@@ -7976,6 +7976,27 @@ function completedPendingOnlineOrderManualFiles(progressRows: string[][]) {
   });
 }
 
+function applyOrderProgressStatusChangeToSheets(
+  currentSheets: Record<SalesSheetName, string[][]>,
+  statusApplyIndexes: number[],
+  status: OrderProgressStatusChangeTarget,
+) {
+  const progressRows = currentSheets["발주 진행 단계"].map((row) => [...row]);
+  statusApplyIndexes.forEach((index) => {
+    if (progressRows[index]) setProgressValue(progressRows[index], "주문상태", status);
+  });
+  const nextSheets = {
+    ...currentSheets,
+    "발주 진행 단계": padSalesRows("발주 진행 단계", progressRows),
+  };
+  return {
+    nextSheets,
+    completedManualFiles: status === "출고완료"
+      ? completedPendingOnlineOrderManualFiles(nextSheets["발주 진행 단계"])
+      : [],
+  };
+}
+
 function setSalesSheetCell(row: string[], sheet: SalesSheetName, header: string, value: unknown) {
   const index = salesSheetHeaders[sheet].indexOf(header);
   if (index >= 0) row[index] = salesCellText(value);
@@ -14296,30 +14317,29 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       return false;
     }
     if (patches.length) {
-      setSheets((prev) => {
-        const next = { ...prev };
-        const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-        const saleRows = next["FN판매입력"].map((row) => [...row]);
-        const purchaseRows = next["FN구매입력"].map((row) => [...row]);
-        patches.forEach((patch) => {
-          if (progressRows[patch.index]) {
-            setProgressValue(progressRows[patch.index], "품목코드(ERP)", patch.code);
-            setProgressValue(progressRows[patch.index], "품목명(ERP)", patch.name);
-          }
-          if (saleRows[patch.index]) {
-            setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목코드", patch.code);
-            setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목명", patch.name);
-          }
-          if (purchaseRows[patch.index]) {
-            setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목코드", patch.code);
-            setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목명", patch.name);
-          }
-        });
-        next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-        next["FN판매입력"] = padSalesRows("FN판매입력", saleRows);
-        next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
-        return next;
+      const next = { ...sheetsRef.current };
+      const progressRows = next["발주 진행 단계"].map((row) => [...row]);
+      const saleRows = next["FN판매입력"].map((row) => [...row]);
+      const purchaseRows = next["FN구매입력"].map((row) => [...row]);
+      patches.forEach((patch) => {
+        if (progressRows[patch.index]) {
+          setProgressValue(progressRows[patch.index], "품목코드(ERP)", patch.code);
+          setProgressValue(progressRows[patch.index], "품목명(ERP)", patch.name);
+        }
+        if (saleRows[patch.index]) {
+          setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목코드", patch.code);
+          setSalesSheetCell(saleRows[patch.index], "FN판매입력", "품목명", patch.name);
+        }
+        if (purchaseRows[patch.index]) {
+          setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목코드", patch.code);
+          setSalesSheetCell(purchaseRows[patch.index], "FN구매입력", "품목명", patch.name);
+        }
       });
+      next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
+      next["FN판매입력"] = padSalesRows("FN판매입력", saleRows);
+      next["FN구매입력"] = padSalesRows("FN구매입력", purchaseRows);
+      sheetsRef.current = next;
+      setSheets(next);
       setSalesGridResetKey((value) => value + 1);
     }
     return true;
@@ -14332,13 +14352,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .filter(Boolean),
     ));
     if (!files.length) return;
-    const hostname = window.location.hostname;
-    const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
-    const isLocalPage = isLoopbackHost || window.location.port === "3000";
-    const savedBridgeOrigin = window.localStorage.getItem("fnosLocalBridgeOrigin") || "";
+    const isLocalPage = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
     const cleanupUrl = isLocalPage
       ? "/api/fnos/online-orders/manual-files/cleanup"
-      : `${(savedBridgeOrigin || "http://192.168.0.27:3000").replace(/\/$/, "")}/api/fnos/online-orders/manual-files/cleanup`;
+      : "http://127.0.0.1:3000/api/fnos/online-orders/manual-files/cleanup";
     try {
       const res = await fetch(cleanupUrl, {
         method: "POST",
@@ -14477,29 +14494,16 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ...failedApiStatusItems,
     ], confirmManualStatuses("fnos-applying"), false, overrideTodayhouseStatusDisplay));
     await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
-    let manualFilesToCleanup: string[] = [];
-    setSheets((prev) => {
-      const next = { ...prev };
-      const progressRows = next["발주 진행 단계"].map((row) => [...row]);
-      statusApplyIndexes.forEach((index) => {
-        if (!progressRows[index]) return;
-        setProgressValue(progressRows[index], "주문상태", status);
-      });
-      next["발주 진행 단계"] = padSalesRows("발주 진행 단계", progressRows);
-      manualFilesToCleanup = status === "출고완료" ? completedPendingOnlineOrderManualFiles(next["발주 진행 단계"]) : [];
-      return next;
-    });
+    const { nextSheets, completedManualFiles } = applyOrderProgressStatusChangeToSheets(sheetsRef.current, statusApplyIndexes, status);
+    sheetsRef.current = nextSheets;
+    setSheets(nextSheets);
     setCollectionStatuses(mergeConfirmOrderStatusDisplayItems([
       ...orderProgressStatusChangeItems(statusApplyIndexes, status, "done", fnosOnlyStatusMove),
       ...failedApiStatusItems,
     ], confirmManualStatuses("done"), false, overrideTodayhouseStatusDisplay));
     setMessage(`${status} 처리 ${failedApiIndexes.length ? "부분 완료" : "완료"}: ${statusApplyIndexes.length}건${failedApiIndexes.length ? ` / API 실패 ${failedApiIndexes.length}건` : ""}`);
     if (partialFailureMessage) window.alert(`일부 쇼핑몰 처리는 실패했고, 성공한 쇼핑몰만 FNOS 상태를 변경했습니다.\n${partialFailureMessage}`);
-    if (status === "출고완료") {
-      window.setTimeout(() => {
-        if (manualFilesToCleanup.length) void cleanupPendingManualOrderFilesAfterCompletion(manualFilesToCleanup);
-      }, 0);
-    }
+    if (completedManualFiles.length) void cleanupPendingManualOrderFilesAfterCompletion(completedManualFiles);
   }
 
   function deleteSelectedOrderRows() {

@@ -21,6 +21,14 @@ export function proxy(request: NextRequest) {
   const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(request.nextUrl.hostname);
   const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(request.nextUrl.hostname);
   const isTrustedLocalBridgeOrigin = request.headers.get("origin") === "https://fn-os.vercel.app";
+  const requestedHeaders = new Set((request.headers.get("access-control-request-headers") || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
+  const isLocalManualFileCleanupPreflight = request.method === "OPTIONS"
+    && request.nextUrl.hostname === "127.0.0.1"
+    && request.nextUrl.port === "3000"
+    && pathname === "/api/fnos/online-orders/manual-files/cleanup"
+    && isTrustedLocalBridgeOrigin
+    && request.headers.get("access-control-request-method")?.toUpperCase() === "POST"
+    && requestedHeaders.has("x-fnos-local-bridge");
   const isLocalOnlineOrderBridgeApi = (isLocalHost || isPrivateIpv4Host)
     && pathname.startsWith("/api/fnos/online-orders/")
     && request.headers.get("x-fnos-local-bridge") === "1"
@@ -31,7 +39,7 @@ export function proxy(request: NextRequest) {
   const isSlackCommandApi = pathname === "/api/slack/commands";
   const isPublicAsset = pathname.startsWith("/_next/") || pathname === "/favicon.ico" || /\.(svg|png|jpg|jpeg|webp|ico)$/.test(pathname);
 
-  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isLocalOnlineOrderWorkerApi || isLocalOnlineOrderBridgeApi || isSlackCommandApi || isPublicAsset) {
+  if (isLoginPage || isLoginApi || isAutomationAgentApi || isAutomationJobApi || isLocalOnlineOrderWorkerApi || isLocalOnlineOrderBridgeApi || isLocalManualFileCleanupPreflight || isSlackCommandApi || isPublicAsset) {
     return NextResponse.next();
   }
 

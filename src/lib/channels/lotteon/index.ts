@@ -3,6 +3,7 @@ import type { ChannelResult, NormalizedOrder, NormalizedOrderItem, SalesChannelA
 
 type AnyRecord = Record<string, unknown>;
 const LOTTEON_BASE_URL = "https://openapi.lotteon.com";
+const LOTTEON_READBACK_DELAYS_MS = [1000, 3000] as const;
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 function record(value: unknown): AnyRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as AnyRecord : {}; }
@@ -108,6 +109,12 @@ function lotteonCarrierCode(value: unknown) {
   if (["KDEXP", "KYUNGDONG", "경동", "경동택배"].includes(compact)) return "0024";
   if (["OTHER", "기타"].includes(compact)) return "9999";
   return "";
+}
+function lotteonTrackingNumber(value: unknown, carrierCode: string) {
+  const raw = text(value);
+  if (carrierCode !== "0002") return raw;
+  const normalized = raw.replace(/[\s-]/g, "");
+  return /^\d+$/.test(normalized) ? normalized : "";
 }
 function lotteonResponseContainers(data: unknown) {
   const root = record(data);
@@ -313,12 +320,13 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
     const source = rows[0];
     const ids = lotteonValidatedIds(source);
     if (!ids) return { ok: false, data: null, error: "롯데ON 발송완료 필수 식별자(odNo/odSeq/procSeq)가 누락되었거나 올바른 양의 정수가 아닙니다." };
-    // FNOS UI가 표시용 하이픈(0000-0000-0000)을 저장값에 포함하므로 숫자만 남긴다. 하이픈 포함 시 롯데ON이 "잘못된 [송장번호리스트]"로 거절.
-    const trackingNumber = firstText(source.trackingNumber, source.tracking_number).replace(/\D/g, "");
-    if (!trackingNumber) return { ok: false, data: null, error: "롯데ON 발송완료 송장번호가 누락되었습니다." };
-    if (trackingNumber.length > 30) return { ok: false, data: null, error: "롯데ON 송장번호는 최대 30자까지 입력할 수 있습니다." };
     const carrierCode = lotteonCarrierCode(firstText(source.deliveryCompanyCode, source.delivery_company_code));
     if (!carrierCode) return { ok: false, data: null, error: "롯데ON 배송사가 누락되었거나 지원하지 않는 배송사입니다." };
+    const rawTrackingNumber = firstText(source.trackingNumber, source.tracking_number);
+    if (!rawTrackingNumber) return { ok: false, data: null, error: "롯데ON 발송완료 송장번호가 누락되었습니다." };
+    const trackingNumber = lotteonTrackingNumber(rawTrackingNumber, carrierCode);
+    if (!trackingNumber) return { ok: false, data: null, error: "롯데ON CJ대한통운 송장번호는 공백/하이픈을 제외한 숫자만 사용할 수 있습니다." };
+    if (trackingNumber.length > 30) return { ok: false, data: null, error: "롯데ON 송장번호는 최대 30자까지 입력할 수 있습니다." };
 
     try {
       const baseUrl = text(params.api_base_url) || LOTTEON_BASE_URL;
@@ -336,6 +344,7 @@ export class LotteonChannelAdapter implements SalesChannelAdapter {
       let lastVerificationError = "롯데ON 배송상태를 확인하지 못했습니다.";
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
+          if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, LOTTEON_READBACK_DELAYS_MS[attempt - 1]));
           const readbackResponse = await fetch(`${baseUrl}${readbackPath}`, { method: "POST", headers: requestHeaders, body: JSON.stringify({ odNo: ids.odNo }) });
           const readbackData = await readJson(readbackResponse);
           readbacks.push(readbackData);
