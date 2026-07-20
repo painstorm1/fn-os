@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import vm from "node:vm";
+import ts from "typescript";
 
 const salesInventorySource = readFileSync(new URL("../src/lib/sales-inventory.ts", import.meta.url), "utf8");
 const dashboardSource = readFileSync(new URL("../src/lib/main-dashboard.ts", import.meta.url), "utf8");
@@ -86,6 +88,7 @@ test("direct F4 save hides the modal while the request runs and restores the dra
   const saveRowsStart = pageSource.indexOf("  async function saveRows()");
   assert.notEqual(saveRowsStart, -1);
   const saveRowsSource = pageSource.slice(saveRowsStart, pageSource.indexOf("  const allLinesSelected", saveRowsStart));
+  assert.doesNotMatch(saveRowsSource, /enrichOnlineEntryRows|onlineEntryRecordCanSkipEnrichment/);
   assert.match(saveRowsSource, /setBackgroundSaving\(true\);[\s\S]*await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 0\)\);[\s\S]*await fetch/);
   assert.match(saveRowsSource, /let saved = false;[\s\S]*saved = true;[\s\S]*finally \{[\s\S]*if \(!saved\) setBackgroundSaving\(false\);/);
   assert.match(saveRowsSource, /if \(saved\) window\.alert\("저장은 완료됐지만 화면 갱신에 실패했습니다\. 새로고침해 주세요\."\);[\s\S]*else setLocalError/);
@@ -136,6 +139,42 @@ test("online sales/purchase save confirms immediately, runs in background, and r
   const purchaseAfterConfirm = purchaseSource.slice(purchaseSource.indexOf("onlineSheetImportInFlight.current = \"purchase\""));
   assert.doesNotMatch(purchaseAfterConfirm, /window\.alert/);
   assert.match(purchaseAfterConfirm, /showOnlineSaveToast\([\s\S]*openOnlineSheetPreview\("purchase"\)/);
+});
+
+test("complete online sales/purchase rows skip frontend enrichment while incomplete rows retain fallback", () => {
+  const helperStart = pageSource.indexOf("function salesCellText(");
+  const helperEnd = pageSource.indexOf("function normalizeEntryDateValue(", helperStart);
+  assert.notEqual(helperStart, -1);
+  assert.notEqual(helperEnd, -1);
+  const runnableSource = ts.transpileModule(
+    `${pageSource.slice(helperStart, helperEnd)}\nexport { onlineEntryRecordCanSkipEnrichment };`,
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+  ).outputText;
+  const helperModule = { exports: {} };
+  vm.runInNewContext(runnableSource, { module: helperModule, exports: helperModule.exports });
+  const canSkip = helperModule.exports.onlineEntryRecordCanSkipEnrichment;
+  const completeSales = {
+    거래처코드: "C001", 거래처명: "온라인몰", 출하창고: "100",
+    품목코드: "P001", 품목명: "상품", 수량: "2", 단가: "5000", 공급가액: "5000", 합계금액: "10000",
+  };
+  const completePurchase = { ...completeSales, 출하창고: "", 입고창고: "100" };
+  assert.equal(canSkip(completeSales, "sales"), true);
+  assert.equal(canSkip(completePurchase, "purchases"), true);
+  for (const field of ["거래처코드", "거래처명", "품목코드", "품목명", "공급가액", "합계금액"]) {
+    assert.equal(canSkip({ ...completeSales, [field]: "" }, "sales"), false, `${field} 누락은 enrichment 대상`);
+    assert.equal(canSkip({ ...completePurchase, [field]: "" }, "purchases"), false, `구매 ${field} 누락은 enrichment 대상`);
+  }
+  assert.equal(canSkip({ ...completeSales, 출하창고: "" }, "sales"), false);
+  assert.equal(canSkip({ ...completePurchase, 입고창고: "" }, "purchases"), false);
+  assert.equal(canSkip({ ...completeSales, 수량: "" }, "sales"), false);
+
+  const salesStart = pageSource.indexOf("  async function sendSalesInput()");
+  const salesSource = pageSource.slice(salesStart, pageSource.indexOf("  async function sendPurchaseInput()", salesStart));
+  assert.match(salesSource, /if \(!sourceRows\.every\(\(item\) => onlineEntryRecordCanSkipEnrichment\(item, "sales"\)\)\) \{\s*sourceRows = await enrichOnlineEntryRows\(sourceRows, "sales"\);\s*\}/);
+
+  const purchaseStart = pageSource.indexOf("  async function sendPurchaseInput()");
+  const purchaseSource = pageSource.slice(purchaseStart, pageSource.indexOf("  async function matchInvoiceNumbers", purchaseStart));
+  assert.match(purchaseSource, /sourceRows = sourceRows\.map\(normalizeDirectShippingPurchaseCustomer\);\s*if \(!sourceRows\.every\(\(item\) => onlineEntryRecordCanSkipEnrichment\(item, "purchases"\)\)\) \{\s*sourceRows = await enrichOnlineEntryRows\(sourceRows, "purchases"\);\s*\}/);
 });
 
 test("direct sales/purchase entry narrows reference lookups before F4 save", () => {

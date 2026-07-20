@@ -6649,6 +6649,18 @@ function salesEntryRecordHasRequiredValues(item: Record<string, string>, mode: "
   );
 }
 
+function onlineEntryRecordCanSkipEnrichment(item: Record<string, string>, mode: "sales" | "purchases") {
+  return salesEntryRecordHasRequiredValues(item, mode) && [
+    item.거래처코드,
+    item.거래처명,
+    item.품목코드,
+    item.품목명,
+    item.단가 || item.공급가액,
+    item.공급가액,
+    item.합계금액,
+  ].every((value) => Boolean(salesCellText(value)));
+}
+
 function normalizeEntryDateValue(value: unknown) {
   const raw = salesCellText(value);
   if (!raw) return "";
@@ -13544,7 +13556,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
-      sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
+      if (!sourceRows.every((item) => onlineEntryRecordCanSkipEnrichment(item, "sales"))) {
+        sourceRows = await enrichOnlineEntryRows(sourceRows, "sales");
+      }
       const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "sales"));
       if (missingRequired.length) {
         throw new Error(`필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 출하창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
@@ -13645,7 +13659,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setMessage("");
     try {
-      sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
+      sourceRows = sourceRows.map(normalizeDirectShippingPurchaseCustomer);
+      if (!sourceRows.every((item) => onlineEntryRecordCanSkipEnrichment(item, "purchases"))) {
+        sourceRows = await enrichOnlineEntryRows(sourceRows, "purchases");
+      }
       const missingRequired = sourceRows.filter((item) => !salesEntryRecordHasRequiredValues(item, "purchases"));
       if (missingRequired.length) {
         throw new Error(`필수값이 누락된 행이 있습니다. 거래처코드 또는 거래처명, 입고창고, 품목코드 또는 품목명, 수량을 확인해 주세요. (${missingRequired.length}건)`);
