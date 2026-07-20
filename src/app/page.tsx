@@ -24544,6 +24544,7 @@ type AdsSummary = {
   total?: AdsMetricRow;
   batches?: AdsMetricRow[];
   daily?: AdsMetricRow[];
+  dailyByChannel?: AdsMetricRow[];
   channels?: AdsMetricRow[];
   products?: AdsMetricRow[];
   campaigns?: AdsMetricRow[];
@@ -24557,7 +24558,7 @@ const ADS_SUMMARY_CACHE_TTL = 5 * 60_000;
 const ADS_SUMMARY_STORAGE_TTL = 10 * 60_000;
 
 function adsSummaryUrl(range: AdsSummaryRange) {
-  const params = new URLSearchParams({ from: range.from, to: range.to });
+  const params = new URLSearchParams({ from: range.from, to: range.to, v: "channel-daily-1" });
   return `/api/fnos/ads/summary?${params.toString()}`;
 }
 
@@ -24919,12 +24920,17 @@ function adMonthlyRowsForRange(rows: AdsMetricRow[], from: string, to: string) {
   return Array.from(monthly.values());
 }
 
-function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; to: string }) {
+function adChartCpa(row: AdsMetricRow) {
+  const conversions = adNumber(row.conversions);
+  return conversions > 0 ? adNumber(row.cost) / conversions : 0;
+}
+
+function AdsLineChart({ rows, from, to, exactRange = false, channelMetrics = false }: { rows: AdsMetricRow[]; from: string; to: string; exactRange?: boolean; channelMetrics?: boolean }) {
   const [activePointKey, setActivePointKey] = useState<string | null>(null);
-  const range = adChartRange(from, to);
+  const range = exactRange ? { from, to, mode: "day" as const, title: `${adRangeDays(from, to)}일` } : adChartRange(from, to);
   const points = range.mode === "month" ? adMonthlyRowsForRange(rows, range.from, range.to) : adDailyRowsForRange(rows, range.from, range.to);
-  const rawMaxCost = Math.max(...points.map((row) => adNumber(row.cost)), 0);
-  const rawMaxRoas = Math.max(...points.map((row) => adNumber(row.roas)), 0);
+  const rawMaxCost = Math.max(...points.flatMap((row) => channelMetrics ? [adNumber(row.cost), adChartCpa(row)] : [adNumber(row.cost)]), 0);
+  const rawMaxRoas = Math.max(...points.flatMap((row) => channelMetrics ? [adNumber(row.roas), adNumber(row.cvr)] : [adNumber(row.roas)]), 0);
   const maxCost = rawMaxCost > 0 ? adCostAxisMax(rawMaxCost) : 1;
   const maxRoas = rawMaxRoas > 0 ? adRoasAxisMax(rawMaxRoas) : 1;
   const costAxisMax = rawMaxCost > 0 ? maxCost : 0;
@@ -24933,10 +24939,14 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
     const x = points.length <= 1 ? 50 : 12 + (index / (points.length - 1)) * 76;
     const costY = 92 - (adNumber(row.cost) / maxCost) * 70;
     const roasY = 92 - (adNumber(row.roas) / maxRoas) * 70;
-    return { row, x, costY, roasY };
+    const cvrY = 92 - (adNumber(row.cvr) / maxRoas) * 70;
+    const cpaY = 92 - (adChartCpa(row) / maxCost) * 70;
+    return { row, x, costY, roasY, cvrY, cpaY };
   });
   const costPath = chartPoints.map(({ x, costY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${costY.toFixed(2)}`).join(" ");
   const roasPath = chartPoints.map(({ x, roasY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${roasY.toFixed(2)}`).join(" ");
+  const cvrPath = chartPoints.map(({ x, cvrY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${cvrY.toFixed(2)}`).join(" ");
+  const cpaPath = chartPoints.map(({ x, cpaY }, index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${cpaY.toFixed(2)}`).join(" ");
   const showPointDateLabels = range.mode === "month" || points.length <= 7;
   const axisTicks = [
     { y: 20, cost: costAxisMax, roas: roasAxisMax },
@@ -24947,12 +24957,23 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
   return (
     <Card className="p-5">
       <SectionHeader
-        title="일별 광고비 / ROAS"
+        title={channelMetrics ? "성과 그래프" : "일별 광고비 / ROAS"}
         className="mb-3"
         actions={(
         <div className="flex shrink-0 gap-2.5 text-xs font-semibold">
-          <span className="text-[#ff6a00]">광고비</span>
-          <span className="text-emerald-600">ROAS</span>
+          {channelMetrics ? (
+            <>
+              <span className="text-[#ff6a00]">총비용</span>
+              <span className="text-emerald-600">ROAS</span>
+              <span className="text-blue-600">CVR</span>
+              <span className="text-purple-600">CPA</span>
+            </>
+          ) : (
+            <>
+              <span className="text-[#ff6a00]">광고비</span>
+              <span className="text-emerald-600">ROAS</span>
+            </>
+          )}
           <span className="text-slate-400">{range.title}</span>
         </div>
         )}
@@ -24969,16 +24990,18 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                   </div>
                 ))}
               </div>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label="광고비와 ROAS 그래프">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={channelMetrics ? "총비용, ROAS, CVR, CPA 성과 그래프" : "광고비와 ROAS 그래프"}>
                 <path d="M 8 92 L 92 92" stroke="#e2e8f0" strokeWidth="0.8" />
                 <path d="M 8 56 L 92 56" stroke="#e2e8f0" strokeWidth="0.5" />
                 <path d="M 8 20 L 92 20" stroke="#e2e8f0" strokeWidth="0.5" />
                 {points.length > 1 && <path d={costPath} fill="none" stroke="#ff6a00" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
                 {points.length > 1 && <path d={roasPath} fill="none" stroke="#16a34a" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" strokeLinecap="round" strokeLinejoin="round" />}
+                {channelMetrics && points.length > 1 && <path d={cvrPath} fill="none" stroke="#2563eb" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="5 3" strokeLinecap="round" strokeLinejoin="round" />}
+                {channelMetrics && points.length > 1 && <path d={cpaPath} fill="none" stroke="#9333ea" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeDasharray="1 3" strokeLinecap="round" strokeLinejoin="round" />}
               </svg>
-              {chartPoints.map(({ row, x, costY, roasY }, index) => {
+              {chartPoints.map(({ row, x, costY, roasY, cvrY, cpaY }, index) => {
                 const pointKey = `${String(row.date)}-${index}`;
-                const tooltipTop = Math.max(8, Math.min(costY, roasY) - 8);
+                const tooltipTop = Math.max(8, Math.min(costY, roasY, ...(channelMetrics ? [cvrY, cpaY] : [])) - 8);
                 const tooltipLeft = Math.min(82, Math.max(18, x));
                 const isActive = activePointKey === pointKey;
                 return (
@@ -24986,6 +25009,10 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                   {[
                     { y: costY, color: "bg-[#ff6a00]" },
                     { y: roasY, color: "bg-emerald-600" },
+                    ...(channelMetrics ? [
+                      { y: cvrY, color: "bg-blue-600" },
+                      { y: cpaY, color: "bg-purple-600" },
+                    ] : []),
                   ].map((point) => (
                     <button
                       key={`${String(row.date)}-${point.color}`}
@@ -25003,8 +25030,19 @@ function AdsLineChart({ rows, from, to }: { rows: AdsMetricRow[]; from: string; 
                     style={{ left: `${tooltipLeft}%`, top: `${tooltipTop}%` }}
                   >
                     <p className="whitespace-nowrap text-slate-500">{String(row.date)}</p>
-                    <p className="mt-2 flex justify-between gap-3 whitespace-nowrap"><span>ROAS</span><span>{adPercent(adNumber(row.roas))}</span></p>
-                    <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>사용금액</span><span>{krw(adNumber(row.cost))}</span></p>
+                    {channelMetrics ? (
+                      <>
+                        <p className="mt-2 flex justify-between gap-3 whitespace-nowrap"><span>총비용</span><span>{krw(adNumber(row.cost))}</span></p>
+                        <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>ROAS</span><span>{adPercent(adNumber(row.roas))}</span></p>
+                        <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>CVR</span><span>{adPercent2(adNumber(row.cvr))}</span></p>
+                        <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>CPA</span><span>{krw(adChartCpa(row))}</span></p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="mt-2 flex justify-between gap-3 whitespace-nowrap"><span>ROAS</span><span>{adPercent(adNumber(row.roas))}</span></p>
+                        <p className="mt-1 flex justify-between gap-3 whitespace-nowrap"><span>사용금액</span><span>{krw(adNumber(row.cost))}</span></p>
+                      </>
+                    )}
                   </div>
                 </div>
                 );
@@ -25297,26 +25335,22 @@ function AdsChannelDetailWorkspace({
   const channelRows = reportRows.filter((row) => row.channel !== "total");
   const currentChannel = channelRows.some((row) => row.channel === activeChannel) ? activeChannel : (channelRows[0]?.channel || adReportChannelOrder[0]);
   const activeReport = channelRows.find((row) => row.channel === currentChannel) || adMetricReportRows([], [currentChannel])[1];
+  const channelDaily = (summary?.dailyByChannel || []).filter((row) => adChannelsMatch(row.channel, currentChannel));
   const channelCampaigns = (summary?.campaigns || [])
     .filter((row) => adChannelsMatch(row.channel, currentChannel))
     .sort((left, right) => adNumber(right.cost) - adNumber(left.cost))
     .slice(0, 80);
-  const channelProducts = (summary?.products || [])
-    .filter((row) => adChannelsMatch(row.channel, currentChannel))
-    .sort((left, right) => adNumber(right.cost) - adNumber(left.cost))
-    .slice(0, 80);
-  const channelUnmapped = (summary?.unmapped || []).filter((row) => adChannelsMatch(row.channel, currentChannel)).slice(0, 20);
   const channelParam = (channel: string) => {
     const params = new URLSearchParams({ menu: "ads", adsSection: "channels", adsFrom: dateFrom, adsTo: dateTo, adsChannel: channel });
     return `/?${params.toString()}`;
   };
   const metricCells = [
     { label: "총비용", value: krw(activeReport?.cost || 0) },
-    { label: "전환매출", value: krw(activeReport?.purchaseValue || 0) },
+    { label: "구매완료 전환매출액", value: krw(activeReport?.purchaseValue || 0) },
     { label: "ROAS", value: adPercent(activeReport?.roas || 0) },
-    { label: "전환", value: `${adNumber(activeReport?.purchases).toLocaleString("ko-KR")}건` },
-    { label: "CPA", value: krw(activeReport?.costPerPurchase || 0) },
-    { label: "CTR / CVR", value: `${adPercent2(activeReport?.ctr || 0)} / ${adPercent2(activeReport?.purchaseCvr || 0)}` },
+    { label: "전환 구매 건수", value: `${adNumber(activeReport?.purchases).toLocaleString("ko-KR")}건` },
+    { label: "구매완료 전환율", value: adPercent2(activeReport?.purchaseCvr || 0) },
+    { label: "전환 구매당 광고비", value: krw(activeReport?.costPerPurchase || 0) },
   ];
 
   return (
@@ -25324,7 +25358,7 @@ function AdsChannelDetailWorkspace({
       <Card className="p-4">
         <SectionHeader
           title="채널별 성과현황"
-          description="왼쪽 광고분석 하위메뉴입니다. 위 탭에서 채널을 바꾸면 캠페인/아이템 세부 지표가 바뀝니다."
+          description="왼쪽 광고분석 하위메뉴입니다. 위 탭에서 채널을 바꾸면 캠페인/소재 세부 지표가 바뀝니다."
           className="mb-4"
         />
         <div className="flex flex-wrap gap-2">
@@ -25358,8 +25392,10 @@ function AdsChannelDetailWorkspace({
         </div>
       </Card>
 
+      <AdsLineChart rows={channelDaily} from={dateFrom} to={dateTo} exactRange channelMetrics />
+
       <Card className="px-3 py-4">
-        <SectionHeader title={`${adChannelDisplayName(currentChannel)} 캠페인/소재 세부 지표`} description="현재 저장된 광고 리포트 행 기준" className="mb-3" />
+        <SectionHeader title={`${adChannelDisplayName(currentChannel)} 소재별 데이터 목록`} description="현재 저장된 광고 리포트의 캠페인/소재 행 기준" className="mb-3" />
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full min-w-[980px] table-fixed border-collapse text-[12px] tabular-nums">
             <colgroup>
@@ -25402,56 +25438,7 @@ function AdsChannelDetailWorkspace({
         </div>
       </Card>
 
-      <Card className="px-3 py-4">
-        <SectionHeader title={`${adChannelDisplayName(currentChannel)} 아이템별 현재 데이터`} description="상품 연결, 매출/재고/추정손익 확인용" className="mb-3" />
-        <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full min-w-[960px] table-fixed border-collapse text-[12px] tabular-nums">
-            <colgroup>
-              <col className="w-[22%]" />
-              <col className="w-[11%]" />
-              <col className="w-[9%]" />
-              <col className="w-[9%]" />
-              <col className="w-[8%]" />
-              <col className="w-[9%]" />
-              <col className="w-[9%]" />
-              <col className="w-[8%]" />
-              <col className="w-[7%]" />
-              <col className="w-[8%]" />
-            </colgroup>
-            <thead className="bg-gray-50 text-gray-700">
-              <tr>
-                {["아이템", "SKU", "광고비", "전환매출", "ROAS", "실매출", "추정손익", "마진", "재고", "판단"].map((label) => (
-                  <th key={label} className="border-b border-r border-gray-200 px-2 py-2 text-left font-black last:border-r-0">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {channelProducts.map((row, index) => (
-                <tr key={`ads-product-detail-${currentChannel}-${index}`} className="border-b border-gray-100 last:border-b-0">
-                  <td className="border-r border-gray-100 px-2 py-2 font-bold text-gray-800">{String(row.product_name || row.product_code || "-")}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-gray-600">{String(row.sku || row.product_code || "-")}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.cost))}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.conversion_value))}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black text-orange-700">{adPercent(row.roas)}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right">{krw(adNumber(row.sales_amount))}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right font-black">{krw(adNumber(row.estimated_profit))}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adPercent(row.margin_rate)}</td>
-                  <td className="border-r border-gray-100 px-2 py-2 text-right">{adNumber(row.current_stock).toLocaleString("ko-KR")}</td>
-                  <td className="px-2 py-2 text-center font-black">{String(row.keep_ad || "점검")}</td>
-                </tr>
-              ))}
-              {!channelProducts.length && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-sm font-bold text-slate-400">상품 연결된 아이템 데이터가 없습니다. 캠페인 세부 지표를 먼저 확인하세요.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {!!channelUnmapped.length && (
-          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
-            미연결 아이템 {channelUnmapped.length.toLocaleString("ko-KR")}개가 있습니다. 광고 상품매핑을 연결하면 아이템별 손익/재고까지 같이 보입니다.
-          </div>
-        )}
-      </Card>
+
     </div>
   );
 }
@@ -25513,8 +25500,15 @@ function AdsAnalysisWorkspace() {
 
   useEffect(() => {
     const refreshAdsSummary = () => loadSummary(true);
+    const refreshVisibleAdsSummary = () => {
+      if (document.visibilityState === "visible") refreshAdsSummary();
+    };
     window.addEventListener("fnos:ads-summary-refresh", refreshAdsSummary);
-    return () => window.removeEventListener("fnos:ads-summary-refresh", refreshAdsSummary);
+    document.addEventListener("visibilitychange", refreshVisibleAdsSummary);
+    return () => {
+      window.removeEventListener("fnos:ads-summary-refresh", refreshAdsSummary);
+      document.removeEventListener("visibilitychange", refreshVisibleAdsSummary);
+    };
   }, [dateFrom, dateTo]);
 
   async function exportAdReportXlsx() {
@@ -25595,7 +25589,7 @@ function AdsAnalysisWorkspace() {
 
   const channels = summary?.channels || [];
   const daily = chartSummary?.daily || summary?.daily || [];
-  const reportRows = adMetricReportRows(channels, selectedAdChannels);
+  const reportRows = adMetricReportRows(channels, adsSection === "channels" ? adReportChannelOrder : selectedAdChannels);
   const mainReport = reportRows[0] || adMetricReportRows([], [])[0];
   const rangeNote = dateFrom === dateTo ? `${dateTo} 기준` : `${dateFrom} ~ ${dateTo}`;
 
@@ -25605,13 +25599,15 @@ function AdsAnalysisWorkspace() {
 
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{summary.error}</Card>}
 
-      <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
-        <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
-        <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
-        <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
-        <AdsMetricCard label="전환 구매 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
-        <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
-      </section>
+      {adsSection !== "channels" && (
+        <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
+          <AdsMetricCard label="총비용" value={krw(mainReport.cost)} note={rangeNote} />
+          <AdsMetricCard label="구매완료 전환매출액" value={krw(mainReport.purchaseValue)} note={`ROAS ${adPercent(mainReport.roas)}`} />
+          <AdsMetricCard label="ROAS" value={adPercent(mainReport.roas)} note="광고 수익률" />
+          <AdsMetricCard label="전환 구매 건수" value={`${mainReport.purchases.toLocaleString("ko-KR")}건`} note="구매완료 기준" />
+          <AdsMetricCard label="구매완료 전환율" value={adPercent2(mainReport.purchaseCvr)} note="구매/클릭" tone="rose" />
+        </section>
+      )}
 
       {adsSection === "channels" ? (
         <AdsChannelDetailWorkspace
@@ -25679,6 +25675,10 @@ function AdsRightPanel() {
 
   function openAdRange(from: string, to: string) {
     const params = new URLSearchParams({ menu: "ads", adsFrom: from, adsTo: to });
+    const adsSection = searchParams.get("adsSection");
+    const adsChannel = searchParams.get("adsChannel");
+    if (adsSection) params.set("adsSection", adsSection);
+    if (adsChannel) params.set("adsChannel", adsChannel);
     goToInternal(`/?${params.toString()}`);
   }
 

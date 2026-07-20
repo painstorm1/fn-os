@@ -412,6 +412,7 @@ export async function adsSummary(range?: SummaryRange) {
 
   const total: AnyRecord = { impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0 };
   const daily = new Map<string, AnyRecord>();
+  const dailyByChannel = new Map<string, AnyRecord>();
   const channels = new Map<string, AnyRecord>();
   const campaigns = new Map<string, AnyRecord>();
   const productsMap = new Map<string, AnyRecord>();
@@ -431,6 +432,11 @@ export async function adsSummary(range?: SummaryRange) {
     const dailyRow = daily.get(date) || { date, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0 };
     addMetric(dailyRow, row);
     daily.set(date, dailyRow);
+
+    const dailyChannelKey = `${date}|${channel}`;
+    const dailyChannelRow = dailyByChannel.get(dailyChannelKey) || { date, channel, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0 };
+    addMetric(dailyChannelRow, row);
+    dailyByChannel.set(dailyChannelKey, dailyChannelRow);
 
     const channelRow = channels.get(channel) || { channel, impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0 };
     addMetric(channelRow, row);
@@ -495,6 +501,7 @@ export async function adsSummary(range?: SummaryRange) {
     total,
     batches,
     daily: Array.from(daily.values()).sort((a, b) => text(a.date).localeCompare(text(b.date))),
+    dailyByChannel: Array.from(dailyByChannel.values()).sort((a, b) => text(a.date).localeCompare(text(b.date)) || text(a.channel).localeCompare(text(b.channel))),
     channels: Array.from(channels.values()).sort((a, b) => numberValue(b.cost) - numberValue(a.cost)),
     products: productRows,
     campaigns: campaignRows,
