@@ -11153,7 +11153,7 @@ function salesShipmentSvgColumn(slots: SalesShipmentSlot[], x: number, y: number
     return `<g>
       <rect x="${x}" y="${rowY}" width="${nameWidth}" height="${rowHeight}" fill="${fill}" stroke="#222" stroke-width="0.7" />
       <rect x="${x + nameWidth}" y="${rowY}" width="${width - nameWidth}" height="${rowHeight}" fill="${fill}" stroke="#222" stroke-width="0.7" />
-      ${item ? `<text x="${x + 5}" y="${rowY + rowHeight * 0.72}" clip-path="url(#${clipId})" font-size="8.5" font-weight="600">${htmlEscape(item.productName)}</text><text x="${x + width - 6}" y="${rowY + rowHeight * 0.72}" text-anchor="end" font-size="9" font-weight="800">${htmlEscape(salesShipmentQuantityText(item.quantity))}</text>` : ""}
+      ${item ? `<text x="${x + 5}" y="${rowY + rowHeight * 0.72}" clip-path="url(#${clipId})" font-size="11" font-weight="400">${htmlEscape(item.productName)}</text><text x="${x + width - 6}" y="${rowY + rowHeight * 0.72}" text-anchor="end" font-size="13" font-weight="800">${htmlEscape(salesShipmentQuantityText(item.quantity))}</text>` : ""}
     </g>`;
   }).join("");
   return `<defs>${definitions.join("")}</defs>
