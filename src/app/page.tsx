@@ -8641,6 +8641,41 @@ type CollectionPopupMode = "collection" | "status-change" | "invoice-upload";
 type OrderProgressStatusChangeStage = "api-running" | "fnos-waiting" | "fnos-applying" | "done" | "failed";
 type OrderProgressStatusChangeTarget = "주문확인" | "출고대기" | "출고완료";
 
+const orderCollectionApiDisplayChannels = [
+  { name: "네이버_에프엔FN", codes: ["NAVER_FN"], aliases: ["네이버_에프엔FN", "에프엔FN"] },
+  { name: "네이버_펀앤파인", codes: ["NAVER_FF"], aliases: ["네이버_펀앤파인", "펀앤파인"] },
+  { name: "쿠팡_WING", codes: ["COUPANG"], aliases: ["쿠팡", "WING"] },
+  { name: "11번가", codes: ["ELEVENST", "11ST"], aliases: ["11번가"] },
+  { name: "SSG신세계", codes: ["SSG"], aliases: ["SSG", "신세계"] },
+  { name: "롯데온", codes: ["LOTTEON", "LOTTE"], aliases: ["롯데온", "롯데ON"] },
+  { name: "토스", codes: ["TOSS"], aliases: ["토스"] },
+] as const;
+
+function orderCollectionStatusMatchesChannel(
+  item: { channel_code?: string; channel_name?: string },
+  channel: (typeof orderCollectionApiDisplayChannels)[number],
+) {
+  const code = salesCellText(item.channel_code).toUpperCase();
+  const name = salesCellText(item.channel_name);
+  return channel.codes.some((candidate) => code === candidate)
+    || channel.aliases.some((alias) => name.includes(alias));
+}
+
+function orderCollectionApiRunningItems(
+  fallbackMessage: string,
+  statuses: Array<{ channel_code?: string; channel_name?: string; message?: string }> = [],
+): OnlineApiStatusItem[] {
+  return orderCollectionApiDisplayChannels.map((channel) => {
+    const matching = statuses.find((item) => orderCollectionStatusMatchesChannel(item, channel));
+    return {
+      name: channel.name,
+      status: "running" as const,
+      message: salesCellText(matching?.message) || fallbackMessage,
+      source: "api" as const,
+    };
+  });
+}
+
 function onlineOrderStatusDisplaySiteKey(value: unknown) {
   const key = salesCellText(value).replace(/\s+/g, "").toUpperCase();
   return inferSalesChannelPlatform(key) === "TODAYHOUSE" ? "TODAYHOUSE" : key;
@@ -12637,47 +12672,14 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (kind === "orders") window.alert("작업 완료됨!");
   }
 
-  async function orderCollectionStatusPlaceholders(collectDays: number): Promise<OnlineApiStatusItem[]> {
-    try {
-      const res = await fetch("/api/fnos/sales-channels", { cache: "no-store", credentials: "include", fnosSkipBusyOverlay: true } as RequestInit & { fnosSkipBusyOverlay: boolean });
-      const data = await res.json().catch(() => ({}));
-      const channels = Array.isArray(data.channels) ? data.channels as Array<Record<string, unknown>> : [];
-      const statuses = channels
-        .filter((channel) => channel.is_active !== false && channel.api_enabled !== false)
-        .map((channel) => ({
-          name: salesCellText(channel.channel_name || channel.customer_name || channel.channel_code) || "쇼핑몰",
-          status: "running" as const,
-          message: `최근 ${collectDays}일`,
-          source: "api" as const,
-        }));
-      return statuses.length ? statuses : [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일`, source: "api" as const }];
-    } catch {
-      return [{ name: "쇼핑몰 API", status: "running" as const, message: `최근 ${collectDays}일`, source: "api" as const }];
-    }
-  }
-
   function orderCollectionStatusItems(
     statuses: OrderCollectionStatusResponseItem[],
     fallbackOk: boolean,
     fallbackMessage: string,
   ): OnlineApiStatusItem[] {
-    const orderCollectionApiDisplayChannels = [
-      { name: "네이버_에프엔FN", codes: ["NAVER_FN"], aliases: ["네이버_에프엔FN", "에프엔FN"] },
-      { name: "네이버_펀앤파인", codes: ["NAVER_FF"], aliases: ["네이버_펀앤파인", "펀앤파인"] },
-      { name: "쿠팡_WING", codes: ["COUPANG"], aliases: ["쿠팡", "WING"] },
-      { name: "11번가", codes: ["ELEVENST", "11ST"], aliases: ["11번가"] },
-      { name: "SSG신세계", codes: ["SSG"], aliases: ["SSG", "신세계"] },
-      { name: "롯데온", codes: ["LOTTEON", "LOTTE"], aliases: ["롯데온", "롯데ON"] },
-      { name: "토스", codes: ["TOSS"], aliases: ["토스"] },
-    ] as const;
     const apiStatuses = statuses.filter((item) => item.source !== "manual");
     const apiItems = orderCollectionApiDisplayChannels.map((channel) => {
-      const matching = apiStatuses.filter((item) => {
-        const code = salesCellText(item.channel_code).toUpperCase();
-        const name = salesCellText(item.channel_name);
-        return channel.codes.some((candidate) => code === candidate)
-          || channel.aliases.some((alias) => name.includes(alias));
-      });
+      const matching = apiStatuses.filter((item) => orderCollectionStatusMatchesChannel(item, channel));
       const newCount = matching.reduce((sum, item) => {
         const stage = salesCellText(item.order_status);
         return sum + (!stage || stage === "신규주문" ? Math.max(0, Number(item.item_count) || 0) : 0);
@@ -12747,9 +12749,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (!ok) return;
     const mallCodeReferenceSheets = sheets;
     resetSalesWorkspaceForOrderCollection();
-    setCollectionStatuses([{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" }]);
+    setCollectionStatuses(orderCollectionApiRunningItems(`최근 ${collectDays}일`));
     setCollectionPopupOpen(true);
-    void orderCollectionStatusPlaceholders(collectDays).then(setCollectionStatuses);
     setMessage("");
     try {
       const todayDate = new Date();
@@ -12769,19 +12770,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
       let data = await res.json().catch(() => ({}));
       if (!isLocalPage && !shouldRunDirect && data.queued) {
-        setCollectionStatuses((prev) => (prev.length ? prev : [{ name: "쇼핑몰 API", status: "running", message: `최근 ${collectDays}일`, source: "api" as const }]).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 워커 대기 중" })));
+        setCollectionStatuses((prev) => (prev.length ? prev : orderCollectionApiRunningItems(`최근 ${collectDays}일`)).map((item) => ({ ...item, status: "running", message: "미니PC 주문수집 워커 대기 중" })));
       }
       if (data.queued && data.job_id) {
         const jobId = salesCellText(data.job_id);
         const queuedStatuses = Array.isArray(data.statuses) ? data.statuses as Array<{ channel_name?: string; channel_code?: string; message?: string }> : [];
-        const waitingStatuses = queuedStatuses.length
-          ? queuedStatuses.map((item) => ({
-              name: salesCellText(item.channel_name || item.channel_code) || "쇼핑몰",
-              status: "running" as const,
-              message: salesCellText(item.message) || "수집 대기 중",
-              source: "api" as const,
-            }))
-          : [{ name: "쇼핑몰", status: "running" as const, message: "수집 대기 중", source: "api" as const }];
+        const waitingStatuses = orderCollectionApiRunningItems("수집 대기 중", queuedStatuses);
         setCollectionStatuses(waitingStatuses);
         for (let attempt = 0; attempt < 180; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
