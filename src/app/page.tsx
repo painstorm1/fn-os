@@ -8922,6 +8922,7 @@ function SalesExcelGrid({
   const customerNameCol = headers.indexOf("거래처명");
   const isOnlineOrderWarehouseCell = (colIndex: number) => warehouseCol >= 0 && colIndex === warehouseCol;
   const showOnlineReviewTools = sheet === "송장출력용" || sheet === "FN판매입력" || sheet === "FN구매입력";
+  const showRowDelete = isSalesEntrySheet(sheet);
   const selectableRowIndexes = rows.map((row, index) => rowHasValue(row) ? index : -1).filter((index) => index >= 0);
   const selectableRowSet = useMemo(() => new Set(selectableRowIndexes), [selectableRowIndexes.join("|")]);
   const [productSearch, setProductSearch] = useState<FnOsProductSearchState>({
@@ -9025,6 +9026,7 @@ function SalesExcelGrid({
     return header !== warehouseHeader && header !== "수량" && header !== "메모";
   }
   function deleteSelectedGridRows() {
+    if (!showRowDelete) return;
     const targets = selectedRows.filter((index) => rowHasValue(rows[index] || []));
     if (!targets.length) {
       window.alert("삭제할 행을 선택해 주세요.");
@@ -9349,7 +9351,7 @@ function SalesExcelGrid({
       <div className={`flex items-center border-b border-slate-200 px-3 py-2 ${showEntryToolbarInTitleSlot ? "justify-start" : "justify-between"}`}>
         {!showEntryToolbarInTitleSlot && <strong>{sheet}</strong>}
         <div className="flex items-center gap-2">
-          {showOnlineReviewTools && (
+          {showRowDelete && (
             <button type="button" onClick={deleteSelectedGridRows} className="rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-black text-rose-600 hover:bg-rose-50">삭제</button>
           )}
           {isSalesEntrySheet(sheet) && (
