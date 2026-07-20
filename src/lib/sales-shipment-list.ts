@@ -35,8 +35,8 @@ export type DirectShippingSourceIndexes = {
 };
 
 const A5_PRODUCT_LIMIT = 30;
-const A5_GRID_ROWS = 14;
-const A4_COLUMN_ROWS = 46;
+const A5_GRID_ROWS = 17;
+const A4_COLUMN_ROWS = 48;
 
 function normalizedProductName(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, " ");

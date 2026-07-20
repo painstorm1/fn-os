@@ -11180,9 +11180,9 @@ function salesShipmentPageSvg(page: SalesShipmentPage, format: "A5" | "A4", date
   const isA5 = format === "A5";
   const width = 794;
   const height = isA5 ? 559 : 1123;
-  const topOffset = 150;
+  const topOffset = 75;
   const tableY = (isA5 ? 112 : 96) + topOffset;
-  const rowHeight = 18;
+  const rowHeight = 19;
   const columns = isA5
     ? salesShipmentSvgColumn(page.left, 216, tableY, `p${pageNumber}-left`, rowHeight)
     : `${salesShipmentSvgColumn(page.left, 28, tableY, `p${pageNumber}-left`, rowHeight)}${salesShipmentSvgColumn(page.right, 404, tableY, `p${pageNumber}-right`, rowHeight)}`;
