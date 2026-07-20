@@ -350,6 +350,7 @@ const TODAYHOUSE_CUSTOMER_CODE = "1198691245";
 const TODAYHOUSE_CUSTOMER_NAME = "오늘의 집";
 const KAKAO_CUSTOMER_CODE = "8918800985";
 const KAKAO_CUSTOMER_NAME = "카카오 스토어";
+const EZWEL_CUSTOMER_CODE = "1018190575";
 type ManualOrderSource = "esm" | "todayhouse" | "toss" | "ezwel" | "kakao" | "unknown";
 
 type ManualOrderFileResult = {
@@ -583,7 +584,7 @@ function normalizeEsmManualRow(row: AnyRecord, fileName: string): NormalizedOrde
 }
 
 function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSource, config: {
-  code: string; name: string; orderKeys: string[]; bundleKeys: string[]; dateKeys: string[]; receiverKeys: string[]; phoneKeys: string[];
+  code: string; name: string; customerCode?: string; orderKeys: string[]; bundleKeys: string[]; dateKeys: string[]; receiverKeys: string[]; phoneKeys: string[];
   zipcodeKeys: string[]; addressKeys: string[]; detailAddressKeys?: string[]; memoKeys: string[]; productCodeKeys?: string[]; optionCodeKeys?: string[];
   productKeys: string[]; optionKeys: string[]; qtyKeys: string[]; amountKeys: string[]; settlementAmountKeys?: string[];
 }): NormalizedOrder | null {
@@ -607,7 +608,7 @@ function makeManualOrder(row: AnyRecord, fileName: string, source: ManualOrderSo
   return {
     channelCode: config.code,
     channelName: config.name,
-    customerCode: config.code,
+    customerCode: config.customerCode || config.code,
     customerName: config.name,
     orderNo,
     bundleOrderNo: cleanId(pick(row, config.bundleKeys)) || orderNo,
@@ -645,7 +646,7 @@ function normalizeManualRow(row: AnyRecord, fileName: string, source: ManualOrde
     qtyKeys: ["주문건수", "수량"], amountKeys: ["주문금액"],
   });
   if (source === "ezwel") return makeManualOrder(row, fileName, source, {
-    code: "Z", name: "현대이지웰", orderKeys: ["주문번호"], bundleKeys: ["장바구니 번호", "주문번호"], dateKeys: ["주문일시", "주문확인일시"],
+    code: "Z", name: "현대이지웰", customerCode: EZWEL_CUSTOMER_CODE, orderKeys: ["주문번호"], bundleKeys: ["장바구니 번호", "주문번호"], dateKeys: ["주문일시", "주문확인일시"],
     receiverKeys: ["수령자명", "주문자명"], phoneKeys: ["수령자 휴대폰번호", "주문자 휴대폰번호"], zipcodeKeys: ["우편번호"], addressKeys: ["주소"],
     memoKeys: ["배송메시지(요청사항)"], productCodeKeys: ["상품코드", "배송번호"], optionCodeKeys: ["배송번호"], productKeys: ["상품명"], optionKeys: ["옵션"],
     qtyKeys: ["주문수량", "배송수량"], amountKeys: ["매입가", "실주문금액", "판매가격"],
