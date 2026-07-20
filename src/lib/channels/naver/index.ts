@@ -412,9 +412,9 @@ export class NaverChannelAdapter implements SalesChannelAdapter {
       const ranges = naverDailyRanges(params.from, params.to);
       const fetchedRows: AnyRecord[] = [];
       for (const [index, range] of ranges.entries()) {
-        if (index > 0) await wait(700);
+        if (index > 0) await wait(500);
         fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "NOT_YET"));
-        await wait(700);
+        await wait(500);
         fetchedRows.push(...await fetchConditionalOrders(token, range.from, range.to, "OK"));
       }
       const detailRows = uniqueNaverRows(fetchedRows);

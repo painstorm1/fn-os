@@ -12685,7 +12685,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setCollectionStatuses(finalStatuses);
   }
 
-  async function runOrderCollectionFlow(dayWindow = 4) {
+  async function runOrderCollectionFlow(dayWindow = 2) {
     const collectDays = Math.max(1, Math.floor(dayWindow));
     setCollectionPopupOpen(false);
     setCollectionPopupTitle("주문수집");
@@ -14812,12 +14812,12 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     if (section !== "online") return undefined;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!/^F[1-3]$/.test(event.key)) return;
-      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.altKey || event.metaKey || (event.ctrlKey && event.key !== "F1")) return;
       if (directPartnerPickerOpen || invoiceMemoText) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "F1") {
-        void runOrderCollectionFlow(event.shiftKey ? 14 : 4);
+        void runOrderCollectionFlow(event.shiftKey ? 14 : event.ctrlKey ? 5 : 2);
         return;
       }
       if (event.shiftKey) return;
@@ -17225,7 +17225,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" title="F1 4일 호출 - Shift+F1 14일 호출" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow(4)}>F1 주문수집</button>
+              <button type="button" title="F1 2일 호출 - Ctrl+F1 5일 호출 - Shift+F1 14일 호출" className="rounded-md bg-slate-950 px-3 py-2 text-sm font-black text-white" onClick={() => void runOrderCollectionFlow(2)}>F1 주문수집</button>
               <button type="button" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700" onClick={openInvoiceUpload}>F2 송장 업로드</button>
               <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-700" onClick={() => void applyFnParcelSheet()}>F3 FN택배시트 반영</button>
               <button type="button" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-500" onClick={resetSalesWorkspace}>초기화</button>

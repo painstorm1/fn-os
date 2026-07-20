@@ -51,7 +51,7 @@ function jsonResponse(body) {
   };
 }
 
-test("네이버 4일 빈 주문 수집은 8개 조건 요청 사이에서만 700ms 대기한다", async () => {
+test("네이버 4일 빈 주문 수집은 8개 조건 요청 사이에서만 500ms 대기한다", async () => {
   const events = [];
   const requests = [];
   const fetch = async (input, init = {}) => {
@@ -114,14 +114,14 @@ test("네이버 4일 빈 주문 수집은 8개 조건 요청 사이에서만 700
   );
 
   const waits = events.filter(({ type }) => type === "wait");
-  assert.deepEqual(waits, Array.from({ length: 7 }, () => ({ type: "wait", ms: 700 })));
+  assert.deepEqual(waits, Array.from({ length: 7 }, () => ({ type: "wait", ms: 500 })));
   assert.deepEqual(
-    events.slice(1).map(({ type, status }) => type === "wait" ? "wait:700" : `${type}:${status}`),
+    events.slice(1).map(({ type, status }) => type === "wait" ? "wait:500" : `${type}:${status}`),
     [
-      "conditional:NOT_YET", "wait:700", "conditional:OK", "wait:700",
-      "conditional:NOT_YET", "wait:700", "conditional:OK", "wait:700",
-      "conditional:NOT_YET", "wait:700", "conditional:OK", "wait:700",
-      "conditional:NOT_YET", "wait:700", "conditional:OK",
+      "conditional:NOT_YET", "wait:500", "conditional:OK", "wait:500",
+      "conditional:NOT_YET", "wait:500", "conditional:OK", "wait:500",
+      "conditional:NOT_YET", "wait:500", "conditional:OK", "wait:500",
+      "conditional:NOT_YET", "wait:500", "conditional:OK",
     ],
   );
   assert.deepEqual(events.at(-1), { type: "conditional", ...expectedRanges.at(-1), status: "OK" });
