@@ -241,10 +241,23 @@ function ssgItemIdentity(order: NormalizedOrder, item: NormalizedOrderItem) {
   return [orderIdentity, shippingIdentity, lineIdentity].map(text).filter(Boolean).join("|");
 }
 
+function canonicalSsgOrder(order: NormalizedOrder) {
+  const itemKeys = new Set<string>();
+  const items = order.items.filter((item) => {
+    const key = ssgItemIdentity(order, item);
+    if (!key) return true;
+    if (itemKeys.has(key)) return false;
+    itemKeys.add(key);
+    return true;
+  });
+  return { ...order, items };
+}
+
 function mergeSsgCollectedOrders(apiOrders: NormalizedOrder[], fallbackOrders: NormalizedOrder[]) {
   const merged: NormalizedOrder[] = [];
   const orderIndexByIdentity = new Map<string, number>();
-  for (const order of [...apiOrders, ...fallbackOrders]) {
+  for (const sourceOrder of [...apiOrders, ...fallbackOrders]) {
+    const order = canonicalSsgOrder(sourceOrder);
     const identities = normalizedOrderIdentities(order);
     let existingIndex: number | undefined;
     for (const identity of identities) {
@@ -302,17 +315,28 @@ async function ssgFallbackConfirmedOrders(channel: AnyRecord, params: AnyRecord)
   });
   return activeRows.map((row) => {
     const raw = record(row.raw_payload);
-    const items = (itemsByOrderId.get(text(row.id)) || []).map((item) => ({
-      channelProductCode: text(item.channel_product_code),
-      channelOptionCode: text(item.channel_option_code),
-      channelProductName: text(item.channel_product_name) || "SSG 주문",
-      channelOptionName: text(item.channel_option_name),
-      sku: text(item.sku),
-      qty: numberValue(item.qty) || 1,
-      salesAmount: numberValue(item.sales_amount) || undefined,
-      settlementAmount: numberValue(item.settlement_amount) || undefined,
-      raw: record(item.raw_payload),
-    }));
+    const items = (itemsByOrderId.get(text(row.id)) || []).map((item) => {
+      const itemRaw = record(item.raw_payload);
+      const shppNo = firstText(itemRaw.shppNo, itemRaw.shppDirectionNo, raw.shppNo, raw.shppDirectionNo);
+      const shppSeq = firstText(itemRaw.shppSeq, itemRaw.ordItemSeq, itemRaw.orordItemSeq, itemRaw.itemSeq, item.channel_option_code);
+      const rowKey = firstText(itemRaw.__fnosRowKey, [shppNo, shppSeq].filter(Boolean).join("|"));
+      return {
+        channelProductCode: text(item.channel_product_code),
+        channelOptionCode: text(item.channel_option_code),
+        channelProductName: text(item.channel_product_name) || "SSG 주문",
+        channelOptionName: text(item.channel_option_name),
+        sku: text(item.sku),
+        qty: numberValue(item.qty) || 1,
+        salesAmount: numberValue(item.sales_amount) || undefined,
+        settlementAmount: numberValue(item.settlement_amount) || undefined,
+        raw: {
+          ...itemRaw,
+          ...(shppNo ? { shppNo } : {}),
+          ...(shppSeq ? { shppSeq } : {}),
+          ...(rowKey ? { __fnosRowKey: rowKey } : {}),
+        },
+      };
+    });
     return {
       channelCode: text(channel.channel_code) || "SSG",
       channelName: text(row.channel_name) || text(channel.channel_name) || "SSG신세계",

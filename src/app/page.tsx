@@ -7840,8 +7840,13 @@ function onlineOrderApiRowKey(order: CollectedOnlineOrder, item: CollectedOnline
   const channelName = salesCellText(order.customerName || order.channelName);
   const channelCode = salesCellText(order.customerCode || order.channelCode);
   const alias = onlineOrderChannelAlias(channelName, channelCode) || channelName || channelCode || "api";
+  const ssgFallbackRowKey = [
+    salesCellText(order.orderNo || orderRaw.ordNo || orderRaw.orderNo),
+    salesCellText(itemRaw.shppNo || itemRaw.shppDirectionNo || orderRaw.shppNo || orderRaw.shppDirectionNo || order.bundleOrderNo),
+    salesCellText(itemRaw.shppSeq || itemRaw.ordItemSeq || itemRaw.orordItemSeq || itemRaw.itemSeq || item.channelOptionCode || item.channelProductCode || item.sku),
+  ].filter(Boolean).join("|");
   const rowKey = salesCellText(alias === "S"
-    ? itemRaw.__fnosRowKey || orderRaw.__fnosRowKey
+    ? itemRaw.__fnosRowKey || ssgFallbackRowKey
     : orderRaw.__fnosRowKey || itemRaw.__fnosRowKey);
   if (!rowKey) return "";
   return ["api", alias, rowKey].filter(Boolean).join("|");
@@ -12650,7 +12655,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   function orderCollectionStatusItems(
-    statuses: Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }>,
+    statuses: Array<{ source?: string; channel_code?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }>,
     fallbackOk: boolean,
     fallbackMessage: string,
   ): OnlineApiStatusItem[] {
@@ -12659,7 +12664,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           const displayCount = Number(item.item_count ?? item.count ?? 0);
           const orderCount = Number(item.count ?? 0);
           const itemCount = Number(item.item_count ?? displayCount);
-          const countMessage = itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
+          const isSsg = salesCellText(item.channel_code).toUpperCase() === "SSG";
+          const countMessage = isSsg ? `${displayCount}건` : itemCount !== orderCount && orderCount > 0 ? `${itemCount}건(주문 ${orderCount}건)` : `${displayCount}건`;
           const isManual = item.source === "manual";
           return {
             name: salesCellText(item.channel_name) || (isManual ? "수동 주문수집" : "쇼핑몰"),
@@ -12765,7 +12771,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
         if (data.queued) throw new Error("로컬 워커 처리 시간이 아직 완료되지 않았습니다. 잠시 후 새로고침해 결과를 확인해주세요.");
       }
-      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
+      const statuses = Array.isArray(data.statuses) ? data.statuses as Array<{ source?: string; channel_code?: string; channel_name?: string; ok?: boolean; skipped?: boolean; count?: number; item_count?: number; message?: string }> : [];
       const finalStatuses = orderCollectionStatusItems(
         statuses,
         res.ok && data.ok !== false,

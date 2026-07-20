@@ -192,6 +192,70 @@ function loadSyncRouteWithMocks({ adapters, selectRows, sourceText = syncRouteSo
   return cjsModule.exports;
 }
 
+function pageBlock(startMarker, endMarker) {
+  const start = pageSource.indexOf(startMarker);
+  const end = pageSource.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, `${startMarker} source block을 찾을 수 없습니다.`);
+  return pageSource.slice(start, end);
+}
+
+function loadPageSsgCollectionHelpers() {
+  const helperSource = `
+    type SalesSheetName = string;
+    type CollectedOnlineOrder = any;
+    type CollectedOnlineOrderItem = any;
+    type SalesChannelProductMapping = any;
+    type OnlineOrderManualFileRowRef = any;
+    type OnlineApiStatusItem = any;
+    const salesSheetHeaders = {
+      "FN판매입력": ["일자", "거래처코드", "거래처명", "출하창고", "VAT 포함/별도", "품목코드", "품목명", "수량", "단가", "공급가액", "합계금액", "메모"],
+      "송장출력용": ["쇼핑몰코드", "수취인", "수취인연락처1", "수취인연락처2", "우편번호", "주소", "주문옵션", "수량", "배송요청사항", "정산예정금액"],
+      "FN송장입력": ["쇼핑몰코드", "주문번호", "묶음주문번호", "배송방법코드"],
+      "발주 진행 단계": ["주문번호", "쇼핑몰상품코드", "주문상태", "API주문ID", "API상품주문ID", "API배송묶음ID", "API보조ID"],
+    };
+    const salesCellText = (value: unknown) => String(value ?? "").trim();
+    const onlineOrderRecord = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const onlineOrderChannelAlias = (name: unknown, code: unknown) => /SSG|신세계/i.test(String(name ?? "") + " " + String(code ?? "")) ? "S" : "";
+    const rowHasValue = (row: unknown[]) => row.some((value) => salesCellText(value));
+    const salesRowObject = (sheet: string, row: unknown[]) => Object.fromEntries((salesSheetHeaders[sheet] || []).map((header: string, index: number) => [header, row[index]]));
+    const salesWorkspaceDayKey = () => "2026-07-20";
+    const onlineOrderRunCode = () => "P";
+    const onlineOrderManualRowKey = () => "";
+    const onlineOrderMoney = (value: unknown) => Number(value || 0);
+    const onlineOrderSettlementAmount = () => 0;
+    const makeShoppingProductKey = (...values: unknown[]) => values.map(salesCellText).filter(Boolean).join("|");
+    const onlineOrderFlowPrefixFor = () => "P";
+    const onlineOrderActionIds = (order: any, item: any) => ({ apiOrderId: salesCellText(order.orderNo), apiProductOrderId: salesCellText(item.channelOptionCode), apiShipmentId: salesCellText(order.bundleOrderNo), apiExtraId: "" });
+    const onlineOrderInitialMallCodeSeq = () => 0;
+    const makeOnlineOrderMallCode = (_date: string, alias: string, _flow: string, seq: number) => "0720-" + alias + "-" + seq;
+    const onlineOrderManualFileNameFromRaw = () => "";
+    const findSalesChannelMapping = () => undefined;
+    const onlineOrderFallbackText = () => "";
+    const onlineOrderPairContacts = (phone1: unknown, phone2: unknown) => ({ phone1: salesCellText(phone1), phone2: salesCellText(phone2) });
+    const onlineOrderJoinCustomerAddress = (...values: unknown[]) => values.map(salesCellText).filter(Boolean).join(" ");
+    const onlineOrderDateKey = (value: unknown) => salesCellText(value);
+    const normalizeSalesEntryRow = (_sheet: string, row: string[]) => row;
+    const onlineOrderDefaultDeliveryCompanyCode = () => "";
+    const padSalesRows = (_sheet: string, rows: string[][]) => rows;
+    const buildOrderProgressRows = (sheets: Record<string, string[][]>) => sheets["송장출력용"].map(() => salesSheetHeaders["발주 진행 단계"].map(() => ""));
+    const preserveExistingOrderProgressFields = (rows: string[][]) => rows;
+    const setProgressValue = (row: string[], header: string, value: unknown) => { const index = salesSheetHeaders["발주 진행 단계"].indexOf(header); if (index >= 0) row[index] = salesCellText(value); };
+    const progressValue = (row: string[], header: string) => row[salesSheetHeaders["발주 진행 단계"].indexOf(header)] || "";
+    const isOrderProgressStatusAdvance = () => true;
+    const rememberPendingOnlineOrderManualFileRows = () => {};
+    ${pageBlock("function onlineOrderApiRowKey(", "function onlineOrderManualFileNameFromRaw(")}
+    ${pageBlock("function setSalesSheetCell(", "function applySalesChannelMappingsToExistingOnlineSheets(")}
+    ${pageBlock("  function orderCollectionStatusItems(", "  async function revealOrderCollectionStatuses(")}
+    module.exports = { appendCollectedOnlineOrdersToSheets, orderCollectionStatusItems };
+  `;
+  const compiled = ts.transpileModule(helperSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, strict: true },
+  }).outputText;
+  const cjsModule = { exports: {} };
+  new Function("exports", "module", compiled)(cjsModule.exports, cjsModule);
+  return cjsModule.exports;
+}
+
 function loadTossAdapterWithMocks() {
   const filename = resolve(projectRoot, "src/lib/channels/toss/index.ts");
   const compiled = ts.transpileModule(tossSource, {
@@ -352,7 +416,9 @@ test("SSG 병합 주문은 각 상품행의 row key와 shppSeq를 우선한다",
   const rowKeyStart = pageSource.indexOf("function onlineOrderApiRowKey(");
   const rowKeyEnd = pageSource.indexOf("function onlineOrderManualFileNameFromRaw(", rowKeyStart);
   const rowKeyBlock = pageSource.slice(rowKeyStart, rowKeyEnd);
-  assert.match(rowKeyBlock, /alias === "S"[\s\S]*itemRaw\.__fnosRowKey \|\| orderRaw\.__fnosRowKey/);
+  assert.match(rowKeyBlock, /alias === "S"[\s\S]*itemRaw\.__fnosRowKey \|\| ssgFallbackRowKey/);
+  assert.match(rowKeyBlock, /item\.channelOptionCode \|\| item\.channelProductCode \|\| item\.sku/);
+  assert.doesNotMatch(rowKeyBlock, /itemRaw\.__fnosRowKey \|\| orderRaw\.__fnosRowKey/, "SSG fallback은 order raw key 하나로 여러 상품행을 접으면 안 됩니다.");
 });
 
 test("F2/F5 송장업로드는 기존 진행상태/API 식별자를 보존하고 직접 재빌드로 덮지 않는다", () => {
@@ -933,7 +999,7 @@ test("F1 동일 기간 재수집은 SSG KST DB fallback과 mixed API 병합으�
   assert.ok(fallbackQueries.some((query) => String(query.and).includes("order_date.gte.2026-07-12T15:00:00.000Z") && String(query.and).includes("order_date.lt.2026-07-14T15:00:00.000Z")), "SSG fallback은 7/13~7/14 KST 경계를 명시적 UTC 반개구간으로 조회해야 합니다.");
 });
 
-test("SSG API 3주문 4상품과 legacy fallback 중복은 3주문 4상품으로 병합한다", async () => {
+test("SSG API 0행과 polluted fallback 3주문 8상품은 3주문 4 canonical 행으로 복원한다", async () => {
   const channel = { id: "ssg", channel_name: "SSG신세계", channel_code: "SSG", customer_code: "S" };
   const dbOrders = ["A", "B", "C"].map((suffix) => ({
     id: `db-${suffix}`,
@@ -952,22 +1018,6 @@ test("SSG API 3주문 4상품과 legacy fallback 중복은 3주문 4상품으로
     channel_product_name: `상품 ${suffix}-${seq}`,
     qty: 1,
   })));
-  const apiOrders = ["A", "B", "C"].map((suffix) => ({
-    channelCode: "SSG",
-    channelName: "SSG신세계",
-    orderNo: `ORD-${suffix}`,
-    bundleOrderNo: `ORD-${suffix}`,
-    orderDate: "2026-07-20T10:00:00+09:00",
-    orderStatus: "주문확인",
-    items: lines.filter(([lineSuffix]) => lineSuffix === suffix).map(([, seq]) => ({
-      channelProductCode: `P-${suffix}-${seq}`,
-      channelOptionCode: seq,
-      channelProductName: `상품 ${suffix}-${seq}`,
-      qty: 1,
-      raw: { shppNo: `SHP-${suffix}`, shppSeq: seq, __fnosRowKey: `SHP-${suffix}|${seq}` },
-    })),
-    raw: { ordNo: `ORD-${suffix}`, shppNo: `SHP-${suffix}` },
-  }));
   const selectRows = async (table, query = {}) => {
     if (table === "sales_channels") return [channel];
     if (table === "order_items") return dbItems.filter((row) => String(query.order_id || "").includes(row.order_id));
@@ -978,7 +1028,7 @@ test("SSG API 3주문 4상품과 legacy fallback 중복은 3주문 4상품으로
     return [];
   };
   const route = loadSyncRouteWithMocks({
-    adapters: { SSG: { collectOrders: async () => ({ ok: true, data: apiOrders, message: "SSG fixture" }) } },
+    adapters: { SSG: { collectOrders: async () => ({ ok: true, data: [], message: "SSG fixture" }) } },
     selectRows,
   });
   const response = await route.POST({
@@ -988,6 +1038,25 @@ test("SSG API 3주문 4상품과 legacy fallback 중복은 3주문 4상품으로
 
   assert.equal(response.body.count, 3);
   assert.equal(response.body.item_count, 4);
-  assert.equal(response.body.statuses.find((status) => status.source === "api").count, 3);
-  assert.equal(response.body.statuses.find((status) => status.source === "api").item_count, 4);
+  const status = response.body.statuses.find((item) => item.source === "api");
+  assert.equal(status.count, 3);
+  assert.equal(status.item_count, 4);
+
+  const orders = JSON.parse(JSON.stringify(response.body.orders));
+  assert.deepEqual(orders.find((order) => order.orderNo === "ORD-B").items.map((item) => item.raw.shppSeq), ["1", "2"], "같은 orderNo/shppNo 아래 seq1/2는 모두 남아야 합니다.");
+  orders.forEach((order) => order.items.forEach((item) => {
+    assert.equal(item.raw.shppNo, order.raw.shppNo);
+    assert.equal(item.raw.shppSeq, item.channelOptionCode);
+    assert.equal(item.raw.__fnosRowKey, `${order.raw.shppNo}|${item.channelOptionCode}`);
+  }));
+
+  const { appendCollectedOnlineOrdersToSheets, orderCollectionStatusItems } = loadPageSsgCollectionHelpers();
+  const emptySheets = { "FN판매입력": [], "송장출력용": [], "FN송장입력": [], "발주 진행 단계": [] };
+  const withoutSerializedItemKeys = orders.map((order) => ({
+    ...order,
+    items: order.items.map((item) => ({ ...item, raw: {} })),
+  }));
+  const appended = appendCollectedOnlineOrdersToSheets(emptySheets, withoutSerializedItemKeys);
+  assert.equal(appended["FN판매입력"].length, 4, "SSG item raw key가 없어도 frontend append는 seq1/2를 별도 FNOS 행으로 유지해야 합니다.");
+  assert.equal(orderCollectionStatusItems([status], true, "")[0].message, "4건", "SSG 수집 상태는 canonical 업무행 수만 표시해야 합니다.");
 });
