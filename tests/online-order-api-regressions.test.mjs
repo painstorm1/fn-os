@@ -610,7 +610,7 @@ test("신규주문→주문확인 팝업만 오늘의 집 수동 표시를 overr
   assert.match(changeSource, /callOnlineOrderStatusApi\("confirm", apiIndexes, manualWaitingStatuses, overrideTodayhouseStatusDisplay\)/);
   assert.match(changeSource, /confirmManualStatuses\("fnos-applying"\)/);
   assert.match(changeSource, /confirmManualStatuses\("done"\)/);
-  assert.match(changeSource, /applyOrderProgressStatusChangeToSheets\(sheetsRef\.current, statusApplyIndexes, status\)/, "실제 FNOS 상태 변경 대상은 기존 statusApplyIndexes 그대로여야 합니다.");
+  assert.match(changeSource, /setSheets\(\(prev\) => \{[\s\S]*applyOrderProgressStatusChangeToSheets\(prev, statusApplyIndexes, status\)/, "실제 FNOS 상태 변경 대상은 기존 statusApplyIndexes를 최종 prev 상태에 적용해야 합니다.");
 });
 
 test("11번가 등 합포장 행은 같은 API배송묶음ID 기준으로 빈 송장번호를 전파한다", () => {

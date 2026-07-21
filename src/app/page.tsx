@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
@@ -11964,6 +11964,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [salesGridResetKey, setSalesGridResetKey] = useState(0);
   const [orderProgressPage, setOrderProgressPage] = useState(1);
   const [orderProgressStatusFilter, setOrderProgressStatusFilter] = useState("전체");
+  const [orderProgressStatusChanging, setOrderProgressStatusChanging] = useState(false);
+  const orderProgressStatusChangeInFlight = useRef(false);
   const [directShippingRows, setDirectShippingRows] = useState<Record<DirectShippingPartner, string[][]>>({ JB: [], 케이모아: [] });
   const [directShippingSourceIndexes, setDirectShippingSourceIndexes] = useState<DirectShippingSourceIndexes>({ JB: [], 케이모아: [] });
   const directShippingFileHandles = useRef<Partial<Record<DirectShippingPartner, FileSystemFileHandleLike>>>({});
@@ -14347,7 +14349,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
 
   async function cleanupPendingManualOrderFilesAfterCompletion(filesToCleanup?: string[]) {
     const files = Array.from(new Set(
-      (filesToCleanup?.length ? filesToCleanup : completedPendingOnlineOrderManualFiles(sheets["발주 진행 단계"]))
+      (filesToCleanup?.length ? filesToCleanup : completedPendingOnlineOrderManualFiles(sheetsRef.current["발주 진행 단계"]))
         .map(normalizePendingOnlineOrderManualFileName)
         .filter(Boolean),
     ));
@@ -14385,6 +14387,18 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   }
 
   async function changeSelectedOrderStatus(status: OrderProgressStatusChangeTarget) {
+    if (orderProgressStatusChangeInFlight.current) return;
+    orderProgressStatusChangeInFlight.current = true;
+    setOrderProgressStatusChanging(true);
+    try {
+      await changeSelectedOrderStatusOnce(status);
+    } finally {
+      orderProgressStatusChangeInFlight.current = false;
+      setOrderProgressStatusChanging(false);
+    }
+  }
+
+  async function changeSelectedOrderStatusOnce(status: OrderProgressStatusChangeTarget) {
     if (!canChangeOrderProgressStatusFromFilter(orderProgressStatusFilter)) {
       window.alert("진행상태 변경은 신규주문·주문확인·출고대기 목록에서만 가능합니다.");
       return;
@@ -14494,16 +14508,27 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       ...failedApiStatusItems,
     ], confirmManualStatuses("fnos-applying"), false, overrideTodayhouseStatusDisplay));
     await new Promise((resolve) => window.setTimeout(resolve, shouldCallApi ? 150 : 250));
-    const { nextSheets, completedManualFiles } = applyOrderProgressStatusChangeToSheets(sheetsRef.current, statusApplyIndexes, status);
-    sheetsRef.current = nextSheets;
-    setSheets(nextSheets);
+    flushSync(() => {
+      setSheets((prev) => {
+        const { nextSheets } = applyOrderProgressStatusChangeToSheets(prev, statusApplyIndexes, status);
+        sheetsRef.current = nextSheets;
+        return nextSheets;
+      });
+    });
+    const completedManualFiles = status === "출고완료"
+      ? completedPendingOnlineOrderManualFiles(sheetsRef.current["발주 진행 단계"])
+      : [];
     setCollectionStatuses(mergeConfirmOrderStatusDisplayItems([
       ...orderProgressStatusChangeItems(statusApplyIndexes, status, "done", fnosOnlyStatusMove),
       ...failedApiStatusItems,
     ], confirmManualStatuses("done"), false, overrideTodayhouseStatusDisplay));
     setMessage(`${status} 처리 ${failedApiIndexes.length ? "부분 완료" : "완료"}: ${statusApplyIndexes.length}건${failedApiIndexes.length ? ` / API 실패 ${failedApiIndexes.length}건` : ""}`);
     if (partialFailureMessage) window.alert(`일부 쇼핑몰 처리는 실패했고, 성공한 쇼핑몰만 FNOS 상태를 변경했습니다.\n${partialFailureMessage}`);
-    if (completedManualFiles.length) void cleanupPendingManualOrderFilesAfterCompletion(completedManualFiles);
+    if (completedManualFiles.length) {
+      window.setTimeout(() => {
+        void cleanupPendingManualOrderFilesAfterCompletion(completedManualFiles);
+      }, 0);
+    }
   }
 
   function deleteSelectedOrderRows() {
@@ -17293,7 +17318,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <select
               className={`h-9 rounded-md border px-3 text-sm font-black ${orderProgressStatusChangeEnabled ? "border-slate-300 bg-white text-slate-700" : "border-slate-200 bg-slate-100 text-slate-400"}`}
               defaultValue=""
-              disabled={!orderProgressStatusChangeEnabled}
+              disabled={!orderProgressStatusChangeEnabled || orderProgressStatusChanging}
               title={orderProgressStatusChangeEnabled ? "선택 주문 진행상태 변경" : "진행상태 변경은 신규주문·주문확인·출고대기 목록에서만 가능합니다."}
               onChange={(event) => {
                 const status = event.target.value as OrderProgressStatusChangeTarget;
