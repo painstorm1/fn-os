@@ -5,6 +5,7 @@ import {
 } from "./accounting-installments";
 import { deleteRows, insertRows, patchRows, selectRows, upsertRows } from "./fnos-db";
 import { cleanAccountingFixedCostPayload, cleanAccountingLoanPayload, shouldAutoMarkLoanPaid } from "./accounting-ledger-payloads";
+import { reconcileAccountingPartnerPayments } from "./partner-balances";
 
 type RawRow = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
@@ -394,6 +395,20 @@ function transactionFallbackDedupeKey(row: RawRow) {
     row.merchant_name || row.description,
     amount,
   ]);
+}
+
+function canonicalAccountingTransactions(inputs: RawRow[], candidates: RawRow[]) {
+  const uniqueCandidates = Array.from(new Map(candidates.map((row) => [text(row.id) || `key:${text(row.dedupe_key)}:${transactionFallbackDedupeKey(row)}`, row])).values());
+  const canonical = new Map<string, RawRow>();
+  for (const input of inputs) {
+    const exact = uniqueCandidates.filter((row) => text(row.dedupe_key) === text(input.dedupe_key));
+    const fallbackKey = transactionFallbackDedupeKey(input);
+    const fallback = uniqueCandidates.filter((row) => !text(row.approval_no) && transactionFallbackDedupeKey(row) === fallbackKey);
+    const matches = exact.length ? exact : fallback;
+    if (matches.length !== 1 || !text(matches[0].id)) throw new Error("업로드 회계 거래의 canonical 행을 고유하게 확인할 수 없습니다.");
+    canonical.set(text(matches[0].id), matches[0]);
+  }
+  return Array.from(canonical.values());
 }
 
 function ruleMatches(rule: RawRow, tx: RawRow) {
@@ -1584,6 +1599,8 @@ export async function updateAccountingTransaction(id: string, row: RawRow) {
     if (row[key] !== undefined) payload[key] = row[key];
   }
   const saved = await patchRows<RawRow>("accounting_transactions", { id: `eq.${id}` }, payload);
+  if (saved.length !== 1) throw new Error("수정한 회계 거래를 고유하게 확인할 수 없습니다.");
+  await reconcileAccountingPartnerPayments(saved, { removeStale: true });
   if (payload.review_status === "confirmed") {
     if (row.create_rule || row.createRule || row.save_rule || row.saveRule) {
       await rememberAccountingRuleFromTransaction({ ...(previous || {}), ...payload, id }, row);
@@ -1658,7 +1675,7 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
     const rowsWithBatch: RawRow[] = classified.map((row) => ({ ...row, batch_id: batch.id }));
     const existing: RawRow[] = [];
     for (const keyChunk of chunkRows(rowsWithBatch.map((row) => text(row.dedupe_key)).filter(Boolean), 100)) {
-      existing.push(...await optionalRows("accounting_transactions", {
+      existing.push(...await selectRows<RawRow>("accounting_transactions", {
         dedupe_key: `in.(${keyChunk.map((key) => `"${key.replace(/"/g, '\\"')}"`).join(",")})`,
         limit: keyChunk.length,
       }));
@@ -1666,7 +1683,7 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
     const dateKeys = Array.from(new Set(rowsWithBatch.map((row) => isoDate(row.transaction_date)).filter(Boolean)));
     const existingByDate: RawRow[] = [];
     for (const dateChunk of chunkRows(dateKeys, 100)) {
-      existingByDate.push(...await optionalRows("accounting_transactions", {
+      existingByDate.push(...await selectRows<RawRow>("accounting_transactions", {
         transaction_date: `in.(${dateChunk.map((date) => `"${date}"`).join(",")})`,
         is_active: "eq.true",
         limit: 5000,
@@ -1694,6 +1711,8 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
     const fresh = Array.from(freshByKey.values());
     const savedChunks = await Promise.all(chunkRows(fresh, 200).map((chunk) => upsertRows<RawRow>("accounting_transactions", chunk, "dedupe_key")));
     const saved = savedChunks.flat();
+    const canonical = canonicalAccountingTransactions(rowsWithBatch, [...existing, ...existingByDate, ...saved]);
+    const partnerPaymentCount = await reconcileAccountingPartnerPayments(canonical);
     const gaonPointTotal = saved
       .filter((row) => text(row.card_name || row.source_name) === "가온글로벌카드")
       .reduce((sum, row) => sum + numberValue((row.raw_json as RawRow | undefined)?.reward_points ?? row.reward_points), 0);
@@ -1718,6 +1737,7 @@ export async function importAccountingLedgerRows(rows: RawRow[], options: { sour
       duplicate_count: classified.length - fresh.length,
       upload_duplicate_count: uploadDuplicateCount,
       review_count: reviewCount,
+      partner_payment_count: partnerPaymentCount,
     };
   } catch (error) {
     await patchRows("accounting_import_batches", { id: `eq.${batch.id}` }, {

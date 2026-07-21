@@ -1,4 +1,4 @@
-import { FnosDbError, insertRows, selectRows } from "./fnos-db";
+import { deleteRows, FnosDbError, insertRows, selectRows, upsertRows } from "./fnos-db";
 
 type Row = Record<string, unknown>;
 type QueryValue = string | number | boolean | null | undefined;
@@ -168,6 +168,77 @@ function paymentLinkedType(mode: BalanceMode) {
   return `fnos_partner_balance_${mode}`;
 }
 
+const AUTOMATIC_PARTNER_PAYMENT_ALIASES: Array<{ merchant: string; customer: string; modes: BalanceMode[] }> = [
+  { merchant: "이종복", customer: "제이비(직거래)", modes: ["sales", "purchases"] },
+  { merchant: "이종복(제이비컴퍼니", customer: "제이비컴퍼니", modes: ["sales", "purchases"] },
+  { merchant: "오완성(케이모아스포", customer: "케이모아", modes: ["purchases"] },
+  { merchant: "주식회사나스포", customer: "나스포", modes: ["purchases"] },
+  { merchant: "(주)아주레포츠", customer: "아주레포츠", modes: ["purchases"] },
+  { merchant: "우리주식회사믹스스포츠", customer: "믹스스포츠", modes: ["purchases"] },
+  { merchant: "주식회사믹스스포츠", customer: "믹스스포츠", modes: ["purchases"] },
+];
+
+function exactPartnerName(value: unknown) {
+  return text(value).normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+}
+
+export function isPartnerBalanceExcludedCustomer(value: unknown) {
+  const excluded = exactPartnerName("FN해외 상품 구매(소싱)");
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const row = value as Row;
+    return [customerName(row), customerCode(row)].some((item) => exactPartnerName(item) === excluded);
+  }
+  return exactPartnerName(value) === excluded;
+}
+
+function automaticPartnerPaymentCandidate(row: Row) {
+  if (text(row.source_type).toLowerCase() !== "bank" || row.is_active === false) return null;
+  const mapping = AUTOMATIC_PARTNER_PAYMENT_ALIASES.find((item) => exactPartnerName(item.merchant) === exactPartnerName(row.merchant_name));
+  if (!mapping) return null;
+  const debit = numberValue(row.debit_amount);
+  const credit = numberValue(row.credit_amount);
+  const mode: BalanceMode | null = credit > 0 && debit === 0 ? "sales" : debit > 0 && credit === 0 ? "purchases" : null;
+  if (!mode || !mapping.modes.includes(mode)) return null;
+  return { mode, amount: mode === "sales" ? credit : debit, customerName: mapping.customer };
+}
+
+export async function reconcileAccountingPartnerPayments(transactions: Row[], options: { removeStale?: boolean } = {}) {
+  const uniqueTransactions = Array.from(new Map(transactions.filter((row) => text(row.id)).map((row) => [text(row.id), row])).values());
+  const candidates = uniqueTransactions.map((row) => ({ row, candidate: automaticPartnerPaymentCandidate(row) })).filter((item) => item.candidate);
+  const customers = candidates.length ? await selectRows<Row>("customers", { limit: 5000 }) : [];
+  const payments: Row[] = [];
+  for (const item of candidates) {
+    const candidate = item.candidate!;
+    const matches = customers.filter((row) => exactPartnerName(customerName(row)) === exactPartnerName(candidate.customerName));
+    if (matches.length !== 1) throw new FnosDbError(`회계 자동 결제 거래처 '${candidate.customerName}'를 고유하게 확인할 수 없습니다.`);
+    const customer = matches[0];
+    if (customer.is_active === false || isPartnerBalanceExcludedCustomer(customer) || !balanceReflect(customer)) throw new FnosDbError(`회계 자동 결제 거래처 '${candidate.customerName}'는 잔액 반영 대상이 아닙니다.`);
+    const paymentDate = isoDate(item.row.transaction_date);
+    if (!paymentDate) throw new FnosDbError("회계 자동 결제 거래일을 확인할 수 없습니다.");
+    payments.push({
+      id: text(item.row.id),
+      payment_date: paymentDate,
+      customer_id: candidate.mode === "sales" ? text(customer.id) : null,
+      supplier_id: candidate.mode === "purchases" ? text(customer.id) : null,
+      amount: candidate.amount,
+      payment_method: candidate.mode === "sales" ? "회계 자동 수금" : "회계 자동 지급",
+      memo: "회계 통장내역 자동 반영",
+      linked_type: paymentLinkedType(candidate.mode),
+      linked_id: customerCode(customer) || customerName(customer),
+      created_at: text(item.row.created_at) || new Date().toISOString(),
+    });
+  }
+  if (payments.length) await upsertRows("payment_records", payments, "id");
+  if (options.removeStale) {
+    const candidateIds = new Set(payments.map((row) => text(row.id)));
+    for (const row of uniqueTransactions) {
+      const id = text(row.id);
+      if (!candidateIds.has(id)) await deleteRows("payment_records", { id: `eq.${id}`, payment_method: "like.회계 자동*" });
+    }
+  }
+  return payments.length;
+}
+
 function missingColumnName(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   return message.match(/컬럼 '([^']+)'/)?.[1] || message.match(/Could not find the ['"]?([^'"\s]+)['"]? column/i)?.[1] || "";
@@ -199,7 +270,9 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     optionalRows("payment_records", { linked_type: `eq.${paymentLinkedType(mode)}`, order: "payment_date.desc", limit: 5000 }),
   ]);
 
-  const customerRows = customers.map((row) => ({ row, keys: customerKeys(row), name: customerName(row) || customerCode(row), code: customerCode(row), type: customerType(row), balance_reflect: balanceReflect(row) }));
+  const customerRows = customers
+    .filter((row) => row.is_active !== false && !isPartnerBalanceExcludedCustomer(row))
+    .map((row) => ({ row, keys: customerKeys(row), name: customerName(row) || customerCode(row), code: customerCode(row), type: customerType(row), balance_reflect: balanceReflect(row) }));
   const customerByKey = new Map<string, { row: Row; keys: string[]; name: string; code: string; type: string; balance_reflect: boolean }>();
   customerRows.forEach((item) => item.keys.forEach((key) => customerByKey.set(key, item)));
   const findCustomer = (code: unknown, name: unknown) => {
@@ -233,8 +306,10 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
   }>();
 
   const groupFor = (code: unknown, name: unknown) => {
+    if (isPartnerBalanceExcludedCustomer(name) || isPartnerBalanceExcludedCustomer(code)) return null;
     const customerRecord = findCustomer(code, name);
     const display = customerRecord?.name || text(name) || text(code) || "-";
+    if (isPartnerBalanceExcludedCustomer(display) || isPartnerBalanceExcludedCustomer(customerRecord?.row)) return null;
     const key = compact(customerRecord?.code || code || display) || compact(display);
     if (customerRecord?.type === "shopping") return null;
     if (!key || display === "-" || display === "거래처" || display === "구매처") return null;
@@ -336,7 +411,7 @@ export async function partnerBalanceSummary({ mode, month, customer }: { mode: B
     if (date >= monthStart && date <= cutoff) target.month_paid_amount += amount;
     if (date > target.latest) target.latest = date;
     target.details.push({
-      source: "수동",
+      source: text(payment.payment_method).startsWith("회계 자동") ? "회계 자동" : "수동",
       kind: mode === "sales" ? "수금" : "지급",
       date,
       amount: 0,

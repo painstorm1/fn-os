@@ -26725,6 +26725,7 @@ function invalidateAccountingCache() {
   invalidateClientCache(ACCOUNTING_SUMMARY_ENDPOINT);
   invalidateClientCache("/api/accounting/ledger/summary");
   invalidateClientCache(ACCOUNTING_TRANSACTIONS_ENDPOINT);
+  invalidateClientCache("/api/fnos/partner-balances");
 }
 
 function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
