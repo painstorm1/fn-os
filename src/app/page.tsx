@@ -11123,6 +11123,7 @@ type SalesPurchaseEntryLine = {
   customerText?: string;
   warehouseCode?: string;
   vatMode?: SalesPurchaseVatMode;
+  _preservedTotalAmount?: string;
   prod_cd: string;
   prod_name: string;
   qty: string;
@@ -16466,6 +16467,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       prod_name: entryRowProduct(line),
       qty: String(entryRowQty(line) || 1),
       price: String(Number(line.price ?? line.unit_price ?? 0) || ""),
+      _preservedTotalAmount: line.total_amount === null || line.total_amount === undefined ? undefined : String(line.total_amount),
       memo: entryRowMemo(line) === "-" ? "" : entryRowMemo(line),
     }));
     setEntryPrefill({
@@ -18819,11 +18821,7 @@ function SalesPurchaseEntryModal({
   });
   const selectedCustomerIsShopping = /shopping|mall|shop|쇼핑몰/i.test(String(selectedCustomer?.customer_type || selectedCustomer?.customer_type_label || ""));
   const entryLinesTotal = lines.reduce((sum, line) => sum + lineSupply(line), 0);
-  const originalEntryTotal = (initialDraft?.lines || []).reduce((sum, line) => {
-    const qty = Number(String(line.qty || 0).replace(/[^\d.-]/g, ""));
-    const price = Number(String(line.price || 0).replace(/[^\d.-]/g, ""));
-    return sum + (Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0);
-  }, 0);
+  const originalEntryTotal = (initialDraft?.lines || []).reduce((sum, line) => sum + lineSupply(line), 0);
   const entryBalanceVisible = !isReturnExchangeMode && (mode === "sales" || mode === "purchases") && Boolean(customerText.trim() || customerCode.trim()) && !selectedCustomerIsShopping;
   const entryBeforeBalance = Math.round(Number(entryPartnerBalance?.month_end_balance || 0) - (initialDraft?.replaceGroupKey ? originalEntryTotal : 0));
   const entryAfterBalance = Math.round(entryBeforeBalance + entryLinesTotal);
@@ -18874,18 +18872,25 @@ function SalesPurchaseEntryModal({
   }
 
   function updateLine(index: number, key: keyof SalesPurchaseEntryLine, value: string) {
-    setLines((prev) => prev.map((line, rowIndex) => rowIndex === index ? { ...line, [key]: value } : line));
+    setLines((prev) => prev.map((line, rowIndex) => rowIndex === index ? {
+      ...line,
+      [key]: value,
+      _preservedTotalAmount: key === "qty" || key === "price" ? undefined : line._preservedTotalAmount,
+    } : line));
   }
 
-  function lineUnit(line: SalesPurchaseEntryLine) {
+  function lineUnit(line: Partial<SalesPurchaseEntryLine>) {
     return Number(String(line.price || 0).replace(/[^\d.-]/g, ""));
   }
 
-  function lineQty(line: SalesPurchaseEntryLine) {
+  function lineQty(line: Partial<SalesPurchaseEntryLine>) {
     return Number(String(line.qty || 0).replace(/[^\d.-]/g, ""));
   }
 
-  function lineSupply(line: SalesPurchaseEntryLine) {
+  function lineSupply(line: Partial<SalesPurchaseEntryLine>) {
+    const preservedText = String(line._preservedTotalAmount ?? "").trim();
+    const preserved = Number(preservedText.replace(/[^\d.-]/g, ""));
+    if (preservedText && Number.isFinite(preserved)) return preserved;
     const qty = lineQty(line);
     const unit = lineUnit(line);
     if (!Number.isFinite(qty) || !Number.isFinite(unit)) return 0;
@@ -19043,13 +19048,15 @@ function SalesPurchaseEntryModal({
   function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine {
     const price = mode === "purchases" ? Number(product.cost_price || fnProductPrice(product)) : Number(product.standard_price || fnProductPrice(product));
     const recentPrice = recentUnitPriceForProduct(fnProductSku(product));
+    const nextPrice = mode === "purchases"
+      ? (price ? String(price) : recentPrice ? String(recentPrice) : line.price)
+      : (recentPrice ? String(recentPrice) : price ? String(price) : line.price);
     return {
       ...line,
       prod_cd: fnProductSku(product),
       prod_name: fnProductName(product),
-      price: mode === "purchases"
-        ? (price ? String(price) : recentPrice ? String(recentPrice) : line.price)
-        : (recentPrice ? String(recentPrice) : price ? String(price) : line.price),
+      price: nextPrice,
+      _preservedTotalAmount: lineUnit({ price: nextPrice }) !== lineUnit(line) ? undefined : line._preservedTotalAmount,
     };
   }
 

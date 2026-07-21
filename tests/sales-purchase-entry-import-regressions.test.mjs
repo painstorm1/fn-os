@@ -228,6 +228,63 @@ test("online sales and purchase modal footers sum total amount from non-empty di
   assert.doesNotMatch(pageSource, /구매입력 총 금액: \{Math\.round\(purchaseSupplyTotal\)/);
 });
 
+test("editing an existing entry preserves its exact stored total until quantity or price changes", () => {
+  assert.match(pageSource, /type SalesPurchaseEntryLine = \{[\s\S]*_preservedTotalAmount\?: string;/);
+
+  const openEditStart = pageSource.indexOf("  function openEntryEditModal(");
+  const openEditSource = pageSource.slice(openEditStart, pageSource.indexOf("  async function", openEditStart));
+  assert.match(openEditSource, /_preservedTotalAmount: line\.total_amount === null \|\| line\.total_amount === undefined \? undefined : String\(line\.total_amount\)/);
+
+  const modalStart = pageSource.indexOf("function SalesPurchaseEntryModal(");
+  const modalSource = pageSource.slice(modalStart);
+  assert.match(modalSource, /function lineSupply\(line: Partial<SalesPurchaseEntryLine>\)[\s\S]*const preservedText[\s\S]*if \(preservedText && Number\.isFinite\(preserved\)\) return preserved/);
+  assert.match(modalSource, /function updateLine\([\s\S]*_preservedTotalAmount: key === "qty" \|\| key === "price" \? undefined : line\._preservedTotalAmount/);
+  assert.match(modalSource, /const originalEntryTotal = \(initialDraft\?\.lines \|\| \[\]\)\.reduce\(\(sum, line\) => sum \+ lineSupply\(line\), 0\)/);
+
+  const helpersStart = modalSource.indexOf("  function lineUnit(");
+  const helpersEnd = modalSource.indexOf("\n  function setLineSelected", helpersStart);
+  const helpersSource = modalSource.slice(helpersStart, helpersEnd).replaceAll(": Partial<SalesPurchaseEntryLine>", "");
+  const evaluatedLineSupply = Function(`${helpersSource}\nreturn lineSupply;`)();
+  assert.equal(evaluatedLineSupply({ qty: "3", price: "19598", _preservedTotalAmount: "58793" }), 58793);
+  assert.equal(evaluatedLineSupply({ qty: "3", price: "19598" }), 58794);
+  assert.equal(evaluatedLineSupply({ qty: "3", price: "19598", _preservedTotalAmount: "" }), 58794);
+
+  const productPatchStart = modalSource.indexOf("  function productLinePatch(");
+  const productPatchEnd = modalSource.indexOf("\n  function recentUnitPriceForProduct", productPatchStart);
+  const productPatchSource = modalSource
+    .slice(productPatchStart, productPatchEnd)
+    .replace("function productLinePatch(product: FnProduct, line: SalesPurchaseEntryLine): SalesPurchaseEntryLine", "function productLinePatch(product, line)");
+  const evaluatedProductLinePatch = Function(
+    "mode",
+    "fnProductPrice",
+    "fnProductSku",
+    "fnProductName",
+    "recentUnitPriceForProduct",
+    `${helpersSource}\n${productPatchSource}\nreturn productLinePatch;`,
+  )(
+    "sales",
+    (product) => product.standard_price,
+    (product) => product.sku,
+    (product) => product.name,
+    () => 0,
+  );
+  const preservedLine = { prod_cd: "old", prod_name: "old", qty: "3", price: "19598", _preservedTotalAmount: "58793" };
+  const changedPriceLine = evaluatedProductLinePatch({ sku: "changed", name: "changed", standard_price: 20000 }, preservedLine);
+  const samePriceLine = evaluatedProductLinePatch({ sku: "same", name: "same", standard_price: 19598 }, preservedLine);
+  assert.equal(changedPriceLine.price, "20000");
+  assert.equal(changedPriceLine._preservedTotalAmount, undefined);
+  assert.equal(samePriceLine.price, "19598");
+  assert.equal(samePriceLine._preservedTotalAmount, "58793");
+  assert.match(modalSource, /next\[targetIndex\] = productLinePatch\(product, baseLine\);/);
+
+  const quantity = 3;
+  const storedTotal = 58793;
+  const roundedPrice = Math.round(storedTotal / quantity);
+  assert.equal(roundedPrice, 19598);
+  assert.equal(quantity * roundedPrice, 58794);
+  assert.equal(Number(String(storedTotal)), 58793);
+});
+
 test("direct-shipping purchase input appends grouped delivery fee rows by recipient phone and address", () => {
   assert.match(pageSource, /directShippingDeliveryFeeUnit[\s\S]*케이모아: 4500,[\s\S]*JB: 2500/);
   assert.match(pageSource, /directShippingDeliveryFeeProduct[\s\S]*code: "ETC_01",[\s\S]*name: "직송 배송비"/);
