@@ -7,6 +7,9 @@ const allowedDevOrigins = (process.env.FNOS_ALLOWED_DEV_ORIGINS || "")
 
 const nextConfig: NextConfig = {
   allowedDevOrigins,
+  outputFileTracingIncludes: {
+    "/api/lcl-fee": ["./data/타배_배송비용.xlsx"],
+  },
 };
 
 export default nextConfig;

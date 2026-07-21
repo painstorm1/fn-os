@@ -1075,6 +1075,7 @@ function RightTools() {
         credentials: "include",
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const originFee = next.origin ? data.origin_certificate : 0;
       const total = data.shipping_fee + originFee + data.bl_charge + data.forwarder_hc + data.cwc_krw;
       const won = (n: number) => `${Math.round(n || 0).toLocaleString("ko-KR")}원`;
@@ -1089,7 +1090,7 @@ function RightTools() {
         `총 금액: ${won(total)}`,
       ].join("\n"));
     } catch {
-      setLclResult("수입관리 서버 연결을 확인해 주세요. localhost:5500이 켜져 있어야 계산됩니다.");
+      setLclResult("LCL 배송요금을 계산하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
   }
 
@@ -2174,12 +2175,12 @@ type PartnerBalanceSummary = {
 };
 
 function apiUrl(path: string) {
-  if (path.startsWith("/api/fnos/") || path.startsWith("/api/accounting/")) return path;
+  if (path === "/api/lcl-fee" || path.startsWith("/api/lcl-fee?") || path.startsWith("/api/fnos/") || path.startsWith("/api/accounting/")) return path;
   return `/api/import-erp${path}`;
 }
 
 function needsImportErpServer(path: string) {
-  return !path.startsWith("/api/fnos/") && !path.startsWith("/api/accounting/");
+  return path !== "/api/lcl-fee" && !path.startsWith("/api/lcl-fee?") && !path.startsWith("/api/fnos/") && !path.startsWith("/api/accounting/");
 }
 
 const DEFAULT_CACHE_TTL = 45_000;
