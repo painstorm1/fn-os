@@ -10,18 +10,6 @@ const ts = require("typescript");
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pageSource = readFileSync(resolve(projectRoot, "src/app/page.tsx"), "utf8");
 
-function executeTypeScriptModule(relativePath, mocks = {}) {
-  const filename = resolve(projectRoot, relativePath);
-  const compiled = ts.transpileModule(readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
-    fileName: filename,
-  }).outputText;
-  const sourceModule = { exports: {} };
-  const localRequire = (specifier) => Object.hasOwn(mocks, specifier) ? mocks[specifier] : createRequire(filename)(specifier);
-  new Function("require", "module", "exports", compiled)(localRequire, sourceModule, sourceModule.exports);
-  return sourceModule.exports;
-}
-
 function loadManualCompletionHelpers() {
   const start = pageSource.indexOf("function normalizePendingOnlineOrderManualFileName(");
   const end = pageSource.indexOf("function setSalesSheetCell(", start);
@@ -50,18 +38,6 @@ function localStorageFixture(values) {
     setItem: (key, value) => data.set(key, String(value)),
     removeItem: (key) => data.delete(key),
   };
-}
-
-class TestNextResponse {
-  constructor(body, init = {}) {
-    this.body = body;
-    this.status = init.status || 200;
-    this.headers = new Headers(init.headers || {});
-  }
-
-  static next() { return { kind: "next" }; }
-  static json(body, init = {}) { return new TestNextResponse(body, init); }
-  static redirect(url) { return { kind: "redirect", url }; }
 }
 
 test("API 미연동 쇼핑몰은 공백·alias·실코드와 무관하게 FNOS-only로 분류된다", () => {
@@ -293,38 +269,5 @@ test("수동 파일 metadata 누락 또는 부분 완료는 cleanup 대상이 �
     }
   } finally {
     globalThis.window = previousWindow;
-  }
-});
-
-test("production Origin의 exact cleanup OPTIONS만 auth를 통과해 route CORS 204에 도달한다", async () => {
-  const nextServer = { NextRequest: class NextRequest {}, NextResponse: TestNextResponse };
-  const { proxy } = executeTypeScriptModule("proxy.ts", { "next/server": nextServer });
-  const cleanupRoute = executeTypeScriptModule("src/app/api/fnos/online-orders/manual-files/cleanup/route.ts", { "next/server": nextServer });
-  const exactUrl = "http://127.0.0.1:3000/api/fnos/online-orders/manual-files/cleanup";
-  const makeRequest = (overrides = {}) => ({
-    method: overrides.method || "OPTIONS",
-    nextUrl: new URL(overrides.url || exactUrl),
-    headers: new Headers({
-      Origin: overrides.origin || "https://fn-os.vercel.app",
-      "Access-Control-Request-Method": overrides.requestMethod || "POST",
-      "Access-Control-Request-Headers": overrides.requestHeaders || "content-type, x-fnos-local-bridge",
-    }),
-    cookies: { get: () => undefined },
-  });
-
-  assert.equal(proxy(makeRequest()).kind, "next");
-  const response = await cleanupRoute.OPTIONS();
-  assert.equal(response.status, 204);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://fn-os.vercel.app");
-  assert.equal(response.headers.get("access-control-allow-methods"), "POST, OPTIONS");
-  assert.equal(response.headers.get("access-control-allow-headers"), "Content-Type, X-FNOS-Local-Bridge");
-
-  for (const overrides of [
-    { url: "http://127.0.0.1:3000/api/fnos/online-orders/status" },
-    { origin: "https://evil.example" },
-    { requestMethod: "GET" },
-    { requestHeaders: "content-type" },
-  ]) {
-    assert.equal(proxy(makeRequest(overrides)).status, 401, JSON.stringify(overrides));
   }
 });

@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import { promisify } from "util";
 import { NextRequest, NextResponse } from "next/server";
 import * as path from "path";
+import { createAutomationJob } from "@/lib/automation-jobs";
 
 export const runtime = "nodejs";
 
@@ -15,27 +16,11 @@ type CleanupResult = {
 
 const execFileAsync = promisify(execFile);
 
-const localBridgeCorsHeaders = {
-  "Access-Control-Allow-Origin": "https://fn-os.vercel.app",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-FNOS-Local-Bridge",
-};
-
 const MANUAL_ORDER_DIR = process.env.FNOS_MANUAL_ORDER_DIR || "D:\\FN_Oder_mall";
 const MANUAL_ORDER_EXTENSIONS = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
 
 function jsonResponse(body: Record<string, unknown>, init?: ResponseInit) {
-  return NextResponse.json(body, {
-    ...init,
-    headers: {
-      ...localBridgeCorsHeaders,
-      ...(init?.headers || {}),
-    },
-  });
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: localBridgeCorsHeaders });
+  return NextResponse.json(body, init);
 }
 
 function text(value: unknown) {
@@ -55,6 +40,13 @@ function safeManualFilePath(fileName: string) {
   const filePath = path.resolve(root, fileName);
   if (filePath !== root && filePath.startsWith(root + path.sep)) return filePath;
   return "";
+}
+
+function shouldQueueForLocalWorker(body: Record<string, unknown>) {
+  if (process.env.VERCEL === "1") return true;
+  if (body.worker_direct === true || body.run_direct === true) return false;
+  if (body.use_worker === false) return false;
+  return body.use_worker === true;
 }
 
 function psSingleQuote(value: string) {
@@ -98,6 +90,22 @@ export async function POST(request: NextRequest) {
 
     if (!fileNames.length) {
       return jsonResponse({ ok: true, moved: [], results: [], message: "정리할 수동 주문파일이 없습니다." });
+    }
+
+    if (shouldQueueForLocalWorker(body)) {
+      const job = await createAutomationJob({
+        job_type: "online_order_status_update",
+        title: "수동 주문파일 정리",
+        requested_by: "sales_inventory",
+        input_json: {
+          action: "cleanup_manual_files",
+          files: fileNames,
+          dry_run: dryRun,
+          worker_direct: true,
+          use_worker: false,
+        },
+      });
+      return jsonResponse({ ok: true, queued: true, job_id: job.id, results: [] });
     }
 
     const results: CleanupResult[] = [];

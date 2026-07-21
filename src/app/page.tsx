@@ -14356,31 +14356,54 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         .filter(Boolean),
     ));
     if (!files.length) return;
-    const isLocalPage = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-    const cleanupUrl = isLocalPage
-      ? "/api/fnos/online-orders/manual-files/cleanup"
-      : "http://127.0.0.1:3000/api/fnos/online-orders/manual-files/cleanup";
     try {
-      const res = await fetch(cleanupUrl, {
+      const res = await fetch("/api/fnos/online-orders/manual-files/cleanup", {
         method: "POST",
-        mode: isLocalPage ? "same-origin" : "cors",
-        credentials: isLocalPage ? "include" : "omit",
-        headers: { "Content-Type": "application/json", ...(isLocalPage ? {} : { "X-FNOS-Local-Bridge": "1" }) },
+        mode: "same-origin",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         fnosSkipBusyOverlay: true,
         body: JSON.stringify({ files }),
       } as RequestInit & { fnosSkipBusyOverlay: boolean });
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+      if (data.queued) {
+        const jobId = salesCellText(data.job_id);
+        if (!jobId) throw new Error("수동 주문파일 정리 작업 ID가 없습니다.");
+        let completed = false;
+        for (let attempt = 0; attempt < 180; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1000 : 2000));
+          const jobRes = await fetch(`/api/fnos/automation-jobs/${encodeURIComponent(jobId)}`, {
+            cache: "no-store",
+            credentials: "include",
+            fnosSkipBusyOverlay: true,
+          } as RequestInit & { fnosSkipBusyOverlay: boolean });
+          const jobData = await jobRes.json().catch(() => ({}));
+          if (!jobRes.ok || jobData.ok === false) throw new Error(salesCellText(jobData.error || "수동 주문파일 정리 작업 조회 실패"));
+          const job = jobData.job || {};
+          const status = salesCellText(job.status);
+          if (status === "success") {
+            data = job.result_json || {};
+            completed = true;
+            break;
+          }
+          if (["failed", "cancelled", "waiting_approval"].includes(status)) {
+            throw new Error(salesCellText(job.error_message) || `수동 주문파일 정리 작업 ${status}`);
+          }
+        }
+        if (!completed) throw new Error("수동 주문파일 정리 작업 시간이 초과되었습니다.");
+      }
       if (!res.ok || data.ok === false) throw new Error(salesCellText(data.error || data.message || "수동 주문파일 정리 실패"));
-      const moved = Array.isArray(data.moved) ? data.moved.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
-      const recycled = Array.isArray(data.recycled) ? data.recycled.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
-      const archived = Array.isArray(data.archived) ? data.archived.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
-      const resolved = Array.isArray(data.results)
-        ? data.results
+      const requested = new Set(files);
+      const resolved: string[] = Array.isArray(data.results)
+        ? Array.from(new Set<string>(data.results
           .filter((item: Record<string, unknown>) => ["recycled", "archived", "missing"].includes(salesCellText(item.status)))
           .map((item: Record<string, unknown>) => salesCellText(item.fileName))
-          .filter(Boolean)
-        : moved;
-      clearPendingOnlineOrderManualFiles(resolved.length ? resolved : files);
+          .filter((fileName: string) => requested.has(fileName))))
+        : [];
+      if (!resolved.length) throw new Error(salesCellText(data.error || data.message || "정리 완료된 수동 주문파일이 없습니다."));
+      clearPendingOnlineOrderManualFiles(resolved);
+      const recycled = Array.isArray(data.recycled) ? data.recycled.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
+      const archived = Array.isArray(data.archived) ? data.archived.map((value: unknown) => salesCellText(value)).filter(Boolean) : [];
       setMessage((prev) => `${prev ? `${prev}\n` : ""}수동 주문파일 정리 완료: 휴지통 ${recycled.length}개, 보관함 ${archived.length}개`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "수동 주문파일 정리 실패";

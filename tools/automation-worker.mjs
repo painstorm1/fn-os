@@ -142,6 +142,30 @@ async function runStubHandler(job) {
     };
   }
 
+  if (job.job_type === "online_order_status_update" && text(input.action) === "cleanup_manual_files") {
+    const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/manual-files/cleanup", {
+      method: "POST",
+      headers: { "x-fnos-worker-direct": "1" },
+      body: JSON.stringify({
+        ...input,
+        worker_direct: true,
+        use_worker: false,
+      }),
+    });
+    const ok = data.ok !== false;
+    return {
+      status: ok ? "success" : "failed",
+      result_json: {
+        ...data,
+        worker_id: workerId,
+        execution_origin: executionOrigin,
+        handled_at: now(),
+      },
+      log_text: appendLog(job, `manual order file cleanup ${ok ? "completed" : "failed"} via ${executionOrigin}`),
+      error_message: ok ? "" : text(data.error || data.message || "Manual order file cleanup failed."),
+    };
+  }
+
   if (job.job_type === "online_order_status_update") {
     const data = await requestFrom(executionOrigin, "/api/fnos/online-orders/status", {
       method: "POST",
