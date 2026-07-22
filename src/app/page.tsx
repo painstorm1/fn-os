@@ -14960,12 +14960,6 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     return mode ? `${mode}:${month}` : "";
   }
 
-  function partnerBalanceMonthEnd(month = partnerBalanceMonth) {
-    if (!/^\d{4}-\d{2}$/.test(month)) return entryDateToday();
-    const [year, monthNo] = month.split("-").map(Number);
-    return new Date(year, monthNo, 0).toISOString().slice(0, 10);
-  }
-
   function partnerBalanceRowKey(row: PartnerBalanceRow) {
     return `${partnerBalanceMode}:${row.customer_code || row.customer}`;
   }
@@ -15046,7 +15040,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         customer_name: row.customer,
         customer_code: row.customer_code || "",
         amount,
-        payment_date: partnerBalanceMonthEnd(),
+        payment_date: entryDateToday(),
         memo: "",
       }),
     });

@@ -193,6 +193,29 @@ test("partner balance behavior accumulates manual plus accounting payments and e
   assert.equal(purchases.rows.length, 0, "excluded customer must stay hidden even with balance_reflect=true and purchase history");
 });
 
+test("manual receivable/payable save keeps the actual transaction date from the shared UI payload through persistence", async () => {
+  const saveStart = pageSource.indexOf("  async function saveManualPartnerPayment(row: PartnerBalanceRow)");
+  const saveEnd = pageSource.indexOf("  function openPartnerBalanceStatementPdf", saveStart);
+  const saveSource = pageSource.slice(saveStart, saveEnd);
+  assert.notEqual(saveStart, -1);
+  assert.match(saveSource, /mode:\s*partnerBalanceMode,/);
+  assert.match(saveSource, /payment_date:\s*entryDateToday\(\),/);
+  assert.doesNotMatch(saveSource, /partnerBalanceMonthEnd\(/);
+
+  const loaded = loadPartnerBalances({ customers: customerFixtures.slice(0, 1) });
+  for (const mode of ["sales", "purchases"]) {
+    const [persisted] = await loaded.createManualPartnerPayment({
+      mode,
+      customer_name: customerFixtures[0].customer_name,
+      customer_code: customerFixtures[0].customer_code,
+      amount: 1234,
+      payment_date: "2026-07-22",
+    });
+    assert.equal(persisted.payment_date, "2026-07-22");
+    assert.equal(persisted.payment_method, mode === "sales" ? "수동 수금" : "수동 지급");
+  }
+});
+
 function loadAccountingLedger({ failDedupeRead = false, failFirstReconcile = false } = {}) {
   const transactions = [];
   const batches = [];
