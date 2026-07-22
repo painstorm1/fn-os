@@ -2391,31 +2391,14 @@ function fileIconType(name?: string) {
   return "file";
 }
 
-function isExcelAttachment(item: OrderAttachment) {
-  return /\.(xlsx|xlsm|xls|csv)$/i.test(item.file_name || "");
-}
-
 function attachmentRawFileUrl(item: OrderAttachment) {
   return String(item.file_url || item.file_path || "").trim();
 }
 
 function attachmentFileUrl(item: OrderAttachment) {
-  if (item.id !== undefined && item.id !== null && String(item.id).trim()) {
-    return `/api/fnos/attachments/${encodeURIComponent(String(item.id))}/file`;
-  }
+  const id = String(item.id ?? "").trim();
+  if (/^\d+$/.test(id)) return `/api/fnos/attachments/${encodeURIComponent(id)}/file`;
   return attachmentRawFileUrl(item);
-}
-
-function absoluteAttachmentFileUrl(item: OrderAttachment) {
-  const fileUrl = attachmentFileUrl(item);
-  if (!fileUrl) return "";
-  return /^https?:\/\//i.test(fileUrl) ? fileUrl : new URL(fileUrl, window.location.origin).toString();
-}
-
-const openingAttachmentSheets = new Set<string>();
-
-function attachmentSheetRequestKey(item: OrderAttachment, fileUrl: string) {
-  return String(item.id || item.file_name || fileUrl);
 }
 
 function FileTypeIcon({ name }: { name?: string }) {
@@ -2623,49 +2606,14 @@ async function loadFnSettingsAttachmentCounts(accountType: FnSettingsAttachmentT
   onLoaded(Object.fromEntries(entries));
 }
 
-async function openAttachment(item: OrderAttachment) {
-  const fileUrl = attachmentFileUrl(item);
-  if (!fileUrl) {
+function openAttachment(item: OrderAttachment) {
+  const url = attachmentViewerUrl(item);
+  if (!url) {
     alert("첨부파일 URL이 없습니다. 파일을 다시 업로드해 주세요.");
     return;
   }
-  if (isExcelAttachment(item)) {
-    const sourceFileUrl = absoluteAttachmentFileUrl(item);
-    const requestKey = attachmentSheetRequestKey(item, sourceFileUrl || fileUrl);
-    const cacheKey = `fnos-attachment-sheet:${requestKey}`;
-    const cachedUrl = sessionStorage.getItem(cacheKey);
-    if (cachedUrl) {
-      const cachedOpened = window.open(cachedUrl, "_blank", "noopener,noreferrer");
-      if (!cachedOpened) alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.");
-      return;
-    }
-    if (openingAttachmentSheets.has(requestKey)) return;
-    openingAttachmentSheets.add(requestKey);
-    try {
-      const res = await fetch("/api/google/attachment-sheet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          attachmentId: item.id,
-          fileName: item.file_name,
-          fileUrl: sourceFileUrl,
-          mimeType: item.mime_type,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false || !data.url) throw new Error(data.error || "Google Sheets로 열 수 없습니다.");
-      sessionStorage.setItem(cacheKey, data.url);
-      const opened = window.open(data.url, "_blank", "noopener,noreferrer");
-      if (!opened) alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.");
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Google Sheets로 열 수 없습니다.");
-    } finally {
-      openingAttachmentSheets.delete(requestKey);
-    }
-    return;
-  }
-  const url = attachmentViewerUrl(item);
-  if (url) window.open(url, "_blank", "noopener,noreferrer");
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.");
 }
 
 function fmtPct(value?: number | null) {
