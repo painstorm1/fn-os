@@ -152,7 +152,8 @@ class FakeElement {
   constructor(id) {
     this.id = id;
     this.value = "";
-    this.innerHTML = "";
+    this._innerHTML = "";
+    this.innerHTMLWrites = 0;
     this.textContent = "";
     this.dataset = {};
     this.style = {};
@@ -168,11 +169,19 @@ class FakeElement {
   addEventListener(type, listener) {
     this.listeners.set(type, listener);
   }
-  dispatch(type) {
+  get innerHTML() {
+    return this._innerHTML;
+  }
+  set innerHTML(value) {
+    this._innerHTML = value;
+    this.innerHTMLWrites += 1;
+  }
+  dispatch(type, event = {}) {
     const listener = this.listeners.get(type);
-    if (listener) listener({ target: this, preventDefault() {} });
+    if (listener) listener({ target: this, currentTarget: this, preventDefault() {}, ...event });
   }
   focus() {}
+  showPicker() { this.showPickerCalls = (this.showPickerCalls || 0) + 1; }
 }
 
 function popupRuntime(script) {
@@ -263,6 +272,57 @@ test("generated trade-analysis popup script parses and reaches ready/render with
   elements.get("toggleUnlinkedOutbound").dispatch("click");
   assert.match(elements.get("tbody").innerHTML, /미연결 출고 감사행/);
   assert.match(elements.get("tbody").innerHTML, /Unlinked component/);
+});
+
+test("generated popup calendar adapter keeps ISO state, visible drafts, picker, and render count synchronized", () => {
+  const html = generatedPopupHtml();
+  assert.match(html, /id="fromMonthText"[^>]*type="text"[^>]*inputmode="numeric"/);
+  assert.match(html, /id="fromMonthPicker"[^>]*data-calendar-picker="true"[^>]*type="month"[^>]*tabindex="-1"/);
+  assert.match(html, /id="fromDayPicker"[^>]*data-calendar-picker="true"[^>]*type="date"[^>]*tabindex="-1"/);
+  assert.doesNotMatch(html.match(/id="fromMonthPicker"[^>]*>/)?.[0] || "", /\bname=/);
+  assert.match(html, /input:not\(\[data-calendar-part\]\),select/);
+
+  const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert.ok(script);
+  const { elements } = popupRuntime(script);
+  const state = elements.get("fromDay");
+  const text = elements.get("fromDayText");
+  const picker = elements.get("fromDayPicker");
+  const tbody = elements.get("tbody");
+
+  assert.equal(state.value, "2026-04-03");
+  assert.equal(text.value, "2026/04/03");
+  assert.equal(picker.value, "2026-04-03");
+
+  const initialWrites = tbody.innerHTMLWrites;
+  text.value = "2026/02";
+  text.dispatch("input");
+  assert.equal(state.value, "2026-04-03", "partial draft must not change the confirmed ISO value");
+  assert.equal(tbody.innerHTMLWrites, initialWrites, "partial draft must not render");
+  text.dispatch("blur");
+  assert.equal(text.value, "2026/04/03", "blur restores the last confirmed value");
+
+  text.value = "20240229";
+  text.dispatch("input");
+  assert.equal(state.value, "2024-02-29");
+  assert.equal(text.value, "2024/02/29");
+  assert.equal(picker.value, "2024-02-29");
+  assert.equal(tbody.innerHTMLWrites, initialWrites + 1, "valid text commit renders exactly once");
+
+  state.value = "2026-07-23";
+  assert.equal(text.value, "2026/07/23", "programmatic state assignment synchronizes visible text");
+  assert.equal(picker.value, "2026-07-23", "programmatic state assignment synchronizes picker");
+  assert.equal(tbody.innerHTMLWrites, initialWrites + 1, "programmatic synchronization does not render by itself");
+
+  const beforePicker = tbody.innerHTMLWrites;
+  picker.value = "2026-07-24";
+  picker.dispatch("change");
+  assert.equal(state.value, "2026-07-24");
+  assert.equal(text.value, "2026/07/24");
+  assert.equal(tbody.innerHTMLWrites, beforePicker + 1, "picker commit renders exactly once");
+
+  elements.get("fromDayButton").dispatch("click");
+  assert.equal(picker.showPickerCalls, 1, "only the calendar button opens the native picker");
 });
 
 test("unlinked outbound audit rows follow active date, product, warehouse, and customer filters", () => {

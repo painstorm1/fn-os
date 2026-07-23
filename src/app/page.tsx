@@ -10,6 +10,7 @@ import { useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
 import {
   ActionButton,
+  CalendarInput,
   Card,
   EmptyState,
   FilterBar,
@@ -27,6 +28,7 @@ import {
   useF4SaveShortcut,
 } from "@/components/fn-ui";
 import { cachedJson as cachedClientJson, invalidateClientCache, markClientCacheReady, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
+import { normalizeCalendarInput } from "@/lib/calendar-input";
 import {
   groupDirectShippingSourceIndexes,
   planDirectShippingBundleSelection,
@@ -2764,7 +2766,7 @@ function LegacyStageDateLane({ paymentMethod, values, onChange }: { paymentMetho
             </button>
             <strong className="text-sm">{stage.label}</strong>
             <button type="button" className="text-xs font-bold text-slate-500" onClick={() => setOpenStage(stage.name)}>{value || "날짜 선택"}</button>
-            {openStage === stage.name && <input className="field-input" type="date" value={value} onChange={(event) => onChange(stage.name, event.target.value)} />}
+            {openStage === stage.name && <CalendarInput className="field-input" value={value} onValueChange={(nextValue) => onChange(stage.name, nextValue)} />}
           </div>
         );
       })}
@@ -2804,16 +2806,11 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
                 {value || "날짜 선택"}
               </button>
               {openStage === stage.name && (
-                <input
+                <CalendarInput
                   className="field-input relative z-30 h-9 w-[112px] max-w-full px-2 text-xs"
-                  type="date"
+                  wrapperClassName="!w-[112px]"
                   value={value}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    event.currentTarget.showPicker?.();
-                  }}
-                  onFocus={(event) => event.currentTarget.showPicker?.()}
-                  onChange={(event) => onChange(stage.name, event.target.value)}
+                  onValueChange={(nextValue) => onChange(stage.name, nextValue)}
                 />
               )}
             </div>
@@ -3244,8 +3241,8 @@ function NativeOrders({
           >
             <Link className="inline-flex h-10 items-center justify-center rounded-lg bg-[#ff6a00] px-4 text-sm font-semibold text-white transition hover:bg-[#ea580c]" href={importHref("/orders/new")}>F2 새 발주</Link>
             <input className="field-input" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} placeholder="제품명 or 거래처명" />
-            <input className="field-input" type="date" value={filters.dateFrom} onChange={(event) => setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))} />
-            <input className="field-input" type="date" value={filters.dateTo} onChange={(event) => setFilters((prev) => ({ ...prev, dateTo: event.target.value }))} />
+            <CalendarInput className="field-input" value={filters.dateFrom} onValueChange={(dateFrom) => setFilters((prev) => ({ ...prev, dateFrom }))} />
+            <CalendarInput className="field-input" value={filters.dateTo} onValueChange={(dateTo) => setFilters((prev) => ({ ...prev, dateTo }))} />
             <button className="rounded-md bg-slate-900 px-3 text-sm font-black text-white" type="submit">찾기</button>
           </form>
           <div className="hidden grid-cols-[120px_1.4fr_1fr_80px_128px_44px_76px_90px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-600 xl:grid">
@@ -6019,8 +6016,8 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
               </select>
             </Field>
             <Field label="환율"><input className="field-input" type="number" step="0.01" name="fx_rate" defaultValue={order?.fx_rate || data?.rates.CNY || 195} /></Field>
-            <Field label="발주일"><input className="field-input" type="date" name="order_date" defaultValue={order?.order_date || ""} /></Field>
-            <Field label="결제일"><input className="field-input" type="date" name="paid_date" defaultValue={order?.paid_date || ""} /></Field>
+            <Field label="발주일"><CalendarInput className="field-input" name="order_date" defaultValue={order?.order_date || ""} /></Field>
+            <Field label="결제일"><CalendarInput className="field-input" name="paid_date" defaultValue={order?.paid_date || ""} /></Field>
             <Field label="결제수단"><input className="field-input" name="payment_method" defaultValue={order?.payment_method || ""} /></Field>
             <Field label="배송방식"><input className="field-input" name="shipping_method" placeholder="LCL / 항공 / 택배" defaultValue={order?.shipping_method || ""} /></Field>
           </div>
@@ -15367,7 +15364,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       *{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#0f172a;font-family:Arial,"Malgun Gothic",sans-serif}button,input,select{font:inherit}
       .app{min-height:100vh;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.headerActions{display:flex;align-items:center;gap:8px}.title{font-size:26px;font-weight:900}.sub{margin-top:4px;color:#64748b;font-size:12px;font-weight:700}
       .panel{border:1px solid #dbe2ea;background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}.topFilters{display:flex;align-items:center;gap:7px}.topFilters select{width:auto}.filters{display:flex;align-items:center;gap:8px;margin-top:10px}.filters .field.searchInput{width:200px}.filterSpacer{flex:1}.period{display:grid;grid-template-columns:78px 30px 138px 138px 30px;gap:5px;align-items:center}
-      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}.loadStatus{margin-left:auto;color:#b45309;font-size:12px;font-weight:900}.loadStatus.error{color:#b91c1c}
+      .field{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:12px;font-weight:800;color:#0f172a}.calendarInput{position:relative;display:flex;width:138px}.calendarText{width:100%;padding-right:32px}.calendarButton{position:absolute;right:3px;top:3px;width:28px;height:28px;border:0;background:transparent;color:#475569;cursor:pointer}.calendarButton:hover{border-radius:6px;background:#fff7ed;color:#ea580c}.calendarPicker{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}.btn{height:34px;border:0;border-radius:8px;background:#ff6a00;color:#fff;font-size:12px;font-weight:900;cursor:pointer}.btn.secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.search{width:58px}.btn.excel{width:42px;background:#15803d;color:#fff;font-size:11px}.btn.pdf{width:42px;background:#dc2626;color:#fff;font-size:11px}.btn.mail{width:66px;border:1px solid #cbd5e1;background:#fff;color:#334155}.btn.tiny{width:30px;padding:0}.loadStatus{margin-left:auto;color:#b45309;font-size:12px;font-weight:900}.loadStatus.error{color:#b91c1c}
       .selectedBar{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 9px;font-size:12px;font-weight:900}.chip.product{background:#fff7ed;color:#c2410c}.chip.warehouse{background:#eff6ff;color:#1d4ed8}.chip.customer{background:#f0fdf4;color:#15803d}.emptySelection{font-size:12px;font-weight:900;color:#94a3b8}
       .summary{display:grid;grid-template-columns:1.18fr .82fr;gap:12px;margin:14px 2px 10px}.summaryCard{min-height:148px;border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:18px 22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,.72fr);gap:20px;align-items:center;box-shadow:0 8px 20px rgba(15,23,42,.05)}.summaryCard.salesCard{background:linear-gradient(135deg,#effbff 0%,#f8fdff 62%,#edf8ff 100%);border-color:#cfeaf7}.summaryCard.purchaseCard{background:linear-gradient(135deg,#fff3eb 0%,#ffe0cf 100%);border-color:#f6b48d}.summaryCard>div:first-child{display:block;min-width:0}.summaryTitle{margin:0 0 12px;font-size:34px;line-height:1;font-weight:950;letter-spacing:0;cursor:pointer}.summaryTitle.salesText{color:#1378ef}.summaryTitle.purchaseText{color:#ea580c}.summaryGrid{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);gap:10px 28px;align-items:center}.metricLine{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}.metricLabel{font-size:14px;color:#334155;font-weight:900;white-space:nowrap}.metricValue{font-size:22px;font-weight:950;color:#0f172a;white-space:nowrap}.totalLine{grid-column:1/3;font-size:22px;font-weight:950;color:#0f172a;white-space:nowrap}.scopeLine{grid-column:1/3;display:flex;flex-wrap:wrap;gap:24px;align-items:center;color:#334155;font-size:14px;font-weight:900}.scopeLine span{white-space:nowrap}.scopeButton{border:0;background:transparent;color:#0f172a;font-size:21px;font-weight:950;cursor:pointer;padding:0}.rankList{display:grid;gap:7px;border-left:1px solid rgba(15,23,42,.08);padding-left:18px;min-width:0}.rankTitle{border:0;background:transparent;color:#0f172a;text-align:left;font-size:13px;font-weight:950;padding:0 0 3px;cursor:pointer}.rankRow{display:grid;grid-template-columns:minmax(112px,1fr) 122px;gap:10px;align-items:center;font-size:12px;font-weight:900}.rankName{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.rankBar{height:6px;border-radius:999px;background:#38bdf8;margin-top:3px}.rankAmount{text-align:right;font-size:12px;font-weight:950;color:#0f172a;white-space:nowrap}.purchaseSide{justify-self:end;width:154px;border-radius:10px;background:rgba(255,255,255,.78);padding:14px 12px;text-align:center;color:#111827;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}.purchaseSideLabel{font-size:15px;font-weight:900}.purchaseSideDate{font-size:22px;line-height:1.12;margin:8px 0 16px;white-space:nowrap}.purchaseSideCycle{font-size:15px;font-weight:900}.purchaseSideDays{font-size:26px;line-height:1.1;font-weight:950;white-space:nowrap}
       .analysisNav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 2px 8px;color:#334155;font-size:13px;font-weight:900}.navTextButton{border:0;background:transparent;color:#ff6a00;font-size:17px;font-weight:950;line-height:1;cursor:pointer;padding:0 3px}.navTextButton:disabled{color:#cbd5e1;cursor:default}.navLabel{min-width:220px;text-align:center}
@@ -15389,7 +15386,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
           <input id="customer" class="field searchInput" placeholder="거래처 검색">
           <button id="search" class="btn search">검색</button><button id="downloadExcel" class="btn excel" title="엑셀 다운로드" type="button">XLS</button><button id="downloadPdf" class="btn pdf" title="PDF 저장" type="button">PDF</button><button id="emailPdf" class="btn mail" title="전송" type="button">전송</button>
           <div class="filterSpacer"></div>
-          <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><input id="fromMonth" class="field periodInput" type="month" value="${analysisDefaultFromMonth}"><input id="toMonth" class="field periodInput" type="month" value="${thisMonth}"><input id="fromDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><input id="toDay" class="field periodInput" type="date" value="${analysisDefaultDay}" style="display:none"><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
+          <div class="period"><select id="periodMode" class="field"><option value="month">월별</option><option value="day">일별</option></select><button id="periodPrev" class="btn secondary tiny" type="button">◀</button><span id="fromMonthWrap" class="calendarInput"><input id="fromMonth" data-calendar-part="state" type="hidden" value="${analysisDefaultFromMonth}"><input id="fromMonthText" data-calendar-part="text" class="field periodInput calendarText" type="text" inputmode="numeric"><button id="fromMonthButton" class="calendarButton" type="button" aria-label="시작월 달력 열기">▣</button><input id="fromMonthPicker" data-calendar-part="picker" data-calendar-picker="true" class="calendarPicker" type="month" tabindex="-1" aria-hidden="true"></span><span id="toMonthWrap" class="calendarInput"><input id="toMonth" data-calendar-part="state" type="hidden" value="${thisMonth}"><input id="toMonthText" data-calendar-part="text" class="field periodInput calendarText" type="text" inputmode="numeric"><button id="toMonthButton" class="calendarButton" type="button" aria-label="종료월 달력 열기">▣</button><input id="toMonthPicker" data-calendar-part="picker" data-calendar-picker="true" class="calendarPicker" type="month" tabindex="-1" aria-hidden="true"></span><span id="fromDayWrap" class="calendarInput" style="display:none"><input id="fromDay" data-calendar-part="state" type="hidden" value="${analysisDefaultDay}"><input id="fromDayText" data-calendar-part="text" class="field periodInput calendarText" type="text" inputmode="numeric"><button id="fromDayButton" class="calendarButton" type="button" aria-label="시작일 달력 열기">▣</button><input id="fromDayPicker" data-calendar-part="picker" data-calendar-picker="true" class="calendarPicker" type="date" tabindex="-1" aria-hidden="true"></span><span id="toDayWrap" class="calendarInput" style="display:none"><input id="toDay" data-calendar-part="state" type="hidden" value="${analysisDefaultDay}"><input id="toDayText" data-calendar-part="text" class="field periodInput calendarText" type="text" inputmode="numeric"><button id="toDayButton" class="calendarButton" type="button" aria-label="종료일 달력 열기">▣</button><input id="toDayPicker" data-calendar-part="picker" data-calendar-picker="true" class="calendarPicker" type="date" tabindex="-1" aria-hidden="true"></span><button id="periodNext" class="btn secondary tiny" type="button">▶</button></div>
         </div>
       </div>
       <div class="summary">
@@ -15439,6 +15436,49 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       const pad = (n) => String(n).padStart(2, "0");
       const formatDate = (date) => date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
       const formatMonth = (date) => date.getFullYear() + "-" + pad(date.getMonth() + 1);
+      function popupCalendarNormalize(value, mode){
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const pattern = mode === "date" ? /^(?:[0-9]{8}|[0-9]{4}[/-][0-9]{2}[/-][0-9]{2})$/ : /^(?:[0-9]{6}|[0-9]{4}[/-][0-9]{2})$/;
+        if (!pattern.test(raw)) return null;
+        const digits = raw.replace(/[/-]/g, "");
+        const year = Number(digits.slice(0, 4));
+        const month = Number(digits.slice(4, 6));
+        const day = mode === "date" ? Number(digits.slice(6, 8)) : 0;
+        const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+        const monthDays = month === 2 ? (leap ? 29 : 28) : [4, 6, 9, 11].includes(month) ? 30 : 31;
+        if (year < 1 || month < 1 || month > 12 || (mode === "date" && (day < 1 || day > monthDays))) return null;
+        return String(year).padStart(4, "0") + "-" + pad(month) + (mode === "date" ? "-" + pad(day) : "");
+      }
+      function wirePopupCalendarInput(id, mode){
+        const state = document.getElementById(id);
+        const textInput = document.getElementById(id + "Text");
+        const button = document.getElementById(id + "Button");
+        const picker = document.getElementById(id + "Picker");
+        let confirmed = popupCalendarNormalize(state.value, mode) || "";
+        const sync = (next) => {
+          const normalized = popupCalendarNormalize(next, mode);
+          if (normalized === null) return false;
+          confirmed = normalized;
+          textInput.value = normalized.replace(/-/g, "/");
+          picker.value = normalized;
+          return true;
+        };
+        Object.defineProperty(state, "value", { configurable: true, get: () => confirmed, set: (next) => { sync(next); } });
+        sync(confirmed);
+        const commitAndRender = (next) => { if (sync(next)) { renderAndReset(); return true; } return false; };
+        textInput.addEventListener("input", () => {
+          if (!textInput.value || popupCalendarNormalize(textInput.value, mode) !== null) commitAndRender(textInput.value);
+        });
+        textInput.addEventListener("blur", () => { if (!sync(textInput.value)) sync(confirmed); });
+        textInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          if (!commitAndRender(textInput.value)) sync(confirmed);
+        });
+        button.addEventListener("click", () => { if (typeof picker.showPicker === "function") picker.showPicker(); else picker.click(); });
+        picker.addEventListener("change", () => { commitAndRender(picker.value); });
+      }
       function optionKey(item){ return String(item.code || item.name || ""); }
       function optionLabel(item){ return item.code && item.name && item.code !== item.name ? item.code + " / " + item.name : (item.name || item.code || "-"); }
       function selectedSet(kind){ return new Set(selected[kind].map(optionKey)); }
@@ -15739,10 +15779,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       function updatePeriodInputVisibility(){
         const monthMode = document.getElementById("periodMode").value === "month";
-        document.getElementById("fromMonth").style.display = monthMode ? "" : "none";
-        document.getElementById("toMonth").style.display = monthMode ? "" : "none";
-        document.getElementById("fromDay").style.display = monthMode ? "none" : "";
-        document.getElementById("toDay").style.display = monthMode ? "none" : "";
+        document.getElementById("fromMonthWrap").style.display = monthMode ? "" : "none";
+        document.getElementById("toMonthWrap").style.display = monthMode ? "" : "none";
+        document.getElementById("fromDayWrap").style.display = monthMode ? "none" : "";
+        document.getElementById("toDayWrap").style.display = monthMode ? "none" : "";
       }
       function resetAnalysisDefaults(){
         selected.product = [];
@@ -16325,8 +16365,10 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       }
       function clearSelectedForInput(kind){ selected[kind] = []; }
       function renderAndReset(){ render(); resetViewHistory(); }
-      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") { if (event.target.id === "pickerQuery") return; if (event.target.id === "product" || event.target.id === "warehouse" || event.target.id === "customer") { event.preventDefault(); openPicker(event.target.id); } else renderAndReset(); } }));
-      document.querySelectorAll("input,select").forEach((el)=>el.addEventListener("change",(event)=>{ if (event.target.id !== "pickerQuery") renderAndReset(); }));
+      ["fromMonth", "toMonth"].forEach((id) => wirePopupCalendarInput(id, "month"));
+      ["fromDay", "toDay"].forEach((id) => wirePopupCalendarInput(id, "date"));
+      document.querySelectorAll("input:not([data-calendar-part]),select").forEach((el)=>el.addEventListener("keydown",(event)=>{ if(event.key==="Enter") { if (event.target.id === "pickerQuery") return; if (event.target.id === "product" || event.target.id === "warehouse" || event.target.id === "customer") { event.preventDefault(); openPicker(event.target.id); } else renderAndReset(); } }));
+      document.querySelectorAll("input:not([data-calendar-part]),select").forEach((el)=>el.addEventListener("change",(event)=>{ if (event.target.id !== "pickerQuery") renderAndReset(); }));
       ["product","warehouse","customer"].forEach((kind) => document.getElementById(kind).addEventListener("click", () => openPicker(kind)));
       ["product","warehouse","customer"].forEach((kind) => document.getElementById(kind).addEventListener("input", () => clearSelectedForInput(kind)));
       document.getElementById("periodMode").addEventListener("change", () => {
@@ -17780,8 +17822,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.customer} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, customer: event.target.value }))} placeholder={historyMode === "sales" ? "전체 거래처" : "전체 구매처"} />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.warehouse} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} placeholder="전체 창고" />
             <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.product} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, product: event.target.value }))} placeholder="전체 품목" />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={historyFilters.from} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, from: event.target.value }))} />
-            <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={historyFilters.to} onChange={(event) => setHistoryFilters((prev) => ({ ...prev, to: event.target.value }))} />
+            <CalendarInput className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.from} onValueChange={(from) => setHistoryFilters((prev) => ({ ...prev, from }))} />
+            <CalendarInput className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={historyFilters.to} onValueChange={(to) => setHistoryFilters((prev) => ({ ...prev, to }))} />
             <div className="flex flex-wrap gap-1">
               {[
                 ["오늘", 0],
@@ -17861,8 +17903,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 }} onKeyDown={handleHistorySearchKeyDown} placeholder={historyMode === "sales" ? "거래처" : "구매처"} />
                 <input className="field-input h-9 !w-[140px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.warehouse} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="창고" />
                 <input className="field-input h-9 !w-[160px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={historyFilterDraft.product} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={handleHistorySearchKeyDown} placeholder="품목" />
-                <input className="field-input h-9 !w-[132px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.from} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, from: event.target.value }))} />
-                <input className="field-input h-9 !w-[132px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={historyFilterDraft.to} onChange={(event) => setHistoryFilterDraft((prev) => ({ ...prev, to: event.target.value }))} />
+                <CalendarInput wrapperClassName="!w-[132px] shrink-0" className="field-input h-9 w-full rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.from} onValueChange={(from) => setHistoryFilterDraft((prev) => ({ ...prev, from }))} />
+                <CalendarInput wrapperClassName="!w-[132px] shrink-0" className="field-input h-9 w-full rounded-md border border-slate-200 px-2 text-sm" value={historyFilterDraft.to} onValueChange={(to) => setHistoryFilterDraft((prev) => ({ ...prev, to }))} />
                 <div className="flex shrink-0 gap-1">
                   {[
                     ["오늘", 0],
@@ -17897,7 +17939,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             <div className="grid flex-1 gap-2 md:grid-cols-[1fr_1fr_160px]">
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.product} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, product: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("product"); } }} placeholder="전체 품목" />
               <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.warehouse} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, warehouse: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); openInventoryPicker("warehouse"); } }} placeholder="전체 창고" />
-              <input className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" type="date" value={inventoryFilters.date} onChange={(event) => setInventoryFilters((prev) => ({ ...prev, date: event.target.value }))} />
+              <CalendarInput className="field-input rounded-md border border-slate-200 px-3 py-2 text-sm" value={inventoryFilters.date} onValueChange={(date) => setInventoryFilters((prev) => ({ ...prev, date }))} />
             </div>
           </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
@@ -18024,8 +18066,8 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
                 {inventoryHistoryReasonOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               <input className="field-input h-9 !w-[360px] shrink-0 rounded-md border border-slate-200 px-3 text-sm" value={inventoryHistoryDraftFilters.query} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, query: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} placeholder="품목/창고코드 검색" />
-              <input className="field-input h-9 !w-[142px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.from} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, from: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
-              <input className="field-input h-9 !w-[142px] shrink-0 rounded-md border border-slate-200 px-2 text-sm" type="date" value={inventoryHistoryDraftFilters.to} onChange={(event) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, to: event.target.value }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <CalendarInput wrapperClassName="!w-[142px] shrink-0" className="field-input h-9 w-full rounded-md border border-slate-200 px-2 text-sm" value={inventoryHistoryDraftFilters.from} onValueChange={(from) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, from }))} onKeyDown={inventoryHistorySearchKeyDown} />
+              <CalendarInput wrapperClassName="!w-[142px] shrink-0" className="field-input h-9 w-full rounded-md border border-slate-200 px-2 text-sm" value={inventoryHistoryDraftFilters.to} onValueChange={(to) => setInventoryHistoryDraftFilters((prev) => ({ ...prev, to }))} onKeyDown={inventoryHistorySearchKeyDown} />
               <button type="button" className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800" onClick={applyInventoryHistorySearch}>찾기</button>
               <span className="shrink-0 text-xs font-bold text-slate-500">총 {filteredInventoryHistoryRows.length.toLocaleString("ko-KR")}건</span>
             </div>
@@ -18508,7 +18550,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </select>
             </FormField>
             <FormField label="수동설정 만료일">
-              <input className={modalInputClass} type="date" value={inventoryEditDraft.expiresAt} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, expiresAt: event.target.value }))} disabled={inventoryEditDraft.riskMode !== "manual"} />
+              <CalendarInput className={modalInputClass} value={inventoryEditDraft.expiresAt} onValueChange={(expiresAt) => setInventoryEditDraft((prev) => ({ ...prev, expiresAt }))} disabled={inventoryEditDraft.riskMode !== "manual"} />
             </FormField>
             <FormField label="메모">
               <input className={modalInputClass} value={inventoryEditDraft.memo} onChange={(event) => setInventoryEditDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="단종 예정, 광고 예정, 입고 대기" />
@@ -18556,7 +18598,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               <div className="w-[200px] shrink-0" />
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const current = entryDateToday().slice(0, 7); setPartnerBalanceMonth(current); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, current); }}>이번달</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(-1)}>{"<"}</ActionButton>
-              <input className={`${modalInputClass} !w-[130px] shrink-0`} type="month" value={partnerBalanceMonth} onChange={(event) => { setPartnerBalanceMonth(event.target.value); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, event.target.value); }} />
+              <CalendarInput mode="month" wrapperClassName="!w-[130px] shrink-0" className={modalInputClass} value={partnerBalanceMonth} onValueChange={(month) => { setPartnerBalanceMonth(month); setPartnerBalanceExpanded(""); void loadPartnerBalances(partnerBalanceMode, month); }} />
               <ActionButton type="button" variant="secondary" className="h-9 px-3 text-xs" onClick={() => shiftPartnerBalanceMonth(1)}>{">"}</ActionButton>
               <ActionButton type="button" variant="secondary" className="h-9 whitespace-nowrap px-3 text-xs" onClick={() => { const key = partnerBalanceCacheKey(partnerBalanceMode, partnerBalanceMonth); delete partnerBalanceCacheRef.current[key]; void loadPartnerBalances(); }}>새로고침</ActionButton>
               <button type="button" data-f4-save="false" disabled={!selectedPartnerBalanceRows.length} className={`h-9 shrink-0 rounded-md px-3 text-xs font-black ${selectedPartnerBalanceRows.length ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-200 bg-slate-100 text-slate-400"}`} onClick={() => void downloadPartnerBalanceStatementXls()}>XLS</button>
@@ -18732,7 +18774,6 @@ function SalesPurchaseEntryModal({
   const lastProductSelectionIndexRef = useRef<number | null>(null);
   const lastProductSearchQueryRef = useRef("");
   const productSearchRowRefs = useActiveRowScroll<HTMLTableRowElement>(productSearch.open, productSearch.selectedIndex, productSearch.results.length);
-  const datePickerOpenRef = useRef(false);
   const customerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const warehouseOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   useEscapeToClose(true, onClose);
@@ -19442,17 +19483,10 @@ function SalesPurchaseEntryModal({
               </select>
             </FormField>
           )}
-          <FormField label="날짜" required><input ref={dateInputRef} className={modalInputClass} type="date" value={entryDate} onChange={(event) => { setEntryDate(event.target.value); datePickerOpenRef.current = false; window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onBlur={() => { datePickerOpenRef.current = false; }} onKeyDown={(event) => {
+          <FormField label="날짜" required><CalendarInput ref={dateInputRef} className={modalInputClass} value={entryDate} onValueChange={(nextValue) => { setEntryDate(nextValue); window.setTimeout(() => customerInputRef.current?.focus(), 0); }} onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
-            if (datePickerOpenRef.current) {
-              datePickerOpenRef.current = false;
-              customerInputRef.current?.focus();
-              return;
-            }
-            datePickerOpenRef.current = true;
-            if (typeof event.currentTarget.showPicker === "function") event.currentTarget.showPicker();
-            else customerInputRef.current?.focus();
+            customerInputRef.current?.focus();
           }} /></FormField>
           <FormField label={partnerLabel} required>
             <div className="relative">
@@ -19947,7 +19981,8 @@ function BulkMultiEditModal<Field extends string, Row>({
         </select>
       );
     }
-    return <input className={modalInputClass} type={config.inputType === "number" ? "number" : config.inputType === "date" ? "date" : "text"} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />;
+    if (config.inputType === "date") return <CalendarInput className={modalInputClass} value={value} onValueChange={onChange} disabled={disabled} />;
+    return <input className={modalInputClass} type={config.inputType === "number" ? "number" : "text"} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />;
   }
 
   return (
@@ -20092,7 +20127,7 @@ const fnLocationBulkFields: Array<BulkFieldConfig<FnLocationBulkField>> = [
   { key: "rent_type", label: "임대구분", inputType: "select", options: [{ value: "owned", label: "소유" }, { value: "rented", label: "임대" }] },
   { key: "landlord_name", label: "임대인" },
   { key: "landlord_phone", label: "임대인 전화번호" },
-  { key: "rent_started_at", label: "임대일" },
+  { key: "rent_started_at", label: "임대일", inputType: "date" },
   { key: "rent_amount", label: "임대료", inputType: "number" },
   { key: "memo", label: "메모" },
 ];
@@ -20145,13 +20180,6 @@ function formatKoreanDateText(value?: string) {
   const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return date || "-";
   return `${Number(match[1])}년 ${Number(match[2])}월 ${Number(match[3])}일`;
-}
-
-function formatDateDigitsInput(value?: string) {
-  const digits = onlyDigits(value).slice(0, 8);
-  if (digits.length <= 4) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 }
 
 function imageFileToDataUrlForSettings(file: File) {
@@ -21274,7 +21302,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
               </FormField>
               <FormField label="입사일자" required>
                 <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                  <input className={modalInputClass} type="date" value={draft.joined_at} onChange={(event) => updateDraft("joined_at", event.target.value)} />
+                  <CalendarInput className={modalInputClass} value={draft.joined_at} onValueChange={(value) => updateDraft("joined_at", value)} />
                   {draft.status === "working" && draft.joined_at && (
                     <div className="flex h-10 items-center rounded-md border border-orange-100 bg-orange-50 px-3 text-sm font-black text-orange-600">
                       {personnelWorkingMonths(draft.joined_at)}
@@ -21300,8 +21328,8 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
                 <div className="md:col-span-2 text-sm font-black text-slate-900">휴직 정보</div>
                 <FormField label="휴직 사유"><input className={modalInputClass} value={draft.leave_reason || ""} onChange={(event) => updateDraft("leave_reason", event.target.value)} /></FormField>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <FormField label="휴직 시작"><input className={modalInputClass} type="date" value={draft.leave_from || ""} onChange={(event) => updateDraft("leave_from", event.target.value)} /></FormField>
-                  <FormField label="휴직 종료"><input className={modalInputClass} type="date" value={draft.leave_to || ""} onChange={(event) => updateDraft("leave_to", event.target.value)} /></FormField>
+                  <FormField label="휴직 시작"><CalendarInput className={modalInputClass} value={draft.leave_from || ""} onValueChange={(value) => updateDraft("leave_from", value)} /></FormField>
+                  <FormField label="휴직 종료"><CalendarInput className={modalInputClass} value={draft.leave_to || ""} onValueChange={(value) => updateDraft("leave_to", value)} /></FormField>
                 </div>
                 <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.leave_memo || ""} onChange={(event) => updateDraft("leave_memo", event.target.value)} /></FormField>
               </div>
@@ -21310,7 +21338,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
               <div className="grid gap-4 border-t border-gray-200 pt-4 md:grid-cols-2">
                 <div className="md:col-span-2 text-sm font-black text-slate-900">퇴사 정보</div>
                 <FormField label="퇴사 사유"><input className={modalInputClass} value={draft.resigned_reason || ""} onChange={(event) => updateDraft("resigned_reason", event.target.value)} /></FormField>
-                <FormField label="퇴사일자"><input className={modalInputClass} type="date" value={draft.resigned_at || ""} onChange={(event) => updateDraft("resigned_at", event.target.value)} /></FormField>
+                <FormField label="퇴사일자"><CalendarInput className={modalInputClass} value={draft.resigned_at || ""} onValueChange={(value) => updateDraft("resigned_at", value)} /></FormField>
                 <FormField label="메모" className="md:col-span-2"><textarea className={modalTextareaClass} value={draft.resigned_memo || ""} onChange={(event) => updateDraft("resigned_memo", event.target.value)} /></FormField>
               </div>
             )}
@@ -25854,10 +25882,9 @@ function AdsRightPanel() {
           </ActionButton>
           <label className="block rounded-md border border-slate-200 bg-white px-3 py-2">
             <span className="text-xs font-black text-slate-700">저장 기준일</span>
-            <input
-              type="date"
+            <CalendarInput
               value={uploadReportDate}
-              onChange={(event) => setUploadReportDate(event.target.value)}
+              onValueChange={setUploadReportDate}
               className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs font-bold text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             />
             <span className="mt-1 block text-[11px] font-bold text-slate-400">파일 안 날짜가 없으면 이 날짜로 광고 DB에 저장됩니다.</span>
@@ -25939,35 +25966,23 @@ function AdsRightPanel() {
             ))}
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
-            <label className="relative block min-w-0">
-              <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-xs font-black tracking-tight text-slate-800">
-                {compactDateLabel(dateFrom)}
-              </span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(event) => {
+            <CalendarInput
+              value={dateFrom}
+              onValueChange={(value) => {
                   setRangePreset("custom");
-                  setDateFrom(event.target.value);
-                }}
-                className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-black tracking-tight text-transparent caret-transparent [color-scheme:light] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-datetime-edit]:opacity-0"
-              />
-            </label>
+                  setDateFrom(value);
+              }}
+              className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-black tracking-tight text-slate-800"
+            />
             <span className="text-xs font-black text-slate-400">~</span>
-            <label className="relative block min-w-0">
-              <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-xs font-black tracking-tight text-slate-800">
-                {compactDateLabel(dateTo)}
-              </span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(event) => {
+            <CalendarInput
+              value={dateTo}
+              onValueChange={(value) => {
                   setRangePreset("custom");
-                  setDateTo(event.target.value);
-                }}
-                className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-black tracking-tight text-transparent caret-transparent [color-scheme:light] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-datetime-edit]:opacity-0"
-              />
-            </label>
+                  setDateTo(value);
+              }}
+              className="field-input h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-black tracking-tight text-slate-800"
+            />
           </div>
           <ActionButton type="button" onClick={() => openAdRange(dateFrom, dateTo)} className="h-9 w-full text-xs">조회</ActionButton>
         </div>
@@ -28935,7 +28950,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
   const manualExpenseFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <FormField label="일자">
-        <input className={modalInputClass} type="date" value={manual.expense_date} onChange={(event) => setManual((prev) => ({ ...prev, expense_date: event.target.value }))} />
+        <CalendarInput className={modalInputClass} value={manual.expense_date} onValueChange={(expense_date) => setManual((prev) => ({ ...prev, expense_date }))} />
       </FormField>
       <FormField label="업체명">
         <input className={modalInputClass} value={manual.vendor_name} onChange={(event) => setManual((prev) => ({ ...prev, vendor_name: event.target.value }))} />
@@ -29115,32 +29130,34 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             <button type="button" className="h-9 w-8 shrink-0 rounded-md border border-gray-200 bg-white text-sm font-black text-slate-600 hover:bg-orange-50" aria-label="이전 기간" onClick={() => shiftLedgerPeriod(-1)}>◀</button>
             {ledgerFilters.periodMode === "day" ? (
               <>
-                <input
+                <CalendarInput
+                  wrapperClassName="!w-[118px] shrink-0"
                   className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
-                  type="date"
                   value={ledgerFilters.fromDay}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromDay: event.target.value || accountingDateValue(0) }))}
+                  onValueChange={(value) => setLedgerFilters((prev) => ({ ...prev, fromDay: value || accountingDateValue(0) }))}
                 />
-                <input
+                <CalendarInput
+                  wrapperClassName="!w-[118px] shrink-0"
                   className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
-                  type="date"
                   value={ledgerFilters.toDay}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toDay: event.target.value || prev.fromDay || accountingDateValue(0) }))}
+                  onValueChange={(value) => setLedgerFilters((prev) => ({ ...prev, toDay: value || prev.fromDay || accountingDateValue(0) }))}
                 />
               </>
             ) : (
               <>
-                <input
+                <CalendarInput
+                  mode="month"
+                  wrapperClassName="!w-[118px] shrink-0"
                   className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
-                  type="month"
                   value={ledgerFilters.fromMonth}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, fromMonth: event.target.value || accountingMonthValue(-2) }))}
+                  onValueChange={(value) => setLedgerFilters((prev) => ({ ...prev, fromMonth: value || accountingMonthValue(-2) }))}
                 />
-                <input
+                <CalendarInput
+                  mode="month"
+                  wrapperClassName="!w-[118px] shrink-0"
                   className="h-9 w-[118px] shrink-0 rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
-                  type="month"
                   value={ledgerFilters.toMonth}
-                  onChange={(event) => setLedgerFilters((prev) => ({ ...prev, toMonth: event.target.value || prev.fromMonth || accountingMonthValue(0) }))}
+                  onValueChange={(value) => setLedgerFilters((prev) => ({ ...prev, toMonth: value || prev.fromMonth || accountingMonthValue(0) }))}
                 />
               </>
             )}
@@ -29517,7 +29534,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
           <form id="rocket-growth-cost-form" onSubmit={saveRocketGrowthCosts} className="space-y-5">
             <div className="grid gap-4 md:grid-cols-3">
               <FormField label="기준월" required>
-                <input className={modalInputClass} type="month" value={rocketGrowthDraft.month} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, month: event.target.value }))} />
+                <CalendarInput mode="month" className={modalInputClass} value={rocketGrowthDraft.month} onValueChange={(month) => setRocketGrowthDraft((prev) => ({ ...prev, month }))} />
               </FormField>
               <FormField label="광고비">
                 <input className={`${modalInputClass} text-right`} inputMode="numeric" value={formatCommaNumber(rocketGrowthDraft.ad_amount)} onChange={(event) => setRocketGrowthDraft((prev) => ({ ...prev, ad_amount: formatCommaNumber(event.target.value) }))} placeholder="마케팅·광고 > 쿠팡" />
@@ -30114,10 +30131,10 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
                 <input className={modalInputClass} value={loanDraft.payment_day} onChange={(event) => setLoanDraft((prev) => ({ ...prev, payment_day: event.target.value }))} placeholder="3, 15, 말일" />
               </FormField>
               <FormField label="대출 시작일">
-                <input className={modalInputClass} type="date" value={loanDraft.loan_start_date} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_start_date: event.target.value }))} />
+                <CalendarInput className={modalInputClass} value={loanDraft.loan_start_date} onValueChange={(loan_start_date) => setLoanDraft((prev) => ({ ...prev, loan_start_date }))} />
               </FormField>
               <FormField label="대출 만료일">
-                <input className={modalInputClass} type="date" value={String((loanDraft as Record<string, string>).loan_end_date || "")} onChange={(event) => setLoanDraft((prev) => ({ ...prev, loan_end_date: event.target.value, loan_period_months: String(loanPeriodMonths()) }))} />
+                <CalendarInput className={modalInputClass} value={String((loanDraft as Record<string, string>).loan_end_date || "")} onValueChange={(loan_end_date) => setLoanDraft((prev) => ({ ...prev, loan_end_date, loan_period_months: String(loanPeriodMonths()) }))} />
                 <p className="mt-1 text-xs font-bold text-slate-500">{loanPeriodMonths().toLocaleString("ko-KR")}개월</p>
               </FormField>
               <FormField label="메모" className="md:col-span-2">
@@ -32419,8 +32436,8 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       ...value,
       id: value.id || "head-office",
       business_no: formatBusinessNoInput(String(value.business_no || defaultCompany.business_no)),
-      representative_birth: formatDateDigitsInput(value.representative_birth || defaultCompany.representative_birth),
-      opened_at: formatDateDigitsInput(value.opened_at || defaultCompany.opened_at),
+      representative_birth: normalizeCalendarInput(value.representative_birth || defaultCompany.representative_birth, "date") || defaultCompany.representative_birth,
+      opened_at: normalizeCalendarInput(value.opened_at || defaultCompany.opened_at, "date") || defaultCompany.opened_at,
       phone: formatKoreanLandline(value.phone || defaultCompany.phone),
       fax: formatKoreanLandline(value.fax || defaultCompany.fax),
       business_types: Array.isArray(value.business_types) && value.business_types.length ? value.business_types : [""],
@@ -32439,7 +32456,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
       manager_phone: formatKoreanPhone(value.manager_phone || ""),
       rent_type: value.rent_type === "rented" ? "rented" : "owned",
       landlord_phone: formatKoreanPhone(value.landlord_phone || ""),
-      rent_started_at: formatDateDigitsInput(value.rent_started_at || ""),
+      rent_started_at: normalizeCalendarInput(value.rent_started_at || "", "date") || "",
       rent_amount: onlyDigits(value.rent_amount || ""),
     } as FnLocationInfo;
     return { ...next, address: composeFnSettingsAddress(next) };
@@ -32506,7 +32523,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setCompanyDraft((prev) => {
       const next = {
         ...prev,
-        [key]: key === "business_no" ? formatBusinessNoInput(String(value)) : key === "phone" || key === "fax" ? formatKoreanLandline(value) : key === "representative_birth" || key === "opened_at" ? formatDateDigitsInput(String(value)) : value,
+        [key]: key === "business_no" ? formatBusinessNoInput(String(value)) : key === "phone" || key === "fax" ? formatKoreanLandline(value) : key === "representative_birth" || key === "opened_at" ? normalizeCalendarInput(String(value), "date") ?? String(prev[key] || "") : value,
       } as FnCompanyInfo;
       return { ...next, address: composeFnSettingsAddress(next) };
     });
@@ -32535,7 +32552,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
     setLocationDraft((prev) => {
       const next = {
         ...prev,
-        [key]: key === "phone" ? formatKoreanLandline(value) : key === "manager_phone" || key === "landlord_phone" ? formatKoreanPhone(value) : key === "rent_started_at" ? formatDateDigitsInput(value) : key === "rent_amount" ? onlyDigits(value) : value,
+        [key]: key === "phone" ? formatKoreanLandline(value) : key === "manager_phone" || key === "landlord_phone" ? formatKoreanPhone(value) : key === "rent_started_at" ? normalizeCalendarInput(value, "date") ?? String(prev.rent_started_at || "") : key === "rent_amount" ? onlyDigits(value) : value,
       } as FnLocationInfo;
       return { ...next, address: composeFnSettingsAddress(next) };
     });
@@ -32630,7 +32647,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
           field,
           field === "phone" ? formatKoreanLandline(value)
             : field === "manager_phone" || field === "landlord_phone" ? formatKoreanPhone(value)
-              : field === "rent_started_at" ? formatDateDigitsInput(value)
+              : field === "rent_started_at" ? normalizeCalendarInput(value, "date") ?? String(location.rent_started_at || "")
                 : field === "rent_amount" ? onlyDigits(value)
                   : value,
         ];
@@ -32760,8 +32777,8 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
               <FormField label="상호" required><input className={modalInputClass} value={companyDraft.company_name} onChange={(event) => updateCompanyDraft("company_name", event.target.value)} /></FormField>
               <FormField label="사업자 등록 번호" required><input className={modalInputClass} inputMode="numeric" value={companyDraft.business_no} onChange={(event) => updateCompanyDraft("business_no", event.target.value)} placeholder="599-26-00311" /></FormField>
               <FormField label="대표자 성명" required><input className={modalInputClass} value={companyDraft.representative_name} onChange={(event) => updateCompanyDraft("representative_name", event.target.value)} /></FormField>
-              <FormField label="대표자 생년월일"><input className={modalInputClass} inputMode="numeric" value={companyDraft.representative_birth} onChange={(event) => updateCompanyDraft("representative_birth", event.target.value)} placeholder="19810319" /></FormField>
-              <FormField label="개업연월일"><input className={modalInputClass} inputMode="numeric" value={companyDraft.opened_at} onChange={(event) => updateCompanyDraft("opened_at", event.target.value)} placeholder="20170313" /></FormField>
+              <FormField label="대표자 생년월일"><CalendarInput className={modalInputClass} value={companyDraft.representative_birth} onValueChange={(value) => updateCompanyDraft("representative_birth", value)} placeholder="19810319" /></FormField>
+              <FormField label="개업연월일"><CalendarInput className={modalInputClass} value={companyDraft.opened_at} onValueChange={(value) => updateCompanyDraft("opened_at", value)} placeholder="20170313" /></FormField>
               <FormField label="전화번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.phone} onChange={(event) => updateCompanyDraft("phone", event.target.value)} placeholder="031-767-5455" /></FormField>
               <FormField label="팩스번호"><input className={modalInputClass} inputMode="numeric" value={companyDraft.fax} onChange={(event) => updateCompanyDraft("fax", event.target.value)} placeholder="031-321-1060" /></FormField>
               <FormField label="사업장소재지" className="md:col-span-3"><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("company")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={companyDraft.postal_code || ""} placeholder="우편번호" /><input ref={companyDetailAddressRef} className={modalInputClass} value={companyDraft.detail_address || ""} onChange={(event) => updateCompanyDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(companyDraft)} placeholder="주소" /></div></FormField>
@@ -32782,7 +32799,7 @@ function FnInfoSettingsPanel({ setMessage }: { setMessage: (value: string) => vo
             <FormField label="명칭"><input className={modalInputClass} value={locationDraft.location_name} onChange={(event) => updateLocationDraft("location_name", event.target.value)} placeholder="천호동 사무실" /></FormField>
             <FormField label="주소" required><div className="grid gap-2"><div className="grid gap-2 md:grid-cols-[120px_180px_1fr]"><ActionButton type="button" variant="secondary" onClick={() => setAddressSearchTarget("location")}>주소검색</ActionButton><input className={modalInputClass} readOnly value={locationDraft.postal_code || ""} placeholder="우편번호" /><input ref={locationDetailAddressRef} className={modalInputClass} value={locationDraft.detail_address || ""} onChange={(event) => updateLocationDraft("detail_address", event.target.value)} placeholder="상세주소" /></div><input className={modalInputClass} readOnly value={composeFnSettingsAddress(locationDraft)} placeholder="주소" /></div></FormField>
             <div className="grid gap-4 md:grid-cols-4"><FormField label="전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.phone} onChange={(event) => updateLocationDraft("phone", event.target.value)} /></FormField><FormField label="담당자" required><input className={modalInputClass} value={locationDraft.manager_name} onChange={(event) => updateLocationDraft("manager_name", event.target.value)} /></FormField><FormField label="담당자 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.manager_phone} onChange={(event) => updateLocationDraft("manager_phone", event.target.value)} /></FormField><FormField label="임대구분"><select className={modalSelectClass} value={locationDraft.rent_type} onChange={(event) => updateLocationDraft("rent_type", event.target.value)}><option value="owned">소유</option><option value="rented">임대</option></select></FormField></div>
-            {locationDraft.rent_type === "rented" && <div className="grid gap-4 rounded-md border border-orange-100 bg-orange-50/40 p-4 md:grid-cols-4"><FormField label="임대인" required><input className={modalInputClass} value={locationDraft.landlord_name} onChange={(event) => updateLocationDraft("landlord_name", event.target.value)} /></FormField><FormField label="임대인 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.landlord_phone} onChange={(event) => updateLocationDraft("landlord_phone", event.target.value)} /></FormField><FormField label="임대일" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.rent_started_at} onChange={(event) => updateLocationDraft("rent_started_at", event.target.value)} placeholder="YYYYMMDD" /></FormField><FormField label="임대료" required><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(locationDraft.rent_amount)} onChange={(event) => updateLocationDraft("rent_amount", event.target.value)} /></FormField></div>}
+            {locationDraft.rent_type === "rented" && <div className="grid gap-4 rounded-md border border-orange-100 bg-orange-50/40 p-4 md:grid-cols-4"><FormField label="임대인" required><input className={modalInputClass} value={locationDraft.landlord_name} onChange={(event) => updateLocationDraft("landlord_name", event.target.value)} /></FormField><FormField label="임대인 전화번호" required><input className={modalInputClass} inputMode="numeric" value={locationDraft.landlord_phone} onChange={(event) => updateLocationDraft("landlord_phone", event.target.value)} /></FormField><FormField label="임대일" required><CalendarInput className={modalInputClass} value={locationDraft.rent_started_at} onValueChange={(value) => updateLocationDraft("rent_started_at", value)} placeholder="YYYYMMDD" /></FormField><FormField label="임대료" required><input className={modalInputClass} inputMode="numeric" value={formatCommaNumber(locationDraft.rent_amount)} onChange={(event) => updateLocationDraft("rent_amount", event.target.value)} /></FormField></div>}
             {locationDraft.id && <div><div className="mb-2 text-[13px] font-semibold text-gray-700">파일업로드</div><FolderAttachmentButton count={fileCounts[locationDraft.id]} title="장소 첨부파일" onClick={() => setFileTarget({ type: "location", id: locationDraft.id, title: composeFnSettingsAddress(locationDraft) || "장소" })} /></div>}
             <FormField label="메모"><textarea className={modalTextareaClass} value={locationDraft.memo} onChange={(event) => updateLocationDraft("memo", event.target.value)} /></FormField>
           </div>

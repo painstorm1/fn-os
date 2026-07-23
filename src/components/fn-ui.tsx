@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { formatCalendarInputValue, normalizeCalendarInput, type CalendarInputMode } from "@/lib/calendar-input";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "muted" | "orange";
 
@@ -246,6 +247,153 @@ const modalSizes: Record<ModalSize, string> = {
 
 export const modalInputClass =
   "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
+
+type CalendarInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "defaultValue" | "onChange" | "min" | "max"> & {
+  mode?: CalendarInputMode;
+  value?: string;
+  defaultValue?: string;
+  min?: string;
+  max?: string;
+  onValueChange?: (value: string) => void;
+  wrapperClassName?: string;
+};
+
+export const CalendarInput = forwardRef<HTMLInputElement, CalendarInputProps>(function CalendarInput({
+  mode = "date",
+  value,
+  defaultValue,
+  onValueChange,
+  wrapperClassName,
+  className,
+  name,
+  min,
+  max,
+  disabled,
+  readOnly,
+  required,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  maxLength,
+  ...props
+}, forwardedRef) {
+  const controlled = value !== undefined;
+  const initialValue = normalizeCalendarInput(value ?? defaultValue, mode, min, max) ?? "";
+  const [uncontrolledValue, setUncontrolledValue] = useState(initialValue);
+  const confirmedValue = controlled ? normalizeCalendarInput(value, mode, min, max) ?? "" : uncontrolledValue;
+  const confirmedRef = useRef(confirmedValue);
+  const confirmedModeRef = useRef(mode);
+  const pendingControlledRef = useRef<string | null>(null);
+  const [draft, setDraft] = useState(() => formatCalendarInputValue(confirmedValue, mode));
+  const visibleRef = useRef<HTMLInputElement | null>(null);
+  const pickerRef = useRef<HTMLInputElement | null>(null);
+  useImperativeHandle(forwardedRef, () => visibleRef.current as HTMLInputElement);
+
+  useEffect(() => {
+    const pending = pendingControlledRef.current;
+    pendingControlledRef.current = null;
+    const rejectedControlledValue = controlled && pending !== null && pending !== confirmedValue;
+    if (!rejectedControlledValue && confirmedValue === confirmedRef.current && mode === confirmedModeRef.current) return;
+    confirmedRef.current = confirmedValue;
+    confirmedModeRef.current = mode;
+    setDraft(formatCalendarInputValue(confirmedValue, mode));
+  });
+
+  function commit(nextValue: string) {
+    const normalized = normalizeCalendarInput(nextValue, mode, min, max);
+    if (normalized === null) return false;
+    const changed = normalized !== confirmedRef.current;
+    confirmedRef.current = normalized;
+    setDraft(formatCalendarInputValue(normalized, mode));
+    if (!controlled) setUncontrolledValue(normalized);
+    if (changed) {
+      if (controlled) pendingControlledRef.current = normalized;
+      onValueChange?.(normalized);
+    }
+    return true;
+  }
+
+  function restoreConfirmed() {
+    setDraft(formatCalendarInputValue(confirmedRef.current, mode));
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (!commit(event.currentTarget.value)) {
+        restoreConfirmed();
+        return;
+      }
+    }
+    onKeyDown?.(event);
+  }
+
+  function openPicker() {
+    const picker = pickerRef.current;
+    if (!picker) return;
+    if (typeof picker.showPicker === "function") picker.showPicker();
+    else picker.click();
+  }
+
+  return (
+    <span className={cn("relative flex w-full max-w-full items-center", wrapperClassName)}>
+      <input
+        {...props}
+        ref={visibleRef}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        value={draft}
+        className={cn(className, "pr-9")}
+        disabled={disabled}
+        readOnly={readOnly}
+        required={required}
+        maxLength={maxLength ?? (mode === "date" ? 10 : 7)}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          if (!nextDraft || normalizeCalendarInput(nextDraft, mode, min, max) !== null) commit(nextDraft);
+        }}
+        onBlur={(event) => {
+          if (!commit(event.currentTarget.value)) restoreConfirmed();
+          onBlur?.(event);
+        }}
+        onFocus={onFocus}
+        onKeyDown={handleKeyDown}
+      />
+      <button
+        type="button"
+        aria-label={mode === "month" ? "월 선택 달력 열기" : "날짜 선택 달력 열기"}
+        className="absolute right-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-orange-50 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={disabled || readOnly}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={openPicker}
+      >
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M16 3v4M8 3v4M3 11h18" />
+        </svg>
+      </button>
+      <input
+        ref={pickerRef}
+        data-calendar-picker="true"
+        aria-hidden="true"
+        tabIndex={-1}
+        type={mode}
+        value={confirmedValue}
+        min={min}
+        max={max}
+        disabled={disabled}
+        readOnly={readOnly}
+        className="pointer-events-none absolute h-px w-px opacity-0"
+        onChange={(event) => commit(event.target.value)}
+      />
+      {name && <input type="hidden" name={name} value={confirmedValue} disabled={disabled} />}
+    </span>
+  );
+});
+CalendarInput.displayName = "CalendarInput";
+
 export const modalSelectClass =
   "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
 export const modalTextareaClass =
@@ -423,7 +571,7 @@ export function useEscapeToClose(enabled: boolean, onClose: () => void) {
     const id = idRef.current!;
     escapeCloseStack.push(id);
 
-    function onKeyDown(event: KeyboardEvent) {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (escapeCloseStack[escapeCloseStack.length - 1] !== id) return;
       event.preventDefault();
