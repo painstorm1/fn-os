@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, StatusBadge } from "@/components/fn-ui";
 import { cachedJson, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
@@ -244,7 +245,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
         <span className="text-right">상태</span>
       </div>
       {rows.slice(0, 10).map((row, index) => (
-        <a
+        <Link
           key={`${row.id || index}`}
           href={importOrderHref(row)}
           className="grid min-h-14 grid-cols-[108px_minmax(0,1.45fr)_minmax(0,0.85fr)_84px_132px_86px] items-center gap-3 border-t border-gray-100 px-3 py-2 text-base transition hover:bg-orange-50/70"
@@ -260,7 +261,7 @@ function ImportOrderRows({ rows }: { rows: Row[] }) {
           <span className="text-right">
             <StatusBadge className={`h-7 px-2.5 text-sm ${importStatusClass(row.status)}`}>{String(row.status || "-")}</StatusBadge>
           </span>
-        </a>
+        </Link>
       ))}
     </div>
   );
@@ -272,13 +273,13 @@ function ImportMonthlyAmounts({ months }: { months?: Point[] }) {
   return (
     <div className="divide-y divide-gray-100">
       {groups.map((group) => (
-        <a key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-[15px] transition hover:bg-orange-50/70 hover:text-orange-600">
+        <Link key={group.month || group.label} href={monthOrdersHref(group)} className="-mx-2 flex items-baseline justify-between gap-4 rounded-lg px-2 py-2 text-[15px] transition hover:bg-orange-50/70 hover:text-orange-600">
           <span className="flex items-baseline gap-2">
             <span className="min-w-8 font-black text-slate-950">{monthTitle(group)}</span>
             <span className="text-sm font-black text-slate-500">{n(group.count).toLocaleString("ko-KR")}건</span>
           </span>
           <span className="text-right text-[19px] font-black tabular-nums text-orange-600">{krwLong(group.value)}</span>
-        </a>
+        </Link>
       ))}
     </div>
   );
