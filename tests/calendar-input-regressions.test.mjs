@@ -56,6 +56,17 @@ test("CalendarInput owns the only React native picker and exposes the required c
   assert.match(componentSource, /type="hidden" name=\{name\} value=\{confirmedValue\} disabled=\{disabled\}/);
 });
 
+test("import order stage dates do not layer the text field over CalendarInput controls", () => {
+  const laneStart = pageSource.indexOf("function StageProgressLane");
+  const laneEnd = pageSource.indexOf("\nfunction NativeImportDashboard", laneStart);
+  const laneSource = pageSource.slice(laneStart, laneEnd);
+  const calendarTags = Array.from(laneSource.matchAll(/<CalendarInput\b[\s\S]*?\/>/g), (match) => match[0]);
+
+  assert.equal(calendarTags.length, 1);
+  assert.doesNotMatch(calendarTags[0], /className="[^"]*\b(?:relative|z-\d+)\b/);
+  assert.match(calendarTags[0], /onValueChange=\{\(nextValue\) => onChange\(stage\.name, nextValue\)\}/);
+});
+
 test("all page date/month callers use CalendarInput, with only generated hidden pickers allowlisted", () => {
   const tags = Array.from(pageSource.matchAll(/<input\b[^>]*\btype=(?:"(?:date|month)"|\{["'](?:date|month)["']\})[^>]*>/gs), (match) => match[0]);
   const forbidden = tags.filter((tag) => !tag.includes("data-calendar-picker"));

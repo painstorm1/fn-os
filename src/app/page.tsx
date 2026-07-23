@@ -2807,7 +2807,7 @@ function StageProgressLane({ paymentMethod, values, onChange }: { paymentMethod?
               </button>
               {openStage === stage.name && (
                 <CalendarInput
-                  className="field-input relative z-30 h-9 w-[112px] max-w-full px-2 text-xs"
+                  className="field-input h-9 w-[112px] max-w-full px-2 text-xs"
                   wrapperClassName="!w-[112px]"
                   value={value}
                   onValueChange={(nextValue) => onChange(stage.name, nextValue)}
