@@ -17,7 +17,7 @@ export function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isAutomationAgentApi = pathname.startsWith("/api/automation/");
   const isAutomationJobApi = pathname.startsWith("/api/fnos/automation-jobs");
-  const isLocalRuntime = process.env.VERCEL !== "1";
+  const isLocalRuntime = process.env.FNOS_LOCAL_RUNTIME === "1";
   const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(request.nextUrl.hostname);
   const isPrivateIpv4Host = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/.test(request.nextUrl.hostname);
   const isTrustedLocalBridgeOrigin = request.headers.get("origin") === "https://fn-os.vercel.app";

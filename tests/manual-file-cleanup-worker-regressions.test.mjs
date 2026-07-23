@@ -151,7 +151,9 @@ test("Vercel cleanup POST는 basename 검증·중복제거 후 파일 접근 없
     "@/lib/automation-jobs": { createAutomationJob: async (input) => { jobs.push(input); return { id: "cleanup-job" }; } },
   });
   const previousVercel = process.env.VERCEL;
+  const previousLocalRuntime = process.env.FNOS_LOCAL_RUNTIME;
   process.env.VERCEL = "1";
+  delete process.env.FNOS_LOCAL_RUNTIME;
   try {
     const result = await cleanupRoute.POST({ json: async () => ({
       files: ["C:\\outside\\orders.xlsx", "../orders.xlsx", "bad.exe", ".."],
@@ -162,6 +164,8 @@ test("Vercel cleanup POST는 basename 검증·중복제거 후 파일 접근 없
   } finally {
     if (previousVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = previousVercel;
+    if (previousLocalRuntime === undefined) delete process.env.FNOS_LOCAL_RUNTIME;
+    else process.env.FNOS_LOCAL_RUNTIME = previousLocalRuntime;
   }
 
   assert.equal(jobs.length, 1);
@@ -180,7 +184,7 @@ test("Vercel cleanup POST는 basename 검증·중복제거 후 파일 접근 없
   assert.deepEqual(fsCalls, []);
 });
 
-test("Vercel cleanup POST는 direct 플래그와 무관하게 항상 queue하고 FS에 접근하지 않는다", async () => {
+test("진짜 Vercel cleanup POST는 direct 플래그와 무관하게 항상 queue하고 FS에 접근하지 않는다", async () => {
   const fsCalls = [];
   const jobs = [];
   const cleanupRoute = executeTypeScriptModule("src/app/api/fnos/online-orders/manual-files/cleanup/route.ts", {
@@ -191,7 +195,9 @@ test("Vercel cleanup POST는 direct 플래그와 무관하게 항상 queue하고
     "@/lib/automation-jobs": { createAutomationJob: async (input) => { jobs.push(input); return { id: `cleanup-job-${jobs.length}` }; } },
   });
   const previousVercel = process.env.VERCEL;
+  const previousLocalRuntime = process.env.FNOS_LOCAL_RUNTIME;
   process.env.VERCEL = "1";
+  delete process.env.FNOS_LOCAL_RUNTIME;
   try {
     for (const flags of [
       { worker_direct: true },
@@ -205,6 +211,8 @@ test("Vercel cleanup POST는 direct 플래그와 무관하게 항상 queue하고
   } finally {
     if (previousVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = previousVercel;
+    if (previousLocalRuntime === undefined) delete process.env.FNOS_LOCAL_RUNTIME;
+    else process.env.FNOS_LOCAL_RUNTIME = previousLocalRuntime;
   }
 
   assert.equal(jobs.length, 3);
@@ -304,12 +312,15 @@ test("cleanup job 실패·취소·승인대기·timeout·resolved 0건은 pendin
   });
 });
 
-test("worker-direct local cleanup은 허용 폴더 basename만 dry-run 조회하고 파일 mutation은 하지 않는다", async () => {
+test("VERCEL metadata가 남은 명시적 local runtime은 worker-direct dry-run을 queue 없이 실행한다", async () => {
   const previousDir = process.env.FNOS_MANUAL_ORDER_DIR;
   const previousVercel = process.env.VERCEL;
+  const previousLocalRuntime = process.env.FNOS_LOCAL_RUNTIME;
   process.env.FNOS_MANUAL_ORDER_DIR = resolve(projectRoot, ".fixture-manual-files");
-  delete process.env.VERCEL;
+  process.env.VERCEL = "1";
+  process.env.FNOS_LOCAL_RUNTIME = "1";
   const calls = [];
+  const jobs = [];
   try {
     const cleanupRoute = executeTypeScriptModule("src/app/api/fnos/online-orders/manual-files/cleanup/route.ts", {
       "next/server": { NextRequest: class NextRequest {}, NextResponse: TestNextResponse },
@@ -320,7 +331,7 @@ test("worker-direct local cleanup은 허용 폴더 basename만 dry-run 조회하
         rename: async (...args) => calls.push(["rename", ...args]),
       } },
       "util": { promisify: () => async (...args) => calls.push(["promisified", ...args]) },
-      "@/lib/automation-jobs": { createAutomationJob: async () => { throw new Error("must not queue"); } },
+      "@/lib/automation-jobs": { createAutomationJob: async (input) => { jobs.push(input); return { id: "unexpected-job" }; } },
     });
     const result = await cleanupRoute.POST({ json: async () => ({
       action: "cleanup_manual_files",
@@ -331,20 +342,25 @@ test("worker-direct local cleanup은 허용 폴더 basename만 dry-run 조회하
     }) });
     assert.equal(result.body.ok, true);
     assert.deepEqual(result.body.results, [{ fileName: "orders.xlsx", status: "dry_run" }]);
+    assert.equal(jobs.length, 0);
     assert.deepEqual(calls, [["stat", resolve(process.env.FNOS_MANUAL_ORDER_DIR, "orders.xlsx")]]);
   } finally {
     if (previousDir === undefined) delete process.env.FNOS_MANUAL_ORDER_DIR;
     else process.env.FNOS_MANUAL_ORDER_DIR = previousDir;
     if (previousVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = previousVercel;
+    if (previousLocalRuntime === undefined) delete process.env.FNOS_LOCAL_RUNTIME;
+    else process.env.FNOS_LOCAL_RUNTIME = previousLocalRuntime;
   }
 });
 
 test("worker-direct cleanup 중복 요청은 두 번째 mutation 없이 missing으로 멱등 처리한다", async () => {
   const previousDir = process.env.FNOS_MANUAL_ORDER_DIR;
   const previousVercel = process.env.VERCEL;
+  const previousLocalRuntime = process.env.FNOS_LOCAL_RUNTIME;
   process.env.FNOS_MANUAL_ORDER_DIR = resolve(projectRoot, ".fixture-manual-files");
-  delete process.env.VERCEL;
+  process.env.VERCEL = "1";
+  process.env.FNOS_LOCAL_RUNTIME = "1";
   let statCalls = 0;
   let recycleCalls = 0;
   try {
@@ -384,10 +400,12 @@ test("worker-direct cleanup 중복 요청은 두 번째 mutation 없이 missing�
     else process.env.FNOS_MANUAL_ORDER_DIR = previousDir;
     if (previousVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = previousVercel;
+    if (previousLocalRuntime === undefined) delete process.env.FNOS_LOCAL_RUNTIME;
+    else process.env.FNOS_LOCAL_RUNTIME = previousLocalRuntime;
   }
 });
 
-test("production browser용 cleanup loopback CORS 예외는 제거되고 worker direct만 proxy를 통과한다", () => {
+test("proxy는 FNOS_LOCAL_RUNTIME=1에서만 worker direct를 통과시킨다", () => {
   const { proxy } = executeTypeScriptModule("proxy.ts", {
     "next/server": { NextRequest: class NextRequest {}, NextResponse: TestNextResponse },
   });
@@ -402,10 +420,23 @@ test("production browser용 cleanup loopback CORS 예외는 제거되고 worker 
     cookies: { get: () => undefined },
   });
 
-  assert.equal(proxy(makeRequest({ method: "OPTIONS" })).status, 401);
-  assert.equal(proxy({
-    ...makeRequest(),
-    headers: new Headers({ Origin: "https://fn-os.vercel.app", "x-fnos-local-bridge": "1" }),
-  }).status, 401);
-  assert.equal(proxy(makeRequest({ workerDirect: true })).kind, "next");
+  const previousVercel = process.env.VERCEL;
+  const previousLocalRuntime = process.env.FNOS_LOCAL_RUNTIME;
+  process.env.VERCEL = "1";
+  delete process.env.FNOS_LOCAL_RUNTIME;
+  try {
+    assert.equal(proxy(makeRequest({ method: "OPTIONS" })).status, 401);
+    assert.equal(proxy({
+      ...makeRequest(),
+      headers: new Headers({ Origin: "https://fn-os.vercel.app", "x-fnos-local-bridge": "1" }),
+    }).status, 401);
+    assert.equal(proxy(makeRequest({ workerDirect: true })).status, 401);
+    process.env.FNOS_LOCAL_RUNTIME = "1";
+    assert.equal(proxy(makeRequest({ workerDirect: true })).kind, "next");
+  } finally {
+    if (previousVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = previousVercel;
+    if (previousLocalRuntime === undefined) delete process.env.FNOS_LOCAL_RUNTIME;
+    else process.env.FNOS_LOCAL_RUNTIME = previousLocalRuntime;
+  }
 });

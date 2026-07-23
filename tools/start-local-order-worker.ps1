@@ -52,11 +52,17 @@ function Test-WorkerRunning {
 }
 
 if (-not (Test-LocalPort -TargetPort $Port)) {
-  Start-Process `
-    -FilePath $NodeExe `
-    -ArgumentList @("node_modules\next\dist\bin\next", "dev", "-H", "127.0.0.1", "-p", "$Port") `
-    -WorkingDirectory $RepoRoot.Path `
-    -WindowStyle Hidden
+  $oldLocalRuntime = $env:FNOS_LOCAL_RUNTIME
+  try {
+    $env:FNOS_LOCAL_RUNTIME = "1"
+    Start-Process `
+      -FilePath $NodeExe `
+      -ArgumentList @("node_modules\next\dist\bin\next", "dev", "-H", "127.0.0.1", "-p", "$Port") `
+      -WorkingDirectory $RepoRoot.Path `
+      -WindowStyle Hidden
+  } finally {
+    $env:FNOS_LOCAL_RUNTIME = $oldLocalRuntime
+  }
 }
 
 if (-not (Wait-LocalPort -TargetPort $Port)) {

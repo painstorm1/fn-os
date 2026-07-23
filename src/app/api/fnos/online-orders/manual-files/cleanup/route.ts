@@ -43,7 +43,7 @@ function safeManualFilePath(fileName: string) {
 }
 
 function shouldQueueForLocalWorker(body: Record<string, unknown>) {
-  if (process.env.VERCEL === "1") return true;
+  if (process.env.FNOS_LOCAL_RUNTIME !== "1") return true;
   if (body.worker_direct === true || body.run_direct === true) return false;
   if (body.use_worker === false) return false;
   return body.use_worker === true;
