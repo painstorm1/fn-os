@@ -2,13 +2,16 @@
 
 import Image from "next/image";
 import { FormEvent, useState } from "react";
+import { ActionButton, InlineNotice, Input } from "@/components/fn-ui";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError("");
     setLoading(true);
 
     const response = await fetch("/api/login", {
@@ -20,14 +23,13 @@ export default function LoginPage() {
     setLoading(false);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      window.alert(data.error || "로그인에 실패했습니다.");
+      setError(data.error || "로그인에 실패했습니다.");
       return;
     }
 
     const params = new URLSearchParams(window.location.search);
     window.location.href = params.get("next") || "/";
   }
-
   return (
     <main className="grid min-h-screen place-items-center bg-[#f9fafb] px-5 text-gray-900">
       <form onSubmit={submit} className="w-full max-w-[420px] rounded-2xl border border-gray-200 bg-white p-8 shadow-[0_12px_40px_rgba(17,24,39,0.08)]">
@@ -42,9 +44,9 @@ export default function LoginPage() {
         <label className="mt-8 block text-sm font-semibold text-gray-700" htmlFor="password">
           비밀번호
         </label>
-        <input
+        <Input
           id="password"
-          className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-base font-medium outline-none focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100"
+          className="mt-2 text-base"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -52,13 +54,11 @@ export default function LoginPage() {
           required
         />
 
-        <button
-          type="submit"
-          className="mt-5 h-10 w-full rounded-lg bg-[#ff6a00] text-sm font-semibold text-white shadow-sm shadow-orange-100 hover:bg-[#ea580c] disabled:opacity-60"
-          disabled={loading}
-        >
-          {"들어가기"}
-        </button>
+        {error && <InlineNotice tone="danger" className="mt-4">{error}</InlineNotice>}
+
+        <ActionButton type="submit" className="mt-5 w-full" disabled={loading}>
+          {loading ? "로그인 중..." : "들어가기"}
+        </ActionButton>
       </form>
     </main>
   );

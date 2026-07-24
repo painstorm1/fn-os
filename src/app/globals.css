@@ -67,10 +67,26 @@ button:disabled {
 }
 
 button:focus-visible,
-a[role="button"]:focus-visible,
-a[class*="rounded"]:focus-visible {
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="tab"]:focus-visible {
   outline: 2px solid var(--fn-primary-500);
   outline-offset: 2px;
+}
+
+input[type="checkbox"]:not([class~="hidden"]) {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--fn-primary-500);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -197,6 +213,15 @@ textarea.field-input {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .fn-global-busy-logo {
     animation: none;
     opacity: 0.9;

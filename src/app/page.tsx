@@ -15,12 +15,17 @@ import {
   EmptyState,
   FilterBar,
   FormField,
+  InlineNotice,
+  LoadingState,
+  NoticeHost,
   KpiCard,
   PageHeader,
+  ResponsiveToolPanel,
   SectionHeader,
   SelectionModal,
   FormModal,
   StatusBadge,
+  Tabs,
   modalInputClass,
   modalSelectClass,
   modalTextareaClass,
@@ -40,10 +45,10 @@ import {
 import { buildSalesShipmentList, type SalesShipmentPage, type SalesShipmentSlot } from "@/lib/sales-shipment-list";
 
 const MainDashboard = dynamic(() => import("./main-dashboard"), {
-  loading: () => null,
+  loading: () => <LoadingState label="화면을 불러오는 중입니다." />,
 });
 const AutomationCenter = dynamic(() => import("./automation-center"), {
-  loading: () => null,
+  loading: () => <LoadingState label="화면을 불러오는 중입니다." />,
 });
 
 type XlsxModule = typeof import("xlsx-js-style");
@@ -722,11 +727,28 @@ function PasswordSettingsModal({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function LeftSidebar({ activeMenu, importPath, salesSection, adsSection, accountingTab }: { activeMenu: string; importPath: string; salesSection: string; adsSection: string; accountingTab: string }) {
+function LeftSidebar({
+  activeMenu,
+  importPath,
+  salesSection,
+  adsSection,
+  accountingTab,
+  mobile = false,
+  onNavigate,
+}: {
+  activeMenu: string;
+  importPath: string;
+  salesSection: string;
+  adsSection: string;
+  accountingTab: string;
+  mobile?: boolean;
+  onNavigate?: () => void;
+}) {
   const [importOpen, setImportOpen] = useState(activeMenu === "수입관리");
   const [salesOpen, setSalesOpen] = useState(activeMenu === "매출/재고");
   const [adsOpen, setAdsOpen] = useState(activeMenu === "광고분석");
   const [accountingOpen, setAccountingOpen] = useState(activeMenu === "회계/비용");
+  const idPrefix = mobile ? "mobile" : "desktop";
 
   useEffect(() => {
     if (activeMenu !== "수입관리") return;
@@ -757,231 +779,159 @@ function LeftSidebar({ activeMenu, importPath, salesSection, adsSection, account
     window.location.href = "/login";
   }
 
+  const mainLinkClass = (active: boolean) => `flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
+    active ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
+  }`;
+
   return (
-    <aside className="hidden min-h-screen w-[280px] shrink-0 border-r border-slate-200 bg-white px-6 py-5 lg:block">
-      <Link
-        href="/?menu=dashboard"
-        className="mb-4 block"
-        onClick={(event) => {
-          event.preventDefault();
-          goToInternal("/?menu=dashboard");
-        }}
-      >
+    <aside
+      id={mobile ? "fnos-mobile-navigation" : undefined}
+      className={mobile ? "h-full w-[min(86vw,320px)] overflow-y-auto bg-white px-6 py-5 shadow-2xl" : "hidden min-h-screen w-[280px] shrink-0 border-r border-slate-200 bg-white px-6 py-5 lg:block"}
+    >
+      {mobile && (
+        <div className="mb-3 flex justify-end">
+          <button type="button" autoFocus aria-label="메뉴 닫기" className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-2xl text-slate-500 hover:bg-slate-100" onClick={onNavigate}>×</button>
+        </div>
+      )}
+      <Link href="/?menu=dashboard" className="mb-4 block" onNavigate={onNavigate} aria-current={activeMenu === "대시보드" ? "page" : undefined}>
         <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
       <div className="mb-5 flex items-center gap-2 text-xs font-semibold text-gray-500">
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="hover:text-orange-600"
-          title="로그아웃"
-        >
-          로그아웃
-        </button>
+        <button type="button" onClick={() => void logout()} className="hover:text-orange-600" title="로그아웃">로그아웃</button>
         <span className="text-gray-300">|</span>
-        <a
-          href="/?menu=fnSettings&settingsTab=info"
-          className="hover:text-orange-600"
-          title="설정"
-        >
-          설정
-        </a>
+        <Link href="/?menu=fnSettings&settingsTab=info" className="hover:text-orange-600" title="설정" onNavigate={onNavigate} aria-current={activeMenu === "FN 설정" ? "page" : undefined}>설정</Link>
       </div>
 
-      <nav className="space-y-1">
-        {mainMenus.map((item) => (
-          <div key={item}>
-            {item === "매출/재고" ? (
-              <Link
-                href="/?menu=sales&salesSection=online"
-                onClick={(event) => {
-                  if (activeMenu === "매출/재고") {
-                    event.preventDefault();
-                    if (salesSection !== "online") {
-                      goToInternal("/?menu=sales&salesSection=online");
+      <nav className="space-y-1" aria-label={mobile ? "모바일 주 메뉴" : "주 메뉴"}>
+        {mainMenus.map((item) => {
+          const active = item === activeMenu;
+          if (item === "매출/재고") {
+            const controls = `${idPrefix}-sales-submenu`;
+            return (
+              <div key={item}>
+                <Link
+                  href="/?menu=sales&salesSection=online"
+                  className={mainLinkClass(active)}
+                  aria-current={active ? "page" : undefined}
+                  aria-expanded={active ? salesOpen : undefined}
+                  aria-controls={active ? controls : undefined}
+                  onNavigate={(event) => {
+                    if (active && salesSection === "online") {
+                      event.preventDefault();
+                      setSalesOpen((open) => !open);
                       return;
                     }
-                    setSalesOpen((open) => !open);
-                    return;
-                  }
-                  event.preventDefault();
-                  goToInternal("/?menu=sales&salesSection=online");
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            ) : item === "수입관리" ? (
-              <Link
-                href="/?menu=import"
-                onMouseEnter={() => warmImportCache(importPath)}
-                onFocus={() => warmImportCache(importPath)}
-                onClick={(event) => {
-                  warmImportCache(importPath);
-                  if (activeMenu === "수입관리") {
-                    event.preventDefault();
-                    setImportOpen((open) => !open);
-                    return;
-                  }
-                  event.preventDefault();
-                  goToInternal("/?menu=import");
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            ) : item === "광고분석" ? (
-              <Link
-                href="/?menu=ads&adsSection=overview"
-                onClick={(event) => {
-                  if (activeMenu === "광고분석") {
-                    event.preventDefault();
-                    if (adsSection !== "overview") {
-                      goToInternal("/?menu=ads&adsSection=overview");
+                    onNavigate?.();
+                  }}
+                >{item}</Link>
+                {active && salesOpen && (
+                  <div id={controls} className={sidebarSubMenuContainerClass}>
+                    {salesSubMenus.map((sub) => (
+                      <Link key={sub.section} href={`/?menu=sales&salesSection=${sub.section}`} onNavigate={onNavigate} aria-current={salesSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(salesSection === sub.section)}>{sub.label}</Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          if (item === "수입관리") {
+            const controls = `${idPrefix}-import-submenu`;
+            return (
+              <div key={item}>
+                <Link
+                  href="/?menu=import"
+                  className={mainLinkClass(active)}
+                  aria-current={active ? "page" : undefined}
+                  aria-expanded={active ? importOpen : undefined}
+                  aria-controls={active ? controls : undefined}
+                  onMouseEnter={() => warmImportCache(importPath)}
+                  onFocus={() => warmImportCache(importPath)}
+                  onNavigate={(event) => {
+                    warmImportCache(importPath);
+                    if (active) {
+                      event.preventDefault();
+                      setImportOpen((open) => !open);
                       return;
                     }
-                    setAdsOpen((open) => !open);
-                    return;
-                  }
-                  event.preventDefault();
-                  goToInternal("/?menu=ads&adsSection=overview");
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            ) : item === "자동화센터" ? (
-              <Link
-                href="/?menu=automation"
-                onClick={(event) => {
-                  event.preventDefault();
-                  goToInternal("/?menu=automation");
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            ) : item === "회계/비용" ? (
-              <Link
-                href="/?menu=accounting&accountingTab=dashboard"
-                onClick={(event) => {
-                  if (activeMenu === "회계/비용") {
-                    event.preventDefault();
-                    setAccountingOpen((open) => !open);
-                    return;
-                  }
-                  event.preventDefault();
-                  goToInternal("/?menu=accounting&accountingTab=dashboard");
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            ) : (
-              <Link
-                href={`/?menu=${menuSlugs[item]}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  goToInternal(`/?menu=${menuSlugs[item]}`);
-                }}
-                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
-                  item === activeMenu ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item}
-              </Link>
-            )}
-            {item === "매출/재고" && activeMenu === "매출/재고" && salesOpen && (
-              <div className={sidebarSubMenuContainerClass}>
-                {salesSubMenus.map((sub) => (
-                  <Link
-                    key={sub.section}
-                    href={`/?menu=sales&salesSection=${sub.section}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      goToInternal(`/?menu=sales&salesSection=${sub.section}`);
-                    }}
-                    className={sidebarSubMenuLinkClass(salesSection === sub.section)}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
+                    onNavigate?.();
+                  }}
+                >{item}</Link>
+                {active && importOpen && (
+                  <div id={controls} className={sidebarSubMenuContainerClass}>
+                    {importSubMenus.map((sub) => (
+                      <Link key={sub.path} href={`/?menu=import&section=${encodeURIComponent(sub.path)}`} onMouseEnter={() => warmImportCache(sub.path)} onFocus={() => warmImportCache(sub.path)} onNavigate={onNavigate} aria-current={importPath === sub.path ? "page" : undefined} className={sidebarSubMenuLinkClass(importPath === sub.path)}>{sub.label}</Link>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {item === "수입관리" && activeMenu === "수입관리" && importOpen && (
-              <div className={sidebarSubMenuContainerClass}>
-                {importSubMenus.map((sub) => (
-                  <Link
-                    key={sub.path}
-                    href={`/?menu=import&section=${encodeURIComponent(sub.path)}`}
-                    onMouseEnter={() => warmImportCache(sub.path)}
-                    onFocus={() => warmImportCache(sub.path)}
-                    onClick={(event) => {
+            );
+          }
+          if (item === "광고분석") {
+            const controls = `${idPrefix}-ads-submenu`;
+            return (
+              <div key={item}>
+                <Link
+                  href="/?menu=ads&adsSection=overview"
+                  className={mainLinkClass(active)}
+                  aria-current={active ? "page" : undefined}
+                  aria-expanded={active ? adsOpen : undefined}
+                  aria-controls={active ? controls : undefined}
+                  onNavigate={(event) => {
+                    if (active && adsSection === "overview") {
                       event.preventDefault();
-                      goToInternal(`/?menu=import&section=${encodeURIComponent(sub.path)}`);
-                    }}
-                    className={sidebarSubMenuLinkClass(importPath === sub.path)}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
+                      setAdsOpen((open) => !open);
+                      return;
+                    }
+                    onNavigate?.();
+                  }}
+                >{item}</Link>
+                {active && adsOpen && (
+                  <div id={controls} className={sidebarSubMenuContainerClass}>
+                    {adsSubMenus.map((sub) => (
+                      <Link key={sub.section} href={`/?menu=ads&adsSection=${sub.section}`} onNavigate={onNavigate} aria-current={adsSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(adsSection === sub.section)}>{sub.label}</Link>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {item === "광고분석" && activeMenu === "광고분석" && adsOpen && (
-              <div className={sidebarSubMenuContainerClass}>
-                {adsSubMenus.map((sub) => (
-                  <Link
-                    key={sub.section}
-                    href={`/?menu=ads&adsSection=${sub.section}`}
-                    onClick={(event) => {
+            );
+          }
+          if (item === "회계/비용") {
+            const controls = `${idPrefix}-accounting-submenu`;
+            return (
+              <div key={item}>
+                <Link
+                  href="/?menu=accounting&accountingTab=dashboard"
+                  className={mainLinkClass(active)}
+                  aria-current={active ? "page" : undefined}
+                  aria-expanded={active ? accountingOpen : undefined}
+                  aria-controls={active ? controls : undefined}
+                  onNavigate={(event) => {
+                    if (active) {
                       event.preventDefault();
-                      goToInternal(`/?menu=ads&adsSection=${sub.section}`);
-                    }}
-                    className={sidebarSubMenuLinkClass(adsSection === sub.section)}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
+                      setAccountingOpen((open) => !open);
+                      return;
+                    }
+                    onNavigate?.();
+                  }}
+                >{item}</Link>
+                {active && accountingOpen && (
+                  <div id={controls} className={sidebarSubMenuContainerClass}>
+                    {accountingSubMenus.map((sub) => (
+                      <Link key={sub.tab} href={`/?menu=accounting&accountingTab=${sub.tab}`} onNavigate={onNavigate} aria-current={accountingTab === sub.tab ? "page" : undefined} className={sidebarSubMenuLinkClass(accountingTab === sub.tab)}>{sub.label}</Link>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {item === "회계/비용" && activeMenu === "회계/비용" && accountingOpen && (
-              <div className={sidebarSubMenuContainerClass}>
-                {accountingSubMenus.map((sub) => (
-                  <Link
-                    key={sub.tab}
-                    href={`/?menu=accounting&accountingTab=${sub.tab}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      goToInternal(`/?menu=accounting&accountingTab=${sub.tab}`);
-                    }}
-                    className={sidebarSubMenuLinkClass(accountingTab === sub.tab)}
-                  >
-                    {sub.label}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+            );
+          }
+          return <Link key={item} href={`/?menu=${menuSlugs[item]}`} onNavigate={onNavigate} aria-current={active ? "page" : undefined} className={mainLinkClass(active)}>{item}</Link>;
+        })}
       </nav>
 
-      <div className="mt-5">
-        <CalendarMemo />
-      </div>
+      <div className="mt-5"><CalendarMemo /></div>
     </aside>
   );
 }
-
 function ToolSection({
   title,
   children,
@@ -1047,7 +997,12 @@ function AddressBlock({ text }: { text: string }) {
   );
 }
 
-function RightTools() {
+type ToolPanelProps = {
+  mobileOpen: boolean;
+  onMobileClose: () => void;
+};
+
+function RightTools({ mobileOpen, onMobileClose }: ToolPanelProps) {
   const [lcl, setLcl] = useState({ method: "LCL(월수금)", w: "", d: "", h: "", box: "", origin: false });
   const [lclResult, setLclResult] = useState("CBM을 입력하면 배송비가 계산됩니다.");
 
@@ -1103,7 +1058,12 @@ function RightTools() {
   }
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-gray-200 bg-white px-4 py-6 xl:block">
+    <ResponsiveToolPanel
+      mobileOpen={mobileOpen}
+      title="수입 업무 도구"
+      onClose={onMobileClose}
+      desktopClassName="border-gray-200 bg-white"
+    >
       <ToolSection title="LCL 배송요금" defaultOpen>
         <select
           value={lcl.method}
@@ -1180,7 +1140,7 @@ postcode 17037
 Phone (+82), 1033748934`}
         />
       </ToolSection>
-    </aside>
+    </ResponsiveToolPanel>
   );
 }
 
@@ -2848,7 +2808,7 @@ function NativeImportDashboard({ compact = false }: { compact?: boolean }) {
     };
   }, []);
 
-  if (loading) return <Panel title="수입제품 현황">{null}</Panel>;
+  if (loading) return <Panel title="수입제품 현황"><LoadingState label="수입제품 현황을 불러오는 중입니다." /></Panel>;
 
   return (
     <div className={`grid gap-4 ${compact ? "xl:grid-cols-[1fr_320px]" : "2xl:grid-cols-[1fr_360px]"}`}>
@@ -3227,7 +3187,7 @@ function NativeOrders({
 
   return (
     <div className="space-y-3">
-      {loading ? null : (
+      {loading ? <LoadingState label="수입관리 데이터를 불러오는 중입니다." /> : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <form
             className="grid gap-2 border-b border-slate-200 bg-white p-3 md:grid-cols-[120px_1fr_150px_150px_78px]"
@@ -3908,7 +3868,7 @@ function LegacyNativeOrders() {
       subtitle="FN OS 안으로 흡수한 수입관리 발주 목록"
       action={<Link className="rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-white" href={importHref("/orders/new")}>+ 새 발주</Link>}
     >
-      {loading ? null : (
+      {loading ? <LoadingState label="수입관리 데이터를 불러오는 중입니다." /> : (
         <div className="grid gap-2">
           {orders.map((order) => (
             <Link key={order.id} href={importHref(`/orders/${order.id}`)} className="grid grid-cols-[56px_1.2fr_1fr_100px_130px_90px] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm hover:border-orange-200">
@@ -3976,7 +3936,7 @@ function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProduc
 
   return (
     <div className="space-y-3">
-      {loading ? null : (
+      {loading ? <LoadingState label="수입관리 데이터를 불러오는 중입니다." /> : (
         <>
         <div className="mb-4 grid gap-3">
           <div className="grid gap-2 md:grid-cols-[120px_1fr]">
@@ -4720,7 +4680,7 @@ function NativeProductForm({ id, listTab }: { id?: number; listTab?: ImportProdu
           <h2 className="text-xl font-semibold text-gray-900">{id ? "제품 수정" : "새 제품 등록"}</h2>
         </div>
       </div>
-      {loading || detailLoading ? null : (
+      {loading || detailLoading ? <LoadingState label="수입관리 상세를 불러오는 중입니다." /> : (
         <>
         <form key={product?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid items-start gap-5 xl:grid-cols-[220px_1fr]">
           <div className="space-y-3" onPaste={handleImagePaste}>
@@ -5700,7 +5660,7 @@ function NativeOrderForm({ id, copyId }: { id?: number; copyId?: number }) {
         </div>
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{order?.order_code || "PO-NEW"}</span>
       </div>
-      {loading || detailLoading ? null : (
+      {loading || detailLoading ? <LoadingState label="수입관리 상세를 불러오는 중입니다." /> : (
         <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <input type="hidden" name="platform" value={order?.platform || "FN_OS"} />
           <input type="hidden" name="currency" value={order?.currency || "CNY"} />
@@ -6000,7 +5960,7 @@ function LegacyNativeOrderForm({ id }: { id?: number }) {
 
   return (
     <Panel title={id ? "발주 수정" : "새 발주 등록"} subtitle="발주 기본정보와 제품 라인을 FN OS에서 바로 저장합니다.">
-      {loading || detailLoading ? null : (
+      {loading || detailLoading ? <LoadingState label="수입관리 상세를 불러오는 중입니다." /> : (
         <form key={order?.id || "new"} onSubmit={submit} onKeyDown={preventEnterSubmit} className="grid gap-5">
           <div className="grid gap-4 md:grid-cols-4">
             <Field label="주공장">
@@ -11837,6 +11797,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
   const [summary, setSummary] = useState<SalesInventorySummary | null>(null);
   const [message, setMessage] = useState("");
   const [onlineSaveToast, setOnlineSaveToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const [salesSheetModal, setSalesSheetModal] = useState<"shipping" | "sales" | "purchase" | null>(null);
   const onlineSaveToastSequence = useRef(0);
   const [showJsonTool, setShowJsonTool] = useState(false);
   const [historyMode, setHistoryMode] = useState<SalesHistoryMode>(requestedHistoryMode);
@@ -11981,34 +11942,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
     setInventoryPage(1);
   }, [inventoryFilters.warehouse, inventoryFilters.product, inventoryFilters.date, inventorySort.key, inventorySort.direction]);
 
-  useEffect(() => {
-    function closeOnlineSheetPreviews(event: globalThis.KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      closeOnlineSheetPreview();
-    }
-    window.addEventListener("keydown", closeOnlineSheetPreviews, true);
-    return () => window.removeEventListener("keydown", closeOnlineSheetPreviews, true);
-  }, []);
-
   function closeOnlineSheetPreview(target?: "shipping" | "sales" | "purchase") {
-    const ids = target === "sales"
-      ? ["online-sales-sheet-toggle"]
-      : target === "purchase"
-        ? ["online-purchase-sheet-toggle"]
-        : target === "shipping"
-          ? ["online-shipping-sheet-toggle"]
-          : ["online-shipping-sheet-toggle", "online-sales-sheet-toggle", "online-purchase-sheet-toggle"];
-    ids.forEach((id) => {
-      const input = document.getElementById(id);
-      if (input instanceof HTMLInputElement) input.checked = false;
-    });
+    setSalesSheetModal((current) => !target || current === target ? null : current);
   }
 
   function openOnlineSheetPreview(target: "sales" | "purchase") {
-    const input = document.getElementById(target === "sales" ? "online-sales-sheet-toggle" : "online-purchase-sheet-toggle");
-    if (input instanceof HTMLInputElement) input.checked = true;
+    setSalesSheetModal(target);
   }
-
   function showOnlineSaveToast(message: string, tone: "success" | "error") {
     const sequence = onlineSaveToastSequence.current + 1;
     onlineSaveToastSequence.current = sequence;
@@ -17269,14 +17209,13 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
         }
       />
       {onlineSaveToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`fixed bottom-5 right-5 z-[100] flex max-w-md items-start gap-3 rounded-xl border px-4 py-3 text-sm font-bold shadow-2xl ${onlineSaveToast.tone === "success" ? "border-emerald-200 bg-emerald-600 text-white" : "border-rose-200 bg-rose-600 text-white"}`}
+        <InlineNotice
+          tone={onlineSaveToast.tone === "success" ? "success" : "danger"}
+          className="fixed bottom-5 right-5 z-[100] max-w-md shadow-2xl"
+          onClose={() => setOnlineSaveToast(null)}
         >
-          <span className="min-w-0 whitespace-pre-line">{onlineSaveToast.message}</span>
-          <button type="button" className="shrink-0 text-lg leading-none text-white/80 hover:text-white" aria-label="알림 닫기" onClick={() => setOnlineSaveToast(null)}>×</button>
-        </div>
+          {onlineSaveToast.message}
+        </InlineNotice>
       )}
       {quickLookupOpen && (
         <FormModal
@@ -17295,9 +17234,7 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
       )}
       {isOnlineSection && (
         <Panel>
-          <input id="online-shipping-sheet-toggle" type="checkbox" className="peer/shipping-sheet hidden" />
-          <input id="online-sales-sheet-toggle" type="checkbox" className="peer/sales-sheet hidden" />
-          <input id="online-purchase-sheet-toggle" type="checkbox" className="peer/purchase-sheet hidden" />
+
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
               {orderProgressStatusFilterLabels.map((label) => (
@@ -17371,9 +17308,9 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
               </div>
             )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-orange-50" onMouseDown={() => setShippingPreviewTab("shipping")}>송장 엑셀</label>
-              <label htmlFor="online-sales-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-blue-300 bg-white px-3 text-sm font-black text-blue-600 hover:bg-blue-50">FN판매입력</label>
-              <label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50">FN구매입력</label>
+              <button type="button" className="inline-flex h-9 items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:bg-orange-50" onClick={() => { setShippingPreviewTab("shipping"); setSalesSheetModal("shipping"); }}>송장 엑셀</button>
+              <button type="button" className="inline-flex h-9 items-center rounded-md border border-blue-300 bg-white px-3 text-sm font-black text-blue-600 hover:bg-blue-50" onClick={() => setSalesSheetModal("sales")}>FN판매입력</button>
+              <button type="button" className="inline-flex h-9 items-center rounded-md border border-violet-300 bg-white px-3 text-sm font-black text-violet-700 hover:bg-violet-50" onClick={() => setSalesSheetModal("purchase")}>FN구매입력</button>
               <button type="button" className="inline-flex h-9 items-center rounded-md border border-amber-300 bg-white px-3 text-sm font-black text-amber-700 hover:bg-amber-50" onClick={openSalesShipmentListPopup}>출고리스트</button>
             </div>
           </div>
@@ -17389,84 +17326,108 @@ function SalesInventoryWorkspace({ section }: { section: string }) {
             onPageChange={setOrderProgressPage}
             statusFilter={orderProgressStatusFilter}
           />
-          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/shipping-sheet:flex">
-            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div><h2 className="text-lg font-black">송장 엑셀</h2><p className="mt-1 text-sm font-bold text-slate-500">송장출력용과 직송파일 현재 값을 확인하고 내보냅니다.</p></div>
-                <label htmlFor="online-shipping-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
+          {salesSheetModal === "shipping" && (
+            <SelectionModal
+              title="송장 엑셀"
+              description="송장출력용과 직송파일 현재 값을 확인하고 내보냅니다."
+              onClose={() => setSalesSheetModal(null)}
+              size="screen"
+              className="flex max-h-[92vh] flex-col overflow-hidden p-0"
+              headerClassName="shrink-0 px-5 py-4"
+              bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-5"
+              footerClassName="flex-wrap px-5 py-4"
+              footer={
+                <>
+                  <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>송장 내보내기</button>
+                  {directShippingRows.JB.length > 0 && <button type="button" className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-black text-blue-700" onClick={() => exportDirectShippingFromModal("JB")}>JB 직송 내보내기</button>}
+                  {directShippingRows.케이모아.length > 0 && <button type="button" className="h-10 rounded-lg border border-violet-200 bg-white px-4 text-sm font-black text-violet-700" onClick={() => exportDirectShippingFromModal("케이모아")}>케이모아 직송 내보내기</button>}
+                  <ActionButton type="button" onClick={exportShippingBundleFromModal}>모두 내보내기</ActionButton>
+                  <ActionButton type="button" variant="secondary" onClick={() => setSalesSheetModal(null)}>닫기</ActionButton>
+                </>
+              }
+            >
+              <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+                <Tabs
+                  ariaLabel="송장 파일 종류"
+                  value={shippingPreviewTab}
+                  onValueChange={setShippingPreviewTab}
+                  items={[
+                    { value: "shipping", label: "송장엑셀" },
+                    { value: "JB", label: `JB 직송파일 ${directShippingRows.JB.length || ""}` },
+                    { value: "케이모아", label: `케이모아 직송파일 ${directShippingRows.케이모아.length || ""}` },
+                  ]}
+                />
+                <span className="mx-1 h-5 w-px bg-slate-200" />
+                <select
+                  className="h-9 rounded-md border border-blue-200 bg-white px-3 text-sm font-black text-blue-700 outline-orange-400"
+                  defaultValue=""
+                  title="선택한 송장 행을 직송파일로 저장"
+                  onChange={(event) => {
+                    const partner = event.currentTarget.value as DirectShippingPartner;
+                    event.currentTarget.value = "";
+                    if (partner) void makeDirectShippingFile(partner);
+                  }}
+                >
+                  <option value="">선택건 직송저장</option>
+                  <option value="JB">JB 직송저장</option>
+                  <option value="케이모아">케이모아 직송저장</option>
+                </select>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
-                <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
-                  <button type="button" onClick={() => setShippingPreviewTab("shipping")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "shipping" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>송장엑셀</button>
-                  <button type="button" onClick={() => setShippingPreviewTab("JB")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "JB" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>JB 직송파일 {directShippingRows.JB.length || ""}</button>
-                  <button type="button" onClick={() => setShippingPreviewTab("케이모아")} className={`h-9 rounded-md border px-3 text-sm font-black ${shippingPreviewTab === "케이모아" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}>케이모아 직송파일 {directShippingRows.케이모아.length || ""}</button>
-                  <span className="mx-1 h-5 w-px bg-slate-200" />
-                  <select
-                    className="h-9 rounded-md border border-blue-200 bg-white px-3 text-sm font-black text-blue-700 outline-orange-400"
-                    defaultValue=""
-                    title="선택한 송장 행을 직송파일로 저장"
-                    onChange={(event) => {
-                      const partner = event.currentTarget.value as DirectShippingPartner;
-                      event.currentTarget.value = "";
-                      if (partner) void makeDirectShippingFile(partner);
-                    }}
-                  >
-                    <option value="">선택건 직송저장</option>
-                    <option value="JB">JB 직송저장</option>
-                    <option value="케이모아">케이모아 직송저장</option>
-                  </select>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir, _rows, selectedRows) => sortOnlineShippingRowsByExportColumn(colIndex, dir, selectedRows)} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} fillHeight />}
-                  {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} fillHeight onChange={(rows, sourceOrder) => {
-                    setDirectShippingRows((prev) => ({ ...prev, JB: rows }));
-                    if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, JB: sourceOrder.map((index) => prev.JB[index]).filter((index): index is number => typeof index === "number") }));
-                  }} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
-                  {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} fillHeight onChange={(rows, sourceOrder) => {
-                    setDirectShippingRows((prev) => ({ ...prev, 케이모아: rows }));
-                    if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, 케이모아: sourceOrder.map((index) => prev.케이모아[index]).filter((index): index is number => typeof index === "number") }));
-                  }} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
-                </div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {shippingPreviewTab === "shipping" && <SalesExcelGrid sheet="송장출력용" rows={padSalesRows("송장출력용", shippingPreviewRows)} onChange={applyShippingPreviewRows} onSelectionChange={(_, range, rowIndexes) => selectShippingPreviewRange(range, rowIndexes)} onSortRows={(colIndex, dir, _rows, selectedRows) => sortOnlineShippingRowsByExportColumn(colIndex, dir, selectedRows)} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows.송장출력용 || []} copyAssistRows={shippingPreviewRows.map((row, index) => onlineOrderStatusApiUnsupportedSite(row) ? index : -1).filter((index) => index >= 0)} fillHeight />}
+                {shippingPreviewTab === "JB" && <DirectShippingPreviewGrid headers={jbDirectHeaders} rows={directShippingRows.JB} fillHeight onChange={(rows, sourceOrder) => {
+                  setDirectShippingRows((prev) => ({ ...prev, JB: rows }));
+                  if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, JB: sourceOrder.map((index) => prev.JB[index]).filter((index): index is number => typeof index === "number") }));
+                }} onDeleteRows={(rows) => removeDirectShippingRows("JB", rows)} />}
+                {shippingPreviewTab === "케이모아" && <DirectShippingPreviewGrid headers={kemoreDirectHeaders} rows={directShippingRows.케이모아} fillHeight onChange={(rows, sourceOrder) => {
+                  setDirectShippingRows((prev) => ({ ...prev, 케이모아: rows }));
+                  if (sourceOrder) setDirectShippingSourceIndexes((prev) => ({ ...prev, 케이모아: sourceOrder.map((index) => prev.케이모아[index]).filter((index): index is number => typeof index === "number") }));
+                }} onDeleteRows={(rows) => removeDirectShippingRows("케이모아", rows)} />}
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
-                <button type="button" className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700" onClick={exportBaseShippingFromModal}>송장 내보내기</button>
-                {directShippingRows.JB.length > 0 && <button type="button" className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-black text-blue-700" onClick={() => exportDirectShippingFromModal("JB")}>JB 직송 내보내기</button>}
-                {directShippingRows.케이모아.length > 0 && <button type="button" className="h-10 rounded-lg border border-violet-200 bg-white px-4 text-sm font-black text-violet-700" onClick={() => exportDirectShippingFromModal("케이모아")}>케이모아 직송 내보내기</button>}
-                <ActionButton type="button" onClick={exportShippingBundleFromModal}>모두 내보내기</ActionButton>
-                <label htmlFor="online-shipping-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label>
-              </div>
-            </div>
-          </div>
-          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/sales-sheet:flex">
-            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div><h2 className="text-lg font-black">FN판매입력</h2><p className="mt-1 text-sm font-bold text-slate-500">현재 FN판매입력 값을 확인하고 FN OS 판매입력으로 저장합니다.</p></div>
-                <label htmlFor="online-sales-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto p-5">
-                <SalesExcelGrid sheet="FN판매입력" rows={sheets["FN판매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN판매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN판매입력"] || []} />
-              </div>
-              <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
-                <span className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesTotalAmount).toLocaleString("ko-KR")}원</span>
-                <div className="flex gap-2"><label htmlFor="online-sales-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton></div>
-              </div>
-            </div>
-          </div>
-          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 peer-checked/purchase-sheet:flex">
-            <div className="flex max-h-[92vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div><h2 className="text-lg font-black">FN구매입력</h2><p className="mt-1 text-sm font-bold text-slate-500">현재 FN구매입력 값을 확인하고 FN OS 구매입력으로 저장합니다.</p></div>
-                <label htmlFor="online-purchase-sheet-toggle" className="cursor-pointer rounded-md px-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</label>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto p-5">
-                <SalesExcelGrid sheet="FN구매입력" rows={sheets["FN구매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN구매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN구매입력"] || []} />
-              </div>
-              <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-5 py-4">
-                <span className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">구매입력 총 금액: {Math.round(purchaseTotalAmount).toLocaleString("ko-KR")}원</span>
-                <div className="flex gap-2"><label htmlFor="online-purchase-sheet-toggle" className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">닫기</label><ActionButton type="button" onClick={() => void sendPurchaseInput()}>저장</ActionButton></div>
-              </div>
-            </div>
-          </div>
+            </SelectionModal>
+          )}
+          {salesSheetModal === "sales" && (
+            <SelectionModal
+              title="FN판매입력"
+              description="현재 FN판매입력 값을 확인하고 FN OS 판매입력으로 저장합니다."
+              onClose={() => setSalesSheetModal(null)}
+              size="screen"
+              className="flex max-h-[92vh] flex-col overflow-hidden p-0"
+              headerClassName="shrink-0 px-5 py-4"
+              bodyClassName="min-h-0 flex-1 overflow-auto p-5"
+              footerClassName="items-center justify-between px-5 py-4"
+              footer={
+                <>
+                  <span className="mr-auto rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-black text-orange-700">판매입력 총 금액: {Math.round(salesTotalAmount).toLocaleString("ko-KR")}원</span>
+                  <ActionButton type="button" variant="secondary" onClick={() => setSalesSheetModal(null)}>닫기</ActionButton>
+                  <ActionButton type="button" onClick={() => void sendSalesInput()}>저장</ActionButton>
+                </>
+              }
+            >
+              <SalesExcelGrid sheet="FN판매입력" rows={sheets["FN판매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN판매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN판매입력"] || []} />
+            </SelectionModal>
+          )}
+          {salesSheetModal === "purchase" && (
+            <SelectionModal
+              title="FN구매입력"
+              description="현재 FN구매입력 값을 확인하고 FN OS 구매입력으로 저장합니다."
+              onClose={() => setSalesSheetModal(null)}
+              size="screen"
+              className="flex max-h-[92vh] flex-col overflow-hidden p-0"
+              headerClassName="shrink-0 px-5 py-4"
+              bodyClassName="min-h-0 flex-1 overflow-auto p-5"
+              footerClassName="items-center justify-between px-5 py-4"
+              footer={
+                <>
+                  <span className="mr-auto rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700">구매입력 총 금액: {Math.round(purchaseTotalAmount).toLocaleString("ko-KR")}원</span>
+                  <ActionButton type="button" variant="secondary" onClick={() => setSalesSheetModal(null)}>닫기</ActionButton>
+                  <ActionButton type="button" onClick={() => void sendPurchaseInput()}>저장</ActionButton>
+                </>
+              }
+            >
+              <SalesExcelGrid sheet="FN구매입력" rows={sheets["FN구매입력"]} onChange={(rows) => setSheets((prev) => ({ ...prev, "FN구매입력": rows }))} resetKey={salesGridResetKey} highlightedRows={salesSheetHighlightedRows["FN구매입력"] || []} />
+            </SelectionModal>
+          )}
           {orderProductLinkOpen && (
             <FormModal
               title="품목 연결"
@@ -21104,6 +21065,7 @@ function PersonnelManagementPanel({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="space-y-4">
+      {personnelMessage && <InlineNotice tone="success">{personnelMessage}</InlineNotice>}
       <Panel
         title="인사관리"
         subtitle={<div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-500"><button type="button" className="font-black text-orange-600 underline underline-offset-4">전체직원</button><span className="ml-2 rounded-lg bg-slate-100 px-3 py-1 font-black text-slate-900">직원수 {employees.length.toLocaleString("ko-KR")}명</span></div>}
@@ -21927,6 +21889,7 @@ function CustomerManagementPanel({ setMessage }: { message: string; setMessage: 
 
   return (
     <div className="space-y-4">
+      {customerMessage && <InlineNotice>{customerMessage}</InlineNotice>}
       <Panel
         title="거래처 관리"
         subtitle={
@@ -22654,6 +22617,7 @@ function ProductManagementPanel({ setMessage }: { message: string; setMessage: (
 
   return (
     <div className="space-y-4">
+      {productMessage && <InlineNotice>{productMessage}</InlineNotice>}
       <Panel
         title="품목관리"
         subtitle={
@@ -25621,9 +25585,9 @@ function AdsAnalysisWorkspace() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="광고분석" className="mb-0" />
+      <PageHeader title="광고분석" description={<span>채널별 광고비·구매전환·ROAS를 선택한 기간으로 비교합니다.</span>} className="mb-0" />
 
-      {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{summary.error}</Card>}
+      {summary?.ok === false && <InlineNotice tone="danger">{summary.error || "광고 분석 조회 실패"}</InlineNotice>}
 
       {adsSection !== "channels" && (
         <section className="grid items-stretch gap-2 md:grid-cols-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,1fr)]">
@@ -25682,7 +25646,7 @@ function AdsAnalysisWorkspace() {
   );
 }
 
-function AdsRightPanel() {
+function AdsRightPanel({ mobileOpen, onMobileClose }: ToolPanelProps) {
   const searchParams = useSearchParams();
   const defaultRange = adRangeForPreset("yesterday");
   const initialFrom = searchParams.get("adsFrom") || defaultRange.from;
@@ -25856,7 +25820,12 @@ function AdsRightPanel() {
 
   return (
     <>
-      <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-white px-4 py-6 xl:block">
+      <ResponsiveToolPanel
+        mobileOpen={mobileOpen}
+        title="광고 업무 도구"
+        onClose={onMobileClose}
+        desktopClassName="border-slate-200 bg-white"
+      >
         <ToolSection title="광고 업로드" defaultOpen showChevron={false}>
         <div className="space-y-2">
           <label
@@ -25996,7 +25965,7 @@ function AdsRightPanel() {
         <ToolSection title="최근 수집현황" showChevron>
           <AdsCollectionStatusSummary batches={recentBatches} />
         </ToolSection>
-      </aside>
+      </ResponsiveToolPanel>
       {replaceConfirm && (
         <FormModal
           title="광고 DB 대체 저장"
@@ -28987,6 +28956,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
         title="회계/비용"
         description={accountingTabLabel[activeTab]}
       />
+      {message && <InlineNotice>{message}</InlineNotice>}
       {summary?.ok === false && <Card className="border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{summary.error}</Card>}
 
       {activeTab === "dashboard" && (
@@ -29067,25 +29037,20 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             description={ledgerMode === "bank" ? "통장 입출금 기준 실제 현금흐름입니다. 카드대금과 내부이체는 손익 비용에서 제외됩니다." : "카드 사용일 기준 비용 발생분입니다. 카드대금 출금은 통장 현금흐름에서만 별도 관리합니다."}
             actions={<StatusBadge tone={ledgerMode === "card" ? "orange" : "muted"}>{currentLedgerRows.length.toLocaleString("ko-KR")}건</StatusBadge>}
           />
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <div className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-1">
-              {[
-                ["bank", "통장 내역"],
-                ["card", "카드 내역"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setLedgerMode(value as "bank" | "card");
-                    setLedgerFilters((prev) => ({ ...prev, source: "", categoryLarge: "", categoryMiddle: "" }));
-                  }}
-                  className={`h-8 rounded-md px-2.5 text-xs font-black transition ${ledgerMode === value ? "bg-orange-500 text-white" : "text-slate-500 hover:bg-orange-50"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          <FilterBar className="mt-4 !gap-2 border-0 p-0">
+            <Tabs
+              ariaLabel="회계 원장 종류"
+              items={[
+                { value: "bank", label: "통장 내역" },
+                { value: "card", label: "카드 내역" },
+              ]}
+              value={ledgerMode}
+              onValueChange={(value) => {
+                setLedgerMode(value);
+                setLedgerFilters((prev) => ({ ...prev, source: "", categoryLarge: "", categoryMiddle: "" }));
+              }}
+              className="shrink-0"
+            />
             <select
               className="h-9 w-20 shrink-0 truncate rounded-md border border-gray-200 bg-white px-2 text-sm font-bold outline-orange-400"
               value={ledgerFilters.source}
@@ -29171,7 +29136,7 @@ function AccountingWorkspace({ tab = "dashboard" }: { tab?: string }) {
             >
               <ExcelFormIcon />
             </button>
-          </div>
+          </FilterBar>
           <div className="mt-4">
             <ExpenseTable
               key={ledgerMode}
@@ -31131,7 +31096,7 @@ function ReportList({ title, rows }: { title: string; rows: Array<Record<string,
   );
 }
 
-function AccountingRightPanel() {
+function AccountingRightPanel({ mobileOpen, onMobileClose }: ToolPanelProps) {
   const endpoint = `${ACCOUNTING_SUMMARY_ENDPOINT}?scope=dashboard`;
   const endpointCacheKey = `${endpoint}:${ACCOUNTING_CACHE_VERSION}`;
   const initialSummary = readInitialCachedJson<AccountingSummary>(endpoint, { key: endpointCacheKey, storageTtl: ACCOUNTING_STORAGE_TTL });
@@ -31274,7 +31239,12 @@ function AccountingRightPanel() {
   }
 
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-slate-200 bg-[#f8fafc] px-4 py-6 xl:block">
+    <ResponsiveToolPanel
+      mobileOpen={mobileOpen}
+      title="회계 업무 도구"
+      onClose={onMobileClose}
+      desktopClassName="border-slate-200 bg-[#f8fafc]"
+    >
       <div className="space-y-4">
         <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
           <h3 className="text-base font-bold text-slate-800">7일간 예정 고정비 지출</h3>
@@ -31378,7 +31348,7 @@ function AccountingRightPanel() {
           {!recentBatches.length && <EmptyState title="업로드 없음" className="min-h-24 border-0 bg-white px-2 py-4" />}
         </div>
       </div>
-    </aside>
+    </ResponsiveToolPanel>
   );
 }
 
@@ -33005,6 +32975,8 @@ function FnSettingsWorkspace() {
       {fnOsPasswordOpen && <PasswordSettingsModal open={fnOsPasswordOpen} onClose={() => setFnOsPasswordOpen(false)} />}
       {adminPasswordOpen && <AdminPasswordSettingsModal open={adminPasswordOpen} onClose={() => setAdminPasswordOpen(false)} />}
       <PageHeader title="FN 설정" actions={!unlocked && <ActionButton type="button" onClick={confirmAdmin}>관리자 확인</ActionButton>} />
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      {message && <InlineNotice tone="success">{message}</InlineNotice>}
 
       {!unlocked ? (
         <Card className="p-5">
@@ -33032,20 +33004,13 @@ function FnSettingsWorkspace() {
       ) : (
         <>
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
-            <div className="flex min-w-max gap-1">
-              {tabs.filter((tab) => tab.key !== "etc").map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => openTab(tab.key)}
-                  className={`h-10 rounded-md px-4 text-sm font-black ${
-                    activeTab === tab.key ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <Tabs
+              ariaLabel="FN 설정 메뉴"
+              items={tabs.filter((tab) => tab.key !== "etc").map((tab) => ({ value: tab.key, label: tab.label }))}
+              value={activeTab}
+              onValueChange={openTab}
+              className="border-0 p-0"
+            />
           </div>
 
           {activeTab === "info" && <FnInfoSettingsPanel setMessage={setMessage} />}
@@ -33154,6 +33119,8 @@ function AdminPasswordSettingsModal({ open, onClose }: { open: boolean; onClose:
       }
     >
       <div className="space-y-4">
+        {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+        {message && <InlineNotice tone="success">{message}</InlineNotice>}
         <FormField label="현재 비밀번호" required>
           <div className="flex gap-2">
             <input
@@ -33203,7 +33170,7 @@ function AdminPasswordSettingsModal({ open, onClose }: { open: boolean; onClose:
 function HomeContent() {
   const searchParams = useSearchParams();
   const activeSlug = searchParams.get("menu") || "dashboard";
-  const activeMenu = slugMenus[activeSlug] || "대시보드";
+  const activeMenu = activeSlug === "fnSettings" ? "FN 설정" : slugMenus[activeSlug] || "대시보드";
   const importPath = searchParams.get("section") || "/orders";
   const salesSection = searchParams.get("salesSection") || "online";
   const adsSection = searchParams.get("adsSection") || "overview";
@@ -33215,6 +33182,26 @@ function HomeContent() {
       : requestedAccountingTab;
   const accountingTab = accountingSubMenus.some((sub) => sub.tab === normalizedAccountingTab) ? normalizedAccountingTab : "dashboard";
   const accountingWorkspaceTab = requestedAccountingTab === "bank" || requestedAccountingTab === "card" ? requestedAccountingTab : accountingTab;
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileToolOpen, setMobileToolOpen] = useState(false);
+  const hasContextTools = activeSlug === "import" || activeSlug === "dashboard" || activeSlug === "accounting" || activeSlug === "ads";
+  const workspaceMenu = activeMenu;
+  const settingsTabLabel = ({ info: "FN정보", personnel: "인사관리", bank: "통장관리", card: "카드관리", password: "비밀번호 관리", certification: "인증자격관리" } as Record<string, string>)[searchParams.get("settingsTab") || "info"] || "FN정보";
+  const workspaceSubmenu = activeSlug === "import"
+    ? importSubMenus.find((sub) => sub.path === importPath.split("?")[0])?.label || "발주"
+    : activeSlug === "sales"
+      ? salesSubMenus.find((sub) => sub.section === salesSection)?.label || "온라인 발주"
+      : activeSlug === "ads"
+        ? adsSubMenus.find((sub) => sub.section === adsSection)?.label || "광고 리포트"
+        : activeSlug === "accounting"
+          ? accountingSubMenus.find((sub) => sub.tab === accountingTab)?.label || "대시보드"
+          : activeSlug === "automation"
+            ? "작업 목록"
+            : activeSlug === "fnSettings"
+              ? settingsTabLabel
+              : "요약";
+
+  useEscapeToClose(mobileMenuOpen, () => setMobileMenuOpen(false));
 
   useEffect(() => {
     markClientCacheReady();
@@ -33237,9 +33224,54 @@ function HomeContent() {
           outline: none;
         }
       `}</style>
+      <NoticeHost />
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-[80] flex lg:hidden">
+          <button type="button" aria-label="메뉴 배경 닫기" className="absolute inset-0 bg-slate-950/50" onClick={() => setMobileMenuOpen(false)} />
+          <div className="relative z-10 h-full">
+            <LeftSidebar
+              activeMenu={activeMenu}
+              importPath={importPath}
+              salesSection={salesSection}
+              adsSection={adsSection}
+              accountingTab={accountingTab}
+              mobile
+              onNavigate={() => setMobileMenuOpen(false)}
+            />
+          </div>
+        </div>
+      )}
       <div className="flex min-h-screen">
         <LeftSidebar activeMenu={activeMenu} importPath={importPath} salesSection={salesSection} adsSection={adsSection} accountingTab={accountingTab} />
         <section className="min-w-0 flex-1 px-5 py-6 sm:px-7">
+          <div className="mb-5 flex min-h-11 items-center gap-3 border-b border-slate-200 pb-4">
+            <button
+              type="button"
+              aria-label="메뉴 열기"
+              aria-controls="fnos-mobile-navigation"
+              aria-expanded={mobileMenuOpen}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-xl text-slate-700 lg:hidden"
+              onClick={() => setMobileMenuOpen(true)}
+            >
+              ☰
+            </button>
+            <div className="min-w-0 text-sm font-semibold text-slate-500" aria-label="현재 작업 위치">
+              <span className="text-slate-900">{workspaceMenu}</span>
+              <span aria-hidden="true" className="mx-2 text-slate-300">/</span>
+              <span className="truncate">{workspaceSubmenu}</span>
+            </div>
+            {hasContextTools && (
+              <ActionButton
+                type="button"
+                variant="secondary"
+                className="ml-auto xl:hidden"
+                aria-expanded={mobileToolOpen}
+                onClick={() => setMobileToolOpen(true)}
+              >
+                도구
+              </ActionButton>
+            )}
+          </div>
           {activeSlug === "import" ? (
             <NativeImportWorkspace path={importPath} />
           ) : activeSlug === "dashboard" ? (
@@ -33261,17 +33293,16 @@ function HomeContent() {
             </section>
           )}
         </section>
-        {activeSlug === "import" && <RightTools />}
-        {(activeSlug === "dashboard" || activeSlug === "accounting") && <AccountingRightPanel />}
-        {activeSlug === "ads" && <AdsRightPanel />}
+        {activeSlug === "import" && <RightTools mobileOpen={mobileToolOpen} onMobileClose={() => setMobileToolOpen(false)} />}
+        {(activeSlug === "dashboard" || activeSlug === "accounting") && <AccountingRightPanel mobileOpen={mobileToolOpen} onMobileClose={() => setMobileToolOpen(false)} />}
+        {activeSlug === "ads" && <AdsRightPanel mobileOpen={mobileToolOpen} onMobileClose={() => setMobileToolOpen(false)} />}
       </div>
     </main>
   );
 }
-
 export default function Home() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<LoadingState label="FN OS를 불러오는 중입니다." className="m-6" />}>
       <HomeContent />
     </Suspense>
   );

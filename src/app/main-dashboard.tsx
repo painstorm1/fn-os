@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Card, StatusBadge } from "@/components/fn-ui";
+import { Card, InlineNotice, LoadingState, PageHeader, StatusBadge } from "@/components/fn-ui";
 import { cachedJson, readCachedJson, readInitialCachedJson } from "@/lib/client-cache";
 
 const MAIN_DASHBOARD_SUMMARY_URL = "/api/dashboard/summary?scope=main";
@@ -344,20 +344,20 @@ export default function MainDashboard() {
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 pb-4">
-        <div>
-          <h1 className="text-[28px] font-bold leading-[1.3] tracking-normal text-gray-900">FN OS</h1>
-          <p className="mt-1.5 text-sm font-medium text-gray-500">{dateText(summary?.today)}</p>
+      <PageHeader
+        title="FN OS"
+        description={<span>매출·광고·회계와 수입 현황을 한눈에 확인합니다. · {dateText(summary?.today)}</span>}
+        actions={
+          <div className="grid grid-cols-3 gap-4 pt-1">
+            <CollectionDate label="주문수집" value={summary?.collection_dates?.orders} />
+            <CollectionDate label="광고수집" value={summary?.collection_dates?.ads} />
+            <CollectionDate label="회계수집" value={summary?.collection_dates?.accounting} />
+          </div>
+        }
+      />
 
-          {summary?.ok === false && <p className="mt-1 text-xs font-semibold text-rose-600">{summary.error}</p>}
-        </div>
-        <div className="grid grid-cols-3 gap-4 pt-1">
-          <CollectionDate label="주문수집" value={summary?.collection_dates?.orders} />
-          <CollectionDate label="광고수집" value={summary?.collection_dates?.ads} />
-          <CollectionDate label="회계수집" value={summary?.collection_dates?.accounting} />
-        </div>
-      </header>
-
+      {loading && !summary && <LoadingState label="대시보드 요약을 불러오는 중입니다." />}
+      {summary?.ok === false && <InlineNotice tone="danger">{summary.error || "대시보드 조회 실패"}</InlineNotice>}
       <main className="grid gap-4 xl:grid-cols-3">
         <Panel title="매출/재고" subtitle={`매출 기준일 ${dateText(summary?.sales_latest_date)}`} compact>
           <div className="grid grid-cols-3 gap-2.5">

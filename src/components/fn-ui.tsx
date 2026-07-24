@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { formatCalendarInputValue, normalizeCalendarInput, type CalendarInputMode } from "@/lib/calendar-input";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "muted" | "orange";
@@ -9,7 +9,7 @@ function cn(...values: Array<string | false | null | undefined>) {
 }
 
 function visualDescription(value?: ReactNode) {
-  return typeof value === "string" ? null : value;
+  return value;
 }
 
 let f4SaveShortcutReady = false;
@@ -235,7 +235,159 @@ export function FilterBar({ className, ...props }: HTMLAttributes<HTMLDivElement
   return <div className={cn("flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4", className)} {...props} />;
 }
 
-type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...props }, ref) {
+  return <input ref={ref} className={cn(modalInputClass, className)} {...props} />;
+});
+Input.displayName = "Input";
+
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select({ className, ...props }, ref) {
+  return <select ref={ref} className={cn(modalSelectClass, className)} {...props} />;
+});
+Select.displayName = "Select";
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...props }, ref) {
+  return <textarea ref={ref} className={cn(modalTextareaClass, className)} {...props} />;
+});
+Textarea.displayName = "Textarea";
+
+export const Checkbox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, "type">>(function Checkbox({ className, ...props }, ref) {
+  return <input ref={ref} type="checkbox" className={cn("h-4 w-4 accent-[#ff6a00]", className)} {...props} />;
+});
+Checkbox.displayName = "Checkbox";
+
+function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+  const tabs = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)') || []);
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  let nextIndex = currentIndex;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % tabs.length;
+  else if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = tabs.length - 1;
+  else return;
+  event.preventDefault();
+  tabs[nextIndex]?.focus();
+  tabs[nextIndex]?.click();
+}
+export function Tabs<T extends string>({
+  items,
+  value,
+  onValueChange,
+  ariaLabel,
+  className,
+}: {
+  items: Array<{ value: T; label: ReactNode; disabled?: boolean }>;
+  value: T;
+  onValueChange: (value: T) => void;
+  ariaLabel: string;
+  className?: string;
+}) {
+  return (
+    <div role="tablist" aria-label={ariaLabel} className={cn("flex min-w-max gap-1 rounded-lg border border-gray-200 bg-white p-1", className)}>
+      {items.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          role="tab"
+          aria-selected={value === item.value}
+          tabIndex={value === item.value ? 0 : -1}
+          disabled={item.disabled}
+          className={cn(
+            "h-9 rounded-md px-3 text-sm font-semibold transition",
+            value === item.value ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50",
+          )}
+          onClick={() => onValueChange(item.value)}
+          onKeyDown={handleTabKeyDown}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function TableShell({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("fn-table-shell overflow-x-auto", className)} {...props} />;
+}
+
+type NoticeTone = "info" | "success" | "warning" | "danger";
+
+const noticeToneClasses: Record<NoticeTone, string> = {
+  info: "border-sky-200 bg-sky-50 text-sky-800",
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+  danger: "border-red-200 bg-red-50 text-red-800",
+};
+
+export function InlineNotice({
+  children,
+  tone = "info",
+  onClose,
+  className,
+}: {
+  children: ReactNode;
+  tone?: NoticeTone;
+  onClose?: () => void;
+  className?: string;
+}) {
+  return (
+    <div role={tone === "danger" ? "alert" : "status"} aria-live={tone === "danger" ? "assertive" : "polite"} className={cn("flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-semibold", noticeToneClasses[tone], className)}>
+      <div className="min-w-0 flex-1 whitespace-pre-line">{children}</div>
+      {onClose && <button type="button" aria-label="알림 닫기" className="shrink-0 text-lg leading-none opacity-70 hover:opacity-100" onClick={onClose}>×</button>}
+    </div>
+  );
+}
+
+export function LoadingState({ label = "불러오는 중입니다.", className }: { label?: ReactNode; className?: string }) {
+  return (
+    <div role="status" aria-live="polite" className={cn("flex min-h-28 items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-sm font-semibold text-gray-500", className)}>
+      <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-[#ff6a00]" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+type NoticeItem = { id: number; message: ReactNode; tone: NoticeTone };
+type NoticeOptions = { tone?: NoticeTone; duration?: number };
+
+let noticeSequence = 0;
+let notices: NoticeItem[] = [];
+const noticeListeners = new Set<(items: NoticeItem[]) => void>();
+
+function publishNotices() {
+  noticeListeners.forEach((listener) => listener(notices));
+}
+
+function dismissNotice(id: number) {
+  notices = notices.filter((notice) => notice.id !== id);
+  publishNotices();
+}
+
+export function notify(message: ReactNode, { tone = "info", duration = 5000 }: NoticeOptions = {}) {
+  const id = ++noticeSequence;
+  notices = [...notices.slice(-3), { id, message, tone }];
+  publishNotices();
+  if (typeof window !== "undefined" && duration > 0) window.setTimeout(() => dismissNotice(id), duration);
+  return id;
+}
+
+export function NoticeHost() {
+  const [items, setItems] = useState<NoticeItem[]>(notices);
+
+  useEffect(() => {
+    noticeListeners.add(setItems);
+    setItems(notices);
+    return () => { noticeListeners.delete(setItems); };
+  }, []);
+
+  if (!items.length) return null;
+  return (
+    <div className="fixed bottom-5 right-5 z-[100] grid w-[min(28rem,calc(100vw-2.5rem))] gap-2" aria-label="알림">
+      {items.map((notice) => <InlineNotice key={notice.id} tone={notice.tone} onClose={() => dismissNotice(notice.id)} className="bg-white shadow-xl">{notice.message}</InlineNotice>)}
+    </div>
+  );
+}
+
+type ModalSize = "sm" | "md" | "lg" | "xl" | "full" | "screen";
 
 const modalSizes: Record<ModalSize, string> = {
   sm: "max-w-[420px]",
@@ -243,6 +395,7 @@ const modalSizes: Record<ModalSize, string> = {
   lg: "max-w-[760px]",
   xl: "max-w-[960px]",
   full: "max-w-[1120px]",
+  screen: "max-w-[1500px]",
 };
 
 export const modalInputClass =
@@ -399,15 +552,14 @@ export const modalSelectClass =
 export const modalTextareaClass =
   "min-h-24 w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm font-medium text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#ff6a00] focus:ring-2 focus:ring-orange-100";
 
-export function ModalShell({
+export const ModalShell = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement> & { size?: ModalSize }>(function ModalShell({
   className,
   size = "lg",
   ...props
-}: HTMLAttributes<HTMLDivElement> & {
-  size?: ModalSize;
-}) {
-  return <div className={cn("relative w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-xl", modalSizes[size], className)} {...props} />;
-}
+}, ref) {
+  return <div ref={ref} className={cn("relative w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-xl", modalSizes[size], className)} {...props} />;
+});
+ModalShell.displayName = "ModalShell";
 
 export function ModalCloseButton({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
@@ -427,17 +579,21 @@ export function ModalHeader({
   description,
   onClose,
   className,
+  titleId,
+  descriptionId,
 }: {
   title: ReactNode;
   description?: ReactNode;
   onClose?: () => void;
   className?: string;
+  titleId?: string;
+  descriptionId?: string;
 }) {
   return (
     <div className={cn("flex items-start justify-between gap-4 border-b border-gray-200 pb-4", className)}>
       <div className="min-w-0">
-        <h3 className="text-xl font-bold leading-tight text-gray-900">{title}</h3>
-        {description && <div className="mt-1 text-[13px] font-medium leading-5 text-gray-500">{description}</div>}
+        <h3 id={titleId} className="text-xl font-bold leading-tight text-gray-900">{title}</h3>
+        {description && <div id={descriptionId} className="mt-1 text-[13px] font-medium leading-5 text-gray-500">{description}</div>}
       </div>
       {onClose && <ModalCloseButton onClick={onClose} />}
     </div>
@@ -453,18 +609,132 @@ export function ModalFooter({ className, ...props }: HTMLAttributes<HTMLDivEleme
 }
 
 function ModalOverlay({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/55 px-4 py-8", className)}>{children}</div>;
+  return <div className={cn("fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-gray-900/55 px-4 py-8", className)}>{children}</div>;
 }
 
-export function FormModal({
+const modalStack: symbol[] = [];
+let modalScrollLockCount = 0;
+let previousBodyOverflow = "";
+
+function modalFocusableElements(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true" && isVisibleElement(element));
+}
+
+function AccessibleModal({
   title,
   description,
   onClose,
   children,
   footer,
-  size = "lg",
+  size,
   className,
+  overlayClassName,
+  bodyClassName,
+  headerClassName,
+  footerClassName,
 }: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  size: ModalSize;
+  className?: string;
+  overlayClassName?: string;
+  bodyClassName?: string;
+  headerClassName?: string;
+  footerClassName?: string;
+}) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const instanceRef = useRef<symbol | null>(null);
+  const onCloseRef = useRef(onClose);
+  const generatedId = useId();
+  const titleId = `${generatedId}-title`;
+  const descriptionId = `${generatedId}-description`;
+  onCloseRef.current = onClose;
+  if (!instanceRef.current) instanceRef.current = Symbol("modal");
+
+  useEffect(() => {
+    const id = instanceRef.current!;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modalStack.push(id);
+    if (modalScrollLockCount === 0) previousBodyOverflow = document.body.style.overflow;
+    modalScrollLockCount += 1;
+    document.body.style.overflow = "hidden";
+
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef.current;
+      if (!dialog || modalStack[modalStack.length - 1] !== id) return;
+      if (document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)) return;
+      const autoFocus = dialog.querySelector<HTMLElement>("[autofocus]");
+      (autoFocus || modalFocusableElements(dialog)[0] || dialog).focus();
+    }, 0);
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (modalStack[modalStack.length - 1] !== id) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = modalFocusableElements(dialog);
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", onKeyDown, true);
+      const index = modalStack.lastIndexOf(id);
+      if (index >= 0) modalStack.splice(index, 1);
+      modalScrollLockCount = Math.max(0, modalScrollLockCount - 1);
+      if (modalScrollLockCount === 0) document.body.style.overflow = previousBodyOverflow;
+      window.setTimeout(() => {
+        if (previousFocus?.isConnected) previousFocus.focus();
+      }, 0);
+    };
+  }, []);
+
+  return (
+    <ModalOverlay className={overlayClassName}>
+      <ModalShell
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
+        size={size}
+        className={className}
+      >
+        <ModalHeader title={title} description={description} onClose={onClose} className={headerClassName} titleId={titleId} descriptionId={descriptionId} />
+        <ModalBody className={bodyClassName}>{children}</ModalBody>
+        {footer && <ModalFooter className={footerClassName}>{footer}</ModalFooter>}
+      </ModalShell>
+    </ModalOverlay>
+  );
+}
+
+type ModalProps = {
   title: ReactNode;
   description?: ReactNode;
   onClose: () => void;
@@ -472,50 +742,49 @@ export function FormModal({
   footer?: ReactNode;
   size?: ModalSize;
   className?: string;
-}) {
-  useEscapeToClose(true, onClose);
+  bodyClassName?: string;
+  headerClassName?: string;
+  footerClassName?: string;
+};
 
-  return (
-    <ModalOverlay>
-      <ModalShell size={size} className={className}>
-        <ModalHeader title={title} description={description} onClose={onClose} />
-        <ModalBody>{children}</ModalBody>
-        {footer && <ModalFooter>{footer}</ModalFooter>}
-      </ModalShell>
-    </ModalOverlay>
-  );
+export function FormModal({ size = "lg", ...props }: ModalProps) {
+  return <AccessibleModal size={size} {...props} />;
 }
 
-export function SelectionModal({
+export function SelectionModal({ size = "xl", ...props }: ModalProps) {
+  return <AccessibleModal size={size} overlayClassName="py-10" {...props} />;
+}
+
+export function ResponsiveToolPanel({
+  mobileOpen,
   title,
-  description,
   onClose,
   children,
-  footer,
-  size = "xl",
-  className,
+  desktopClassName,
 }: {
+  mobileOpen: boolean;
   title: ReactNode;
-  description?: ReactNode;
   onClose: () => void;
   children: ReactNode;
-  footer?: ReactNode;
-  size?: ModalSize;
-  className?: string;
+  desktopClassName?: string;
 }) {
-  useEscapeToClose(true, onClose);
+  if (mobileOpen) {
+    return (
+      <AccessibleModal
+        title={title}
+        onClose={onClose}
+        size="md"
+        className="flex max-h-[92vh] flex-col overflow-hidden p-0"
+        headerClassName="shrink-0 px-5 py-4"
+        bodyClassName="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+      >
+        {children}
+      </AccessibleModal>
+    );
+  }
 
-  return (
-    <ModalOverlay className="py-10">
-      <ModalShell size={size} className={className}>
-        <ModalHeader title={title} description={description} onClose={onClose} />
-        <ModalBody>{children}</ModalBody>
-        {footer && <ModalFooter>{footer}</ModalFooter>}
-      </ModalShell>
-    </ModalOverlay>
-  );
+  return <aside className={cn("hidden w-[320px] shrink-0 border-l px-4 py-6 xl:block", desktopClassName)}>{children}</aside>;
 }
-
 export function ConfirmModal({
   title,
   description,

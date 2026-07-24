@@ -5,9 +5,14 @@ import {
   ActionButton,
   Card,
   EmptyState,
+  InlineNotice,
+  Input,
+  LoadingState,
   FormField,
   FormModal,
   KpiCard,
+  Select,
+  Textarea,
   PageHeader,
   SectionHeader,
   StatusBadge,
@@ -352,9 +357,9 @@ export default function AutomationCenter() {
       />
 
       {(message || error) && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {message && <StatusBadge tone="success">{message}</StatusBadge>}
-          {error && <StatusBadge tone="danger">{error}</StatusBadge>}
+        <div className="mb-4 grid gap-2">
+          {message && <InlineNotice tone="success">{message}</InlineNotice>}
+          {error && <InlineNotice tone="danger">{error}</InlineNotice>}
         </div>
       )}
 
@@ -430,7 +435,7 @@ export default function AutomationCenter() {
           description={<span>{tableRows.length.toLocaleString("ko-KR")}건</span>}
           actions={(
             <div className="flex flex-wrap gap-2">
-              <select
+              <Select
                 className={`${modalSelectClass} h-9 w-52 text-sm`}
                 value={jobFilter}
                 onChange={(event) => setJobFilter(event.target.value as AutomationJobFilter)}
@@ -438,8 +443,8 @@ export default function AutomationCenter() {
                 {jobFilterOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
-              <select
+              </Select>
+              <Select
                 className={`${modalSelectClass} h-9 w-40 text-sm`}
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as AutomationStatusFilter)}
@@ -447,7 +452,7 @@ export default function AutomationCenter() {
                 {statusFilterOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
         />
@@ -490,7 +495,7 @@ export default function AutomationCenter() {
               ))}
             </tbody>
           </table>
-          {!tableRows.length && <EmptyState className="mt-4" title={loading ? "작업을 불러오는 중입니다." : "작업이 없습니다."} />}
+          {loading ? <LoadingState className="mt-4" label="자동화 작업을 불러오는 중입니다." /> : !tableRows.length && <EmptyState className="mt-4" title="작업이 없습니다." />}
         </div>
       </Card>
 
@@ -509,7 +514,7 @@ export default function AutomationCenter() {
           <form id="automation-create-form" className="space-y-4" onSubmit={createJob}>
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="작업유형" required>
-                <select
+                <Select
                   className={modalSelectClass}
                   value={createDraft.job_type}
                   onChange={(event) => setCreateDraft((prev) => ({ ...prev, job_type: event.target.value as AutomationJobType }))}
@@ -517,18 +522,18 @@ export default function AutomationCenter() {
                   {CREATABLE_AUTOMATION_JOB_TYPES.map((type) => (
                     <option key={type} value={type}>{AUTOMATION_JOB_TYPE_LABELS[type]}</option>
                   ))}
-                </select>
+                </Select>
               </FormField>
               <FormField label="요청자">
-                <select className={modalSelectClass} value={createDraft.requested_by} onChange={(event) => setCreateDraft((prev) => ({ ...prev, requested_by: event.target.value }))}>
+                <Select className={modalSelectClass} value={createDraft.requested_by} onChange={(event) => setCreateDraft((prev) => ({ ...prev, requested_by: event.target.value }))}>
                   <option value="manual">manual</option>
                   <option value="voice">voice</option>
                   <option value="system">system</option>
-                </select>
+                </Select>
               </FormField>
             </div>
             <FormField label="작업명">
-              <input
+              <Input
                 className={modalInputClass}
                 value={createDraft.title}
                 placeholder={AUTOMATION_JOB_TYPE_LABELS[createDraft.job_type]}
@@ -536,7 +541,7 @@ export default function AutomationCenter() {
               />
             </FormField>
             <FormField label="input_json">
-              <textarea
+              <Textarea
                 className={`${modalTextareaClass} min-h-36 font-mono text-xs`}
                 value={createDraft.input_json}
                 onChange={(event) => setCreateDraft((prev) => ({ ...prev, input_json: event.target.value }))}
@@ -583,35 +588,35 @@ export default function AutomationCenter() {
 
             <div className="grid gap-4 md:grid-cols-3">
               <FormField label="작업명">
-                <input className={modalInputClass} value={detailDraft.title} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, title: event.target.value } : prev)} />
+                <Input className={modalInputClass} value={detailDraft.title} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, title: event.target.value } : prev)} />
               </FormField>
               <FormField label="상태">
-                <select className={modalSelectClass} value={detailDraft.status} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, status: event.target.value as AutomationJobStatus } : prev)}>
+                <Select className={modalSelectClass} value={detailDraft.status} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, status: event.target.value as AutomationJobStatus } : prev)}>
                   {AUTOMATION_JOB_STATUSES.map((status) => (
                     <option key={status} value={status}>{AUTOMATION_JOB_STATUS_LABELS[status]}</option>
                   ))}
-                </select>
+                </Select>
               </FormField>
               <FormField label="요청자">
-                <input className={modalInputClass} value={detailDraft.requested_by} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, requested_by: event.target.value } : prev)} />
+                <Input className={modalInputClass} value={detailDraft.requested_by} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, requested_by: event.target.value } : prev)} />
               </FormField>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="result_file_url">
-                <input className={modalInputClass} value={detailDraft.result_file_url} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, result_file_url: event.target.value } : prev)} />
+                <Input className={modalInputClass} value={detailDraft.result_file_url} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, result_file_url: event.target.value } : prev)} />
               </FormField>
               <FormField label="screenshot_url">
-                <input className={modalInputClass} value={detailDraft.screenshot_url} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, screenshot_url: event.target.value } : prev)} />
+                <Input className={modalInputClass} value={detailDraft.screenshot_url} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, screenshot_url: event.target.value } : prev)} />
               </FormField>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="input_json">
-                <textarea className={`${modalTextareaClass} min-h-44 font-mono text-xs`} value={detailDraft.input_json} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, input_json: event.target.value } : prev)} />
+                <Textarea className={`${modalTextareaClass} min-h-44 font-mono text-xs`} value={detailDraft.input_json} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, input_json: event.target.value } : prev)} />
               </FormField>
               <FormField label="result_json">
-                <textarea className={`${modalTextareaClass} min-h-44 font-mono text-xs`} value={detailDraft.result_json} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, result_json: event.target.value } : prev)} />
+                <Textarea className={`${modalTextareaClass} min-h-44 font-mono text-xs`} value={detailDraft.result_json} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, result_json: event.target.value } : prev)} />
               </FormField>
             </div>
 
@@ -638,10 +643,10 @@ export default function AutomationCenter() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="log_text">
-                <textarea className={`${modalTextareaClass} min-h-36 font-mono text-xs`} value={detailDraft.log_text} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, log_text: event.target.value } : prev)} />
+                <Textarea className={`${modalTextareaClass} min-h-36 font-mono text-xs`} value={detailDraft.log_text} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, log_text: event.target.value } : prev)} />
               </FormField>
               <FormField label="error_message">
-                <textarea className={`${modalTextareaClass} min-h-36`} value={detailDraft.error_message} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, error_message: event.target.value } : prev)} />
+                <Textarea className={`${modalTextareaClass} min-h-36`} value={detailDraft.error_message} onChange={(event) => setDetailDraft((prev) => prev ? { ...prev, error_message: event.target.value } : prev)} />
               </FormField>
             </div>
           </form>
