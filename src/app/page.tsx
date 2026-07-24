@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { CellObject, WorkSheet } from "xlsx-js-style";
 import {
   ActionButton,
@@ -105,6 +105,7 @@ function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>) {
 }
 
 function useF2Navigate(enabled: boolean, href: string) {
+  const router = useRouter();
   useEffect(() => {
     if (!enabled) return;
     function onKeyDown(event: globalThis.KeyboardEvent) {
@@ -117,11 +118,11 @@ function useF2Navigate(enabled: boolean, href: string) {
         target instanceof HTMLButtonElement
       ) return;
       event.preventDefault();
-      window.location.href = href;
+      router.push(href);
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [enabled, href]);
+  }, [enabled, href, router]);
 }
 
 type CheckboxSelectionMode = "select" | "deselect";
@@ -3932,11 +3933,11 @@ function LegacyNativeOrders() {
 }
 
 function NativeProducts({ initialTab = "products" }: { initialTab?: ImportProductTab }) {
-  useF2Navigate(true, importHref(`/products/new?tab=${initialTab}`));
   const initialProducts = readInitialImportCache<{ products?: ImportProduct[] }>("/api/fnos/products");
   const [products, setProducts] = useState<ImportProduct[]>(initialProducts?.products || []);
   const [loading, setLoading] = useState(!initialProducts?.products?.length);
   const [tab, setTab] = useState<ImportProductTab>(initialTab);
+  useF2Navigate(true, importHref(`/products/new?tab=${tab}`));
   const [query, setQuery] = useState("");
 
   function switchTab(nextTab: ImportProductTab) {
@@ -5293,7 +5294,7 @@ function NativeOrderDetail({ id }: { id: number }) {
         ) : null
       }
     >
-      {loading ? null : order ? (
+      {loading ? <LoadingState label="수입관리 상세를 불러오는 중입니다." /> : order ? (
         <div className="grid gap-5">
           <div className="flex justify-end">
             <div className="flex gap-2">
