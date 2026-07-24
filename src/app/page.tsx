@@ -322,6 +322,11 @@ const accountingSubMenus = [
   { label: "고정비", tab: "fixed" },
 ];
 
+const desktopToolLinks = [
+  { label: "링크 트래커", href: "https://track.fnteams.com/" },
+  { label: "라벨 센터", href: "https://label.fnteams.com/" },
+] as const;
+
 const sidebarSubMenuContainerClass = "ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3";
 
 function sidebarSubMenuLinkClass(active: boolean) {
@@ -927,6 +932,29 @@ function LeftSidebar({
           return <Link key={item} href={`/?menu=${menuSlugs[item]}`} onNavigate={onNavigate} aria-current={active ? "page" : undefined} className={mainLinkClass(active)}>{item}</Link>;
         })}
       </nav>
+
+      {!mobile && (
+        <nav className="mt-5 border-t border-slate-200 pt-4" aria-label="도구센터">
+          <h2 className="px-3 text-xs font-black text-slate-400">도구센터</h2>
+          <div className={sidebarSubMenuContainerClass}>
+            {desktopToolLinks.map((tool) => (
+              <a
+                key={tool.href}
+                href={tool.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${tool.label} 새 창에서 열기`}
+                className={sidebarSubMenuLinkClass(false)}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span>{tool.label}</span>
+                  <span aria-hidden="true">↗</span>
+                </span>
+              </a>
+            ))}
+          </div>
+        </nav>
+      )}
 
       <div className="mt-5"><CalendarMemo /></div>
     </aside>
