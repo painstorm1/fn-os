@@ -346,6 +346,10 @@ const menuSlugs: Record<string, string> = {
 
 const slugMenus = Object.fromEntries(Object.entries(menuSlugs).map(([key, value]) => [value, key]));
 
+function sidebarNavigationMode(activeMenu: string): "soft" | "document" {
+  return activeMenu === "회계/비용" ? "document" : "soft";
+}
+
 function goToInternal(href: string) {
   window.location.href = href;
 }
@@ -784,6 +788,16 @@ function LeftSidebar({
     window.location.href = "/login";
   }
 
+  function navigateFromSidebar(event: { preventDefault: () => void }, href: string) {
+    if (sidebarNavigationMode(activeMenu) === "document") {
+      event.preventDefault();
+      onNavigate?.();
+      goToInternal(href);
+      return;
+    }
+    onNavigate?.();
+  }
+
   const mainLinkClass = (active: boolean) => `flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-black transition ${
     active ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
   }`;
@@ -798,13 +812,13 @@ function LeftSidebar({
           <button type="button" autoFocus aria-label="메뉴 닫기" className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-2xl text-slate-500 hover:bg-slate-100" onClick={onNavigate}>×</button>
         </div>
       )}
-      <Link href="/?menu=dashboard" className="mb-4 block" onNavigate={onNavigate} aria-current={activeMenu === "대시보드" ? "page" : undefined}>
+      <Link href="/?menu=dashboard" className="mb-4 block" onNavigate={(event) => navigateFromSidebar(event, "/?menu=dashboard")} aria-current={activeMenu === "대시보드" ? "page" : undefined}>
         <Image src="/fn-logo.jpg" alt="F&" width={88} height={88} className="object-contain" priority />
       </Link>
       <div className="mb-5 flex items-center gap-2 text-xs font-semibold text-gray-500">
         <button type="button" onClick={() => void logout()} className="hover:text-orange-600" title="로그아웃">로그아웃</button>
         <span className="text-gray-300">|</span>
-        <Link href="/?menu=fnSettings&settingsTab=info" className="hover:text-orange-600" title="설정" onNavigate={onNavigate} aria-current={activeMenu === "FN 설정" ? "page" : undefined}>설정</Link>
+        <Link href="/?menu=fnSettings&settingsTab=info" className="hover:text-orange-600" title="설정" onNavigate={(event) => navigateFromSidebar(event, "/?menu=fnSettings&settingsTab=info")} aria-current={activeMenu === "FN 설정" ? "page" : undefined}>설정</Link>
       </div>
 
       <nav className="space-y-1" aria-label={mobile ? "모바일 주 메뉴" : "주 메뉴"}>
@@ -826,13 +840,13 @@ function LeftSidebar({
                       setSalesOpen((open) => !open);
                       return;
                     }
-                    onNavigate?.();
+                    navigateFromSidebar(event, "/?menu=sales&salesSection=online");
                   }}
                 >{item}</Link>
                 {active && salesOpen && (
                   <div id={controls} className={sidebarSubMenuContainerClass}>
                     {salesSubMenus.map((sub) => (
-                      <Link key={sub.section} href={`/?menu=sales&salesSection=${sub.section}`} onNavigate={onNavigate} aria-current={salesSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(salesSection === sub.section)}>{sub.label}</Link>
+                      <Link key={sub.section} href={`/?menu=sales&salesSection=${sub.section}`} onNavigate={(event) => navigateFromSidebar(event, `/?menu=sales&salesSection=${sub.section}`)} aria-current={salesSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(salesSection === sub.section)}>{sub.label}</Link>
                     ))}
                   </div>
                 )}
@@ -858,13 +872,13 @@ function LeftSidebar({
                       setImportOpen((open) => !open);
                       return;
                     }
-                    onNavigate?.();
+                    navigateFromSidebar(event, "/?menu=import");
                   }}
                 >{item}</Link>
                 {active && importOpen && (
                   <div id={controls} className={sidebarSubMenuContainerClass}>
                     {importSubMenus.map((sub) => (
-                      <Link key={sub.path} href={`/?menu=import&section=${encodeURIComponent(sub.path)}`} onMouseEnter={() => warmImportCache(sub.path)} onFocus={() => warmImportCache(sub.path)} onNavigate={onNavigate} aria-current={importPath === sub.path ? "page" : undefined} className={sidebarSubMenuLinkClass(importPath === sub.path)}>{sub.label}</Link>
+                      <Link key={sub.path} href={`/?menu=import&section=${encodeURIComponent(sub.path)}`} onMouseEnter={() => warmImportCache(sub.path)} onFocus={() => warmImportCache(sub.path)} onNavigate={(event) => navigateFromSidebar(event, `/?menu=import&section=${encodeURIComponent(sub.path)}`)} aria-current={importPath === sub.path ? "page" : undefined} className={sidebarSubMenuLinkClass(importPath === sub.path)}>{sub.label}</Link>
                     ))}
                   </div>
                 )}
@@ -887,13 +901,13 @@ function LeftSidebar({
                       setAdsOpen((open) => !open);
                       return;
                     }
-                    onNavigate?.();
+                    navigateFromSidebar(event, "/?menu=ads&adsSection=overview");
                   }}
                 >{item}</Link>
                 {active && adsOpen && (
                   <div id={controls} className={sidebarSubMenuContainerClass}>
                     {adsSubMenus.map((sub) => (
-                      <Link key={sub.section} href={`/?menu=ads&adsSection=${sub.section}`} onNavigate={onNavigate} aria-current={adsSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(adsSection === sub.section)}>{sub.label}</Link>
+                      <Link key={sub.section} href={`/?menu=ads&adsSection=${sub.section}`} onNavigate={(event) => navigateFromSidebar(event, `/?menu=ads&adsSection=${sub.section}`)} aria-current={adsSection === sub.section ? "page" : undefined} className={sidebarSubMenuLinkClass(adsSection === sub.section)}>{sub.label}</Link>
                     ))}
                   </div>
                 )}
@@ -916,20 +930,20 @@ function LeftSidebar({
                       setAccountingOpen((open) => !open);
                       return;
                     }
-                    onNavigate?.();
+                    navigateFromSidebar(event, "/?menu=accounting&accountingTab=dashboard");
                   }}
                 >{item}</Link>
                 {active && accountingOpen && (
                   <div id={controls} className={sidebarSubMenuContainerClass}>
                     {accountingSubMenus.map((sub) => (
-                      <Link key={sub.tab} href={`/?menu=accounting&accountingTab=${sub.tab}`} onNavigate={onNavigate} aria-current={accountingTab === sub.tab ? "page" : undefined} className={sidebarSubMenuLinkClass(accountingTab === sub.tab)}>{sub.label}</Link>
+                      <Link key={sub.tab} href={`/?menu=accounting&accountingTab=${sub.tab}`} onNavigate={(event) => navigateFromSidebar(event, `/?menu=accounting&accountingTab=${sub.tab}`)} aria-current={accountingTab === sub.tab ? "page" : undefined} className={sidebarSubMenuLinkClass(accountingTab === sub.tab)}>{sub.label}</Link>
                     ))}
                   </div>
                 )}
               </div>
             );
           }
-          return <Link key={item} href={`/?menu=${menuSlugs[item]}`} onNavigate={onNavigate} aria-current={active ? "page" : undefined} className={mainLinkClass(active)}>{item}</Link>;
+          return <Link key={item} href={`/?menu=${menuSlugs[item]}`} onNavigate={(event) => navigateFromSidebar(event, `/?menu=${menuSlugs[item]}`)} aria-current={active ? "page" : undefined} className={mainLinkClass(active)}>{item}</Link>;
         })}
       </nav>
 
